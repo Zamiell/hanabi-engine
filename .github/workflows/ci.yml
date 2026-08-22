@@ -50,7 +50,8 @@ jobs:
         run: |
           python3 -m venv .venv
           .venv/bin/python -m pip install --requirement scripts/requirements.txt
-          .venv/bin/python -m py_compile scripts/hanabi_live_bot.py
+          .venv/bin/python -m py_compile scripts/hanabi_live_bot.py scripts/tests/test_hanabi_live_bot.py
+          .venv/bin/python -W error::ResourceWarning -m unittest discover -s scripts/tests -v
           .venv/bin/python scripts/hanabi_live_bot.py --help > /dev/null
 
   msrv:

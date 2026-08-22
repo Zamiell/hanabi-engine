@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import http.cookies
 import json
 import os
+import queue
 import subprocess
 import sys
+import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections import deque
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 try:
     import websocket
@@ -23,6 +28,10 @@ except ImportError:
 DEFAULT_BASE_URL = "https://hanab.live"
 DEFAULT_ITERATIONS = 1_000
 DEFAULT_SEED = 0
+DEFAULT_ENGINE_TIMEOUT = 180.0
+INITIAL_RECONNECT_DELAY = 1.0
+MAX_RECONNECT_DELAY = 30.0
+STABLE_CONNECTION_SECONDS = 30.0
 
 
 def log(message: str) -> None:
@@ -72,35 +81,252 @@ def authenticate(base_url: str, username: str, password: str) -> tuple[str, str]
     return ws_url, "; ".join(cookies)
 
 
+class EngineProcessError(RuntimeError):
+    pass
+
+
+class PersistentEngine:
+    """One newline-delimited Rust engine session for one live table."""
+
+    def __init__(self, command: list[str], timeout: float) -> None:
+        self.command = command
+        self.timeout = timeout
+        self.process: subprocess.Popen[str] | None = None
+        self.responses: queue.Queue[str | None] = queue.Queue()
+        self.stderr: deque[str] = deque(maxlen=20)
+        self.reader_threads: list[threading.Thread] = []
+        self.request_lock = threading.Lock()
+        self.process_lock = threading.Lock()
+
+    def request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self.request_lock:
+            self._ensure_started()
+            assert self.process is not None
+            assert self.process.stdin is not None
+            process = self.process
+            responses = self.responses
+            try:
+                process.stdin.write(
+                    json.dumps(payload, separators=(",", ":")) + "\n"
+                )
+                process.stdin.flush()
+            except (BrokenPipeError, OSError) as error:
+                detail = self._failure_detail()
+                self._stop()
+                raise EngineProcessError(f"engine input failed: {detail}") from error
+
+            try:
+                line = responses.get(timeout=self.timeout)
+            except queue.Empty as error:
+                self._stop()
+                raise EngineProcessError(
+                    f"engine did not respond within {self.timeout:g} seconds"
+                ) from error
+            if line is None:
+                detail = self._failure_detail()
+                self._stop()
+                raise EngineProcessError(f"engine exited without a response: {detail}")
+            try:
+                response = json.loads(line)
+            except json.JSONDecodeError as error:
+                self._stop()
+                raise EngineProcessError(f"engine returned invalid JSON: {error}") from error
+            if not isinstance(response, dict):
+                self._stop()
+                raise EngineProcessError("engine response is not a JSON object")
+            if "error" in response:
+                message = str(response["error"])
+                self._stop()
+                raise EngineProcessError(message)
+            return response
+
+    def close(self) -> None:
+        self._stop()
+
+    def _ensure_started(self) -> None:
+        with self.process_lock:
+            if self.process is not None and self.process.poll() is None:
+                return
+            environment = {
+                key: value
+                for key, value in os.environ.items()
+                if key not in {"HANABI_USERNAME", "HANABI_PASSWORD"}
+            }
+            try:
+                self.process = subprocess.Popen(
+                    self.command,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                    env=environment,
+                )
+            except OSError as error:
+                raise EngineProcessError(f"could not start engine: {error}") from error
+            self.responses = queue.Queue()
+            self.stderr.clear()
+            assert self.process.stdout is not None
+            assert self.process.stderr is not None
+            stdout_thread = threading.Thread(
+                target=self._read_stdout,
+                args=(self.process.stdout, self.responses),
+                name="hanabi-engine-stdout",
+                daemon=True,
+            )
+            stderr_thread = threading.Thread(
+                target=self._read_stderr,
+                args=(self.process.stderr,),
+                name="hanabi-engine-stderr",
+                daemon=True,
+            )
+            self.reader_threads = [stdout_thread, stderr_thread]
+            stdout_thread.start()
+            stderr_thread.start()
+
+    @staticmethod
+    def _read_stdout(stream: Any, responses: queue.Queue[str | None]) -> None:
+        try:
+            for line in stream:
+                responses.put(line)
+        finally:
+            responses.put(None)
+
+    def _read_stderr(self, stream: Any) -> None:
+        for line in stream:
+            self.stderr.append(line.rstrip())
+
+    def _failure_detail(self) -> str:
+        if self.stderr:
+            return self.stderr[-1]
+        if self.process is not None and self.process.poll() is not None:
+            return f"exit status {self.process.returncode}"
+        return "no diagnostic output"
+
+    def _stop(self) -> None:
+        with self.process_lock:
+            process = self.process
+            self.process = None
+            reader_threads = self.reader_threads
+            self.reader_threads = []
+        if process is None:
+            return
+        if process.stdin is not None:
+            try:
+                process.stdin.close()
+            except OSError:
+                pass
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+        for thread in reader_threads:
+            thread.join(timeout=0.2)
+        for stream in (process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
+
+
+def next_reconnect_delay(previous: float, connected_seconds: float) -> float:
+    if connected_seconds >= STABLE_CONNECTION_SECONDS:
+        return INITIAL_RECONNECT_DELAY
+    return min(previous * 2, MAX_RECONNECT_DELAY)
+
+
 class HanabiEngineBot:
     def __init__(
         self,
-        ws_url: str,
-        cookie: str,
+        base_url: str,
         engine_command: list[str],
         username: str,
+        password: str,
         debug: bool,
+        engine_timeout: float = DEFAULT_ENGINE_TIMEOUT,
+        authenticator: Callable[[str, str, str], tuple[str, str]] = authenticate,
+        engine_factory: Callable[[list[str], float], PersistentEngine] = PersistentEngine,
     ) -> None:
+        self.base_url = base_url
         self.username = username
+        self.password = password
         self.engine_command = engine_command
         self.debug = debug
+        self.engine_timeout = engine_timeout
+        self.authenticator = authenticator
+        self.engine_factory = engine_factory
         self.tables: dict[int, dict[str, Any]] = {}
         self.games: dict[int, dict[str, Any]] = {}
-        self.last_decided_turn: dict[int, int] = {}
-        self.deciding = False
-        self.ws = websocket.WebSocketApp(
-            ws_url,
-            cookie=cookie,
-            on_open=self.on_open,
-            on_message=self.on_message,
-            on_error=self.on_error,
-            on_close=self.on_close,
+        self.ws: Any = None
+        self.connection_generation = 0
+        self.game_generation = 0
+        self.opened_at: float | None = None
+        self.lock = threading.RLock()
+        self.stop_event = threading.Event()
+        self.executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=5,
+            thread_name_prefix="hanabi-decision",
         )
 
     def run(self) -> None:
-        self.ws.run_forever()
+        reconnect_delay = INITIAL_RECONNECT_DELAY
+        try:
+            while not self.stop_event.is_set():
+                try:
+                    ws_url, cookie = self.authenticator(
+                        self.base_url,
+                        self.username,
+                        self.password,
+                    )
+                    app = websocket.WebSocketApp(
+                        ws_url,
+                        cookie=cookie,
+                        on_open=self.on_open,
+                        on_message=self.on_message,
+                        on_error=self.on_error,
+                        on_close=self.on_close,
+                    )
+                    with self.lock:
+                        self.connection_generation += 1
+                        self.ws = app
+                    app.run_forever()
+                except (OSError, RuntimeError, ValueError) as error:
+                    log(f"Connection attempt failed: {error}")
+                finally:
+                    with self.lock:
+                        opened_at = self.opened_at
+                    connected_seconds = (
+                        0.0 if opened_at is None else time.monotonic() - opened_at
+                    )
+                    self._reset_connection()
+
+                if self.stop_event.is_set():
+                    break
+                if connected_seconds >= STABLE_CONNECTION_SECONDS:
+                    reconnect_delay = INITIAL_RECONNECT_DELAY
+                log(f"Reconnecting in {reconnect_delay:g} seconds.")
+                if self.stop_event.wait(reconnect_delay):
+                    break
+                reconnect_delay = next_reconnect_delay(
+                    reconnect_delay,
+                    0,
+                )
+        finally:
+            self.shutdown()
+
+    def shutdown(self) -> None:
+        self.stop_event.set()
+        with self.lock:
+            ws = self.ws
+        if ws is not None:
+            ws.close()
+        self._reset_connection()
+        self.executor.shutdown(wait=True, cancel_futures=True)
 
     def on_open(self, _ws: websocket.WebSocketApp) -> None:
+        with self.lock:
+            self.opened_at = time.monotonic()
         log("Connected to Hanabi Live.")
 
     def on_error(self, _ws: websocket.WebSocketApp, error: object) -> None:
@@ -163,15 +389,16 @@ class HanabiEngineBot:
         if data.get("recipient") != self.username or data.get("msg") != "/join":
             return
         requester = str(data["who"])
-        table = next(
-            (
-                candidate
-                for candidate in self.tables.values()
-                if not candidate.get("running", False)
-                and requester in candidate.get("players", [])
-            ),
-            None,
-        )
+        with self.lock:
+            table = next(
+                (
+                    candidate.copy()
+                    for candidate in self.tables.values()
+                    if not candidate.get("running", False)
+                    and requester in candidate.get("players", [])
+                ),
+                None,
+            )
         if table is None:
             self.reply(requester, "Create a table before asking me to join.")
             return
@@ -184,108 +411,246 @@ class HanabiEngineBot:
         self.send("tableJoin", {"tableID": table["id"]})
 
     def handle_table(self, data: dict[str, Any]) -> None:
-        self.tables[int(data["id"])] = data
+        with self.lock:
+            self.tables[int(data["id"])] = data
 
     def handle_table_list(self, data: list[dict[str, Any]]) -> None:
         for table in data:
             self.handle_table(table)
 
     def handle_table_gone(self, data: dict[str, Any]) -> None:
-        self.tables.pop(int(data["tableID"]), None)
+        with self.lock:
+            self.tables.pop(int(data["tableID"]), None)
 
     def handle_table_start(self, data: dict[str, Any]) -> None:
         self.send("getGameInfo1", {"tableID": int(data["tableID"])})
 
     def handle_init(self, data: dict[str, Any]) -> None:
         table_id = int(data["tableID"])
-        self.games[table_id] = {
-            "tableID": table_id,
-            "playerNames": data["playerNames"],
-            "ourPlayerIndex": data["ourPlayerIndex"],
-            "spectating": data.get("spectating", False),
-            "replay": data.get("replay", False),
-            "options": data["options"],
-            "actions": [],
-        }
+        with self.lock:
+            old = self.games.pop(table_id, None)
+            self.game_generation += 1
+            self.games[table_id] = {
+                "tableID": table_id,
+                "playerNames": data["playerNames"],
+                "ourPlayerIndex": data["ourPlayerIndex"],
+                "spectating": data.get("spectating", False),
+                "replay": data.get("replay", False),
+                "options": data["options"],
+                "actions": [],
+                "turn": 0,
+                "currentPlayer": 0,
+                "terminal": False,
+                "inFlight": False,
+                "lastDecidedTurn": None,
+                "syncedActions": 0,
+                "engineInitialized": False,
+                "engine": None,
+                "generation": self.game_generation,
+            }
+        self._close_game_engine(old)
         self.send("getGameInfo2", {"tableID": table_id})
 
     def handle_game_action_list(self, data: dict[str, Any]) -> None:
         table_id = int(data["tableID"])
-        snapshot = self.games[table_id]
-        snapshot["actions"] = list(data["list"])
+        with self.lock:
+            game = self.games[table_id]
+            old_engine = game["engine"]
+            self.game_generation += 1
+            game["generation"] = self.game_generation
+            game["engine"] = None
+            game["engineInitialized"] = False
+            game["syncedActions"] = 0
+            game["actions"] = list(data["list"])
+            game["turn"] = 0
+            game["currentPlayer"] = 0
+            game["terminal"] = False
+            game["inFlight"] = False
+            game["lastDecidedTurn"] = None
+            for action in game["actions"]:
+                self._update_progress(game, action)
+        if old_engine is not None:
+            old_engine.close()
         self.send("loaded", {"tableID": table_id})
         self.maybe_move(table_id)
 
     def handle_game_action(self, data: dict[str, Any]) -> None:
         table_id = int(data["tableID"])
-        snapshot = self.games.get(table_id)
-        if snapshot is None:
-            return
-        snapshot["actions"].append(data["action"])
+        with self.lock:
+            game = self.games.get(table_id)
+            if game is None:
+                return
+            action = data["action"]
+            game["actions"].append(action)
+            self._update_progress(game, action)
         self.maybe_move(table_id)
 
     def handle_game_finished(self, data: dict[str, Any]) -> None:
         table_id = int(data.get("tableID", -1))
         if table_id >= 0:
             self.send("tableUnattend", {"tableID": table_id})
-            self.games.pop(table_id, None)
-            self.last_decided_turn.pop(table_id, None)
+            with self.lock:
+                game = self.games.pop(table_id, None)
+            self._close_game_engine(game)
 
     def maybe_move(self, table_id: int) -> None:
-        if self.deciding:
-            return
-        snapshot = self.games[table_id]
-        if snapshot.get("spectating") or snapshot.get("replay"):
-            return
-
-        turn = 0
-        current_player = 0
-        terminal = False
-        for action in snapshot["actions"]:
-            action_type = action.get("type")
-            if action_type == "turn":
-                turn = int(action["num"])
-                current_player = int(action["currentPlayerIndex"])
-            elif action_type == "gameOver":
-                terminal = True
-        if (
-            terminal
-            or current_player != int(snapshot["ourPlayerIndex"])
-            or self.last_decided_turn.get(table_id) == turn
-        ):
-            return
-
-        self.deciding = True
+        with self.lock:
+            game = self.games.get(table_id)
+            if game is None:
+                return
+            if (
+                game.get("spectating")
+                or game.get("replay")
+                or game["terminal"]
+                or game["currentPlayer"] != int(game["ourPlayerIndex"])
+                or game["lastDecidedTurn"] == game["turn"]
+                or game["inFlight"]
+            ):
+                return
+            game["inFlight"] = True
+            turn = int(game["turn"])
+            action_count = len(game["actions"])
+            generation = int(game["generation"])
         try:
-            result = subprocess.run(
-                self.engine_command,
-                input=json.dumps(snapshot),
-                text=True,
-                capture_output=True,
-                timeout=180,
-                check=False,
-                env={
-                    key: value
-                    for key, value in os.environ.items()
-                    if key not in {"HANABI_USERNAME", "HANABI_PASSWORD"}
-                },
+            self.executor.submit(
+                self._decide,
+                table_id,
+                turn,
+                action_count,
+                generation,
             )
-            if result.returncode != 0:
-                error = result.stderr.strip() or f"exit status {result.returncode}"
-                log(f"Engine failed on table {table_id}, turn {turn}: {error}")
+        except RuntimeError:
+            with self.lock:
+                game = self.games.get(table_id)
+                if game is not None:
+                    game["inFlight"] = False
+
+    def _decide(
+        self,
+        table_id: int,
+        turn: int,
+        action_count: int,
+        generation: int,
+    ) -> None:
+        try:
+            action = self._request_action(table_id, action_count, generation)
+            with self.lock:
+                game = self.games.get(table_id)
+                current = (
+                    game is not None
+                    and game["generation"] == generation
+                    and game["turn"] == turn
+                    and game["currentPlayer"] == int(game["ourPlayerIndex"])
+                    and not game["terminal"]
+                )
+            if not current:
+                log(f"Discarding stale engine result for table {table_id}, turn {turn}.")
                 return
-            try:
-                action = json.loads(result.stdout)
-            except json.JSONDecodeError as error:
-                log(f"Engine returned invalid action JSON: {error}")
-                return
-            self.last_decided_turn[table_id] = turn
+            if int(action.get("tableID", -1)) != table_id:
+                raise EngineProcessError("engine response targets the wrong table")
             log(f"Table {table_id}, turn {turn}: sending {action}")
             self.send("action", action)
-        except subprocess.TimeoutExpired:
-            log(f"Engine timed out on table {table_id}, turn {turn}.")
+            with self.lock:
+                game = self.games.get(table_id)
+                if game is not None and game["generation"] == generation:
+                    game["lastDecidedTurn"] = turn
+        except (EngineProcessError, OSError, TypeError, ValueError) as error:
+            log(f"Engine failed on table {table_id}, turn {turn}: {error}")
         finally:
-            self.deciding = False
+            with self.lock:
+                game = self.games.get(table_id)
+                if game is not None and game["generation"] == generation:
+                    game["inFlight"] = False
+
+    def _request_action(
+        self,
+        table_id: int,
+        action_count: int,
+        generation: int,
+    ) -> dict[str, Any]:
+        last_error: EngineProcessError | None = None
+        for _attempt in range(2):
+            with self.lock:
+                game = self.games.get(table_id)
+                if game is None or game["generation"] != generation:
+                    raise EngineProcessError("game session is no longer current")
+                engine = game["engine"]
+                if engine is None:
+                    engine = self.engine_factory(
+                        self.engine_command,
+                        self.engine_timeout,
+                    )
+                    game["engine"] = engine
+                    game["engineInitialized"] = False
+                    game["syncedActions"] = 0
+                initialized = bool(game["engineInitialized"])
+                synced = int(game["syncedActions"])
+                if initialized and synced <= action_count:
+                    payload = {
+                        "kind": "append",
+                        "tableID": table_id,
+                        "actions": game["actions"][synced:action_count],
+                    }
+                else:
+                    snapshot = {
+                        key: game[key]
+                        for key in (
+                            "tableID",
+                            "playerNames",
+                            "ourPlayerIndex",
+                            "spectating",
+                            "replay",
+                            "options",
+                        )
+                    }
+                    snapshot["actions"] = game["actions"][:action_count]
+                    payload = {"kind": "initialize", "snapshot": snapshot}
+            try:
+                response = engine.request(payload)
+            except EngineProcessError as error:
+                last_error = error
+                with self.lock:
+                    game = self.games.get(table_id)
+                    if game is not None and game.get("engine") is engine:
+                        game["engine"] = None
+                        game["engineInitialized"] = False
+                        game["syncedActions"] = 0
+                engine.close()
+                continue
+            with self.lock:
+                game = self.games.get(table_id)
+                if game is None or game["generation"] != generation:
+                    raise EngineProcessError("game session changed during search")
+                game["engineInitialized"] = True
+                game["syncedActions"] = action_count
+            return response
+        assert last_error is not None
+        raise last_error
+
+    @staticmethod
+    def _update_progress(game: dict[str, Any], action: dict[str, Any]) -> None:
+        action_type = action.get("type")
+        if action_type == "turn":
+            game["turn"] = int(action["num"])
+            game["currentPlayer"] = int(action["currentPlayerIndex"])
+        elif action_type == "gameOver":
+            game["terminal"] = True
+
+    @staticmethod
+    def _close_game_engine(game: dict[str, Any] | None) -> None:
+        if game is not None and game.get("engine") is not None:
+            game["engine"].close()
+
+    def _reset_connection(self) -> None:
+        with self.lock:
+            self.ws = None
+            self.opened_at = None
+            self.connection_generation += 1
+            games = list(self.games.values())
+            self.games.clear()
+            self.tables.clear()
+        for game in games:
+            self._close_game_engine(game)
 
     def reply(self, recipient: str, message: str) -> None:
         self.send(
@@ -294,7 +659,11 @@ class HanabiEngineBot:
         )
 
     def send(self, command: str, data: dict[str, Any]) -> None:
-        self.ws.send(f"{command} {json.dumps(data, separators=(',', ':'))}")
+        with self.lock:
+            ws = self.ws
+        if ws is None:
+            raise OSError("WebSocket is not connected")
+        ws.send(f"{command} {json.dumps(data, separators=(',', ':'))}")
         if self.debug:
             log(f"sent {command}")
 
@@ -326,6 +695,12 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--samples", type=int, default=100)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--exploration", type=float)
+    parser.add_argument(
+        "--engine-timeout",
+        type=float,
+        default=DEFAULT_ENGINE_TIMEOUT,
+        help=f"seconds to wait for one move (default: {DEFAULT_ENGINE_TIMEOUT:g})",
+    )
     parser.add_argument(
         "--convention",
         choices=("none", "h-group"),
@@ -363,6 +738,9 @@ def main() -> int:
     if arguments.iterations <= 0 or arguments.samples <= 0:
         log("error: search budgets must be positive")
         return 2
+    if arguments.engine_timeout <= 0:
+        log("error: the engine timeout must be positive")
+        return 2
     if arguments.seed < 0:
         log("error: the search seed must be nonnegative")
         return 2
@@ -372,7 +750,7 @@ def main() -> int:
 
     engine_command = [
         str(engine),
-        "live-action",
+        "live-session",
         "--mode",
         arguments.mode,
         "--iterations",
@@ -389,28 +767,19 @@ def main() -> int:
     if arguments.convention == "h-group":
         engine_command.extend(["--h-group-level", arguments.h_group_level])
 
-    try:
-        ws_url, cookie = authenticate(
-            arguments.base_url,
-            username,
-            password,
-        )
-    except (RuntimeError, ValueError) as error:
-        log(f"error: {error}")
-        return 1
-
     profile = (
         f"H-Group {arguments.h_group_level}"
         if arguments.convention == "h-group"
         else "no convention"
     )
-    log(f"Connecting to {ws_url} with {profile}.")
+    log(f"Connecting to {arguments.base_url} with {profile}.")
     HanabiEngineBot(
-        ws_url,
-        cookie,
-        engine_command,
-        username,
-        arguments.debug,
+        base_url=arguments.base_url,
+        engine_command=engine_command,
+        username=username,
+        password=password,
+        debug=arguments.debug,
+        engine_timeout=arguments.engine_timeout,
     ).run()
     return 0
 

@@ -4,29 +4,8 @@ use std::{
     process::{Command, Stdio},
 };
 
-#[test]
-fn help_describes_turn_semantics_and_search_modes() {
-    let output = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
-        .arg("--help")
-        .output()
-        .unwrap();
-
-    assert!(output.status.success());
-    let stdout = String::from_utf8(output.stdout).unwrap();
-    assert!(stdout.contains("turn 0 is the initial deal"));
-    assert!(stdout.contains("--mode <ismcts|flat>"));
-    assert!(stdout.contains("--convention <none|h-group>"));
-    assert!(stdout.contains("--h-group-level <1-25|max>"));
-    assert!(stdout.contains("hanabi-engine benchmark"));
-    assert!(stdout.contains("hanabi-engine live-action"));
-    assert!(stdout.contains("Convention framework (default: h-group)"));
-    assert!(stdout.contains("H-Group profile (default: max)"));
-    assert!(stdout.contains("versioned JSON report"));
-}
-
-#[test]
-fn live_action_defaults_to_h_group_max_and_emits_server_json() {
-    let snapshot = serde_json::json!({
+fn live_snapshot() -> serde_json::Value {
+    serde_json::json!({
         "tableID": 17,
         "playerNames": ["Bot", "Alice"],
         "ourPlayerIndex": 0,
@@ -60,7 +39,32 @@ fn live_action_defaults_to_h_group_max_and_emits_server_json() {
             {"type": "turn", "num": 2, "currentPlayerIndex": 0}
         ]
     })
-    .to_string();
+}
+
+#[test]
+fn help_describes_turn_semantics_and_search_modes() {
+    let output = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
+        .arg("--help")
+        .output()
+        .unwrap();
+
+    assert!(output.status.success());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("turn 0 is the initial deal"));
+    assert!(stdout.contains("--mode <ismcts|flat>"));
+    assert!(stdout.contains("--convention <none|h-group>"));
+    assert!(stdout.contains("--h-group-level <1-25|max>"));
+    assert!(stdout.contains("hanabi-engine benchmark"));
+    assert!(stdout.contains("hanabi-engine live-action"));
+    assert!(stdout.contains("hanabi-engine live-session"));
+    assert!(stdout.contains("Convention framework (default: h-group)"));
+    assert!(stdout.contains("H-Group profile (default: max)"));
+    assert!(stdout.contains("versioned JSON report"));
+}
+
+#[test]
+fn live_action_defaults_to_h_group_max_and_emits_server_json() {
+    let snapshot = live_snapshot().to_string();
     let mut child = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
         .args(["live-action", "--iterations", "1", "--seed", "42"])
         .stdin(Stdio::piped())
@@ -85,6 +89,50 @@ fn live_action_defaults_to_h_group_max_and_emits_server_json() {
     assert_eq!(command["tableID"], 17);
     assert!(command["type"].as_u64().is_some_and(|kind| kind <= 3));
     assert!(command["target"].as_u64().is_some());
+}
+
+#[test]
+fn live_session_serves_multiple_requests_from_one_process() {
+    let initialize = serde_json::json!({
+        "kind": "initialize",
+        "snapshot": live_snapshot(),
+    });
+    let append = serde_json::json!({
+        "kind": "append",
+        "tableID": 17,
+        "actions": [],
+    });
+    let mut child = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
+        .args(["live-session", "--iterations", "1", "--seed", "42"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    {
+        let mut input = child.stdin.take().unwrap();
+        writeln!(input, "{initialize}").unwrap();
+        writeln!(input, "{append}").unwrap();
+    }
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let responses = String::from_utf8(output.stdout).unwrap();
+    let responses = responses
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(responses.len(), 2);
+    assert!(responses.iter().all(|response| response["tableID"] == 17));
+    assert!(
+        responses
+            .iter()
+            .all(|response| response.get("error").is_none())
+    );
 }
 
 #[test]

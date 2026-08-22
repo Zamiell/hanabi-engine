@@ -47,6 +47,7 @@ fn run() -> Result<(), CliError> {
         Command::Analyze(arguments) => run_analyze(&arguments),
         Command::Benchmark(arguments) => benchmark::run(&arguments),
         Command::LiveAction(arguments) => live_action::run(&arguments),
+        Command::LiveSession(arguments) => live_action::run_session(&arguments),
     }
 }
 
@@ -366,6 +367,7 @@ enum Command {
     Analyze(AnalyzeArguments),
     Benchmark(BenchmarkArguments),
     LiveAction(LiveActionArguments),
+    LiveSession(LiveActionArguments),
 }
 
 fn parse_arguments() -> Result<Option<Command>, CliError> {
@@ -385,6 +387,9 @@ fn parse_arguments() -> Result<Option<Command>, CliError> {
         }
         "live-action" => {
             parse_live_action_arguments(&mut arguments).map(|value| value.map(Command::LiveAction))
+        }
+        "live-session" => {
+            parse_live_action_arguments(&mut arguments).map(|value| value.map(Command::LiveSession))
         }
         _ => Err(CliError::Usage(format!("unknown command {command:?}"))),
     }
@@ -622,6 +627,7 @@ fn usage() -> &'static str {
     "Usage:\n  hanabi-engine analyze <replay.json> --turn <N> [options]\n  \
      hanabi-engine benchmark <replay.json> --turn <N> [--turn <N> ...] [options]\n\n\
      hanabi-engine live-action [options] < live-snapshot.json\n\n\
+     hanabi-engine live-session [options] < session-requests.ndjson\n\n\
      Turn N is the position after N completed game actions; turn 0 is the initial deal.\n\n\
      Analyze options:\n  --mode <ismcts|flat>   Search mode (default: ismcts)\n  \
      --iterations <N>       ISMCTS iterations (default: 1000)\n  \
@@ -645,6 +651,8 @@ fn usage() -> &'static str {
      --exploration <X>      ISMCTS UCB coefficient (default: sqrt(2))\n  \
      --convention <none|h-group>  Convention framework (default: h-group)\n  \
      --h-group-level <1-25|max>   H-Group profile (default: max)\n\n\
+     Live-session accepts one initialize request followed by append requests as NDJSON.\n\
+     It emits one action or error JSON object per input line.\n\n\
      Benchmark writes a versioned JSON report to standard output."
 }
 
@@ -657,6 +665,7 @@ enum CliError {
     InvalidCurrentPlayer,
     InformationSet(InformationSetError),
     ReadLiveSnapshot(io::Error),
+    WriteLiveSession(io::Error),
     LiveSnapshot(hanabi_protocol::LiveSnapshotError),
     BestMove(BestMoveError),
     Flat(FlatSearchError),
@@ -687,6 +696,9 @@ impl fmt::Display for CliError {
                     "could not read live snapshot from standard input: {error}"
                 )
             }
+            Self::WriteLiveSession(error) => {
+                write!(formatter, "could not write live session response: {error}")
+            }
             Self::LiveSnapshot(error) => write!(formatter, "invalid live snapshot: {error}"),
             Self::BestMove(error) => write!(formatter, "live search failed: {error}"),
             Self::Flat(error) => write!(formatter, "flat Monte Carlo search failed: {error}"),
@@ -705,7 +717,7 @@ impl std::error::Error for CliError {
             Self::ReadReplay { source, .. } => Some(source),
             Self::Replay(error) => Some(error),
             Self::InformationSet(error) => Some(error),
-            Self::ReadLiveSnapshot(error) => Some(error),
+            Self::ReadLiveSnapshot(error) | Self::WriteLiveSession(error) => Some(error),
             Self::LiveSnapshot(error) => Some(error),
             Self::BestMove(error) => Some(error),
             Self::Flat(error) => Some(error),

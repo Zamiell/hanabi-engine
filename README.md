@@ -98,7 +98,8 @@ cargo +1.85.0 check --workspace --all-targets --all-features --locked
 
 python3 -m venv .venv
 .venv/bin/python -m pip install --requirement scripts/requirements.txt
-.venv/bin/python -m py_compile scripts/hanabi_live_bot.py
+.venv/bin/python -m py_compile scripts/hanabi_live_bot.py scripts/tests/test_hanabi_live_bot.py
+.venv/bin/python -W error::ResourceWarning -m unittest discover -s scripts/tests -v
 .venv/bin/python scripts/hanabi_live_bot.py --help
 ```
 
@@ -164,13 +165,18 @@ The online adapter has two deliberately separate pieces:
 
 1. `scripts/hanabi_live_bot.py` handles login, the authenticated WebSocket,
    lobby invitations, and the server's scrubbed action stream.
-2. `hanabi-engine live-action` reconstructs a player-safe `PlayerView`,
-   searches it, and emits one Hanabi Live action as JSON.
+2. A persistent `hanabi-engine live-session` process per table reconstructs a
+   player-safe `PlayerView` once, incrementally applies new actions, searches
+   it, and emits Hanabi Live actions as newline-delimited JSON. The
+   `live-action` command remains available for one-shot analysis and testing.
 
 This keeps credentials and the changing network protocol outside the search
 engine, while the Rust boundary prevents the bot from filling its own hidden
 cards with simulator truth. The live command defaults to ISMCTS with 1,000
-iterations and H-Group `max`.
+iterations and H-Group `max`. Searches run on background workers, independently
+per table, so the WebSocket receive loop remains responsive. A failed engine
+session is restarted from the complete scrubbed snapshot, and a dropped server
+connection is reauthenticated with bounded exponential backoff.
 
 Use a dedicated Hanabi Live bot account, then build the release binary and set
 up the one Python dependency:
@@ -207,8 +213,9 @@ privately message it:
 The launcher supports `--iterations`, `--mode`, `--seed`,
 `--h-group-level 1` through `--h-group-level 25`, and
 `--h-group-level max`. Use `--convention none` to exercise the
-convention-agnostic baseline. `--base-url` can point at a local Hanabi Live
-server for integration testing; the default is `https://hanab.live`.
+convention-agnostic baseline. `--engine-timeout` bounds one search attempt.
+`--base-url` can point at a local Hanabi Live server for integration testing;
+the default is `https://hanab.live`.
 
 ## Benchmark search
 

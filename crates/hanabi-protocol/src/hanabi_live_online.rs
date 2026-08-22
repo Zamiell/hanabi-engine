@@ -86,6 +86,35 @@ enum HanabiLiveOnlineAction {
     Ignored,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum HanabiLiveSessionRequest {
+    Initialize {
+        snapshot: HanabiLiveSnapshot,
+    },
+    Append {
+        #[serde(rename = "tableID")]
+        table_id: u64,
+        actions: Vec<HanabiLiveOnlineAction>,
+    },
+}
+
+/// Incremental state for one persistent Hanabi Live engine process.
+///
+/// The first request initializes the session from the server's complete,
+/// scrubbed action list. Later requests append only newly received actions,
+/// avoiding replaying the full game history before every search.
+#[derive(Clone, Debug, Default)]
+pub struct HanabiLiveSessionState {
+    session: Option<HanabiLiveSession>,
+}
+
+#[derive(Clone, Debug)]
+struct HanabiLiveSession {
+    table_id: u64,
+    builder: LiveViewBuilder,
+}
+
 /// Wire payload accepted by the Hanabi Live action WebSocket command.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -131,31 +160,104 @@ impl HanabiLiveSnapshot {
     /// Returns `LiveSnapshotError` when the game is not a standard active-player
     /// game or the action stream is malformed or incomplete.
     pub fn player_view(&self) -> Result<PlayerView, LiveSnapshotError> {
-        if self.spectating {
+        HanabiLiveSession::from_snapshot(self)?.player_view()
+    }
+}
+
+impl HanabiLiveSessionState {
+    /// Creates an empty session awaiting an `initialize` request.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { session: None }
+    }
+
+    /// Applies one newline-delimited JSON session request and returns the
+    /// current table and player view.
+    ///
+    /// Updates are transactional: malformed action batches leave the previous
+    /// session state untouched so callers can restart or resynchronize safely.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LiveSnapshotError`] when the request is malformed, arrives
+    /// before initialization, targets another table, or contains invalid game
+    /// actions.
+    pub fn apply_json(&mut self, json: &str) -> Result<(u64, PlayerView), LiveSnapshotError> {
+        let request: HanabiLiveSessionRequest =
+            serde_json::from_str(json).map_err(LiveSnapshotError::Json)?;
+        match request {
+            HanabiLiveSessionRequest::Initialize { snapshot } => {
+                let candidate = HanabiLiveSession::from_snapshot(&snapshot)?;
+                let view = candidate.player_view()?;
+                let table_id = candidate.table_id;
+                self.session = Some(candidate);
+                Ok((table_id, view))
+            }
+            HanabiLiveSessionRequest::Append { table_id, actions } => {
+                let current = self
+                    .session
+                    .as_ref()
+                    .ok_or(LiveSnapshotError::SessionNotInitialized)?;
+                if current.table_id != table_id {
+                    return Err(LiveSnapshotError::SessionTableMismatch {
+                        expected: current.table_id,
+                        actual: table_id,
+                    });
+                }
+                let mut candidate = current.clone();
+                candidate.append(&actions)?;
+                let view = candidate.player_view()?;
+                self.session = Some(candidate);
+                Ok((table_id, view))
+            }
+        }
+    }
+}
+
+impl HanabiLiveSession {
+    fn from_snapshot(snapshot: &HanabiLiveSnapshot) -> Result<Self, LiveSnapshotError> {
+        if snapshot.spectating {
             return Err(LiveSnapshotError::Spectating);
         }
-        if self.replay {
+        if snapshot.replay {
             return Err(LiveSnapshotError::Replay);
         }
-        if self.options.variant_name != "No Variant" {
+        if snapshot.options.variant_name != "No Variant" {
             return Err(LiveSnapshotError::UnsupportedVariant(
-                self.options.variant_name.clone(),
+                snapshot.options.variant_name.clone(),
             ));
         }
-        if !(2..=5).contains(&self.player_names.len()) {
+        if !(2..=5).contains(&snapshot.player_names.len()) {
             return Err(LiveSnapshotError::InvalidPlayerCount(
-                self.player_names.len(),
+                snapshot.player_names.len(),
             ));
         }
-        if self.our_player_index >= self.player_names.len() {
-            return Err(LiveSnapshotError::InvalidObserver(self.our_player_index));
+        if snapshot.our_player_index >= snapshot.player_names.len() {
+            return Err(LiveSnapshotError::InvalidObserver(
+                snapshot.our_player_index,
+            ));
         }
 
-        let mut builder = LiveViewBuilder::new(self.player_names.len(), self.our_player_index);
-        for action in &self.actions {
+        let mut builder =
+            LiveViewBuilder::new(snapshot.player_names.len(), snapshot.our_player_index);
+        for action in &snapshot.actions {
             builder.apply(action)?;
         }
-        builder.finish()
+        Ok(Self {
+            table_id: snapshot.table_id,
+            builder,
+        })
+    }
+
+    fn append(&mut self, actions: &[HanabiLiveOnlineAction]) -> Result<(), LiveSnapshotError> {
+        for action in actions {
+            self.builder.apply(action)?;
+        }
+        Ok(())
+    }
+
+    fn player_view(&self) -> Result<PlayerView, LiveSnapshotError> {
+        self.builder.player_view()
     }
 }
 
@@ -200,6 +302,7 @@ impl HanabiLiveActionCommand {
     }
 }
 
+#[derive(Clone, Debug)]
 struct LiveViewBuilder {
     observer: PlayerId,
     current_player: PlayerId,
@@ -537,7 +640,7 @@ impl LiveViewBuilder {
         Ok(())
     }
 
-    fn finish(self) -> Result<PlayerView, LiveSnapshotError> {
+    fn player_view(&self) -> Result<PlayerView, LiveSnapshotError> {
         if self.initial_deal_remaining != 0 {
             return Err(LiveSnapshotError::IncompleteInitialDeal(
                 self.initial_deal_remaining,
@@ -547,15 +650,15 @@ impl LiveViewBuilder {
             observer: self.observer,
             current_player: self.current_player,
             turn: self.turn,
-            hands: self.hands,
+            hands: self.hands.clone(),
             deck_size: self.deck_size,
-            play_stacks: self.play_stacks,
-            discard_pile: self.discard_pile,
+            play_stacks: self.play_stacks.clone(),
+            discard_pile: self.discard_pile.clone(),
             clue_tokens: self.clue_tokens,
             strikes: self.strikes,
             final_turns_remaining: self.final_turns_remaining,
             status: self.status,
-            history: self.history,
+            history: self.history.clone(),
         })
     }
 }
@@ -665,6 +768,11 @@ pub enum LiveSnapshotError {
         previous: u32,
         next: u32,
     },
+    SessionNotInitialized,
+    SessionTableMismatch {
+        expected: u64,
+        actual: u64,
+    },
 }
 
 impl fmt::Display for LiveSnapshotError {
@@ -753,6 +861,13 @@ impl fmt::Display for LiveSnapshotError {
             Self::TurnWentBackward { previous, next } => {
                 write!(formatter, "turn went backward from {previous} to {next}")
             }
+            Self::SessionNotInitialized => {
+                formatter.write_str("live session received actions before initialization")
+            }
+            Self::SessionTableMismatch { expected, actual } => write!(
+                formatter,
+                "live session is for table {expected}, but update targets table {actual}"
+            ),
         }
     }
 }
@@ -850,6 +965,61 @@ mod tests {
                 }),
                 ..
             } if card == CardId::new(10)
+        ));
+    }
+
+    #[test]
+    fn live_session_appends_actions_incrementally_and_transactionally() {
+        let mut snapshot: serde_json::Value = serde_json::from_str(&snapshot_json()).unwrap();
+        let actions = snapshot["actions"].as_array_mut().unwrap();
+        let appended = actions.split_off(13);
+        let initialize = serde_json::json!({
+            "kind": "initialize",
+            "snapshot": snapshot,
+        });
+        let mut session = HanabiLiveSessionState::new();
+
+        let (table_id, first) = session.apply_json(&initialize.to_string()).unwrap();
+        assert_eq!(table_id, 17);
+        assert_eq!(first.turn, 1);
+        assert_eq!(first.current_player, PlayerId::new(1));
+
+        let wrong_table = serde_json::json!({
+            "kind": "append",
+            "tableID": 99,
+            "actions": appended,
+        });
+        assert!(matches!(
+            session.apply_json(&wrong_table.to_string()),
+            Err(LiveSnapshotError::SessionTableMismatch {
+                expected: 17,
+                actual: 99
+            })
+        ));
+
+        let append = serde_json::json!({
+            "kind": "append",
+            "tableID": 17,
+            "actions": wrong_table["actions"],
+        });
+        let (_, second) = session.apply_json(&append.to_string()).unwrap();
+        assert_eq!(second.turn, 2);
+        assert_eq!(second.current_player, PlayerId::new(0));
+        assert_eq!(second.play_stacks[Suit::Red.index()].len(), 1);
+        assert_eq!(second.hands[1].last().unwrap().id, CardId::new(10));
+    }
+
+    #[test]
+    fn live_session_requires_initialization() {
+        let mut session = HanabiLiveSessionState::new();
+        let append = serde_json::json!({
+            "kind": "append",
+            "tableID": 17,
+            "actions": [],
+        });
+        assert!(matches!(
+            session.apply_json(&append.to_string()),
+            Err(LiveSnapshotError::SessionNotInitialized)
         ));
     }
 
