@@ -41,11 +41,20 @@ class FakeWebSocket:
                 if message.startswith("action ")
             ]
 
+    def private_messages(self) -> list[dict[str, Any]]:
+        with self.lock:
+            return [
+                json.loads(message.partition(" ")[2])
+                for message in self.messages
+                if message.startswith("chatPM ")
+            ]
+
 
 class RecordingEngine:
     instances: list[RecordingEngine] = []
 
-    def __init__(self, _command: list[str], _timeout: float) -> None:
+    def __init__(self, command: list[str], _timeout: float) -> None:
+        self.command = command
         self.payloads: list[dict[str, Any]] = []
         self.closed = False
         self.__class__.instances.append(self)
@@ -119,10 +128,11 @@ def wait_until(predicate: Any, timeout: float = 2.0) -> None:
 def make_bot(
     engine_factory: Any,
     trace_recorder: bridge.TraceRecorder | None = None,
+    engine_command: list[str] | None = None,
 ) -> tuple[bridge.HanabiEngineBot, FakeWebSocket]:
     bot = bridge.HanabiEngineBot(
         base_url="http://example.invalid",
-        engine_command=["fake-engine", "live-session"],
+        engine_command=engine_command or ["fake-engine", "live-session"],
         username="Bot",
         password="secret",
         debug=False,
@@ -136,6 +146,12 @@ def make_bot(
 
 
 class PersistentEngineTests(unittest.TestCase):
+    def test_closed_engine_cannot_restart(self) -> None:
+        engine = bridge.PersistentEngine(["unused-engine"], 1)
+        engine.close()
+        with self.assertRaisesRegex(bridge.EngineProcessError, "session is closed"):
+            engine.request({"kind": "initialize"})
+
     def test_rejects_a_stale_engine_before_connecting(self) -> None:
         stale = mock.Mock()
         stale.returncode = 0
@@ -337,6 +353,112 @@ class BotConcurrencyTests(unittest.TestCase):
             )
             self.assertFalse(
                 any(message.startswith("tableReattend ") for message in socket.messages)
+            )
+        finally:
+            bot.shutdown()
+
+    def test_private_level_message_configures_the_game_engine(self) -> None:
+        bot, socket = make_bot(
+            RecordingEngine,
+            engine_command=[
+                "fake-engine",
+                "live-session",
+                "--convention",
+                "h-group",
+                "--h-group-level",
+                "max",
+            ],
+        )
+        try:
+            bot.handle_init(init_message(7))
+            bot.handle_chat(
+                {"recipient": "Bot", "who": "Alice", "msg": "/level 3"}
+            )
+            self.assertEqual(bot.games[7]["hGroupLevel"], "3")
+            self.assertEqual(
+                socket.private_messages()[-1]["msg"],
+                "H-Group level 3 selected for this game.",
+            )
+
+            bot.handle_game_action_list(
+                {
+                    "tableID": 7,
+                    "list": [{"type": "turn", "num": 0, "currentPlayerIndex": 0}],
+                }
+            )
+            wait_until(lambda: len(socket.actions()) == 1)
+            command = RecordingEngine.instances[0].command
+            self.assertEqual(command[command.index("--h-group-level") + 1], "3")
+        finally:
+            bot.shutdown()
+
+    def test_changing_level_restarts_only_that_games_engine(self) -> None:
+        bot, socket = make_bot(
+            RecordingEngine,
+            engine_command=[
+                "fake-engine",
+                "live-session",
+                "--convention",
+                "h-group",
+                "--h-group-level",
+                "max",
+            ],
+        )
+        try:
+            bot.handle_init(init_message(7))
+            bot.handle_game_action_list(
+                {
+                    "tableID": 7,
+                    "list": [{"type": "turn", "num": 0, "currentPlayerIndex": 0}],
+                }
+            )
+            wait_until(lambda: len(socket.actions()) == 1)
+            original = RecordingEngine.instances[0]
+
+            bot.handle_chat(
+                {"recipient": "Bot", "who": "Alice", "msg": "/level 3"}
+            )
+            self.assertTrue(original.closed)
+            bot.handle_game_action(
+                {
+                    "tableID": 7,
+                    "action": {"type": "turn", "num": 1, "currentPlayerIndex": 1},
+                }
+            )
+            bot.handle_game_action(
+                {
+                    "tableID": 7,
+                    "action": {"type": "turn", "num": 2, "currentPlayerIndex": 0},
+                }
+            )
+            wait_until(lambda: len(socket.actions()) == 2)
+            self.assertEqual(len(RecordingEngine.instances), 2)
+            replacement = RecordingEngine.instances[1]
+            self.assertEqual(
+                replacement.command[replacement.command.index("--h-group-level") + 1],
+                "3",
+            )
+            self.assertEqual(replacement.payloads[0]["kind"], "initialize")
+        finally:
+            bot.shutdown()
+
+    def test_level_message_validates_sender_value_and_convention(self) -> None:
+        bot, socket = make_bot(RecordingEngine)
+        try:
+            bot.handle_init(init_message(7))
+            bot.handle_chat(
+                {"recipient": "Bot", "who": "Alice", "msg": "/level 26"}
+            )
+            self.assertEqual(
+                socket.private_messages()[-1]["msg"],
+                "Level must be 1 through 25, or max.",
+            )
+            bot.handle_chat(
+                {"recipient": "Bot", "who": "Alice", "msg": "/level 3"}
+            )
+            self.assertEqual(
+                socket.private_messages()[-1]["msg"],
+                "This bot is not running the H-Group convention.",
             )
         finally:
             bot.shutdown()

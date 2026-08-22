@@ -245,6 +245,20 @@ privately message it:
 /msg your-bot-account /join
 ```
 
+Any player seated at the bot's table can select the cumulative H-Group profile
+for that game with a private message:
+
+```text
+/msg your-bot-account /level 3
+```
+
+Levels `1` through `25` and `max` are accepted. The bot confirms the change,
+restarts only that table's persistent engine session, and reconstructs it from
+the player-safe action history. The selection survives a WebSocket reconnect
+for the same table and is cleared when the game finishes. Invalid levels,
+non-players, and `/level` requests while running `--convention none` are
+rejected with a private explanation.
+
 The launcher supports `--iterations`, `--mode`, `--seed`,
 `--h-group-level 1` through `--h-group-level 25`, and
 `--h-group-level max`. Use `--convention none` to exercise the

@@ -329,6 +329,7 @@ class PersistentEngine:
         self.reader_threads: list[threading.Thread] = []
         self.request_lock = threading.Lock()
         self.process_lock = threading.Lock()
+        self.closed = threading.Event()
 
     def request(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self.request_lock:
@@ -373,10 +374,13 @@ class PersistentEngine:
             return response
 
     def close(self) -> None:
+        self.closed.set()
         self._stop()
 
     def _ensure_started(self) -> None:
         with self.process_lock:
+            if self.closed.is_set():
+                raise EngineProcessError("engine session is closed")
             if self.process is not None and self.process.poll() is None:
                 return
             try:
@@ -485,6 +489,11 @@ class HanabiEngineBot:
         self.authenticator = authenticator
         self.engine_factory = engine_factory
         self.trace_recorder = trace_recorder
+        self.default_h_group_level = self._command_option(
+            engine_command,
+            "--h-group-level",
+        )
+        self.game_levels: dict[int, str] = {}
         self.tables: dict[int, dict[str, Any]] = {}
         self.games: dict[int, dict[str, Any]] = {}
         self.ws: Any = None
@@ -638,9 +647,15 @@ class HanabiEngineBot:
         log(f"Hanabi Live: {data}")
 
     def handle_chat(self, data: dict[str, Any]) -> None:
-        if data.get("recipient") != self.username or data.get("msg") != "/join":
+        if data.get("recipient") != self.username:
             return
+        message = str(data.get("msg", "")).strip()
         requester = str(data["who"])
+        if message.startswith("/level"):
+            self._handle_level(requester, message)
+            return
+        if message != "/join":
+            return
         with self.lock:
             table = next(
                 (
@@ -662,6 +677,71 @@ class HanabiEngineBot:
             return
         self.send("tableJoin", {"tableID": table["id"]})
 
+    def _handle_level(self, requester: str, message: str) -> None:
+        parts = message.split()
+        if len(parts) != 2 or parts[0] != "/level":
+            self.reply(requester, "Usage: /level <1-25|max>")
+            return
+        level = parts[1].lower()
+        if level != "max":
+            try:
+                number = int(level)
+            except ValueError:
+                number = 0
+            if not 1 <= number <= 25 or level != str(number):
+                self.reply(requester, "Level must be 1 through 25, or max.")
+                return
+        if self.default_h_group_level is None:
+            self.reply(requester, "This bot is not running the H-Group convention.")
+            return
+
+        old_engine: PersistentEngine | None = None
+        active_table: int | None = None
+        with self.lock:
+            active = next(
+                (
+                    (table_id, game)
+                    for table_id, game in self.games.items()
+                    if requester in game.get("playerNames", [])
+                ),
+                None,
+            )
+            if active is not None:
+                active_table, game = active
+            else:
+                table = next(
+                    (
+                        candidate
+                        for candidate in self.tables.values()
+                        if requester in candidate.get("players", [])
+                    ),
+                    None,
+                )
+                if table is None:
+                    self.reply(requester, "You must be seated at my table to set its level.")
+                    return
+                active_table = int(table["id"])
+                game = None
+
+            self.game_levels[active_table] = level
+            if game is not None and game.get("hGroupLevel") != level:
+                old_engine = game.get("engine")
+                self.game_generation += 1
+                game["generation"] = self.game_generation
+                game["hGroupLevel"] = level
+                game["engine"] = None
+                game["engineInitialized"] = False
+                game["syncedActions"] = 0
+                game["inFlight"] = False
+
+        if old_engine is not None:
+            old_engine.close()
+        display = "max" if level == "max" else f"level {level}"
+        log(f"Table {active_table}: {requester} selected H-Group {display}.")
+        self.reply(requester, f"H-Group {display} selected for this game.")
+        if active_table is not None:
+            self.maybe_move(active_table)
+
     def handle_table(self, data: dict[str, Any]) -> None:
         with self.lock:
             self.tables[int(data["id"])] = data
@@ -671,8 +751,11 @@ class HanabiEngineBot:
             self.handle_table(table)
 
     def handle_table_gone(self, data: dict[str, Any]) -> None:
+        table_id = int(data["tableID"])
         with self.lock:
-            self.tables.pop(int(data["tableID"]), None)
+            self.tables.pop(table_id, None)
+            if table_id not in self.games:
+                self.game_levels.pop(table_id, None)
 
     def handle_table_start(self, data: dict[str, Any]) -> None:
         self.send("getGameInfo1", {"tableID": int(data["tableID"])})
@@ -690,6 +773,7 @@ class HanabiEngineBot:
                 "replay": data.get("replay", False),
                 "options": data["options"],
                 "actions": [],
+                "actionListLoaded": False,
                 "turn": 0,
                 "currentPlayer": 0,
                 "terminal": False,
@@ -698,6 +782,10 @@ class HanabiEngineBot:
                 "syncedActions": 0,
                 "engineInitialized": False,
                 "engine": None,
+                "hGroupLevel": self.game_levels.get(
+                    table_id,
+                    self.default_h_group_level,
+                ),
                 "generation": self.game_generation,
             }
         self._close_game_engine(old)
@@ -714,6 +802,7 @@ class HanabiEngineBot:
             game["engineInitialized"] = False
             game["syncedActions"] = 0
             game["actions"] = list(data["list"])
+            game["actionListLoaded"] = True
             game["turn"] = 0
             game["currentPlayer"] = 0
             game["terminal"] = False
@@ -743,6 +832,7 @@ class HanabiEngineBot:
             self.send("tableUnattend", {"tableID": table_id})
             with self.lock:
                 game = self.games.pop(table_id, None)
+                self.game_levels.pop(table_id, None)
             self._close_game_engine(game)
 
     def maybe_move(self, table_id: int) -> None:
@@ -753,6 +843,7 @@ class HanabiEngineBot:
             if (
                 game.get("spectating")
                 or game.get("replay")
+                or not game.get("actionListLoaded", False)
                 or game["terminal"]
                 or game["currentPlayer"] != int(game["ourPlayerIndex"])
                 or game["lastDecidedTurn"] == game["turn"]
@@ -872,7 +963,7 @@ class HanabiEngineBot:
                 engine = game["engine"]
                 if engine is None:
                     engine = self.engine_factory(
-                        self.engine_command,
+                        self._engine_command_for_game(game),
                         self.engine_timeout,
                     )
                     game["engine"] = engine
@@ -965,6 +1056,29 @@ class HanabiEngineBot:
     def _close_game_engine(game: dict[str, Any] | None) -> None:
         if game is not None and game.get("engine") is not None:
             game["engine"].close()
+
+    @staticmethod
+    def _command_option(command: list[str], option: str) -> str | None:
+        try:
+            index = command.index(option)
+        except ValueError:
+            return None
+        if index + 1 >= len(command):
+            return None
+        return command[index + 1]
+
+    def _engine_command_for_game(self, game: dict[str, Any]) -> list[str]:
+        command = self.engine_command.copy()
+        level = game.get("hGroupLevel")
+        if level is None:
+            return command
+        try:
+            index = command.index("--h-group-level")
+        except ValueError:
+            command.extend(["--h-group-level", str(level)])
+        else:
+            command[index + 1] = str(level)
+        return command
 
     def _reset_connection(self) -> None:
         with self.lock:
