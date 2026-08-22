@@ -1,4 +1,4 @@
-# H-Group convention interpreter
+# H-Group Convention Interpreter
 
 The engine implements the pinned H-Group learning path as a cumulative public-history interpreter. `h-group:N` enables Levels 1 through N; `h-group:max` is treated internally as the effective 26th cumulative level. The source revision is exposed as `H_GROUP_RULESET_REVISION`.
 
