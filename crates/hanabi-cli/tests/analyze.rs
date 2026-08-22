@@ -4,6 +4,12 @@ use std::{
     process::{Command, Stdio},
 };
 
+use hanabi_core::{Action, Clue, PlayerId, Rank};
+use hanabi_protocol::HanabiLiveSnapshot;
+use hanabi_search::{
+    HGroupProfile, InformationSet, IsmctsConfig, SupportedConvention, ismcts_search,
+};
+
 fn live_snapshot() -> serde_json::Value {
     serde_json::json!({
         "tableID": 17,
@@ -39,6 +45,69 @@ fn live_snapshot() -> serde_json::Value {
             {"type": "turn", "num": 2, "currentPlayerIndex": 0}
         ]
     })
+}
+
+fn traced_opening_snapshot() -> serde_json::Value {
+    serde_json::json!({
+        "tableID": 39,
+        "playerNames": ["hanabi-engine", "red_hedgehog", "James"],
+        "ourPlayerIndex": 0,
+        "spectating": false,
+        "replay": false,
+        "options": {"variantName": "No Variant"},
+        "actions": [
+            {"type": "draw", "playerIndex": 0, "order": 0, "suitIndex": -1, "rank": -1},
+            {"type": "draw", "playerIndex": 0, "order": 1, "suitIndex": -1, "rank": -1},
+            {"type": "draw", "playerIndex": 0, "order": 2, "suitIndex": -1, "rank": -1},
+            {"type": "draw", "playerIndex": 0, "order": 3, "suitIndex": -1, "rank": -1},
+            {"type": "draw", "playerIndex": 0, "order": 4, "suitIndex": -1, "rank": -1},
+            {"type": "draw", "playerIndex": 1, "order": 5, "suitIndex": 0, "rank": 2},
+            {"type": "draw", "playerIndex": 1, "order": 6, "suitIndex": 1, "rank": 3},
+            {"type": "draw", "playerIndex": 1, "order": 7, "suitIndex": 3, "rank": 3},
+            {"type": "draw", "playerIndex": 1, "order": 8, "suitIndex": 0, "rank": 1},
+            {"type": "draw", "playerIndex": 1, "order": 9, "suitIndex": 0, "rank": 3},
+            {"type": "draw", "playerIndex": 2, "order": 10, "suitIndex": 4, "rank": 3},
+            {"type": "draw", "playerIndex": 2, "order": 11, "suitIndex": 0, "rank": 1},
+            {"type": "draw", "playerIndex": 2, "order": 12, "suitIndex": 0, "rank": 1},
+            {"type": "draw", "playerIndex": 2, "order": 13, "suitIndex": 3, "rank": 1},
+            {"type": "draw", "playerIndex": 2, "order": 14, "suitIndex": 1, "rank": 1}
+        ]
+    })
+}
+
+#[test]
+fn traced_opening_clues_do_not_predict_certain_strikeouts() {
+    let snapshot = HanabiLiveSnapshot::from_json(&traced_opening_snapshot().to_string()).unwrap();
+    let information_set = InformationSet::new(snapshot.player_view().unwrap()).unwrap();
+    let convention = SupportedConvention::HGroup(HGroupProfile::Max);
+    let result = ismcts_search(
+        &information_set,
+        &convention,
+        IsmctsConfig {
+            iterations: 32,
+            exploration: std::f64::consts::SQRT_2,
+            seed: 0,
+        },
+    )
+    .unwrap();
+
+    for rank in [Rank::One, Rank::Two] {
+        let action = Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(rank),
+        };
+        let statistics = result
+            .root_actions
+            .iter()
+            .find(|statistics| statistics.action == action)
+            .unwrap_or_else(|| panic!("missing root statistics for {action:?}"));
+        assert!(
+            statistics
+                .strikeout_rate
+                .is_some_and(|strikeouts| strikeouts < 1.0),
+            "{action:?} was incorrectly evaluated as a certain strikeout: {statistics:?}"
+        );
+    }
 }
 
 #[test]

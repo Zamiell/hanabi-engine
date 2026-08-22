@@ -101,6 +101,19 @@ pub trait RolloutPolicy {
     /// current-player position or does not contain its own hidden hand.
     fn select_action(&self, deductions: &LogicalDeductions) -> Result<Action, PolicyError>;
 
+    /// Chooses an action for a leaf rollout inside search.
+    ///
+    /// Frameworks may use a more conservative value-estimation policy than
+    /// their explicit tree policy. The default preserves ordinary rollout
+    /// behavior.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same policy-specific errors as [`Self::select_action`].
+    fn select_search_action(&self, deductions: &LogicalDeductions) -> Result<Action, PolicyError> {
+        self.select_action(deductions)
+    }
+
     /// Chooses from the compact convention-free rollout representation.
     ///
     /// Policies returning `false` from [`Self::uses_history`] must implement
@@ -115,6 +128,19 @@ pub trait RolloutPolicy {
         _deductions: &PolicyDeductions<'_>,
     ) -> Result<Action, PolicyError> {
         Err(PolicyError::CompactObservationUnsupported)
+    }
+
+    /// Compact-observation counterpart to [`Self::select_search_action`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the same policy-specific errors as
+    /// [`Self::select_policy_action`].
+    fn select_search_policy_action(
+        &self,
+        deductions: &PolicyDeductions<'_>,
+    ) -> Result<Action, PolicyError> {
+        self.select_policy_action(deductions)
     }
 }
 

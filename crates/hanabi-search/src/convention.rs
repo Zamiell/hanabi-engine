@@ -336,6 +336,19 @@ impl RolloutPolicy for SupportedConvention {
             }
         }
     }
+
+    fn select_search_action(
+        &self,
+        deductions: &LogicalDeductions,
+    ) -> Result<hanabi_core::Action, crate::PolicyError> {
+        match self {
+            Self::None => ConventionAgnosticPolicy.select_action(deductions),
+            Self::HGroup(profile) => {
+                crate::h_group::select_h_group_search_rollout_action(deductions, *profile)
+                    .ok_or(crate::PolicyError::NoConventionAction)
+            }
+        }
+    }
 }
 
 impl ConventionFramework for SupportedConvention {

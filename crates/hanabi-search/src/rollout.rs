@@ -105,7 +105,7 @@ pub fn rollout_to_terminal<P: RolloutPolicy>(
     state: FullState,
     policy: &P,
 ) -> Result<RolloutOutcome, RolloutError> {
-    Ok(run_rollout::<_, true, false>(state, policy)?.outcome)
+    Ok(run_rollout::<_, true, false, false>(state, policy)?.outcome)
 }
 
 /// Plays a sampled state to completion and records per-stage rollout timing.
@@ -117,7 +117,7 @@ pub fn rollout_to_terminal_with_diagnostics<P: RolloutPolicy>(
     state: FullState,
     policy: &P,
 ) -> Result<RolloutReport, RolloutError> {
-    run_rollout::<_, true, true>(state, policy)
+    run_rollout::<_, true, true, false>(state, policy)
 }
 
 pub(crate) fn rollout_for_search<P: RolloutPolicy>(
@@ -126,13 +126,18 @@ pub(crate) fn rollout_for_search<P: RolloutPolicy>(
     measure_timing: bool,
 ) -> Result<RolloutReport, RolloutError> {
     if measure_timing {
-        run_rollout::<_, false, true>(state, policy)
+        run_rollout::<_, false, true, true>(state, policy)
     } else {
-        run_rollout::<_, false, false>(state, policy)
+        run_rollout::<_, false, false, true>(state, policy)
     }
 }
 
-fn run_rollout<P: RolloutPolicy, const RECORD_ACTIONS: bool, const MEASURE_TIMING: bool>(
+fn run_rollout<
+    P: RolloutPolicy,
+    const RECORD_ACTIONS: bool,
+    const MEASURE_TIMING: bool,
+    const SEARCH: bool,
+>(
     mut state: FullState,
     policy: &P,
 ) -> Result<RolloutReport, RolloutError> {
@@ -147,9 +152,9 @@ fn run_rollout<P: RolloutPolicy, const RECORD_ACTIONS: bool, const MEASURE_TIMIN
         }
 
         let action = if MEASURE_TIMING {
-            select_rollout_action_with_diagnostics(&state, policy, &mut diagnostics)?
+            select_rollout_action_with_diagnostics::<_, SEARCH>(&state, policy, &mut diagnostics)?
         } else {
-            select_rollout_action(&state, policy)?
+            select_rollout_action::<_, SEARCH>(&state, policy)?
         };
         if MEASURE_TIMING {
             let apply_started = Instant::now();
@@ -181,7 +186,7 @@ fn run_rollout<P: RolloutPolicy, const RECORD_ACTIONS: bool, const MEASURE_TIMIN
     })
 }
 
-fn select_rollout_action<P: RolloutPolicy>(
+fn select_rollout_action<P: RolloutPolicy, const SEARCH: bool>(
     state: &FullState,
     policy: &P,
 ) -> Result<Action, RolloutError> {
@@ -191,22 +196,28 @@ fn select_rollout_action<P: RolloutPolicy>(
             .view_for(actor)
             .ok_or(RolloutError::InvalidCurrentPlayer(actor))?;
         let deductions = LogicalDeductions::new(view).map_err(RolloutError::InformationSet)?;
-        policy
-            .select_action(&deductions)
-            .map_err(RolloutError::Policy)
+        if SEARCH {
+            policy.select_search_action(&deductions)
+        } else {
+            policy.select_action(&deductions)
+        }
+        .map_err(RolloutError::Policy)
     } else {
         let observation = state
             .policy_observation_for(actor)
             .ok_or(RolloutError::InvalidCurrentPlayer(actor))?;
         let deductions =
             PolicyDeductions::new(&observation).map_err(RolloutError::InformationSet)?;
-        policy
-            .select_policy_action(&deductions)
-            .map_err(RolloutError::Policy)
+        if SEARCH {
+            policy.select_search_policy_action(&deductions)
+        } else {
+            policy.select_policy_action(&deductions)
+        }
+        .map_err(RolloutError::Policy)
     }
 }
 
-fn select_rollout_action_with_diagnostics<P: RolloutPolicy>(
+fn select_rollout_action_with_diagnostics<P: RolloutPolicy, const SEARCH: bool>(
     state: &FullState,
     policy: &P,
     diagnostics: &mut RolloutDiagnostics,
@@ -223,7 +234,11 @@ fn select_rollout_action_with_diagnostics<P: RolloutPolicy>(
         diagnostics.deduction_time += deduction_started.elapsed();
         let deductions = deductions.map_err(RolloutError::InformationSet)?;
         let policy_started = Instant::now();
-        let selected = policy.select_action(&deductions);
+        let selected = if SEARCH {
+            policy.select_search_action(&deductions)
+        } else {
+            policy.select_action(&deductions)
+        };
         diagnostics.policy_time += policy_started.elapsed();
         selected.map_err(RolloutError::Policy)
     } else {
@@ -236,7 +251,11 @@ fn select_rollout_action_with_diagnostics<P: RolloutPolicy>(
         diagnostics.deduction_time += deduction_started.elapsed();
         let deductions = deductions.map_err(RolloutError::InformationSet)?;
         let policy_started = Instant::now();
-        let selected = policy.select_policy_action(&deductions);
+        let selected = if SEARCH {
+            policy.select_search_policy_action(&deductions)
+        } else {
+            policy.select_policy_action(&deductions)
+        };
         diagnostics.policy_time += policy_started.elapsed();
         selected.map_err(RolloutError::Policy)
     }

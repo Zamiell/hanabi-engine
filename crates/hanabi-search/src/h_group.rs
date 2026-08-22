@@ -692,6 +692,44 @@ pub(crate) fn select_h_group_action(
         .next()
 }
 
+pub(crate) fn select_h_group_search_rollout_action(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+) -> Option<Action> {
+    let view = deductions.view();
+    let safe = |action: &Action| match action {
+        Action::Play(card) => deductions
+            .possible_identities(*card)
+            .is_some_and(|identities| {
+                !identities.is_empty()
+                    && identities
+                        .iter()
+                        .all(|identity| is_playable_now(view, identity))
+            }),
+        Action::Discard(_) | Action::Clue { .. } => true,
+    };
+    if let Some(action) = h_group_candidate_actions(deductions, profile)
+        .into_iter()
+        .find(safe)
+    {
+        return Some(action);
+    }
+
+    let mut clues = h_group_clue_candidates(deductions, profile);
+    clues.sort_by_key(|candidate| core::cmp::Reverse(candidate.score));
+    if let Some(clue) = clues.first() {
+        return Some(clue.action);
+    }
+
+    if view.clue_tokens == MAX_CLUE_TOKENS {
+        return view
+            .legal_actions()
+            .into_iter()
+            .find(|action| matches!(action, Action::Clue { .. }));
+    }
+    crate::RolloutPolicy::select_action(&crate::ConventionAgnosticPolicy, deductions).ok()
+}
+
 /// Selects a conservative, unambiguous Level 1 clue.
 ///
 /// Candidate clues must satisfy focus and Minimum Clue Value. Play clues also
@@ -941,18 +979,39 @@ fn advanced_clue_candidates(
         let delayed = identities.iter().find(|identity| {
             usize::from(identity.rank.number()) > view.play_stacks[identity.suit.index()].len() + 1
         });
+        let out_of_order = delayed.is_some_and(|focus| {
+            let height = view.play_stacks[focus.suit.index()].len();
+            let connector = Card::new(focus.suit, Rank::ALL[height]);
+            let actor = next_player(view.current_player, view.hands.len());
+            view.hands[actor.index()]
+                .iter()
+                .rev()
+                .skip(1)
+                .any(|candidate| candidate.identity == Some(connector))
+        });
         let bluff = delayed.is_some_and(|focus| {
             let actor = next_player(view.current_player, view.hands.len());
             if actor == target {
                 return false;
             }
-            visible_playable_in_hand(view, actor, None).is_some_and(|(_, actual)| {
-                let height = view.play_stacks[focus.suit.index()].len();
-                height < Rank::ALL.len() && actual != Card::new(focus.suit, Rank::ALL[height])
-            })
+            view.hands[actor.index()]
+                .iter()
+                .rev()
+                .find(|candidate| !gotten.contains(&candidate.id))
+                .and_then(|candidate| candidate.identity)
+                .is_some_and(|actual| {
+                    let height = view.play_stacks[focus.suit.index()].len();
+                    is_playable_now(view, actual)
+                        && height < Rank::ALL.len()
+                        && actual != Card::new(focus.suit, Rank::ALL[height])
+                })
         });
+        let every_touched_card_is_playable = !identities.is_empty() && playable == identities.len();
 
-        let classification = if profile.includes(HGroupLevel::Level21) && playable >= 2 {
+        let classification = if profile.includes(HGroupLevel::Level21)
+            && playable >= 2
+            && every_touched_card_is_playable
+        {
             Some((HGroupMoveKind::Ignition, 360))
         } else if profile.includes(HGroupLevel::Level16) && five_ejection {
             Some((HGroupMoveKind::Ejection, 290))
@@ -960,7 +1019,7 @@ fn advanced_clue_candidates(
             Some((HGroupMoveKind::Bluff, 280))
         } else if profile.includes(HGroupLevel::Level18) && elimination {
             Some((HGroupMoveKind::Elimination, 230))
-        } else if profile.includes(HGroupLevel::Level20) && delayed.is_some() {
+        } else if profile.includes(HGroupLevel::Level20) && out_of_order {
             Some((HGroupMoveKind::OccupiedPlay, 220))
         } else if profile.includes(HGroupLevel::Level4) && all_trash {
             Some((HGroupMoveKind::ChopMove, 210))
@@ -1797,6 +1856,21 @@ fn replay_h_group(deductions: &LogicalDeductions, profile: HGroupProfile) -> Rep
     let mut forced_playable = HashSet::new();
 
     for entry in &view.history {
+        // Priority depends on the choices that were playable immediately before
+        // the action. Replaying it after updating the stacks would make the card
+        // enabled by this play look like an alternative the actor declined.
+        if profile.includes(HGroupLevel::Level25) {
+            apply_priority_effects(
+                entry,
+                view,
+                &hands,
+                &facts,
+                stack_heights,
+                &explicitly_clued,
+                &mut forced_playable,
+                &mut signals,
+            );
+        }
         match &entry.event {
             ObservedEvent::Clued {
                 giver,
@@ -2116,6 +2190,8 @@ fn replay_h_group(deductions: &LogicalDeductions, profile: HGroupProfile) -> Rep
                 entry,
                 view,
                 &hands,
+                &clues,
+                stack_heights,
                 &mut pending_connections,
                 &mut forced_playable,
                 &mut signals,
@@ -2148,7 +2224,13 @@ fn replay_h_group(deductions: &LogicalDeductions, profile: HGroupProfile) -> Rep
             );
         }
         if profile.includes(HGroupLevel::Level21) {
-            apply_ignition_effects(entry, view, &hands, &mut forced_playable, &mut signals);
+            apply_ignition_effects(
+                entry,
+                view,
+                stack_heights,
+                &mut forced_playable,
+                &mut signals,
+            );
         }
         if profile.includes(HGroupLevel::Level22) {
             apply_phantom_effects(entry, view, &hands, &mut forced_playable, &mut signals);
@@ -2158,16 +2240,6 @@ fn replay_h_group(deductions: &LogicalDeductions, profile: HGroupProfile) -> Rep
         }
         if profile.includes(HGroupLevel::Level24) {
             apply_unnecessary_move_effects(entry, view, &hands, &mut signals);
-        }
-        if profile.includes(HGroupLevel::Level25) {
-            apply_priority_effects(
-                entry,
-                view,
-                &hands,
-                &explicitly_clued,
-                &mut forced_playable,
-                &mut signals,
-            );
         }
         if profile.is_max() {
             apply_extra_effects(
@@ -2312,6 +2384,40 @@ fn visible_playable_in_hand(
             .filter(|identity| is_playable_now(view, *identity))
             .map(|identity| (card.id, identity))
     })
+}
+
+fn is_playable_at(stack_heights: [u8; 5], identity: Card) -> bool {
+    identity.rank.number() == stack_heights[identity.suit.index()] + 1
+}
+
+fn has_higher_basic_priority(
+    hand: &[CardId],
+    candidate: CardId,
+    candidate_identity: Card,
+    played: CardId,
+    played_identity: Card,
+) -> bool {
+    match (
+        candidate_identity.rank == Rank::Five,
+        played_identity.rank == Rank::Five,
+    ) {
+        (true, false) => return true,
+        (false, true) => return false,
+        _ => {}
+    }
+
+    match candidate_identity
+        .rank
+        .number()
+        .cmp(&played_identity.rank.number())
+    {
+        std::cmp::Ordering::Less => true,
+        std::cmp::Ordering::Greater => false,
+        std::cmp::Ordering::Equal => {
+            let position = |card| hand.iter().position(|in_hand| *in_hand == card);
+            position(candidate) > position(played)
+        }
+    }
 }
 
 fn apply_level_two_effects(
@@ -3062,10 +3168,13 @@ fn apply_trash_effects(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_ejection_discharge_effects(
     entry: &ObservedHistoryEntry,
     view: &PlayerView,
     hands: &[Vec<CardId>],
+    clues: &[HGroupClueInterpretation],
+    stack_heights: [u8; 5],
     pending: &mut Vec<PendingConnection>,
     forced_playable: &mut HashSet<CardId>,
     signals: &mut Vec<HGroupSignal>,
@@ -3080,17 +3189,20 @@ fn apply_ejection_discharge_effects(
     else {
         return;
     };
+    let interpretation = clues.iter().rev().find(|clue| clue.turn == entry.turn);
+    let focus_identity =
+        interpretation.and_then(|interpretation| current_card_identity(view, interpretation.focus));
     let five_ejection = matches!(clue, Clue::Suit(_))
-        && touched.iter().any(|card| {
-            current_card_identity(view, *card).is_some_and(|identity| {
-                identity.rank == Rank::Five
-                    && 5_usize.saturating_sub(view.play_stacks[identity.suit.index()].len()) >= 2
-            })
+        && focus_identity.is_some_and(|identity| {
+            identity.rank == Rank::Five
+                && 5_u8.saturating_sub(stack_heights[identity.suit.index()]) >= 2
         });
+    // An Unknown Trash Discharge communicates that the focused card is trash.
+    // Merely touching an already-played duplicate as a useful non-focus card is
+    // an ordinary multi-card clue and must not eject the next player's slot 3.
     let unknown_discharge = touched.len() >= 2
-        && touched.iter().any(|card| {
-            current_card_identity(view, *card).is_some_and(|identity| card_is_trash(view, identity))
-        });
+        && focus_identity
+            .is_some_and(|identity| identity.rank.number() <= stack_heights[identity.suit.index()]);
     let (kind, position) = if five_ejection {
         (Some(HGroupMoveKind::Ejection), 1)
     } else if unknown_discharge {
@@ -3176,15 +3288,23 @@ fn apply_five_tech_effects(
     if touched.is_empty() {
         return;
     }
-    let actor = next_player(*giver, hands.len());
-    let focus_is_new = touched
+    let target_hand = &hands[target.index()];
+    let pulled = touched
         .iter()
-        .any(|card| !was_clued_before(view, entry.turn, *card));
-    if focus_is_new {
-        if let Some(ejected) = hands[actor.index()].iter().rev().nth(1).copied() {
-            pending.retain(|connection| connection.actor != actor);
-            forced_playable.insert(ejected);
-        }
+        .copied()
+        .filter(|card| !was_clued_before(view, entry.turn, *card))
+        .filter_map(|card| {
+            target_hand
+                .iter()
+                .position(|candidate| *candidate == card)
+                .map(|position| (position, card))
+        })
+        .max_by_key(|(position, _)| *position)
+        .and_then(|(position, _)| position.checked_sub(1))
+        .and_then(|position| target_hand.get(position).copied());
+    if let Some(pulled) = pulled {
+        pending.retain(|connection| connection.actor != *target);
+        forced_playable.insert(pulled);
     }
     push_signal(
         signals,
@@ -3257,7 +3377,7 @@ fn apply_out_of_order_effects(
 fn apply_ignition_effects(
     entry: &ObservedHistoryEntry,
     view: &PlayerView,
-    _hands: &[Vec<CardId>],
+    stack_heights: [u8; 5],
     forced_playable: &mut HashSet<CardId>,
     signals: &mut Vec<HGroupSignal>,
 ) {
@@ -3270,14 +3390,12 @@ fn apply_ignition_effects(
     else {
         return;
     };
-    let playable = touched
-        .iter()
-        .filter(|card| {
-            current_card_identity(view, **card)
-                .is_some_and(|identity| is_playable_now(view, identity))
-        })
-        .count();
-    if playable >= 2 {
+    let every_touched_card_is_playable = touched.len() >= 2
+        && touched.iter().all(|card| {
+            current_card_identity(view, *card)
+                .is_some_and(|identity| is_playable_at(stack_heights, identity))
+        });
+    if every_touched_card_is_playable {
         forced_playable.extend(touched.iter().copied());
         push_signal(
             signals,
@@ -3396,10 +3514,13 @@ fn apply_unnecessary_move_effects(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_priority_effects(
     entry: &ObservedHistoryEntry,
     view: &PlayerView,
     hands: &[Vec<CardId>],
+    facts: &[ClueFacts],
+    stack_heights: [u8; 5],
     explicitly_clued: &HashSet<CardId>,
     forced_playable: &mut HashSet<CardId>,
     signals: &mut Vec<HGroupSignal>,
@@ -3414,7 +3535,35 @@ fn apply_priority_effects(
     else {
         return;
     };
-    if visible_playable_in_hand(view, *player, Some(*card)).is_some() {
+
+    // Ordinary Priority is a deliberate choice between globally-known playable
+    // cards. Trust Finesses from unknown cards need substantially stronger
+    // evidence and must not be inferred merely from hidden simulator truth.
+    let played_possibilities = IdentitySet::from_mask(facts[card.index()].identity_mask());
+    if played_possibilities != IdentitySet::singleton(*identity) {
+        return;
+    }
+
+    let actor_hand = &hands[player.index()];
+    let declined_priority = actor_hand.iter().copied().any(|candidate| {
+        if candidate == *card {
+            return false;
+        }
+        let possibilities = IdentitySet::from_mask(facts[candidate.index()].identity_mask());
+        !possibilities.is_empty()
+            && possibilities.iter().all(|candidate_identity| {
+                is_playable_at(stack_heights, candidate_identity)
+                    && has_higher_basic_priority(
+                        actor_hand,
+                        candidate,
+                        candidate_identity,
+                        *card,
+                        *identity,
+                    )
+            })
+    });
+
+    if declined_priority {
         let target = next_player(*player, hands.len());
         if identity.rank != Rank::Five {
             let connector = Card::new(identity.suit, Rank::ALL[identity.rank.index() + 1]);

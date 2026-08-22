@@ -48,7 +48,12 @@ Logical feasibility uses compact 25-bit identity sets and exact Hall-capacity
 matching. Assignment counts and card-copy sampling weights are initialized
 lazily, with packed memoization keys and a reusable validated determinization
 template. Convention-free rollouts use a compact history-free observation;
-H-Group rollouts retain public history and convention state.
+H-Group rollouts retain public history and convention state. During search,
+H-Group actions are expanded normally in the tree, while a newly expanded
+leaf uses a conservative value-estimation policy: it can give H-Group clues,
+but only plays a card when ordinary logical information already proves that
+every possible identity is playable. This keeps incomplete advanced
+inferences from turning a whole candidate line into deterministic strikeouts.
 
 Flat Monte Carlo compares every legal root action on the same stream of sampled
 worlds. Single-observer ISMCTS uses availability-aware UCB selection,
