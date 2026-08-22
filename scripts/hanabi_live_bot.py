@@ -679,11 +679,12 @@ class HanabiEngineBot:
 
     def _handle_level(self, requester: str, message: str) -> None:
         parts = message.split()
-        if len(parts) != 2 or parts[0] != "/level":
+        if not 1 <= len(parts) <= 2 or parts[0] != "/level":
             self.reply(requester, "Usage: /level <1-25|max>")
             return
-        level = parts[1].lower()
-        if level != "max":
+        query = len(parts) == 1
+        level = None if query else parts[1].lower()
+        if level is not None and level != "max":
             try:
                 number = int(level)
             except ValueError:
@@ -696,33 +697,25 @@ class HanabiEngineBot:
             return
 
         old_engine: PersistentEngine | None = None
-        active_table: int | None = None
+        active_table: int
         with self.lock:
-            active = next(
-                (
-                    (table_id, game)
-                    for table_id, game in self.games.items()
-                    if requester in game.get("playerNames", [])
-                ),
-                None,
-            )
-            if active is not None:
-                active_table, game = active
-            else:
-                table = next(
-                    (
-                        candidate
-                        for candidate in self.tables.values()
-                        if requester in candidate.get("players", [])
-                    ),
-                    None,
-                )
-                if table is None:
-                    self.reply(requester, "You must be seated at my table to set its level.")
-                    return
-                active_table = int(table["id"])
-                game = None
+            target = self._level_target(requester)
+            if target is None:
+                self.reply(requester, "You must be seated at my table to query or set its level.")
+                return
+            active_table, game = target
 
+            current_level = (
+                game.get("hGroupLevel")
+                if game is not None
+                else self.game_levels.get(active_table, self.default_h_group_level)
+            )
+            if query:
+                display = self._level_display(str(current_level))
+                self.reply(requester, f"Current H-Group level: {display}.")
+                return
+
+            assert level is not None
             self.game_levels[active_table] = level
             if game is not None and game.get("hGroupLevel") != level:
                 old_engine = game.get("engine")
@@ -736,11 +729,40 @@ class HanabiEngineBot:
 
         if old_engine is not None:
             old_engine.close()
-        display = "max" if level == "max" else f"level {level}"
+        display = self._level_display(level)
         log(f"Table {active_table}: {requester} selected H-Group {display}.")
         self.reply(requester, f"H-Group {display} selected for this game.")
-        if active_table is not None:
-            self.maybe_move(active_table)
+        self.maybe_move(active_table)
+
+    def _level_target(
+        self,
+        requester: str,
+    ) -> tuple[int, dict[str, Any] | None] | None:
+        active = next(
+            (
+                (table_id, game)
+                for table_id, game in self.games.items()
+                if requester in game.get("playerNames", [])
+            ),
+            None,
+        )
+        if active is not None:
+            return active
+        table = next(
+            (
+                candidate
+                for candidate in self.tables.values()
+                if requester in candidate.get("players", [])
+            ),
+            None,
+        )
+        if table is None:
+            return None
+        return int(table["id"]), None
+
+    @staticmethod
+    def _level_display(level: str) -> str:
+        return "max" if level == "max" else f"level {level}"
 
     def handle_table(self, data: dict[str, Any]) -> None:
         with self.lock:

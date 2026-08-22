@@ -379,6 +379,11 @@ class BotConcurrencyTests(unittest.TestCase):
                 socket.private_messages()[-1]["msg"],
                 "H-Group level 3 selected for this game.",
             )
+            bot.handle_chat({"recipient": "Bot", "who": "Alice", "msg": "/level"})
+            self.assertEqual(
+                socket.private_messages()[-1]["msg"],
+                "Current H-Group level: level 3.",
+            )
 
             bot.handle_game_action_list(
                 {
@@ -460,6 +465,29 @@ class BotConcurrencyTests(unittest.TestCase):
                 socket.private_messages()[-1]["msg"],
                 "This bot is not running the H-Group convention.",
             )
+        finally:
+            bot.shutdown()
+
+    def test_bare_level_reports_the_default_without_restarting(self) -> None:
+        bot, socket = make_bot(
+            RecordingEngine,
+            engine_command=[
+                "fake-engine",
+                "live-session",
+                "--convention",
+                "h-group",
+                "--h-group-level",
+                "max",
+            ],
+        )
+        try:
+            bot.handle_init(init_message(7))
+            bot.handle_chat({"recipient": "Bot", "who": "Alice", "msg": "/level"})
+            self.assertEqual(
+                socket.private_messages()[-1]["msg"],
+                "Current H-Group level: max.",
+            )
+            self.assertEqual(RecordingEngine.instances, [])
         finally:
             bot.shutdown()
 

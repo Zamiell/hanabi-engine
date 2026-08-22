@@ -257,7 +257,8 @@ restarts only that table's persistent engine session, and reconstructs it from
 the player-safe action history. The selection survives a WebSocket reconnect
 for the same table and is cleared when the game finishes. Invalid levels,
 non-players, and `/level` requests while running `--convention none` are
-rejected with a private explanation.
+rejected with a private explanation. Send `/level` without an argument to
+query the table's current profile without restarting its engine.
 
 The launcher supports `--iterations`, `--mode`, `--seed`,
 `--h-group-level 1` through `--h-group-level 25`, and
