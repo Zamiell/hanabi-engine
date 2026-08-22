@@ -29,11 +29,12 @@ player's decision policy.
 The workspace contains:
 
 - `hanabi-cli`: the `hanabi-engine` executable for analyzing actionable turns
-  from Hanabi Live replay JSON and benchmarking both search modes.
+  from Hanabi Live replay JSON, producing live-game actions, and benchmarking
+  both search modes.
 - `hanabi-core`: deterministic rules, complete state, event history, legal
   player observations, and world determinization.
-- `hanabi-protocol`: Hanabi Live compact replay parsing and reconstruction for
-  standard no-variant games.
+- `hanabi-protocol`: Hanabi Live compact replay parsing plus player-safe live
+  action-stream reconstruction for standard no-variant games.
 - `hanabi-search`: logical deduction, information sets, convention
   interpretation, rollout policies, flat Monte Carlo, ISMCTS, diagnostics, and
   the high-level `best_move` API.
@@ -94,6 +95,11 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-targets --all-features --locked
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked
 cargo +1.85.0 check --workspace --all-targets --all-features --locked
+
+python3 -m venv .venv
+.venv/bin/python -m pip install --requirement scripts/requirements.txt
+.venv/bin/python -m py_compile scripts/hanabi_live_bot.py
+.venv/bin/python scripts/hanabi_live_bot.py --help
 ```
 
 The Hanabi Live compatibility tests use the sibling `hanabi-live` repository
@@ -151,6 +157,58 @@ let result = hanabi_search::best_move(
 The same entry point accepts `SearchConfig::Flat`. Lower-level search APIs also
 accept any Rust type implementing `ConventionFramework`, while user-facing
 configuration remains the closed `SupportedConvention` enum.
+
+## Play on Hanabi Live
+
+The online adapter has two deliberately separate pieces:
+
+1. `scripts/hanabi_live_bot.py` handles login, the authenticated WebSocket,
+   lobby invitations, and the server's scrubbed action stream.
+2. `hanabi-engine live-action` reconstructs a player-safe `PlayerView`,
+   searches it, and emits one Hanabi Live action as JSON.
+
+This keeps credentials and the changing network protocol outside the search
+engine, while the Rust boundary prevents the bot from filling its own hidden
+cards with simulator truth. The live command defaults to ISMCTS with 1,000
+iterations and H-Group `max`.
+
+Use a dedicated Hanabi Live bot account, then build the release binary and set
+up the one Python dependency:
+
+```sh
+cargo build --release --locked
+
+# On Ubuntu/WSL, install this first if the venv module is unavailable:
+# sudo apt install python3-venv  # or the versioned package, e.g. python3.14-venv
+python3 -m venv .venv
+. .venv/bin/activate
+python -m pip install -r scripts/requirements.txt
+```
+
+Pass credentials through the environment rather than storing them in the
+repository:
+
+```sh
+export HANABI_USERNAME="your-bot-account"
+read -rsp "Hanabi Live password: " HANABI_PASSWORD
+export HANABI_PASSWORD
+echo
+
+python scripts/hanabi_live_bot.py
+```
+
+In a browser, create a public `No Variant` table with room for the bot, then
+privately message it:
+
+```text
+/msg your-bot-account /join
+```
+
+The launcher supports `--iterations`, `--mode`, `--seed`,
+`--h-group-level 1` through `--h-group-level 25`, and
+`--h-group-level max`. Use `--convention none` to exercise the
+convention-agnostic baseline. `--base-url` can point at a local Hanabi Live
+server for integration testing; the default is `https://hanab.live`.
 
 ## Benchmark search
 

@@ -46,6 +46,13 @@ jobs:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --workspace --all-features --no-deps --locked
 
+      - name: Check Hanabi Live bot launcher
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --requirement scripts/requirements.txt
+          .venv/bin/python -m py_compile scripts/hanabi_live_bot.py
+          .venv/bin/python scripts/hanabi_live_bot.py --help > /dev/null
+
   msrv:
     name: Check MSRV (Rust 1.85)
     runs-on: ubuntu-latest

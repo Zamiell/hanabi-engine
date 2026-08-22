@@ -1,4 +1,8 @@
-use std::{path::PathBuf, process::Command};
+use std::{
+    io::Write,
+    path::PathBuf,
+    process::{Command, Stdio},
+};
 
 #[test]
 fn help_describes_turn_semantics_and_search_modes() {
@@ -14,7 +18,73 @@ fn help_describes_turn_semantics_and_search_modes() {
     assert!(stdout.contains("--convention <none|h-group>"));
     assert!(stdout.contains("--h-group-level <1-25|max>"));
     assert!(stdout.contains("hanabi-engine benchmark"));
+    assert!(stdout.contains("hanabi-engine live-action"));
+    assert!(stdout.contains("Convention framework (default: h-group)"));
+    assert!(stdout.contains("H-Group profile (default: max)"));
     assert!(stdout.contains("versioned JSON report"));
+}
+
+#[test]
+fn live_action_defaults_to_h_group_max_and_emits_server_json() {
+    let snapshot = serde_json::json!({
+        "tableID": 17,
+        "playerNames": ["Bot", "Alice"],
+        "ourPlayerIndex": 0,
+        "spectating": false,
+        "replay": false,
+        "options": {"variantName": "No Variant"},
+        "actions": [
+            {"type": "draw", "playerIndex": 0, "order": 0, "suitIndex": -1, "rank": -1},
+            {"type": "draw", "playerIndex": 0, "order": 1, "suitIndex": -1, "rank": -1},
+            {"type": "draw", "playerIndex": 0, "order": 2, "suitIndex": -1, "rank": -1},
+            {"type": "draw", "playerIndex": 0, "order": 3, "suitIndex": -1, "rank": -1},
+            {"type": "draw", "playerIndex": 0, "order": 4, "suitIndex": -1, "rank": -1},
+            {"type": "draw", "playerIndex": 1, "order": 5, "suitIndex": 0, "rank": 1},
+            {"type": "draw", "playerIndex": 1, "order": 6, "suitIndex": 0, "rank": 1},
+            {"type": "draw", "playerIndex": 1, "order": 7, "suitIndex": 0, "rank": 1},
+            {"type": "draw", "playerIndex": 1, "order": 8, "suitIndex": 0, "rank": 2},
+            {"type": "draw", "playerIndex": 1, "order": 9, "suitIndex": 0, "rank": 2},
+            {
+                "type": "clue",
+                "clue": {"type": 1, "value": 1},
+                "giver": 0,
+                "list": [5, 6, 7],
+                "target": 1,
+                "turn": 0
+            },
+            {"type": "status", "clues": 7, "score": 0, "maxScore": 25},
+            {"type": "turn", "num": 1, "currentPlayerIndex": 1},
+            {"type": "play", "playerIndex": 1, "order": 5, "suitIndex": 0, "rank": 1},
+            {"type": "draw", "playerIndex": 1, "order": 10, "suitIndex": 2, "rank": 1},
+            {"type": "status", "clues": 7, "score": 1, "maxScore": 25},
+            {"type": "turn", "num": 2, "currentPlayerIndex": 0}
+        ]
+    })
+    .to_string();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
+        .args(["live-action", "--iterations", "1", "--seed", "42"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(snapshot.as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let command: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(command["tableID"], 17);
+    assert!(command["type"].as_u64().is_some_and(|kind| kind <= 3));
+    assert!(command["target"].as_u64().is_some());
 }
 
 #[test]
