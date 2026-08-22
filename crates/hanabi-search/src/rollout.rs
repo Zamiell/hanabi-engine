@@ -3,7 +3,10 @@ use std::time::{Duration, Instant};
 
 use hanabi_core::{Action, FullState, PlayerId, RuleError};
 
-use crate::{InformationSetError, LogicalDeductions, PolicyDeductions, PolicyError, RolloutPolicy};
+use crate::{
+    InformationSetError, LogicalDeductions, PolicyDeductions, PolicyError, RolloutPolicy,
+    StrategicMetrics, evaluation,
+};
 
 /// Defensive ceiling for a rollout. Standard games normally finish far below
 /// this even when policies spend clue tokens between card actions.
@@ -27,12 +30,13 @@ pub const fn terminal_utility(official_score: u8, raw_score: u8) -> u16 {
 }
 
 /// A completed simulation and the actions selected along the way.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RolloutOutcome {
     final_state: FullState,
     actions: Vec<Action>,
     turns: usize,
     score: u8,
+    strategic: StrategicMetrics,
 }
 
 /// Timing breakdown for one completed terminal rollout.
@@ -47,7 +51,7 @@ pub struct RolloutDiagnostics {
 }
 
 /// Terminal rollout outcome plus measured timing diagnostics.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RolloutReport {
     pub outcome: RolloutOutcome,
     pub diagnostics: RolloutDiagnostics,
@@ -86,6 +90,11 @@ impl RolloutOutcome {
     #[must_use]
     pub fn actions(&self) -> &[Action] {
         &self.actions
+    }
+
+    #[must_use]
+    pub const fn strategic_metrics(&self) -> StrategicMetrics {
+        self.strategic
     }
 }
 
@@ -126,9 +135,9 @@ pub(crate) fn rollout_for_search<P: RolloutPolicy>(
     measure_timing: bool,
 ) -> Result<RolloutReport, RolloutError> {
     if measure_timing {
-        run_rollout::<_, false, true, true>(state, policy)
+        run_rollout::<_, true, true, true>(state, policy)
     } else {
-        run_rollout::<_, false, false, true>(state, policy)
+        run_rollout::<_, true, false, true>(state, policy)
     }
 }
 
@@ -145,17 +154,23 @@ fn run_rollout<
     let mut actions = Vec::new();
     let mut turns = 0;
     let mut diagnostics = RolloutDiagnostics::default();
+    let mut strategic = StrategicMetrics::default();
 
     while !state.is_terminal() {
         if turns >= MAX_ROLLOUT_TURNS as usize {
             return Err(RolloutError::TurnLimitExceeded);
         }
 
-        let action = if MEASURE_TIMING {
+        evaluation::observe_position(&state, &mut strategic);
+        let (action, predictable) = if MEASURE_TIMING {
             select_rollout_action_with_diagnostics::<_, SEARCH>(&state, policy, &mut diagnostics)?
         } else {
             select_rollout_action::<_, SEARCH>(&state, policy)?
         };
+        if predictable {
+            strategic.predictable_turns = strategic.predictable_turns.saturating_add(1);
+        }
+        evaluation::observe_action(&state, action, &mut strategic);
         if MEASURE_TIMING {
             let apply_started = Instant::now();
             let applied = state.apply(action);
@@ -170,7 +185,7 @@ fn run_rollout<
         turns += 1;
     }
 
-    let outcome = finish_outcome(state, actions, turns)?;
+    let outcome = finish_outcome(state, actions, turns, strategic)?;
     if let Some(started) = rollout_started {
         diagnostics.total_time = started.elapsed();
         let stages = diagnostics
@@ -189,7 +204,7 @@ fn run_rollout<
 fn select_rollout_action<P: RolloutPolicy, const SEARCH: bool>(
     state: &FullState,
     policy: &P,
-) -> Result<Action, RolloutError> {
+) -> Result<(Action, bool), RolloutError> {
     let actor = state.current_player();
     if policy.uses_history() {
         let view = state
@@ -197,10 +212,14 @@ fn select_rollout_action<P: RolloutPolicy, const SEARCH: bool>(
             .ok_or(RolloutError::InvalidCurrentPlayer(actor))?;
         let deductions = LogicalDeductions::new(view).map_err(RolloutError::InformationSet)?;
         if SEARCH {
+            if let Some(action) = policy.predictable_action(&deductions) {
+                return Ok((action, true));
+            }
             policy.select_search_action(&deductions)
         } else {
             policy.select_action(&deductions)
         }
+        .map(|action| (action, false))
         .map_err(RolloutError::Policy)
     } else {
         let observation = state
@@ -208,12 +227,14 @@ fn select_rollout_action<P: RolloutPolicy, const SEARCH: bool>(
             .ok_or(RolloutError::InvalidCurrentPlayer(actor))?;
         let deductions =
             PolicyDeductions::new(&observation).map_err(RolloutError::InformationSet)?;
-        if SEARCH {
+        let selected = if SEARCH {
             policy.select_search_policy_action(&deductions)
         } else {
             policy.select_policy_action(&deductions)
-        }
-        .map_err(RolloutError::Policy)
+        };
+        selected
+            .map(|action| (action, false))
+            .map_err(RolloutError::Policy)
     }
 }
 
@@ -221,7 +242,7 @@ fn select_rollout_action_with_diagnostics<P: RolloutPolicy, const SEARCH: bool>(
     state: &FullState,
     policy: &P,
     diagnostics: &mut RolloutDiagnostics,
-) -> Result<Action, RolloutError> {
+) -> Result<(Action, bool), RolloutError> {
     let actor = state.current_player();
     let observation_started = Instant::now();
     if policy.uses_history() {
@@ -234,13 +255,21 @@ fn select_rollout_action_with_diagnostics<P: RolloutPolicy, const SEARCH: bool>(
         diagnostics.deduction_time += deduction_started.elapsed();
         let deductions = deductions.map_err(RolloutError::InformationSet)?;
         let policy_started = Instant::now();
+        let mut predictable = false;
         let selected = if SEARCH {
-            policy.select_search_action(&deductions)
+            if let Some(action) = policy.predictable_action(&deductions) {
+                predictable = true;
+                Ok(action)
+            } else {
+                policy.select_search_action(&deductions)
+            }
         } else {
             policy.select_action(&deductions)
         };
         diagnostics.policy_time += policy_started.elapsed();
-        selected.map_err(RolloutError::Policy)
+        selected
+            .map(|action| (action, predictable))
+            .map_err(RolloutError::Policy)
     } else {
         let observation = state
             .policy_observation_for(actor)
@@ -257,7 +286,9 @@ fn select_rollout_action_with_diagnostics<P: RolloutPolicy, const SEARCH: bool>(
             policy.select_policy_action(&deductions)
         };
         diagnostics.policy_time += policy_started.elapsed();
-        selected.map_err(RolloutError::Policy)
+        selected
+            .map(|action| (action, false))
+            .map_err(RolloutError::Policy)
     }
 }
 
@@ -265,15 +296,18 @@ fn finish_outcome(
     state: FullState,
     actions: Vec<Action>,
     turns: usize,
+    strategic: StrategicMetrics,
 ) -> Result<RolloutOutcome, RolloutError> {
     let score = state
         .final_score()
         .ok_or(RolloutError::NonTerminalOutcome)?;
+    let strategic = evaluation::finish_metrics(&state, strategic);
     Ok(RolloutOutcome {
         final_state: state,
         actions,
         turns,
         score,
+        strategic,
     })
 }
 

@@ -1021,6 +1021,12 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--exploration", type=float)
     parser.add_argument(
+        "--objective",
+        choices=("expected-score", "perfect-score"),
+        default="perfect-score",
+        help="search objective (default: perfect-score)",
+    )
+    parser.add_argument(
         "--engine-timeout",
         type=float,
         default=DEFAULT_ENGINE_TIMEOUT,
@@ -1117,6 +1123,8 @@ def main() -> int:
         str(arguments.seed),
         "--convention",
         arguments.convention,
+        "--objective",
+        arguments.objective,
         "--include-search-details",
     ]
     if arguments.exploration is not None:

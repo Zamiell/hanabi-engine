@@ -22,6 +22,7 @@ fn evaluates_every_legal_action_on_the_same_number_of_worlds() {
         MonteCarloConfig {
             samples_per_action: 8,
             seed: 867_5309,
+            objective: hanabi_search::SearchObjective::ExpectedScore,
         },
     )
     .unwrap();
@@ -56,6 +57,7 @@ fn evaluation_is_reproducible_for_a_seed() {
     let config = MonteCarloConfig {
         samples_per_action: 12,
         seed: 42,
+        objective: hanabi_search::SearchObjective::ExpectedScore,
     };
 
     assert_eq!(
@@ -74,6 +76,7 @@ fn diagnostics_account_for_flat_search_work() {
         MonteCarloConfig {
             samples_per_action: 3,
             seed: 7,
+            objective: hanabi_search::SearchObjective::ExpectedScore,
         },
     )
     .unwrap();
@@ -86,6 +89,7 @@ fn diagnostics_account_for_flat_search_work() {
             MonteCarloConfig {
                 samples_per_action: 3,
                 seed: 7,
+                objective: hanabi_search::SearchObjective::ExpectedScore,
             },
         )
         .unwrap()
@@ -113,6 +117,7 @@ fn rejects_a_zero_sample_budget() {
             MonteCarloConfig {
                 samples_per_action: 0,
                 seed: 1,
+                objective: hanabi_search::SearchObjective::ExpectedScore,
             },
         ),
         Err(SearchError::ZeroSamples)
@@ -145,9 +150,19 @@ fn evaluation(
         mean_score,
         mean_raw_score,
         mean_utility,
+        perfect_rate: 0.0,
+        mean_score_ceiling: 25.0,
+        mean_clue_actions: 0.0,
+        mean_clue_efficiency: 0.0,
+        mean_tempo_clues: 0.0,
+        mean_critical_discards: 0.0,
+        mean_bottom_deck_risk: 0.0,
+        mean_clue_debt: 0.0,
+        mean_predictable_turns: 0.0,
         score_variance: 0.0,
         strikeout_rate: 0.0,
         min_score: 0,
         max_score: 0,
+        principal_variation: vec![action],
     }
 }

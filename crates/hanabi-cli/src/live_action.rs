@@ -83,10 +83,12 @@ fn decide(
             iterations: arguments.iterations,
             exploration: arguments.exploration,
             seed: arguments.seed,
+            objective: arguments.objective,
         }),
         SearchMode::Flat => SearchConfig::Flat(hanabi_search::MonteCarloConfig {
             samples_per_action: arguments.samples,
             seed: arguments.seed,
+            objective: arguments.objective,
         }),
     };
     let best = best_move(view, arguments.convention, config).map_err(CliError::BestMove)?;
@@ -227,6 +229,7 @@ fn search_json(table_id: u64, best: &BestMove) -> Value {
         "convention": best.convention.id(),
         "profile": best.convention.profile().map(|profile| profile.to_string()),
         "rulesetRevision": best.convention.ruleset_revision(),
+        "objective": best.objective.to_string(),
     });
     let details = match &best.details {
         SearchDetails::Ismcts(result) => json!({
@@ -240,6 +243,19 @@ fn search_json(table_id: u64, best: &BestMove) -> Value {
                 "meanScore": statistics.mean_score,
                 "meanRawScore": statistics.mean_raw_score,
                 "meanUtility": statistics.mean_utility,
+                "perfectRate": statistics.perfect_rate,
+                "meanScoreCeiling": statistics.mean_score_ceiling,
+                "meanClueActions": statistics.mean_clue_actions,
+                "meanClueEfficiency": statistics.mean_clue_efficiency,
+                "meanTempoClues": statistics.mean_tempo_clues,
+                "meanCriticalDiscards": statistics.mean_critical_discards,
+                "meanBottomDeckRisk": statistics.mean_bottom_deck_risk,
+                "meanClueDebt": statistics.mean_clue_debt,
+                "meanPredictableTurns": statistics.mean_predictable_turns,
+                "prior": statistics.prior,
+                "principalVariation": statistics.principal_variation.iter().map(|action| {
+                    HanabiLiveActionCommand::from_engine_action(table_id, *action)
+                }).collect::<Vec<_>>(),
                 "strikeoutRate": statistics.strikeout_rate,
                 "minScore": statistics.min_score,
                 "maxScore": statistics.max_score,
@@ -254,6 +270,18 @@ fn search_json(table_id: u64, best: &BestMove) -> Value {
                 "meanScore": evaluation.mean_score,
                 "meanRawScore": evaluation.mean_raw_score,
                 "meanUtility": evaluation.mean_utility,
+                "perfectRate": evaluation.perfect_rate,
+                "meanScoreCeiling": evaluation.mean_score_ceiling,
+                "meanClueActions": evaluation.mean_clue_actions,
+                "meanClueEfficiency": evaluation.mean_clue_efficiency,
+                "meanTempoClues": evaluation.mean_tempo_clues,
+                "meanCriticalDiscards": evaluation.mean_critical_discards,
+                "meanBottomDeckRisk": evaluation.mean_bottom_deck_risk,
+                "meanClueDebt": evaluation.mean_clue_debt,
+                "meanPredictableTurns": evaluation.mean_predictable_turns,
+                "principalVariation": evaluation.principal_variation.iter().map(|action| {
+                    HanabiLiveActionCommand::from_engine_action(table_id, *action)
+                }).collect::<Vec<_>>(),
                 "scoreVariance": evaluation.score_variance,
                 "strikeoutRate": evaluation.strikeout_rate,
                 "minScore": evaluation.min_score,

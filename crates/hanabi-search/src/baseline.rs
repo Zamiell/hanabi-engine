@@ -114,6 +114,14 @@ pub trait RolloutPolicy {
         self.select_action(deductions)
     }
 
+    /// Returns a convention-forced continuation, when the current position
+    /// has one. Search uses this to distinguish a predictable line from a
+    /// heuristic rollout without exposing simulator truth to the policy.
+    #[must_use]
+    fn predictable_action(&self, _deductions: &LogicalDeductions) -> Option<Action> {
+        None
+    }
+
     /// Chooses from the compact convention-free rollout representation.
     ///
     /// Policies returning `false` from [`Self::uses_history`] must implement

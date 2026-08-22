@@ -87,6 +87,7 @@ fn traced_opening_clues_do_not_predict_certain_strikeouts() {
             iterations: 32,
             exploration: std::f64::consts::SQRT_2,
             seed: 0,
+            objective: hanabi_search::SearchObjective::PerfectScore,
         },
     )
     .unwrap();
@@ -412,6 +413,7 @@ fn analyzes_a_real_hanabi_live_prefix() {
 }
 
 #[test]
+#[allow(clippy::too_many_lines)]
 fn benchmarks_both_search_modes_with_reproducible_trials() {
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../../hanabi-live/packages/client/test_data/no_variant.json");
@@ -445,7 +447,7 @@ fn benchmarks_both_search_modes_with_reproducible_trials() {
     );
 
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["schema_version"], 4);
+    assert_eq!(report["schema_version"], 5);
     assert_eq!(report["policy"], "convention_agnostic");
     assert_eq!(report["convention"], "none");
     assert!(report["convention_profile"].is_null());
@@ -458,9 +460,23 @@ fn benchmarks_both_search_modes_with_reproducible_trials() {
 
     let searches = position["searches"].as_array().unwrap();
     assert_eq!(searches.len(), 2);
-    for (search, mode, work_units, raw_scores, expected_diagnostics) in [
-        (&searches[0], "ismcts", 8, [10.0, 10.0], [8, 0, 8, 8, 8, 1]),
-        (&searches[1], "flat", 16, [10.5, 8.5], [2, 16, 0, 16, 16, 1]),
+    for (search, mode, work_units, actions, raw_scores, expected_diagnostics) in [
+        (
+            &searches[0],
+            "ismcts",
+            8,
+            ["play:24", "discard:22"],
+            [9.0, 12.0],
+            [8, 0, 8, 8, 8, 1],
+        ),
+        (
+            &searches[1],
+            "flat",
+            16,
+            ["play:22", "play:24"],
+            [10.5, 8.5],
+            [2, 16, 0, 16, 16, 1],
+        ),
     ] {
         assert_eq!(search["mode"], mode);
         assert_eq!(search["trial_count"], 2);
@@ -473,12 +489,11 @@ fn benchmarks_both_search_modes_with_reproducible_trials() {
         let trials = search["trials"].as_array().unwrap();
         assert_eq!(trials[0]["seed"], 42);
         assert_eq!(trials[1]["seed"], 43);
-        assert_eq!(trials[0]["selected_action"]["key"], "play:22");
-        assert_eq!(trials[1]["selected_action"]["key"], "play:20");
-        for (trial, raw_score) in trials.iter().zip(raw_scores) {
+        for ((trial, action), raw_score) in trials.iter().zip(actions).zip(raw_scores) {
+            assert_eq!(trial["selected_action"]["key"], action);
             assert_eq!(trial["mean_official_score"], 0.0);
             assert_eq!(trial["mean_raw_score"], raw_score);
-            assert_eq!(trial["mean_utility"], raw_score);
+            assert!(trial["mean_utility"].as_f64().unwrap() > raw_score);
             assert_eq!(trial["strikeout_rate"], 1.0);
             assert_eq!(trial["work_units"], work_units);
             let diagnostics = &trial["diagnostics"];
@@ -547,7 +562,7 @@ fn benchmark_reports_structured_h_group_profile_and_revision() {
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["policy"], "h_group");
     assert_eq!(report["convention"], "h-group");
-    assert_eq!(report["schema_version"], 4);
+    assert_eq!(report["schema_version"], 5);
     assert_eq!(report["convention_profile"]["level"], 26);
     assert_eq!(
         report["convention_ruleset_revision"],

@@ -291,6 +291,21 @@ pub trait ConventionFramework: RolloutPolicy {
         deductions.view().legal_actions()
     }
 
+    /// Relative policy prior for PUCT. This orders plausible convention moves
+    /// without excluding lower-priority legal alternatives from search.
+    #[must_use]
+    fn action_prior(&self, _deductions: &LogicalDeductions, _action: hanabi_core::Action) -> f64 {
+        1.0
+    }
+
+    /// Whether root actions should receive a matched-determinization prepass.
+    /// Convention-heavy searches benefit most; the default preserves the
+    /// exact work budget for simple or third-party frameworks.
+    #[must_use]
+    fn uses_paired_root_evaluation(&self) -> bool {
+        false
+    }
+
     /// Samples one root world according to this framework's beliefs.
     ///
     /// The no-convention implementation preserves the exact card-copy-weighted
@@ -349,6 +364,15 @@ impl RolloutPolicy for SupportedConvention {
             }
         }
     }
+
+    fn predictable_action(&self, deductions: &LogicalDeductions) -> Option<hanabi_core::Action> {
+        match self {
+            Self::None => None,
+            Self::HGroup(profile) => {
+                crate::h_group::h_group_predictable_action(deductions, *profile)
+            }
+        }
+    }
 }
 
 impl ConventionFramework for SupportedConvention {
@@ -368,6 +392,19 @@ impl ConventionFramework for SupportedConvention {
                 crate::h_group::h_group_candidate_actions(deductions, *profile)
             }
         }
+    }
+
+    fn action_prior(&self, deductions: &LogicalDeductions, action: hanabi_core::Action) -> f64 {
+        match self {
+            Self::None => 1.0,
+            Self::HGroup(profile) => {
+                crate::h_group::h_group_action_prior(deductions, *profile, action)
+            }
+        }
+    }
+
+    fn uses_paired_root_evaluation(&self) -> bool {
+        matches!(self, Self::HGroup(_))
     }
 
     fn sample_root_world<R: Rng + ?Sized>(
@@ -642,6 +679,7 @@ mod tests {
                 iterations: 7,
                 exploration: core::f64::consts::SQRT_2,
                 seed: 1,
+                objective: crate::SearchObjective::ExpectedScore,
             },
         )
         .unwrap();
@@ -653,6 +691,7 @@ mod tests {
             MonteCarloConfig {
                 samples_per_action: 3,
                 seed: 1,
+                objective: crate::SearchObjective::ExpectedScore,
             },
         )
         .unwrap();

@@ -27,6 +27,7 @@ pub enum SearchDetails {
 #[derive(Clone, Debug, PartialEq)]
 pub struct BestMove {
     pub convention: SupportedConvention,
+    pub objective: crate::SearchObjective,
     pub action: Action,
     pub details: SearchDetails,
 }
@@ -54,6 +55,7 @@ pub fn best_move(
                 .map_err(BestMoveError::Ismcts)?;
             Ok(BestMove {
                 convention,
+                objective: config.objective,
                 action: result.best_action,
                 details: SearchDetails::Ismcts(result),
             })
@@ -64,6 +66,7 @@ pub fn best_move(
             let action = select_best_action(&evaluations).ok_or(BestMoveError::NoBestAction)?;
             Ok(BestMove {
                 convention,
+                objective: config.objective,
                 action,
                 details: SearchDetails::Flat(evaluations),
             })
@@ -124,6 +127,7 @@ mod tests {
                 iterations: 8,
                 exploration: core::f64::consts::SQRT_2,
                 seed: 42,
+                objective: crate::SearchObjective::ExpectedScore,
             }),
         )
         .unwrap();
@@ -136,6 +140,7 @@ mod tests {
             SearchConfig::Flat(MonteCarloConfig {
                 samples_per_action: 2,
                 seed: 42,
+                objective: crate::SearchObjective::ExpectedScore,
             }),
         )
         .unwrap();
@@ -150,6 +155,7 @@ mod tests {
                 iterations: 1,
                 exploration: core::f64::consts::SQRT_2,
                 seed: 42,
+                objective: crate::SearchObjective::ExpectedScore,
             }),
         )
         .unwrap();

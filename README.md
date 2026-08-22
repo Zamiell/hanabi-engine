@@ -48,20 +48,27 @@ Logical feasibility uses compact 25-bit identity sets and exact Hall-capacity
 matching. Assignment counts and card-copy sampling weights are initialized
 lazily, with packed memoization keys and a reusable validated determinization
 template. Convention-free rollouts use a compact history-free observation;
-H-Group rollouts retain public history and convention state. During search,
-H-Group actions are expanded normally in the tree, while a newly expanded
-leaf uses a conservative value-estimation policy: it can give H-Group clues,
-but only plays a card when ordinary logical information already proves that
-every possible identity is playable. This keeps incomplete advanced
-inferences from turning a whole candidate line into deterministic strikeouts.
+H-Group rollouts retain public history and convention state. Convention-forced
+plays, Prompts, Finesses, must-clue turns, and forced discards are resolved as
+predictable continuations. Search records the complete resulting principal
+variation, so an obvious convention line can extend for many turns rather than
+being cut off at a fixed two- or three-ply horizon. At two strikes, the leaf
+policy plays only when ordinary logical information proves the card safe.
 
 Flat Monte Carlo compares every legal root action on the same stream of sampled
-worlds. Single-observer ISMCTS uses availability-aware UCB selection,
-expansion, rollout, cooperative backpropagation, and robust-child root
-selection. Both report official score, raw stack progress, terminal utility,
-strikeout statistics, and optional diagnostic timings. Search utility is
-`official_score * 26 + raw_stack_score`: official score remains primary, while
-raw progress distinguishes otherwise identical strikeout outcomes.
+worlds. H-Group ISMCTS also gives every root candidate several matched sampled
+worlds before normal tree growth. Tree selection uses convention scores as
+soft PUCT priors instead of excluding every lower-priority alternative;
+genuinely forced convention obligations may still narrow a node. Both modes
+report official and raw score, perfect-game rate, reachable score ceiling,
+clue cost, clue debt, critical discards, bottom-deck risk, predictable turns,
+strikeouts, and a representative principal variation.
+
+`--objective expected-score` keeps official score primary.
+`--objective perfect-score` first maximizes the chance of 25, then uses score,
+ceiling, clue efficiency, and card-risk terms to distinguish imperfect lines.
+Analyze and benchmark default to expected score; live play defaults to perfect
+score.
 
 ## Convention support
 
@@ -133,6 +140,11 @@ cargo run --release -p hanabi-cli --bin hanabi-engine -- \
 cargo run --release -p hanabi-cli --bin hanabi-engine -- \
   analyze /path/to/replay.json --turn 17 --convention h-group \
   --h-group-level max --iterations 10000 --seed 42
+
+# Optimize perfect-game probability explicitly.
+cargo run --release -p hanabi-cli --bin hanabi-engine -- \
+  analyze /path/to/replay.json --turn 17 --convention h-group \
+  --h-group-level max --objective perfect-score --iterations 10000
 ```
 
 `--h-group-level` accepts `1` through `25`, or `max`. Level 5 means levels 1-5
@@ -143,8 +155,8 @@ metadata, so the convention interpreter cannot be configured for a different
 variant than the simulator.
 
 The report marks the selected action with `*`, uses slot 1 for the newest card,
-and includes official score, raw stack score, terminal utility, strikeout,
-visit, action-availability, and throughput data.
+and includes the score/risk metrics and principal variation used to compare
+the root actions, plus visit, action-availability, and throughput data.
 
 Applications with an arbitrary legal `PlayerView` can use the library facade:
 
@@ -156,6 +168,7 @@ let result = hanabi_search::best_move(
         iterations: 10_000,
         exploration: core::f64::consts::SQRT_2,
         seed: 42,
+        objective: hanabi_search::SearchObjective::PerfectScore,
     }),
 )?;
 ```
@@ -235,7 +248,9 @@ privately message it:
 The launcher supports `--iterations`, `--mode`, `--seed`,
 `--h-group-level 1` through `--h-group-level 25`, and
 `--h-group-level max`. Use `--convention none` to exercise the
-convention-agnostic baseline. `--engine-timeout` bounds one search attempt.
+convention-agnostic baseline. The Rust live command also accepts
+`--objective expected-score` or `--objective perfect-score`.
+`--engine-timeout` bounds one search attempt.
 `--base-url` can point at a local Hanabi Live server for integration testing;
 the default is `https://hanab.live`.
 
@@ -255,7 +270,7 @@ cargo run --release -p hanabi-cli --bin hanabi-engine -- \
   > benchmark.json
 ```
 
-The schema-version-4 JSON report records the selected convention and contains
+The schema-version-5 JSON report records the selected convention and objective and contains
 every trial's selected action, mean official score, raw stack score, terminal
 utility, strikeout rate, work count, elapsed time, and throughput. An H-Group
 profile is recorded as one effective `level` value, including `26` for `max`.

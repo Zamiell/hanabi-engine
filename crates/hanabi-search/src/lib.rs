@@ -4,6 +4,7 @@ pub mod analysis;
 pub mod baseline;
 pub mod convention;
 pub mod diagnostics;
+pub mod evaluation;
 pub mod h_group;
 pub mod information_set;
 pub mod ismcts;
@@ -20,6 +21,7 @@ pub use convention::{
     ParseHGroupProfileError, SupportedConvention,
 };
 pub use diagnostics::SearchDiagnostics;
+pub use evaluation::{ParseSearchObjectiveError, SearchObjective, StrategicMetrics, score_ceiling};
 pub use h_group::{
     H_GROUP_LEVELS, HGroupClueInterpretation, HGroupClueKind, HGroupConnection,
     HGroupConnectionKind, HGroupConnectionPromise, HGroupInferences, HGroupLevelDescriptor,

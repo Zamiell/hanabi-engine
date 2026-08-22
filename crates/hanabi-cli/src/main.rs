@@ -11,8 +11,8 @@ use hanabi_core::{Action, CardId, Clue, FullState, PlayerView};
 use hanabi_protocol::{HanabiLiveReplay, ReplayError};
 use hanabi_search::{
     BestMoveError, HGroupProfile, InformationSet, InformationSetError, IsmctsConfig, IsmctsError,
-    MonteCarloConfig, SearchError as FlatSearchError, SupportedConvention, TreeActionStatistics,
-    evaluate_actions, ismcts_search, select_best_action,
+    MonteCarloConfig, SearchError as FlatSearchError, SearchObjective, SupportedConvention,
+    TreeActionStatistics, evaluate_actions, ismcts_search, select_best_action,
 };
 
 mod benchmark;
@@ -68,6 +68,7 @@ fn run_analyze(arguments: &AnalyzeArguments) -> Result<(), CliError> {
 
     print_position(&replay, &state, &view);
     println!("Convention: {}", arguments.convention);
+    println!("Objective: {}", arguments.objective);
     if let Some(revision) = arguments.convention.ruleset_revision() {
         println!("Convention ruleset revision: {revision}");
     }
@@ -99,6 +100,7 @@ fn analyze_ismcts(
             iterations: arguments.iterations,
             exploration: arguments.exploration,
             seed: arguments.seed,
+            objective: arguments.objective,
         },
     )
     .map_err(CliError::Ismcts)?;
@@ -134,7 +136,21 @@ fn analyze_ismcts(
         } else {
             ' '
         };
-        print_tree_row(marker, &action_label(view, players, entry.action), entry);
+        print_tree_row(marker, &action_label(view, players, entry.action), &entry);
+        if marker == '*' {
+            println!(
+                "      perfect {:.1}%  ceiling {:.2}  clues {:.2}  efficiency {:.2}  tempo clues {:.2}  clue debt {:.3}  BDR {:.3}  predictable {:.2}",
+                entry.perfect_rate.unwrap_or(0.0) * 100.0,
+                entry.mean_score_ceiling.unwrap_or(0.0),
+                entry.mean_clue_actions.unwrap_or(0.0),
+                entry.mean_clue_efficiency.unwrap_or(0.0),
+                entry.mean_tempo_clues.unwrap_or(0.0),
+                entry.mean_clue_debt.unwrap_or(0.0),
+                entry.mean_bottom_deck_risk.unwrap_or(0.0),
+                entry.mean_predictable_turns.unwrap_or(0.0),
+            );
+            println!("      principal variation: {:?}", entry.principal_variation);
+        }
     }
     Ok(())
 }
@@ -152,6 +168,7 @@ fn analyze_flat(
         MonteCarloConfig {
             samples_per_action: arguments.samples,
             seed: arguments.seed,
+            objective: arguments.objective,
         },
     )
     .map_err(CliError::Flat)?;
@@ -189,6 +206,20 @@ fn analyze_flat(
             entry.score_variance,
             entry.strikeout_rate * 100.0,
         );
+        if marker == '*' {
+            println!(
+                "      perfect {:.1}%  ceiling {:.2}  clues {:.2}  efficiency {:.2}  tempo clues {:.2}  clue debt {:.3}  BDR {:.3}  predictable {:.2}",
+                entry.perfect_rate * 100.0,
+                entry.mean_score_ceiling,
+                entry.mean_clue_actions,
+                entry.mean_clue_efficiency,
+                entry.mean_tempo_clues,
+                entry.mean_clue_debt,
+                entry.mean_bottom_deck_risk,
+                entry.mean_predictable_turns,
+            );
+            println!("      principal variation: {:?}", entry.principal_variation);
+        }
     }
     Ok(())
 }
@@ -217,7 +248,7 @@ fn print_position(replay: &HanabiLiveReplay, state: &FullState, view: &PlayerVie
     println!();
 }
 
-fn print_tree_row(marker: char, label: &str, entry: TreeActionStatistics) {
+fn print_tree_row(marker: char, label: &str, entry: &TreeActionStatistics) {
     let official = entry
         .mean_score
         .map_or_else(|| "-".to_owned(), |value| format!("{value:.3}"));
@@ -341,6 +372,7 @@ struct AnalyzeArguments {
     seed: u64,
     exploration: f64,
     convention: SupportedConvention,
+    objective: SearchObjective,
 }
 
 struct BenchmarkArguments {
@@ -352,6 +384,7 @@ struct BenchmarkArguments {
     seed: u64,
     exploration: f64,
     convention: SupportedConvention,
+    objective: SearchObjective,
 }
 
 struct LiveActionArguments {
@@ -361,6 +394,7 @@ struct LiveActionArguments {
     seed: u64,
     exploration: f64,
     convention: SupportedConvention,
+    objective: SearchObjective,
     include_search_details: bool,
 }
 
@@ -414,6 +448,7 @@ fn parse_analyze_arguments(
     let mut exploration = core::f64::consts::SQRT_2;
     let mut convention = ConventionChoice::default();
     let mut h_group_profile = None;
+    let mut objective = SearchObjective::ExpectedScore;
 
     while let Some(flag) = arguments.next() {
         match flag.as_str() {
@@ -441,6 +476,9 @@ fn parse_analyze_arguments(
                     &next_value(arguments, "--h-group-level")?,
                 )?);
             }
+            "--objective" => {
+                objective = parse_value("--objective", &next_value(arguments, "--objective")?)?;
+            }
             "--help" | "-h" => return Ok(None),
             _ => return Err(CliError::Usage(format!("unknown option {flag:?}"))),
         }
@@ -456,6 +494,7 @@ fn parse_analyze_arguments(
         seed,
         exploration,
         convention,
+        objective,
     }))
 }
 
@@ -477,6 +516,7 @@ fn parse_benchmark_arguments(
     let mut exploration = core::f64::consts::SQRT_2;
     let mut convention = ConventionChoice::default();
     let mut h_group_profile = None;
+    let mut objective = SearchObjective::ExpectedScore;
 
     while let Some(flag) = arguments.next() {
         match flag.as_str() {
@@ -504,6 +544,9 @@ fn parse_benchmark_arguments(
                     &next_value(arguments, "--h-group-level")?,
                 )?);
             }
+            "--objective" => {
+                objective = parse_value("--objective", &next_value(arguments, "--objective")?)?;
+            }
             "--help" | "-h" => return Ok(None),
             _ => return Err(CliError::Usage(format!("unknown option {flag:?}"))),
         }
@@ -528,6 +571,7 @@ fn parse_benchmark_arguments(
         seed,
         exploration,
         convention,
+        objective,
     }))
 }
 
@@ -542,6 +586,7 @@ fn parse_live_action_arguments(
     let mut convention = None;
     let mut h_group_profile = None;
     let mut include_search_details = false;
+    let mut objective = SearchObjective::PerfectScore;
 
     while let Some(flag) = arguments.next() {
         match flag.as_str() {
@@ -570,6 +615,9 @@ fn parse_live_action_arguments(
                 )?);
             }
             "--include-search-details" => include_search_details = true,
+            "--objective" => {
+                objective = parse_value("--objective", &next_value(arguments, "--objective")?)?;
+            }
             "--help" | "-h" => return Ok(None),
             _ => return Err(CliError::Usage(format!("unknown option {flag:?}"))),
         }
@@ -596,6 +644,7 @@ fn parse_live_action_arguments(
         seed,
         exploration,
         convention,
+        objective,
         include_search_details,
     }))
 }
@@ -638,6 +687,7 @@ fn usage() -> &'static str {
      --samples <N>          Flat Monte Carlo samples/action (default: 100)\n  \
      --seed <N>             Reproducible random seed (default: 0)\n  \
      --exploration <X>      ISMCTS UCB coefficient (default: sqrt(2))\n  \
+     --objective <expected-score|perfect-score>  Search objective (default: expected-score)\n  \
      --convention <none|h-group>  Convention framework (default: none)\n  \
      --h-group-level <1-25|max>   Required H-Group cumulative profile\n\n\
      Benchmark options:\n  --turn <N>             Position to benchmark; may be repeated\n  \
@@ -646,6 +696,7 @@ fn usage() -> &'static str {
      --samples <N>          Flat Monte Carlo samples/action/trial (default: 100)\n  \
      --seed <N>             Base seed; trial N uses seed + N (default: 0)\n  \
      --exploration <X>      ISMCTS UCB coefficient (default: sqrt(2))\n  \
+     --objective <expected-score|perfect-score>  Search objective (default: expected-score)\n  \
      --convention <none|h-group>  Convention framework (default: none)\n  \
      --h-group-level <1-25|max>   Required H-Group cumulative profile\n\n\
      Live-action options:\n  --mode <ismcts|flat>   Search mode (default: ismcts)\n  \
@@ -653,6 +704,7 @@ fn usage() -> &'static str {
      --samples <N>          Flat Monte Carlo samples/action (default: 100)\n  \
      --seed <N>             Reproducible random seed (default: 0)\n  \
      --exploration <X>      ISMCTS UCB coefficient (default: sqrt(2))\n  \
+     --objective <expected-score|perfect-score>  Search objective (default: perfect-score)\n  \
      --convention <none|h-group>  Convention framework (default: h-group)\n  \
      --h-group-level <1-25|max>   H-Group profile (default: max)\n\n\
      --include-search-details     Emit an action envelope with diagnostic evidence\n\n\

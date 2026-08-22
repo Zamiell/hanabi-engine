@@ -471,6 +471,7 @@ pub fn infer_h_group(deductions: &LogicalDeductions, profile: HGroupProfile) -> 
 
 /// Actions permitted by the implemented Level 1 principles, in policy order.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub(crate) fn h_group_candidate_actions(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
@@ -500,14 +501,6 @@ pub(crate) fn h_group_candidate_actions(
         return actions;
     }
 
-    let urgent = clue_candidates
-        .iter()
-        .filter(|candidate| candidate.score >= 450)
-        .map(|candidate| candidate.action)
-        .collect::<Vec<_>>();
-    if !urgent.is_empty() {
-        return urgent;
-    }
     let mut actions = inferred
         .discard_now
         .iter()
@@ -523,6 +516,34 @@ pub(crate) fn h_group_candidate_actions(
     actions.dedup();
     actions.retain(|action| legal_actions.contains(action));
     if !actions.is_empty() {
+        actions.sort_by(|left, right| {
+            let score = |action: &Action| {
+                clue_candidates
+                    .iter()
+                    .find(|candidate| candidate.action == *action)
+                    .map_or_else(
+                        || {
+                            if inferred
+                                .playable_now
+                                .iter()
+                                .any(|card| *action == Action::Play(*card))
+                            {
+                                300
+                            } else if inferred
+                                .discard_now
+                                .iter()
+                                .any(|card| *action == Action::Discard(*card))
+                            {
+                                250
+                            } else {
+                                0
+                            }
+                        },
+                        |candidate| candidate.score,
+                    )
+            };
+            score(right).cmp(&score(left))
+        });
         return actions;
     }
 
@@ -576,6 +597,86 @@ pub(crate) fn h_group_candidate_actions(
     own_hand
         .last()
         .map_or_else(Vec::new, |newest| vec![Action::Play(newest.id)])
+}
+
+pub(crate) fn h_group_action_prior(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+    action: Action,
+) -> f64 {
+    let inferred = infer_h_group(deductions, profile);
+    if inferred
+        .connection
+        .is_some_and(|connection| action == Action::Play(connection.card))
+    {
+        return 8.0;
+    }
+    if inferred
+        .discard_now
+        .iter()
+        .any(|card| action == Action::Discard(*card))
+    {
+        return 6.0;
+    }
+    if inferred
+        .playable_now
+        .iter()
+        .any(|card| action == Action::Play(*card))
+    {
+        return 5.0;
+    }
+    h_group_clue_candidates(deductions, profile)
+        .into_iter()
+        .find(|candidate| candidate.action == action)
+        .map_or(0.25, |candidate| 1.0 + f64::from(candidate.score) / 100.0)
+}
+
+pub(crate) fn h_group_predictable_action(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+) -> Option<Action> {
+    let view = deductions.view();
+    let safe_at_last_strike = |action: Action| {
+        if view.strikes < 2 {
+            return Some(action);
+        }
+        match action {
+            Action::Play(card) => deductions
+                .possible_identities(card)
+                .is_some_and(|identities| {
+                    !identities.is_empty()
+                        && identities
+                            .iter()
+                            .all(|identity| is_playable_now(view, identity))
+                }),
+            Action::Discard(_) | Action::Clue { .. } => true,
+        }
+        .then_some(action)
+    };
+    let inferred = infer_h_group(deductions, profile);
+    let mut clues = h_group_clue_candidates(deductions, profile);
+    clues.sort_by_key(|candidate| core::cmp::Reverse(candidate.score));
+    if let Some(connection) = inferred.connection {
+        let actions = legal_connection_actions(connection, &clues, &view.legal_actions())?;
+        return (actions.len() == 1)
+            .then_some(actions[0])
+            .and_then(safe_at_last_strike);
+    }
+    if let [card] = inferred.discard_now.as_slice() {
+        return safe_at_last_strike(Action::Discard(*card));
+    }
+    let urgent_save_exists = clues
+        .iter()
+        .any(|candidate| candidate.save && candidate.score >= 400);
+    if !urgent_save_exists {
+        if let [card] = inferred.playable_now.as_slice() {
+            return safe_at_last_strike(Action::Play(*card));
+        }
+    }
+    if inferred.must_clue.contains(&view.observer) && clues.len() == 1 {
+        return safe_at_last_strike(clues[0].action);
+    }
+    None
 }
 
 fn legal_connection_actions(
@@ -687,6 +788,22 @@ pub(crate) fn select_h_group_action(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
 ) -> Option<Action> {
+    let inferred = infer_h_group(deductions, profile);
+    let mut clues = h_group_clue_candidates(deductions, profile);
+    clues.sort_by_key(|candidate| core::cmp::Reverse(candidate.score));
+    if inferred.must_clue.contains(&deductions.view().observer) {
+        if let Some(clue) = clues.first() {
+            return Some(clue.action);
+        }
+    }
+    if let Some(actions) = inferred.connection.and_then(|connection| {
+        legal_connection_actions(connection, &clues, &deductions.view().legal_actions())
+    }) {
+        return actions.into_iter().next();
+    }
+    if let Some(urgent) = clues.iter().find(|candidate| candidate.score >= 450) {
+        return Some(urgent.action);
+    }
     h_group_candidate_actions(deductions, profile)
         .into_iter()
         .next()
@@ -708,11 +825,35 @@ pub(crate) fn select_h_group_search_rollout_action(
             }),
         Action::Discard(_) | Action::Clue { .. } => true,
     };
-    if let Some(action) = h_group_candidate_actions(deductions, profile)
+    if view.strikes >= 2 {
+        if let Some(play) = h_group_candidate_actions(deductions, profile)
+            .into_iter()
+            .find(|action| matches!(action, Action::Play(_)) && safe(action))
+        {
+            return Some(play);
+        }
+        if view.clue_tokens < MAX_CLUE_TOKENS {
+            return crate::RolloutPolicy::select_action(
+                &crate::ConventionAgnosticPolicy,
+                deductions,
+            )
+            .ok();
+        }
+        return view
+            .legal_actions()
+            .into_iter()
+            .find(|action| matches!(action, Action::Clue { .. }));
+    }
+    let mut actions = h_group_candidate_actions(deductions, profile)
         .into_iter()
-        .find(safe)
-    {
-        return Some(action);
+        .filter(safe)
+        .collect::<Vec<_>>();
+    actions.sort_by(|left, right| {
+        h_group_action_prior(deductions, profile, *right)
+            .total_cmp(&h_group_action_prior(deductions, profile, *left))
+    });
+    if let Some(action) = actions.first() {
+        return Some(*action);
     }
 
     let mut clues = h_group_clue_candidates(deductions, profile);
@@ -5222,13 +5363,7 @@ mod tests {
                 clue: Clue::Suit(Suit::Blue),
             })
         );
-        assert!(candidates.iter().all(|action| matches!(
-            action,
-            Action::Clue {
-                target,
-                ..
-            } if *target == PlayerId::new(1)
-        )));
+        assert!(candidates.contains(&Action::Play(CardId::new(0))));
     }
 
     #[test]

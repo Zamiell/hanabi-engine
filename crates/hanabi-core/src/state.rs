@@ -240,6 +240,15 @@ impl FullState {
         self.draw_pile.len()
     }
 
+    /// Card identifiers in draw order, with the next draw first.
+    ///
+    /// This is simulator truth and must only be used by search evaluation and
+    /// determinization code, never by a player policy when selecting an action.
+    #[must_use]
+    pub fn draw_pile(&self) -> impl ExactSizeIterator<Item = CardId> + '_ {
+        self.draw_pile.iter().copied()
+    }
+
     #[must_use]
     pub fn hand(&self, player: PlayerId) -> Option<&[CardId]> {
         self.hands.get(player.index()).map(Vec::as_slice)

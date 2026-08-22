@@ -1,13 +1,13 @@
 use core::fmt;
 use std::time::Instant;
 
-use hanabi_core::{Action, EndReason, FullState, GameStatus, PlayerId, RuleError};
+use hanabi_core::{Action, FullState, PlayerId, RuleError};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::rollout::rollout_for_search;
 use crate::{
-    ConventionFramework, InformationSet, InformationSetError, LogicalDeductions,
-    MAX_TERMINAL_UTILITY, RolloutError, SampleError, SearchDiagnostics, terminal_utility,
+    ConventionFramework, InformationSet, InformationSetError, LogicalDeductions, RolloutError,
+    SampleError, SearchDiagnostics, SearchObjective, StrategicMetrics, evaluation,
 };
 
 const MAX_TREE_DEPTH: u32 = 512;
@@ -23,10 +23,11 @@ pub struct IsmctsConfig {
     pub exploration: f64,
     /// Seed used for determinization and expansion selection.
     pub seed: u64,
+    pub objective: SearchObjective,
 }
 
 /// Public root-edge statistics after an ISMCTS search.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct TreeActionStatistics {
     pub action: Action,
     pub visits: u32,
@@ -38,9 +39,20 @@ pub struct TreeActionStatistics {
     pub mean_raw_score: Option<f64>,
     /// Mean terminal utility used by UCB and robust-child tie-breaking.
     pub mean_utility: Option<f64>,
+    pub perfect_rate: Option<f64>,
+    pub mean_score_ceiling: Option<f64>,
+    pub mean_clue_actions: Option<f64>,
+    pub mean_clue_efficiency: Option<f64>,
+    pub mean_tempo_clues: Option<f64>,
+    pub mean_critical_discards: Option<f64>,
+    pub mean_bottom_deck_risk: Option<f64>,
+    pub mean_clue_debt: Option<f64>,
+    pub mean_predictable_turns: Option<f64>,
     pub strikeout_rate: Option<f64>,
     pub min_score: Option<u8>,
     pub max_score: Option<u8>,
+    pub prior: f64,
+    pub principal_variation: Vec<Action>,
 }
 
 /// Root result of a completed ISMCTS search.
@@ -118,6 +130,17 @@ fn run_ismcts<P: ConventionFramework>(
     let mut rng = StdRng::seed_from_u64(config.seed);
     let mut diagnostics = SearchDiagnostics::default();
     let mut legal_actions = Vec::with_capacity(MAX_LEGAL_ACTIONS);
+    if rollout_policy.uses_paired_root_evaluation() {
+        run_paired_root_evaluation(
+            information_set,
+            rollout_policy,
+            config,
+            &mut root,
+            &mut rng,
+            &mut diagnostics,
+            measure_timing,
+        )?;
+    }
     for iteration in 0..config.iterations {
         let sampling_started = measure_timing.then(Instant::now);
         let sampled = rollout_policy.sample_root_world(information_set, &mut rng);
@@ -129,6 +152,7 @@ fn run_ismcts<P: ConventionFramework>(
         let mut context = SimulationContext {
             rollout_policy,
             exploration: config.exploration,
+            objective: config.objective,
             rng: &mut rng,
             diagnostics: &mut diagnostics,
             legal_actions: &mut legal_actions,
@@ -151,6 +175,86 @@ fn run_ismcts<P: ConventionFramework>(
         result,
         diagnostics,
     })
+}
+
+/// Gives every root action several matched determinizations before ordinary
+/// tree growth. This common-random-numbers prepass removes a large source of
+/// root noise: competing clues see the same hands and deck order.
+fn run_paired_root_evaluation<P: ConventionFramework>(
+    information_set: &InformationSet,
+    policy: &P,
+    config: IsmctsConfig,
+    root: &mut Node,
+    rng: &mut StdRng,
+    diagnostics: &mut SearchDiagnostics,
+    measure_timing: bool,
+) -> Result<(), IsmctsError> {
+    let paired_samples = (config.iterations / 100).clamp(1, 8);
+    let mut legal_actions = Vec::with_capacity(MAX_LEGAL_ACTIONS);
+    for sample in 0..paired_samples {
+        let sampling_started = measure_timing.then(Instant::now);
+        let world = policy
+            .sample_root_world(information_set, rng)
+            .map_err(|source| IsmctsError::Sample {
+                iteration: sample,
+                source,
+            })?;
+        if let Some(started) = sampling_started {
+            diagnostics.sampling_time += started.elapsed();
+        }
+        diagnostics.worlds_sampled += 1;
+        let actor = world.current_player();
+        let view = world
+            .view_for(actor)
+            .ok_or(IsmctsError::InvalidCurrentPlayer(actor))?;
+        let deductions = LogicalDeductions::new(view)
+            .map_err(|source| IsmctsError::TreeInformationSet { depth: 0, source })?;
+        legal_actions.extend(policy.candidate_actions(&deductions));
+        let indices = register_available_actions(root, &legal_actions, &deductions, policy);
+        for index in indices.as_slice().iter().copied() {
+            let action = root.edges[index].action;
+            let mut candidate = world.clone();
+            diagnostics.candidate_state_clones += 1;
+            let mut action_metrics = StrategicMetrics::default();
+            evaluation::observe_action(&candidate, action, &mut action_metrics);
+            candidate
+                .apply(action)
+                .map_err(|source| IsmctsError::TreeAction {
+                    depth: 0,
+                    action,
+                    source,
+                })?;
+            diagnostics.search_actions_applied += 1;
+            let report =
+                rollout_for_search(candidate, policy, measure_timing).map_err(|source| {
+                    IsmctsError::Rollout {
+                        depth: 0,
+                        action,
+                        source,
+                    }
+                })?;
+            if measure_timing {
+                diagnostics.add_rollout_timing(report.diagnostics);
+            }
+            diagnostics.rollouts += 1;
+            diagnostics.rollout_turns +=
+                u64::try_from(report.outcome.turns()).expect("a rollout turn count fits in u64");
+            let outcome = report.outcome;
+            let mut reward = Reward::new(
+                outcome.score(),
+                outcome.raw_score(),
+                evaluation::is_strikeout(outcome.final_state()),
+                outcome.strategic_metrics(),
+                config.objective,
+                outcome.actions().to_vec(),
+            );
+            reward.prepend_action(action, action_metrics, config.objective);
+            root.edges[index].observe(&reward);
+            root.visits += 1;
+        }
+        legal_actions.clear();
+    }
+    Ok(())
 }
 
 fn validate_config(config: IsmctsConfig) -> Result<(), IsmctsError> {
@@ -176,10 +280,22 @@ struct Edge {
     score_sum: f64,
     raw_score_sum: f64,
     utility_sum: f64,
+    perfects: u32,
+    score_ceiling_sum: f64,
+    clue_actions_sum: f64,
+    clue_efficiency_sum: f64,
+    tempo_clues_sum: f64,
+    critical_discards_sum: f64,
+    bottom_deck_risk_sum: f64,
+    clue_debt_sum: f64,
+    predictable_turns_sum: f64,
     strikeouts: u32,
     min_score: u8,
     max_score: u8,
     child: Option<Box<Node>>,
+    prior_sum: f64,
+    best_utility: f64,
+    principal_variation: Vec<Action>,
 }
 
 impl Edge {
@@ -191,22 +307,51 @@ impl Edge {
             score_sum: 0.0,
             raw_score_sum: 0.0,
             utility_sum: 0.0,
+            perfects: 0,
+            score_ceiling_sum: 0.0,
+            clue_actions_sum: 0.0,
+            clue_efficiency_sum: 0.0,
+            tempo_clues_sum: 0.0,
+            critical_discards_sum: 0.0,
+            bottom_deck_risk_sum: 0.0,
+            clue_debt_sum: 0.0,
+            predictable_turns_sum: 0.0,
             strikeouts: 0,
             min_score: u8::MAX,
             max_score: u8::MIN,
             child: None,
+            prior_sum: 0.0,
+            best_utility: f64::NEG_INFINITY,
+            principal_variation: Vec::new(),
         }
     }
 
-    fn observe(&mut self, reward: Reward) {
+    fn observe(&mut self, reward: &Reward) {
         self.visits += 1;
         self.score_sum += f64::from(reward.score);
         self.raw_score_sum += f64::from(reward.raw_score);
-        self.utility_sum += f64::from(reward.utility());
+        self.utility_sum += reward.utility;
+        self.perfects += u32::from(reward.metrics.perfect);
+        self.score_ceiling_sum += f64::from(reward.metrics.score_ceiling);
+        self.clue_actions_sum += f64::from(reward.metrics.clue_actions);
+        self.clue_efficiency_sum += if reward.metrics.clue_actions == 0 {
+            0.0
+        } else {
+            f64::from(reward.metrics.newly_touched_cards) / f64::from(reward.metrics.clue_actions)
+        };
+        self.tempo_clues_sum += f64::from(reward.metrics.tempo_clues);
+        self.critical_discards_sum += f64::from(reward.metrics.critical_discards);
+        self.bottom_deck_risk_sum += reward.metrics.bottom_deck_risk;
+        self.clue_debt_sum += reward.metrics.clue_debt;
+        self.predictable_turns_sum += f64::from(reward.metrics.predictable_turns);
         self.min_score = self.min_score.min(reward.score);
         self.max_score = self.max_score.max(reward.score);
         if reward.strikeout {
             self.strikeouts += 1;
+        }
+        if reward.utility > self.best_utility {
+            self.best_utility = reward.utility;
+            self.principal_variation.clone_from(&reward.line);
         }
     }
 
@@ -231,37 +376,98 @@ impl Edge {
             mean_score: visited.then(|| self.mean_score()),
             mean_raw_score: visited.then(|| self.mean_raw_score()),
             mean_utility: visited.then(|| self.mean_utility()),
+            perfect_rate: visited.then(|| f64::from(self.perfects) / f64::from(self.visits)),
+            mean_score_ceiling: visited.then(|| self.score_ceiling_sum / f64::from(self.visits)),
+            mean_clue_actions: visited.then(|| self.clue_actions_sum / f64::from(self.visits)),
+            mean_clue_efficiency: visited
+                .then(|| self.clue_efficiency_sum / f64::from(self.visits)),
+            mean_tempo_clues: visited.then(|| self.tempo_clues_sum / f64::from(self.visits)),
+            mean_critical_discards: visited
+                .then(|| self.critical_discards_sum / f64::from(self.visits)),
+            mean_bottom_deck_risk: visited
+                .then(|| self.bottom_deck_risk_sum / f64::from(self.visits)),
+            mean_clue_debt: visited.then(|| self.clue_debt_sum / f64::from(self.visits)),
+            mean_predictable_turns: visited
+                .then(|| self.predictable_turns_sum / f64::from(self.visits)),
             strikeout_rate: visited.then(|| f64::from(self.strikeouts) / f64::from(self.visits)),
             min_score: visited.then_some(self.min_score),
             max_score: visited.then_some(self.max_score),
+            prior: if self.availability == 0 {
+                0.0
+            } else {
+                self.prior_sum / f64::from(self.availability)
+            },
+            principal_variation: self.principal_variation.clone(),
         }
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Reward {
     score: u8,
     raw_score: u8,
     strikeout: bool,
+    metrics: StrategicMetrics,
+    utility: f64,
+    line: Vec<Action>,
 }
 
 impl Reward {
-    const fn new(score: u8, raw_score: u8, strikeout: bool) -> Self {
+    fn new(
+        score: u8,
+        raw_score: u8,
+        strikeout: bool,
+        metrics: StrategicMetrics,
+        objective: SearchObjective,
+        line: Vec<Action>,
+    ) -> Self {
         Self {
             score,
             raw_score,
             strikeout,
+            metrics,
+            utility: objective.utility(score, raw_score, metrics),
+            line,
         }
     }
 
-    const fn utility(self) -> u16 {
-        terminal_utility(self.score, self.raw_score)
+    fn prepend_action(
+        &mut self,
+        action: Action,
+        action_metrics: StrategicMetrics,
+        objective: SearchObjective,
+    ) {
+        self.metrics.clue_actions = self
+            .metrics
+            .clue_actions
+            .saturating_add(action_metrics.clue_actions);
+        self.metrics.newly_touched_cards = self
+            .metrics
+            .newly_touched_cards
+            .saturating_add(action_metrics.newly_touched_cards);
+        self.metrics.tempo_clues = self
+            .metrics
+            .tempo_clues
+            .saturating_add(action_metrics.tempo_clues);
+        self.metrics.critical_discards = self
+            .metrics
+            .critical_discards
+            .saturating_add(action_metrics.critical_discards);
+        self.metrics.bottom_deck_risk += action_metrics.bottom_deck_risk;
+        self.metrics.clue_debt += action_metrics.clue_debt;
+        self.metrics.evaluated_positions = self
+            .metrics
+            .evaluated_positions
+            .saturating_add(action_metrics.evaluated_positions);
+        self.utility = objective.utility(self.score, self.raw_score, self.metrics);
+        self.line.insert(0, action);
     }
 }
 
 struct SimulationContext<'a, P, R: ?Sized> {
     rollout_policy: &'a P,
     exploration: f64,
+    objective: SearchObjective,
     rng: &'a mut R,
     diagnostics: &'a mut SearchDiagnostics,
     legal_actions: &'a mut Vec<Action>,
@@ -277,7 +483,7 @@ fn simulate<P: ConventionFramework, R: Rng + ?Sized>(
     context.diagnostics.observe_tree_depth(depth);
     if state.is_terminal() {
         node.visits += 1;
-        return terminal_reward(&state).ok_or(IsmctsError::NonTerminalOutcome);
+        return terminal_reward(&state, context.objective).ok_or(IsmctsError::NonTerminalOutcome);
     }
     if depth >= MAX_TREE_DEPTH {
         return Err(IsmctsError::TreeDepthExceeded);
@@ -297,14 +503,22 @@ fn simulate<P: ConventionFramework, R: Rng + ?Sized>(
         return Err(IsmctsError::NoLegalTreeActions { depth, actor });
     }
 
-    let legal_edges = register_available_actions(node, context.legal_actions);
+    let legal_edges = register_available_actions(
+        node,
+        context.legal_actions,
+        &deductions,
+        context.rollout_policy,
+    );
     let selected = select_edge(
         node,
         legal_edges.as_slice(),
         context.exploration,
+        context.objective,
         context.rng,
     );
     let action = node.edges[selected].action;
+    let mut action_metrics = StrategicMetrics::default();
+    evaluation::observe_action(&state, action, &mut action_metrics);
     state
         .apply(action)
         .map_err(|source| IsmctsError::TreeAction {
@@ -339,7 +553,10 @@ fn simulate<P: ConventionFramework, R: Rng + ?Sized>(
         Reward::new(
             outcome.score(),
             outcome.raw_score(),
-            outcome.final_state().status() == GameStatus::Finished(EndReason::TooManyStrikes),
+            evaluation::is_strikeout(outcome.final_state()),
+            outcome.strategic_metrics(),
+            context.objective,
+            outcome.actions().to_vec(),
         )
     } else {
         simulate(
@@ -353,8 +570,10 @@ fn simulate<P: ConventionFramework, R: Rng + ?Sized>(
         )?
     };
 
+    let mut reward = reward;
+    reward.prepend_action(action, action_metrics, context.objective);
     node.visits += 1;
-    node.edges[selected].observe(reward);
+    node.edges[selected].observe(&reward);
     Ok(reward)
 }
 
@@ -369,7 +588,12 @@ impl LegalEdges {
     }
 }
 
-fn register_available_actions(node: &mut Node, legal_actions: &[Action]) -> LegalEdges {
+fn register_available_actions<P: ConventionFramework>(
+    node: &mut Node,
+    legal_actions: &[Action],
+    deductions: &LogicalDeductions,
+    policy: &P,
+) -> LegalEdges {
     let mut legal_edges = LegalEdges {
         indices: [0; MAX_LEGAL_ACTIONS],
         len: 0,
@@ -384,6 +608,7 @@ fn register_available_actions(node: &mut Node, legal_actions: &[Action]) -> Lega
                 node.edges.len() - 1
             });
         node.edges[index].availability += 1;
+        node.edges[index].prior_sum += policy.action_prior(deductions, *action).max(0.0);
         legal_edges.indices[legal_edges.len] = index;
         legal_edges.len += 1;
     }
@@ -394,6 +619,7 @@ fn select_edge<R: Rng + ?Sized>(
     node: &Node,
     legal_edges: &[usize],
     exploration: f64,
+    objective: SearchObjective,
     rng: &mut R,
 ) -> usize {
     let unexpanded_count = legal_edges
@@ -402,22 +628,38 @@ fn select_edge<R: Rng + ?Sized>(
         .filter(|index| node.edges[*index].child.is_none())
         .count();
     if unexpanded_count > 0 {
-        let selected = rng.random_range(0..unexpanded_count);
-        return legal_edges
+        let unexpanded = legal_edges
             .iter()
             .copied()
             .filter(|index| node.edges[*index].child.is_none())
-            .nth(selected)
-            .expect("the selected unexpanded edge was counted");
+            .collect::<Vec<_>>();
+        let total = unexpanded
+            .iter()
+            .map(|index| node.edges[*index].prior_sum.max(0.001))
+            .sum::<f64>();
+        let mut draw = rng.random::<f64>() * total;
+        for index in unexpanded.iter().copied() {
+            draw -= node.edges[index].prior_sum.max(0.001);
+            if draw <= 0.0 {
+                return index;
+            }
+        }
+        return *unexpanded.last().expect("unexpanded edges were counted");
     }
 
+    let total_prior = legal_edges
+        .iter()
+        .map(|index| node.edges[*index].prior_sum / f64::from(node.edges[*index].availability))
+        .sum::<f64>()
+        .max(f64::EPSILON);
     let mut selected = legal_edges[0];
     let mut best_value = f64::NEG_INFINITY;
     for index in legal_edges.iter().copied() {
         let edge = &node.edges[index];
-        let availability = f64::from(edge.availability);
-        let exploration_bonus = exploration * (availability.ln() / f64::from(edge.visits)).sqrt();
-        let value = edge.mean_utility() / f64::from(MAX_TERMINAL_UTILITY) + exploration_bonus;
+        let prior = (edge.prior_sum / f64::from(edge.availability)) / total_prior;
+        let exploration_bonus = exploration * prior * f64::from(node.visits.max(1)).sqrt()
+            / (1.0 + f64::from(edge.visits));
+        let value = edge.mean_utility() / objective.normalization() + exploration_bonus;
         if value > best_value {
             selected = index;
             best_value = value;
@@ -440,11 +682,15 @@ fn robust_child(edges: &[Edge]) -> Option<Action> {
     best.map(|edge| edge.action)
 }
 
-fn terminal_reward(state: &FullState) -> Option<Reward> {
+fn terminal_reward(state: &FullState, objective: SearchObjective) -> Option<Reward> {
+    let metrics = evaluation::finish_metrics(state, StrategicMetrics::default());
     Some(Reward::new(
         state.final_score()?,
         state.score(),
-        state.status() == GameStatus::Finished(EndReason::TooManyStrikes),
+        evaluation::is_strikeout(state),
+        metrics,
+        objective,
+        Vec::new(),
     ))
 }
 
@@ -566,7 +812,32 @@ impl std::error::Error for IsmctsError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hanabi_core::CardId;
+    use hanabi_core::{CardId, PlayerId, standard_deck};
+
+    fn deductions() -> LogicalDeductions {
+        LogicalDeductions::new(
+            FullState::new_standard(2, standard_deck())
+                .unwrap()
+                .view_for(PlayerId::new(0))
+                .unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn reward(score: u8, raw_score: u8, strikeout: bool) -> Reward {
+        Reward::new(
+            score,
+            raw_score,
+            strikeout,
+            StrategicMetrics {
+                perfect: score == 25,
+                score_ceiling: 25,
+                ..StrategicMetrics::default()
+            },
+            SearchObjective::ExpectedScore,
+            Vec::new(),
+        )
+    }
 
     #[test]
     fn availability_counts_only_worlds_where_an_action_is_legal() {
@@ -575,8 +846,19 @@ mod tests {
         let last = Action::Discard(CardId::new(3));
         let mut node = Node::default();
 
-        register_available_actions(&mut node, &[first, shared]);
-        register_available_actions(&mut node, &[shared, last]);
+        let deductions = deductions();
+        register_available_actions(
+            &mut node,
+            &[first, shared],
+            &deductions,
+            &crate::ConventionAgnosticPolicy,
+        );
+        register_available_actions(
+            &mut node,
+            &[shared, last],
+            &deductions,
+            &crate::ConventionAgnosticPolicy,
+        );
 
         assert_eq!(
             node.edges
@@ -593,24 +875,24 @@ mod tests {
         let second = Action::Play(CardId::new(2));
         let mut edges = vec![Edge::new(first), Edge::new(second)];
 
-        edges[0].observe(Reward::new(20, 20, false));
-        edges[1].observe(Reward::new(25, 25, false));
+        edges[0].observe(&reward(20, 20, false));
+        edges[1].observe(&reward(25, 25, false));
         assert_eq!(robust_child(&edges), Some(second));
 
-        edges[0].observe(Reward::new(0, 0, true));
+        edges[0].observe(&reward(0, 0, true));
         assert_eq!(robust_child(&edges), Some(first));
 
-        edges[1].observe(Reward::new(0, 0, true));
+        edges[1].observe(&reward(0, 0, true));
         assert_eq!(robust_child(&edges), Some(second));
 
         let mut raw_progress = vec![Edge::new(first), Edge::new(second)];
-        raw_progress[0].observe(Reward::new(0, 8, true));
-        raw_progress[1].observe(Reward::new(0, 9, true));
+        raw_progress[0].observe(&reward(0, 8, true));
+        raw_progress[1].observe(&reward(0, 9, true));
         assert_eq!(robust_child(&raw_progress), Some(second));
 
         let mut tied = vec![Edge::new(first), Edge::new(second)];
         for edge in &mut tied {
-            edge.observe(Reward::new(20, 20, false));
+            edge.observe(&reward(20, 20, false));
         }
         assert_eq!(robust_child(&tied), Some(first));
     }

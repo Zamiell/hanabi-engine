@@ -14,6 +14,7 @@ fn config(iterations: u32) -> IsmctsConfig {
         iterations,
         exploration: core::f64::consts::SQRT_2,
         seed: 2026,
+        objective: hanabi_search::SearchObjective::ExpectedScore,
     }
 }
 
@@ -137,6 +138,7 @@ fn rejects_invalid_search_configuration() {
                 iterations: 1,
                 exploration: -0.5,
                 seed: 0,
+                objective: hanabi_search::SearchObjective::ExpectedScore,
             },
         ),
         Err(IsmctsError::InvalidExploration(-0.5))

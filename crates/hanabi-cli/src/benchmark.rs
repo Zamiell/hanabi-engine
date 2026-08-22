@@ -10,7 +10,7 @@ use serde::Serialize;
 
 use crate::{BenchmarkArguments, CliError, action_label, read_replay};
 
-const REPORT_SCHEMA_VERSION: u8 = 4;
+const REPORT_SCHEMA_VERSION: u8 = 5;
 
 #[derive(Serialize)]
 struct BenchmarkReport {
@@ -21,6 +21,7 @@ struct BenchmarkReport {
     convention_profile: Option<ConventionProfileReport>,
     convention_ruleset_revision: Option<&'static str>,
     base_seed: u64,
+    objective: String,
     positions: Vec<PositionReport>,
 }
 
@@ -75,6 +76,15 @@ struct TrialReport {
     mean_raw_score: f64,
     mean_utility: f64,
     strikeout_rate: f64,
+    perfect_rate: f64,
+    mean_score_ceiling: f64,
+    mean_clue_actions: f64,
+    mean_clue_efficiency: f64,
+    mean_tempo_clues: f64,
+    mean_clue_debt: f64,
+    mean_critical_discards: f64,
+    mean_bottom_deck_risk: f64,
+    mean_predictable_turns: f64,
     work_units: u64,
     elapsed_seconds: f64,
     throughput_per_second: f64,
@@ -138,6 +148,7 @@ fn build_report(
             }),
         convention_ruleset_revision: arguments.convention.ruleset_revision(),
         base_seed: arguments.seed,
+        objective: arguments.objective.to_string(),
         positions,
     })
 }
@@ -195,6 +206,7 @@ fn benchmark_ismcts(
                 iterations: arguments.iterations,
                 exploration: arguments.exploration,
                 seed,
+                objective: arguments.objective,
             },
         )
         .map_err(CliError::Ismcts)?;
@@ -214,6 +226,25 @@ fn benchmark_ismcts(
             mean_raw_score: statistics.mean_raw_score.ok_or(CliError::NoBestAction)?,
             mean_utility: statistics.mean_utility.ok_or(CliError::NoBestAction)?,
             strikeout_rate: statistics.strikeout_rate.ok_or(CliError::NoBestAction)?,
+            perfect_rate: statistics.perfect_rate.ok_or(CliError::NoBestAction)?,
+            mean_score_ceiling: statistics
+                .mean_score_ceiling
+                .ok_or(CliError::NoBestAction)?,
+            mean_clue_actions: statistics.mean_clue_actions.ok_or(CliError::NoBestAction)?,
+            mean_clue_efficiency: statistics
+                .mean_clue_efficiency
+                .ok_or(CliError::NoBestAction)?,
+            mean_tempo_clues: statistics.mean_tempo_clues.ok_or(CliError::NoBestAction)?,
+            mean_clue_debt: statistics.mean_clue_debt.ok_or(CliError::NoBestAction)?,
+            mean_critical_discards: statistics
+                .mean_critical_discards
+                .ok_or(CliError::NoBestAction)?,
+            mean_bottom_deck_risk: statistics
+                .mean_bottom_deck_risk
+                .ok_or(CliError::NoBestAction)?,
+            mean_predictable_turns: statistics
+                .mean_predictable_turns
+                .ok_or(CliError::NoBestAction)?,
             work_units,
             elapsed_seconds,
             throughput_per_second: throughput(work_units, elapsed_seconds),
@@ -244,6 +275,7 @@ fn benchmark_flat(
             MonteCarloConfig {
                 samples_per_action: arguments.samples,
                 seed,
+                objective: arguments.objective,
             },
         )
         .map_err(CliError::Flat)?;
@@ -265,6 +297,15 @@ fn benchmark_flat(
             mean_raw_score: evaluation.mean_raw_score,
             mean_utility: evaluation.mean_utility,
             strikeout_rate: evaluation.strikeout_rate,
+            perfect_rate: evaluation.perfect_rate,
+            mean_score_ceiling: evaluation.mean_score_ceiling,
+            mean_clue_actions: evaluation.mean_clue_actions,
+            mean_clue_efficiency: evaluation.mean_clue_efficiency,
+            mean_tempo_clues: evaluation.mean_tempo_clues,
+            mean_clue_debt: evaluation.mean_clue_debt,
+            mean_critical_discards: evaluation.mean_critical_discards,
+            mean_bottom_deck_risk: evaluation.mean_bottom_deck_risk,
+            mean_predictable_turns: evaluation.mean_predictable_turns,
             work_units,
             elapsed_seconds,
             throughput_per_second: throughput(work_units, elapsed_seconds),
