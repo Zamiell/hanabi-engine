@@ -1,0 +1,16 @@
+[package]
+name = "hanabi-protocol"
+version = "0.1.0"
+description = "Adapters between Hanabi Engine and external game formats"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hanabi-core = { path = "../hanabi-core" }
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
+

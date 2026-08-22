@@ -1,0 +1,898 @@
+use core::fmt;
+use std::collections::VecDeque;
+
+use crate::{
+    Action, Card, CardId, Clue, ObservedEvent, ObservedHistoryEntry, PlayerId, PlayerView, Rank,
+    Suit, standard_deck,
+};
+
+pub const MAX_CLUE_TOKENS: u8 = 8;
+pub const MAX_STRIKES: u8 = 3;
+const MIN_PLAYERS: u8 = 2;
+const MAX_PLAYERS: u8 = 5;
+
+/// Why a game ended.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EndReason {
+    PerfectScore,
+    TooManyStrikes,
+    FinalRoundComplete,
+}
+
+/// Whether actions may still be applied to a game.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GameStatus {
+    InProgress,
+    Finished(EndReason),
+}
+
+/// An authoritative event. Unlike an observed event, a draw can be resolved
+/// through the state's private card table.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum GameEvent {
+    Clued {
+        giver: PlayerId,
+        target: PlayerId,
+        clue: Clue,
+        touched: Vec<CardId>,
+        untouched: Vec<CardId>,
+    },
+    Played {
+        player: PlayerId,
+        card: CardId,
+        successful: bool,
+    },
+    Discarded {
+        player: PlayerId,
+        card: CardId,
+    },
+    Drew {
+        player: PlayerId,
+        card: CardId,
+    },
+}
+
+/// One event associated with a game turn.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HistoryEntry {
+    pub turn: u32,
+    pub event: GameEvent,
+}
+
+/// The result of applying one player action.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TurnResult {
+    pub actor: PlayerId,
+    pub action: Action,
+    pub drawn: Option<CardId>,
+    pub status: GameStatus,
+}
+
+/// Complete simulator truth for a standard game.
+///
+/// Policies and search algorithms should use [`crate::PlayerView`] rather than
+/// this type. A `FullState` contains every hidden identity and the exact deck
+/// order.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FullState {
+    cards: Vec<Card>,
+    draw_pile: VecDeque<CardId>,
+    hands: Vec<Vec<CardId>>,
+    play_stacks: [Vec<CardId>; 5],
+    discard_pile: Vec<CardId>,
+    clue_tokens: u8,
+    strikes: u8,
+    current_player: PlayerId,
+    turn: u32,
+    final_turns_remaining: Option<u8>,
+    status: GameStatus,
+    history: Vec<HistoryEntry>,
+}
+
+impl FullState {
+    /// Creates a dealt standard game from a complete, ordered 50-card deck.
+    /// The first card in `deck` is drawn first.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SetupError`] when the player count or standard-deck
+    /// multiplicities are invalid.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if validated standard-deck constants cannot satisfy the
+    /// initial deal, which would indicate an internal rules bug.
+    pub fn new_standard(num_players: u8, deck: Vec<Card>) -> Result<Self, SetupError> {
+        if !(MIN_PLAYERS..=MAX_PLAYERS).contains(&num_players) {
+            return Err(SetupError::InvalidPlayerCount(num_players));
+        }
+        validate_standard_deck(&deck)?;
+
+        let cards = deck;
+        let mut draw_pile = (0..cards.len()).map(CardId::new).collect::<VecDeque<_>>();
+        let mut hands = vec![Vec::with_capacity(hand_size(num_players)); num_players.into()];
+
+        // Hanabi Live assigns card orders by dealing a complete hand to each
+        // player in index order rather than dealing round-robin.
+        for player in 0..num_players {
+            for _ in 0..hand_size(num_players) {
+                let card = draw_pile
+                    .pop_front()
+                    .expect("a validated standard deck contains enough cards for the initial deal");
+                hands[usize::from(player)].push(card);
+            }
+        }
+
+        let state = Self {
+            cards,
+            draw_pile,
+            hands,
+            play_stacks: std::array::from_fn(|_| Vec::with_capacity(5)),
+            discard_pile: Vec::new(),
+            clue_tokens: MAX_CLUE_TOKENS,
+            strikes: 0,
+            current_player: PlayerId::new(0),
+            turn: 0,
+            final_turns_remaining: None,
+            status: GameStatus::InProgress,
+            history: Vec::new(),
+        };
+
+        debug_assert!(state.validate().is_ok());
+        Ok(state)
+    }
+
+    /// Reconstructs one complete world consistent with a player's observation.
+    /// Card identities are indexed by stable [`CardId`] draw order.
+    ///
+    /// This is an explicit hidden-information boundary intended for
+    /// information-set sampling. Action-selection code must not inspect the
+    /// returned state directly.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DeterminizationError`] if identities do not form a standard
+    /// deck, conflict with visible information or clues, duplicate a card
+    /// location, or produce an invalid rules state.
+    pub fn from_determinization(
+        view: &PlayerView,
+        cards: Vec<Card>,
+    ) -> Result<Self, DeterminizationError> {
+        validate_standard_deck(&cards).map_err(DeterminizationError::InvalidDeck)?;
+
+        let mut used = vec![false; cards.len()];
+        let mut hands = Vec::with_capacity(view.hands.len());
+        for hand in &view.hands {
+            let mut ids = Vec::with_capacity(hand.len());
+            for observed in hand {
+                occupy(&mut used, observed.id)?;
+                let supplied = identity_at(&cards, observed.id)?;
+                if let Some(identity) = observed.identity {
+                    require_identity(observed.id, identity, supplied)?;
+                } else if !observed.clues.allows(supplied) {
+                    return Err(DeterminizationError::ViolatesClues {
+                        card: observed.id,
+                        supplied,
+                    });
+                }
+                ids.push(observed.id);
+            }
+            hands.push(ids);
+        }
+
+        let mut play_stacks = std::array::from_fn(|_| Vec::new());
+        for (suit_index, observed_stack) in view.play_stacks.iter().enumerate() {
+            for (id, identity) in observed_stack {
+                occupy(&mut used, *id)?;
+                require_identity(*id, *identity, identity_at(&cards, *id)?)?;
+                play_stacks[suit_index].push(*id);
+            }
+        }
+
+        let mut discard_pile = Vec::with_capacity(view.discard_pile.len());
+        for (id, identity) in &view.discard_pile {
+            occupy(&mut used, *id)?;
+            require_identity(*id, *identity, identity_at(&cards, *id)?)?;
+            discard_pile.push(*id);
+        }
+
+        let draw_pile = used
+            .iter()
+            .enumerate()
+            .filter_map(|(index, occupied)| (!occupied).then_some(CardId::new(index)))
+            .collect::<VecDeque<_>>();
+        if draw_pile.len() != view.deck_size {
+            return Err(DeterminizationError::DeckSizeMismatch {
+                observed: view.deck_size,
+                reconstructed: draw_pile.len(),
+            });
+        }
+
+        validate_history_identities(&view.history, &cards)?;
+        let history = reconstruct_history(&view.history);
+
+        let state = Self {
+            cards,
+            draw_pile,
+            hands,
+            play_stacks,
+            discard_pile,
+            clue_tokens: view.clue_tokens,
+            strikes: view.strikes,
+            current_player: view.current_player,
+            turn: view.turn,
+            final_turns_remaining: view.final_turns_remaining,
+            status: view.status,
+            history,
+        };
+        state
+            .validate()
+            .map_err(DeterminizationError::InvalidState)?;
+        Ok(state)
+    }
+
+    #[must_use]
+    /// # Panics
+    ///
+    /// Panics only if an internally constructed state exceeds five players.
+    pub fn num_players(&self) -> u8 {
+        self.hands
+            .len()
+            .try_into()
+            .expect("standard Hanabi has at most five players")
+    }
+
+    #[must_use]
+    pub const fn current_player(&self) -> PlayerId {
+        self.current_player
+    }
+
+    #[must_use]
+    pub const fn turn(&self) -> u32 {
+        self.turn
+    }
+
+    #[must_use]
+    pub const fn status(&self) -> GameStatus {
+        self.status
+    }
+
+    #[must_use]
+    pub const fn is_terminal(&self) -> bool {
+        matches!(self.status, GameStatus::Finished(_))
+    }
+
+    #[must_use]
+    pub const fn clue_tokens(&self) -> u8 {
+        self.clue_tokens
+    }
+
+    #[must_use]
+    pub const fn strikes(&self) -> u8 {
+        self.strikes
+    }
+
+    #[must_use]
+    pub const fn final_turns_remaining(&self) -> Option<u8> {
+        self.final_turns_remaining
+    }
+
+    #[must_use]
+    pub fn deck_size(&self) -> usize {
+        self.draw_pile.len()
+    }
+
+    #[must_use]
+    pub fn hand(&self, player: PlayerId) -> Option<&[CardId]> {
+        self.hands.get(player.index()).map(Vec::as_slice)
+    }
+
+    #[must_use]
+    pub fn hands(&self) -> &[Vec<CardId>] {
+        &self.hands
+    }
+
+    #[must_use]
+    pub fn card(&self, id: CardId) -> Option<Card> {
+        self.cards.get(id.index()).copied()
+    }
+
+    #[must_use]
+    pub const fn play_stacks(&self) -> &[Vec<CardId>; 5] {
+        &self.play_stacks
+    }
+
+    #[must_use]
+    pub fn discard_pile(&self) -> &[CardId] {
+        &self.discard_pile
+    }
+
+    #[must_use]
+    pub fn history(&self) -> &[HistoryEntry] {
+        &self.history
+    }
+
+    #[must_use]
+    /// # Panics
+    ///
+    /// Panics only if an internally constructed standard stack exceeds five
+    /// cards.
+    pub fn score(&self) -> u8 {
+        self.play_stacks
+            .iter()
+            .map(|stack| {
+                u8::try_from(stack.len()).expect("a standard stack has at most five cards")
+            })
+            .sum()
+    }
+
+    /// Returns the official final score, where three strikes score zero.
+    #[must_use]
+    pub fn final_score(&self) -> Option<u8> {
+        match self.status {
+            GameStatus::InProgress => None,
+            GameStatus::Finished(EndReason::TooManyStrikes) => Some(0),
+            GameStatus::Finished(_) => Some(self.score()),
+        }
+    }
+
+    /// Legal actions in deterministic order for the current player.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if the state's current-player invariant is broken.
+    #[must_use]
+    pub fn legal_actions(&self) -> Vec<Action> {
+        if self.is_terminal() {
+            return Vec::new();
+        }
+        self.view_for(self.current_player)
+            .expect("the current player is always valid")
+            .legal_actions()
+    }
+
+    /// Applies one complete player action and any resulting draw.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RuleError`] when `action` is illegal in the current state.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if a previously validated state violates an internal
+    /// location or final-round invariant.
+    pub fn apply(&mut self, action: Action) -> Result<TurnResult, RuleError> {
+        self.validate_action(action)?;
+
+        let actor = self.current_player;
+        let deck_was_empty = self.draw_pile.is_empty();
+        let mut drawn = None;
+
+        match action {
+            Action::Clue { target, clue } => self.apply_clue(actor, target, clue),
+            Action::Play(card) => {
+                self.remove_from_current_hand(card);
+                let identity = self.cards[card.index()];
+                let expected_rank = self.play_stacks[identity.suit.index()].len() + 1;
+                let successful = expected_rank == usize::from(identity.rank.number());
+
+                if successful {
+                    self.play_stacks[identity.suit.index()].push(card);
+                    if identity.rank == Rank::Five {
+                        self.clue_tokens = self.clue_tokens.saturating_add(1).min(MAX_CLUE_TOKENS);
+                    }
+                } else {
+                    self.discard_pile.push(card);
+                    self.strikes += 1;
+                }
+
+                self.push_event(GameEvent::Played {
+                    player: actor,
+                    card,
+                    successful,
+                });
+
+                if self.strikes == MAX_STRIKES {
+                    self.status = GameStatus::Finished(EndReason::TooManyStrikes);
+                } else if self.score() == 25 {
+                    self.status = GameStatus::Finished(EndReason::PerfectScore);
+                } else {
+                    drawn = self.draw_for(actor);
+                }
+            }
+            Action::Discard(card) => {
+                self.remove_from_current_hand(card);
+                self.discard_pile.push(card);
+                self.clue_tokens += 1;
+                self.push_event(GameEvent::Discarded {
+                    player: actor,
+                    card,
+                });
+                drawn = self.draw_for(actor);
+            }
+        }
+
+        if self.status == GameStatus::InProgress && deck_was_empty {
+            let remaining = self
+                .final_turns_remaining
+                .as_mut()
+                .expect("an empty deck starts the final round");
+            *remaining -= 1;
+            if *remaining == 0 {
+                self.status = GameStatus::Finished(EndReason::FinalRoundComplete);
+            }
+        }
+
+        self.turn += 1;
+        if self.status == GameStatus::InProgress {
+            let next = (actor.index() + 1) % self.hands.len();
+            self.current_player = PlayerId::new(
+                next.try_into()
+                    .expect("standard Hanabi has at most five players"),
+            );
+        }
+
+        debug_assert!(self.validate().is_ok());
+        Ok(TurnResult {
+            actor,
+            action,
+            drawn,
+            status: self.status,
+        })
+    }
+
+    /// Checks structural and standard-rule invariants. This is deliberately
+    /// public so simulations and property tests can validate sampled states.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`InvariantViolation`] describing the first broken invariant.
+    pub fn validate(&self) -> Result<(), InvariantViolation> {
+        if !(usize::from(MIN_PLAYERS)..=usize::from(MAX_PLAYERS)).contains(&self.hands.len()) {
+            return Err(InvariantViolation("player count is outside 2..=5".into()));
+        }
+        if self.cards.len() != 50 {
+            return Err(InvariantViolation(
+                "a standard game must contain 50 cards".into(),
+            ));
+        }
+        if self.current_player.index() >= self.hands.len() {
+            return Err(InvariantViolation("current player is out of range".into()));
+        }
+        if self.clue_tokens > MAX_CLUE_TOKENS {
+            return Err(InvariantViolation("clue-token count exceeds eight".into()));
+        }
+        if self.strikes > MAX_STRIKES {
+            return Err(InvariantViolation("strike count exceeds three".into()));
+        }
+        if self.final_turns_remaining.is_some() != self.draw_pile.is_empty() {
+            return Err(InvariantViolation(
+                "final-round counter must exist exactly when the deck is empty".into(),
+            ));
+        }
+        if let Some(remaining) = self.final_turns_remaining {
+            if remaining > self.num_players() {
+                return Err(InvariantViolation(
+                    "final-round counter is too large".into(),
+                ));
+            }
+            if self.status == GameStatus::InProgress && remaining == 0 {
+                return Err(InvariantViolation(
+                    "an in-progress final round must have a remaining turn".into(),
+                ));
+            }
+        }
+
+        let mut locations = vec![0_u8; self.cards.len()];
+        for id in self
+            .draw_pile
+            .iter()
+            .chain(self.hands.iter().flatten())
+            .chain(self.play_stacks.iter().flatten())
+            .chain(&self.discard_pile)
+        {
+            let Some(count) = locations.get_mut(id.index()) else {
+                return Err(InvariantViolation(format!("unknown card identifier {id}")));
+            };
+            *count += 1;
+        }
+        if locations.iter().any(|count| *count != 1) {
+            return Err(InvariantViolation(
+                "every card must occur in exactly one location".into(),
+            ));
+        }
+
+        for suit in Suit::ALL {
+            let stack = &self.play_stacks[suit.index()];
+            if stack.len() > 5 {
+                return Err(InvariantViolation(format!(
+                    "{suit} stack exceeds rank five"
+                )));
+            }
+            for (index, id) in stack.iter().enumerate() {
+                let card = self.cards[id.index()];
+                if card.suit != suit || usize::from(card.rank.number()) != index + 1 {
+                    return Err(InvariantViolation(format!(
+                        "{suit} stack is not an ordered sequence"
+                    )));
+                }
+            }
+        }
+
+        match self.status {
+            GameStatus::Finished(EndReason::PerfectScore) if self.score() != 25 => {
+                return Err(InvariantViolation(
+                    "perfect-score ending requires a score of 25".into(),
+                ));
+            }
+            GameStatus::Finished(EndReason::TooManyStrikes) if self.strikes != MAX_STRIKES => {
+                return Err(InvariantViolation(
+                    "strike ending requires exactly three strikes".into(),
+                ));
+            }
+            GameStatus::Finished(EndReason::FinalRoundComplete)
+                if self.final_turns_remaining != Some(0) =>
+            {
+                return Err(InvariantViolation(
+                    "final-round ending requires zero remaining turns".into(),
+                ));
+            }
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    fn validate_action(&self, action: Action) -> Result<(), RuleError> {
+        if self.is_terminal() {
+            return Err(RuleError::GameAlreadyFinished);
+        }
+        match action {
+            Action::Play(card) => self.require_current_players_card(card),
+            Action::Discard(card) => {
+                self.require_current_players_card(card)?;
+                if self.clue_tokens == MAX_CLUE_TOKENS {
+                    Err(RuleError::DiscardAtMaximumClues)
+                } else {
+                    Ok(())
+                }
+            }
+            Action::Clue { target, clue } => {
+                if self.clue_tokens == 0 {
+                    return Err(RuleError::NoClueTokens);
+                }
+                if target.index() >= self.hands.len() {
+                    return Err(RuleError::InvalidPlayer(target));
+                }
+                if target == self.current_player {
+                    return Err(RuleError::CannotClueSelf);
+                }
+                let touches = self.hands[target.index()]
+                    .iter()
+                    .any(|id| clue.matches(self.cards[id.index()]));
+                if !touches {
+                    return Err(RuleError::ClueTouchesNoCards);
+                }
+                Ok(())
+            }
+        }
+    }
+
+    fn require_current_players_card(&self, card: CardId) -> Result<(), RuleError> {
+        if self.hands[self.current_player.index()].contains(&card) {
+            Ok(())
+        } else {
+            Err(RuleError::CardNotInCurrentHand(card))
+        }
+    }
+
+    fn remove_from_current_hand(&mut self, card: CardId) {
+        let hand = &mut self.hands[self.current_player.index()];
+        let index = hand
+            .iter()
+            .position(|candidate| *candidate == card)
+            .expect("the action was validated before mutation");
+        hand.remove(index);
+    }
+
+    fn apply_clue(&mut self, giver: PlayerId, target: PlayerId, clue: Clue) {
+        self.clue_tokens -= 1;
+        let (touched, untouched) = self.hands[target.index()]
+            .iter()
+            .copied()
+            .partition(|id| clue.matches(self.cards[id.index()]));
+        self.push_event(GameEvent::Clued {
+            giver,
+            target,
+            clue,
+            touched,
+            untouched,
+        });
+    }
+
+    fn draw_for(&mut self, player: PlayerId) -> Option<CardId> {
+        let card = self.draw_pile.pop_front()?;
+        self.hands[player.index()].push(card);
+        self.push_event(GameEvent::Drew { player, card });
+        if self.draw_pile.is_empty() {
+            self.final_turns_remaining = Some(self.num_players());
+        }
+        Some(card)
+    }
+
+    fn push_event(&mut self, event: GameEvent) {
+        self.history.push(HistoryEntry {
+            turn: self.turn,
+            event,
+        });
+    }
+}
+
+#[must_use]
+const fn hand_size(num_players: u8) -> usize {
+    if num_players <= 3 { 5 } else { 4 }
+}
+
+fn validate_standard_deck(deck: &[Card]) -> Result<(), SetupError> {
+    let expected = standard_deck();
+    if deck.len() != expected.len() {
+        return Err(SetupError::InvalidDeckSize {
+            expected: expected.len(),
+            actual: deck.len(),
+        });
+    }
+
+    let mut counts = [[0_u8; 5]; 5];
+    for card in deck {
+        counts[card.suit.index()][card.rank.index()] += 1;
+    }
+    for suit in Suit::ALL {
+        for rank in Rank::ALL {
+            let actual = counts[suit.index()][rank.index()];
+            if actual != rank.copies() {
+                return Err(SetupError::InvalidCardMultiplicity {
+                    card: Card::new(suit, rank),
+                    expected: rank.copies(),
+                    actual,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn occupy(used: &mut [bool], card: CardId) -> Result<(), DeterminizationError> {
+    let Some(occupied) = used.get_mut(card.index()) else {
+        return Err(DeterminizationError::InvalidCardId(card));
+    };
+    if *occupied {
+        return Err(DeterminizationError::DuplicateLocation(card));
+    }
+    *occupied = true;
+    Ok(())
+}
+
+fn require_identity(
+    card: CardId,
+    observed: Card,
+    supplied: Card,
+) -> Result<(), DeterminizationError> {
+    if observed == supplied {
+        Ok(())
+    } else {
+        Err(DeterminizationError::ConflictingIdentity {
+            card,
+            observed,
+            supplied,
+        })
+    }
+}
+
+fn identity_at(cards: &[Card], card: CardId) -> Result<Card, DeterminizationError> {
+    cards
+        .get(card.index())
+        .copied()
+        .ok_or(DeterminizationError::InvalidCardId(card))
+}
+
+fn validate_history_identities(
+    history: &[ObservedHistoryEntry],
+    cards: &[Card],
+) -> Result<(), DeterminizationError> {
+    for entry in history {
+        match &entry.event {
+            ObservedEvent::Played { card, identity, .. }
+            | ObservedEvent::Discarded { card, identity, .. } => {
+                require_identity(*card, *identity, identity_at(cards, *card)?)?;
+            }
+            ObservedEvent::Drew {
+                card,
+                identity: Some(identity),
+                ..
+            } => require_identity(*card, *identity, identity_at(cards, *card)?)?,
+            ObservedEvent::Clued { .. } | ObservedEvent::Drew { identity: None, .. } => {}
+        }
+    }
+    Ok(())
+}
+
+fn reconstruct_history(history: &[ObservedHistoryEntry]) -> Vec<HistoryEntry> {
+    history
+        .iter()
+        .map(|entry| HistoryEntry {
+            turn: entry.turn,
+            event: match &entry.event {
+                ObservedEvent::Clued {
+                    giver,
+                    target,
+                    clue,
+                    touched,
+                    untouched,
+                } => GameEvent::Clued {
+                    giver: *giver,
+                    target: *target,
+                    clue: *clue,
+                    touched: touched.clone(),
+                    untouched: untouched.clone(),
+                },
+                ObservedEvent::Played {
+                    player,
+                    card,
+                    successful,
+                    ..
+                } => GameEvent::Played {
+                    player: *player,
+                    card: *card,
+                    successful: *successful,
+                },
+                ObservedEvent::Discarded { player, card, .. } => GameEvent::Discarded {
+                    player: *player,
+                    card: *card,
+                },
+                ObservedEvent::Drew { player, card, .. } => GameEvent::Drew {
+                    player: *player,
+                    card: *card,
+                },
+            },
+        })
+        .collect()
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SetupError {
+    InvalidPlayerCount(u8),
+    InvalidDeckSize {
+        expected: usize,
+        actual: usize,
+    },
+    InvalidCardMultiplicity {
+        card: Card,
+        expected: u8,
+        actual: u8,
+    },
+}
+
+impl fmt::Display for SetupError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidPlayerCount(count) => {
+                write!(
+                    formatter,
+                    "standard Hanabi requires 2 to 5 players, got {count}"
+                )
+            }
+            Self::InvalidDeckSize { expected, actual } => {
+                write!(formatter, "expected a {expected}-card deck, got {actual}")
+            }
+            Self::InvalidCardMultiplicity {
+                card,
+                expected,
+                actual,
+            } => write!(
+                formatter,
+                "expected {expected} copies of {card}, got {actual}"
+            ),
+        }
+    }
+}
+
+impl std::error::Error for SetupError {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DeterminizationError {
+    InvalidDeck(SetupError),
+    InvalidCardId(CardId),
+    DuplicateLocation(CardId),
+    ConflictingIdentity {
+        card: CardId,
+        observed: Card,
+        supplied: Card,
+    },
+    ViolatesClues {
+        card: CardId,
+        supplied: Card,
+    },
+    DeckSizeMismatch {
+        observed: usize,
+        reconstructed: usize,
+    },
+    InvalidState(InvariantViolation),
+}
+
+impl fmt::Display for DeterminizationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidDeck(error) => write!(formatter, "invalid sampled deck: {error}"),
+            Self::InvalidCardId(card) => write!(formatter, "unknown card identifier {card}"),
+            Self::DuplicateLocation(card) => {
+                write!(formatter, "card {card} occurs in more than one location")
+            }
+            Self::ConflictingIdentity {
+                card,
+                observed,
+                supplied,
+            } => write!(
+                formatter,
+                "sampled identity {supplied} for {card} conflicts with observed {observed}"
+            ),
+            Self::ViolatesClues { card, supplied } => {
+                write!(
+                    formatter,
+                    "sampled identity {supplied} for {card} violates its clues"
+                )
+            }
+            Self::DeckSizeMismatch {
+                observed,
+                reconstructed,
+            } => write!(
+                formatter,
+                "observed deck has {observed} cards but reconstruction found {reconstructed}"
+            ),
+            Self::InvalidState(error) => write!(formatter, "sampled state is invalid: {error}"),
+        }
+    }
+}
+
+impl std::error::Error for DeterminizationError {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RuleError {
+    GameAlreadyFinished,
+    CardNotInCurrentHand(CardId),
+    DiscardAtMaximumClues,
+    NoClueTokens,
+    InvalidPlayer(PlayerId),
+    CannotClueSelf,
+    ClueTouchesNoCards,
+}
+
+impl fmt::Display for RuleError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::GameAlreadyFinished => formatter.write_str("the game is already finished"),
+            Self::CardNotInCurrentHand(card) => {
+                write!(formatter, "{card} is not in the current player's hand")
+            }
+            Self::DiscardAtMaximumClues => {
+                formatter.write_str("discarding is illegal at eight clue tokens")
+            }
+            Self::NoClueTokens => formatter.write_str("giving a clue requires a clue token"),
+            Self::InvalidPlayer(player) => write!(formatter, "invalid target player {player}"),
+            Self::CannotClueSelf => formatter.write_str("a player cannot clue their own hand"),
+            Self::ClueTouchesNoCards => formatter.write_str("a clue must touch at least one card"),
+        }
+    }
+}
+
+impl std::error::Error for RuleError {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InvariantViolation(pub String);
+
+impl fmt::Display for InvariantViolation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for InvariantViolation {}

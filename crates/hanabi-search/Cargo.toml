@@ -1,0 +1,15 @@
+[package]
+name = "hanabi-search"
+version = "0.1.0"
+description = "Information-set sampling and search for Hanabi Engine"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hanabi-core = { path = "../hanabi-core" }
+rand.workspace = true
+
+[lints]
+workspace = true
+

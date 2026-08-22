@@ -1,0 +1,19 @@
+[package]
+name = "hanabi-cli"
+version = "0.1.0"
+description = "Command-line analysis tools for Hanabi Engine"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "hanabi-engine"
+path = "src/main.rs"
+
+[dependencies]
+hanabi-core = { path = "../hanabi-core" }
+hanabi-protocol = { path = "../hanabi-protocol" }
+hanabi-search = { path = "../hanabi-search" }
+
+[lints]
+workspace = true
