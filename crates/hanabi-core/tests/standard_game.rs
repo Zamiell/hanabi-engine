@@ -1,10 +1,26 @@
 use hanabi_core::{
-    Action, Card, Clue, EndReason, FullState, GameEvent, GameStatus, MAX_CLUE_TOKENS, PlayerId,
-    Rank, RuleError, SetupError, Suit, standard_deck,
+    Action, Card, CardId, Clue, EndReason, FullState, GameEvent, GameStatus, MAX_CLUE_TOKENS,
+    PlayerId, Rank, RuleError, SetupError, Suit, standard_deck,
 };
 
 fn card(suit: Suit, rank: Rank) -> Card {
     Card::new(suit, rank)
+}
+
+#[test]
+fn standard_suits_match_hanabi_live_no_variant() {
+    assert_eq!(
+        Suit::ALL,
+        [
+            Suit::Red,
+            Suit::Yellow,
+            Suit::Green,
+            Suit::Blue,
+            Suit::Purple,
+        ]
+    );
+    assert_eq!(Suit::Purple.index(), 4);
+    assert_eq!(Suit::Purple.to_string(), "purple");
 }
 
 fn deck_with_prefix(prefix: &[Card]) -> Vec<Card> {
@@ -67,10 +83,7 @@ fn player_view_hides_exactly_the_observers_hand() {
                     observed.identity.is_none(),
                     player_index == observer.index()
                 );
-                assert!(observed.clues.positive_suits.is_empty());
-                assert!(observed.clues.negative_suits.is_empty());
-                assert!(observed.clues.positive_ranks.is_empty());
-                assert!(observed.clues.negative_ranks.is_empty());
+                assert!(observed.clues.is_empty());
             }
         }
     }
@@ -79,10 +92,10 @@ fn player_view_hides_exactly_the_observers_hand() {
 #[test]
 fn direct_clue_facts_are_derived_from_history() {
     let prefix = [
-        card(Suit::White, Rank::One),
+        card(Suit::Purple, Rank::One),
         card(Suit::Yellow, Rank::One),
         card(Suit::Green, Rank::One),
-        card(Suit::White, Rank::Two),
+        card(Suit::Purple, Rank::Two),
         card(Suit::Yellow, Rank::Two),
         card(Suit::Red, Rank::One),
         card(Suit::Red, Rank::Two),
@@ -104,12 +117,12 @@ fn direct_clue_facts_are_derived_from_history() {
     for observed in &target_view.hands[target.index()] {
         let identity = state.card(observed.id).unwrap();
         if identity.suit == Suit::Red {
-            assert_eq!(observed.clues.positive_suits, vec![Suit::Red]);
-            assert!(observed.clues.negative_suits.is_empty());
+            assert!(observed.clues.has_positive_clue(Clue::Suit(Suit::Red)));
+            assert!(!observed.clues.has_negative_clue(Clue::Suit(Suit::Red)));
             assert!(!observed.clues.allows(card(Suit::Blue, identity.rank)));
         } else {
-            assert!(observed.clues.positive_suits.is_empty());
-            assert_eq!(observed.clues.negative_suits, vec![Suit::Red]);
+            assert!(!observed.clues.has_positive_clue(Clue::Suit(Suit::Red)));
+            assert!(observed.clues.has_negative_clue(Clue::Suit(Suit::Red)));
             assert!(!observed.clues.allows(card(Suit::Red, identity.rank)));
         }
         assert!(observed.clues.allows(identity));
@@ -216,7 +229,7 @@ fn third_misplay_ends_the_game_without_drawing() {
         card(Suit::Red, Rank::Two),
         card(Suit::Green, Rank::Two),
         card(Suit::Yellow, Rank::Two),
-        card(Suit::White, Rank::Two),
+        card(Suit::Purple, Rank::Two),
         card(Suit::Red, Rank::Three),
         card(Suit::Blue, Rank::Two),
     ];
@@ -251,7 +264,7 @@ fn completing_a_stack_restores_a_spent_clue_token() {
         card(Suit::Red, Rank::Four),
         card(Suit::Blue, Rank::One),
         card(Suit::Green, Rank::One),
-        card(Suit::White, Rank::One),
+        card(Suit::Purple, Rank::One),
         card(Suit::Red, Rank::One),
         card(Suit::Red, Rank::Three),
         card(Suit::Red, Rank::Five),
@@ -349,6 +362,9 @@ fn many_random_legal_games_preserve_invariants() {
                 break;
             }
             let actions = state.legal_actions();
+            let mut reused_actions = vec![Action::Play(CardId::new(49)); 64];
+            state.legal_actions_into(&mut reused_actions);
+            assert_eq!(reused_actions, actions);
             let action = actions[rng.index(actions.len())];
             state.apply(action).unwrap();
         }

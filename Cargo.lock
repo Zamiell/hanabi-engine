@@ -47,6 +47,8 @@ dependencies = [
  "hanabi-core",
  "hanabi-protocol",
  "hanabi-search",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

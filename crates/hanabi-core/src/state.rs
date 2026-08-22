@@ -2,14 +2,15 @@ use core::fmt;
 use std::collections::VecDeque;
 
 use crate::{
-    Action, Card, CardId, Clue, ObservedEvent, ObservedHistoryEntry, PlayerId, PlayerView, Rank,
-    Suit, standard_deck,
+    Action, Card, CardId, Clue, ClueFacts, ObservedEvent, ObservedHistoryEntry, PlayerId,
+    PlayerView, Rank, Suit,
 };
 
 pub const MAX_CLUE_TOKENS: u8 = 8;
 pub const MAX_STRIKES: u8 = 3;
 const MIN_PLAYERS: u8 = 2;
 const MAX_PLAYERS: u8 = 5;
+const STANDARD_DECK_SIZE: usize = 50;
 
 /// Why a game ended.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -87,6 +88,31 @@ pub struct FullState {
     final_turns_remaining: Option<u8>,
     status: GameStatus,
     history: Vec<HistoryEntry>,
+    clue_facts: Vec<ClueFacts>,
+}
+
+/// Reusable public-state structure for constructing multiple determinizations
+/// of the same [`PlayerView`].
+///
+/// Building a template validates card locations and reconstructs authoritative
+/// history and clue facts once. Each instantiation still validates the supplied
+/// standard deck and every visible identity and direct clue constraint.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeterminizationTemplate {
+    hands: Vec<Vec<CardId>>,
+    play_stacks: [Vec<CardId>; 5],
+    discard_pile: Vec<CardId>,
+    draw_pile: VecDeque<CardId>,
+    observed_cards: Vec<(CardId, Option<Card>, ClueFacts)>,
+    observed_history: Vec<ObservedHistoryEntry>,
+    clue_tokens: u8,
+    strikes: u8,
+    current_player: PlayerId,
+    turn: u32,
+    final_turns_remaining: Option<u8>,
+    status: GameStatus,
+    history: Vec<HistoryEntry>,
+    clue_facts: Vec<ClueFacts>,
 }
 
 impl FullState {
@@ -123,6 +149,7 @@ impl FullState {
             }
         }
 
+        let clue_facts = vec![ClueFacts::default(); cards.len()];
         let state = Self {
             cards,
             draw_pile,
@@ -136,6 +163,7 @@ impl FullState {
             final_turns_remaining: None,
             status: GameStatus::InProgress,
             history: Vec::new(),
+            clue_facts,
         };
 
         debug_assert!(state.validate().is_ok());
@@ -158,77 +186,7 @@ impl FullState {
         view: &PlayerView,
         cards: Vec<Card>,
     ) -> Result<Self, DeterminizationError> {
-        validate_standard_deck(&cards).map_err(DeterminizationError::InvalidDeck)?;
-
-        let mut used = vec![false; cards.len()];
-        let mut hands = Vec::with_capacity(view.hands.len());
-        for hand in &view.hands {
-            let mut ids = Vec::with_capacity(hand.len());
-            for observed in hand {
-                occupy(&mut used, observed.id)?;
-                let supplied = identity_at(&cards, observed.id)?;
-                if let Some(identity) = observed.identity {
-                    require_identity(observed.id, identity, supplied)?;
-                } else if !observed.clues.allows(supplied) {
-                    return Err(DeterminizationError::ViolatesClues {
-                        card: observed.id,
-                        supplied,
-                    });
-                }
-                ids.push(observed.id);
-            }
-            hands.push(ids);
-        }
-
-        let mut play_stacks = std::array::from_fn(|_| Vec::new());
-        for (suit_index, observed_stack) in view.play_stacks.iter().enumerate() {
-            for (id, identity) in observed_stack {
-                occupy(&mut used, *id)?;
-                require_identity(*id, *identity, identity_at(&cards, *id)?)?;
-                play_stacks[suit_index].push(*id);
-            }
-        }
-
-        let mut discard_pile = Vec::with_capacity(view.discard_pile.len());
-        for (id, identity) in &view.discard_pile {
-            occupy(&mut used, *id)?;
-            require_identity(*id, *identity, identity_at(&cards, *id)?)?;
-            discard_pile.push(*id);
-        }
-
-        let draw_pile = used
-            .iter()
-            .enumerate()
-            .filter_map(|(index, occupied)| (!occupied).then_some(CardId::new(index)))
-            .collect::<VecDeque<_>>();
-        if draw_pile.len() != view.deck_size {
-            return Err(DeterminizationError::DeckSizeMismatch {
-                observed: view.deck_size,
-                reconstructed: draw_pile.len(),
-            });
-        }
-
-        validate_history_identities(&view.history, &cards)?;
-        let history = reconstruct_history(&view.history);
-
-        let state = Self {
-            cards,
-            draw_pile,
-            hands,
-            play_stacks,
-            discard_pile,
-            clue_tokens: view.clue_tokens,
-            strikes: view.strikes,
-            current_player: view.current_player,
-            turn: view.turn,
-            final_turns_remaining: view.final_turns_remaining,
-            status: view.status,
-            history,
-        };
-        state
-            .validate()
-            .map_err(DeterminizationError::InvalidState)?;
-        Ok(state)
+        DeterminizationTemplate::new(view)?.instantiate(cards)
     }
 
     #[must_use]
@@ -343,12 +301,63 @@ impl FullState {
     /// Panics only if the state's current-player invariant is broken.
     #[must_use]
     pub fn legal_actions(&self) -> Vec<Action> {
+        let mut actions = Vec::with_capacity(50);
+        self.legal_actions_into(&mut actions);
+        actions
+    }
+
+    /// Replaces `actions` with the legal actions in deterministic order while
+    /// retaining its allocation for reuse by search traversals.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if the state's current-player invariant is broken.
+    pub fn legal_actions_into(&self, actions: &mut Vec<Action>) {
+        actions.clear();
         if self.is_terminal() {
-            return Vec::new();
+            return;
         }
-        self.view_for(self.current_player)
-            .expect("the current player is always valid")
-            .legal_actions()
+
+        let own_hand = &self.hands[self.current_player.index()];
+        actions.reserve(own_hand.len() * 2 + 40);
+        actions.extend(own_hand.iter().copied().map(Action::Play));
+        if self.clue_tokens < MAX_CLUE_TOKENS {
+            actions.extend(own_hand.iter().copied().map(Action::Discard));
+        }
+        if self.clue_tokens > 0 {
+            for (target_index, target_hand) in self.hands.iter().enumerate() {
+                if target_index == self.current_player.index() {
+                    continue;
+                }
+                let target = PlayerId::new(
+                    target_index
+                        .try_into()
+                        .expect("standard Hanabi has at most five players"),
+                );
+                for suit in Suit::ALL {
+                    if target_hand
+                        .iter()
+                        .any(|card| self.cards[card.index()].suit == suit)
+                    {
+                        actions.push(Action::Clue {
+                            target,
+                            clue: Clue::Suit(suit),
+                        });
+                    }
+                }
+                for rank in Rank::ALL {
+                    if target_hand
+                        .iter()
+                        .any(|card| self.cards[card.index()].rank == rank)
+                    {
+                        actions.push(Action::Clue {
+                            target,
+                            clue: Clue::Rank(rank),
+                        });
+                    }
+                }
+            }
+        }
     }
 
     /// Applies one complete player action and any resulting draw.
@@ -454,6 +463,11 @@ impl FullState {
         if self.cards.len() != 50 {
             return Err(InvariantViolation(
                 "a standard game must contain 50 cards".into(),
+            ));
+        }
+        if self.clue_facts != derive_clue_facts(self.cards.len(), &self.history) {
+            return Err(InvariantViolation(
+                "cached clue facts disagree with authoritative history".into(),
             ));
         }
         if self.current_player.index() >= self.hands.len() {
@@ -597,10 +611,16 @@ impl FullState {
 
     fn apply_clue(&mut self, giver: PlayerId, target: PlayerId, clue: Clue) {
         self.clue_tokens -= 1;
-        let (touched, untouched) = self.hands[target.index()]
+        let (touched, untouched): (Vec<CardId>, Vec<CardId>) = self.hands[target.index()]
             .iter()
             .copied()
             .partition(|id| clue.matches(self.cards[id.index()]));
+        for card in &touched {
+            self.clue_facts[card.index()].record(clue, true);
+        }
+        for card in &untouched {
+            self.clue_facts[card.index()].record(clue, false);
+        }
         self.push_event(GameEvent::Clued {
             giver,
             target,
@@ -608,6 +628,10 @@ impl FullState {
             touched,
             untouched,
         });
+    }
+
+    pub(crate) fn clue_facts(&self, card: CardId) -> &ClueFacts {
+        &self.clue_facts[card.index()]
     }
 
     fn draw_for(&mut self, player: PlayerId) -> Option<CardId> {
@@ -628,16 +652,144 @@ impl FullState {
     }
 }
 
+impl DeterminizationTemplate {
+    /// Validates and compiles the public structure shared by all hidden worlds
+    /// represented by `view`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DeterminizationError`] for invalid or duplicate card
+    /// locations, a mismatched deck size, or an invalid public rules state.
+    pub fn new(view: &PlayerView) -> Result<Self, DeterminizationError> {
+        let mut used = [false; STANDARD_DECK_SIZE];
+        let mut observed_cards = Vec::new();
+        let mut hands = Vec::with_capacity(view.hands.len());
+        for hand in &view.hands {
+            let mut ids = Vec::with_capacity(hand.len());
+            for observed in hand {
+                occupy(&mut used, observed.id)?;
+                observed_cards.push((observed.id, observed.identity, observed.clues));
+                ids.push(observed.id);
+            }
+            hands.push(ids);
+        }
+
+        let mut play_stacks = std::array::from_fn(|_| Vec::new());
+        for (suit_index, observed_stack) in view.play_stacks.iter().enumerate() {
+            for (id, identity) in observed_stack {
+                occupy(&mut used, *id)?;
+                observed_cards.push((*id, Some(*identity), ClueFacts::default()));
+                play_stacks[suit_index].push(*id);
+            }
+        }
+
+        let mut discard_pile = Vec::with_capacity(view.discard_pile.len());
+        for (id, identity) in &view.discard_pile {
+            occupy(&mut used, *id)?;
+            observed_cards.push((*id, Some(*identity), ClueFacts::default()));
+            discard_pile.push(*id);
+        }
+
+        let draw_pile = used
+            .iter()
+            .enumerate()
+            .filter_map(|(index, occupied)| (!occupied).then_some(CardId::new(index)))
+            .collect::<VecDeque<_>>();
+        if draw_pile.len() != view.deck_size {
+            return Err(DeterminizationError::DeckSizeMismatch {
+                observed: view.deck_size,
+                reconstructed: draw_pile.len(),
+            });
+        }
+
+        validate_history_card_ids(&view.history, STANDARD_DECK_SIZE)?;
+        let history = reconstruct_history(&view.history);
+        let clue_facts = derive_clue_facts(STANDARD_DECK_SIZE, &history);
+        let template = Self {
+            hands,
+            play_stacks,
+            discard_pile,
+            draw_pile,
+            observed_cards,
+            observed_history: view.history.clone(),
+            clue_tokens: view.clue_tokens,
+            strikes: view.strikes,
+            current_player: view.current_player,
+            turn: view.turn,
+            final_turns_remaining: view.final_turns_remaining,
+            status: view.status,
+            history,
+            clue_facts,
+        };
+
+        // Known stack identities are sufficient for validating every
+        // card-dependent structural invariant. All other placeholder
+        // identities are ignored by `FullState::validate`.
+        let mut placeholder_cards = vec![Card::new(Suit::Red, Rank::One); STANDARD_DECK_SIZE];
+        for (id, identity, _) in &template.observed_cards {
+            if let Some(identity) = identity {
+                placeholder_cards[id.index()] = *identity;
+            }
+        }
+        template
+            .build_state(placeholder_cards)
+            .validate()
+            .map_err(DeterminizationError::InvalidState)?;
+        Ok(template)
+    }
+
+    /// Creates a complete world using the template's already-validated public
+    /// structure.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`DeterminizationError`] if `cards` is not a standard deck or
+    /// conflicts with a visible identity, direct clue, or observed history.
+    pub fn instantiate(&self, cards: Vec<Card>) -> Result<FullState, DeterminizationError> {
+        validate_standard_deck(&cards).map_err(DeterminizationError::InvalidDeck)?;
+        for (id, identity, clues) in &self.observed_cards {
+            let supplied = identity_at(&cards, *id)?;
+            if let Some(identity) = identity {
+                require_identity(*id, *identity, supplied)?;
+            } else if !clues.allows(supplied) {
+                return Err(DeterminizationError::ViolatesClues {
+                    card: *id,
+                    supplied,
+                });
+            }
+        }
+        validate_history_identities(&self.observed_history, &cards)?;
+        Ok(self.build_state(cards))
+    }
+
+    fn build_state(&self, cards: Vec<Card>) -> FullState {
+        FullState {
+            cards,
+            draw_pile: self.draw_pile.clone(),
+            hands: self.hands.clone(),
+            play_stacks: self.play_stacks.clone(),
+            discard_pile: self.discard_pile.clone(),
+            clue_tokens: self.clue_tokens,
+            strikes: self.strikes,
+            current_player: self.current_player,
+            turn: self.turn,
+            final_turns_remaining: self.final_turns_remaining,
+            status: self.status,
+            history: self.history.clone(),
+            clue_facts: self.clue_facts.clone(),
+        }
+    }
+}
+
 #[must_use]
 const fn hand_size(num_players: u8) -> usize {
     if num_players <= 3 { 5 } else { 4 }
 }
 
 fn validate_standard_deck(deck: &[Card]) -> Result<(), SetupError> {
-    let expected = standard_deck();
-    if deck.len() != expected.len() {
+    if deck.len() != STANDARD_DECK_SIZE {
         return Err(SetupError::InvalidDeckSize {
-            expected: expected.len(),
+            expected: STANDARD_DECK_SIZE,
             actual: deck.len(),
         });
     }
@@ -716,6 +868,33 @@ fn validate_history_identities(
     Ok(())
 }
 
+fn validate_history_card_ids(
+    history: &[ObservedHistoryEntry],
+    card_count: usize,
+) -> Result<(), DeterminizationError> {
+    for entry in history {
+        match &entry.event {
+            ObservedEvent::Clued {
+                touched, untouched, ..
+            } => {
+                for card in touched.iter().chain(untouched) {
+                    if card.index() >= card_count {
+                        return Err(DeterminizationError::InvalidCardId(*card));
+                    }
+                }
+            }
+            ObservedEvent::Played { card, .. }
+            | ObservedEvent::Discarded { card, .. }
+            | ObservedEvent::Drew { card, .. } => {
+                if card.index() >= card_count {
+                    return Err(DeterminizationError::InvalidCardId(*card));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn reconstruct_history(history: &[ObservedHistoryEntry]) -> Vec<HistoryEntry> {
     history
         .iter()
@@ -756,6 +935,28 @@ fn reconstruct_history(history: &[ObservedHistoryEntry]) -> Vec<HistoryEntry> {
             },
         })
         .collect()
+}
+
+fn derive_clue_facts(card_count: usize, history: &[HistoryEntry]) -> Vec<ClueFacts> {
+    let mut facts = vec![ClueFacts::default(); card_count];
+    for entry in history {
+        let GameEvent::Clued {
+            clue,
+            touched,
+            untouched,
+            ..
+        } = &entry.event
+        else {
+            continue;
+        };
+        for card in touched {
+            facts[card.index()].record(*clue, true);
+        }
+        for card in untouched {
+            facts[card.index()].record(*clue, false);
+        }
+    }
+    facts
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

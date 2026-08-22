@@ -1,9 +1,11 @@
 use core::fmt;
+use std::time::Instant;
 
 use hanabi_core::{Action, EndReason, FullState, GameStatus, RuleError};
 use rand::{SeedableRng, rngs::StdRng};
 
-use crate::{InformationSet, RolloutError, RolloutPolicy, SampleError, rollout_to_terminal};
+use crate::rollout::rollout_for_search;
+use crate::{InformationSet, RolloutError, RolloutPolicy, SampleError, SearchDiagnostics};
 
 /// Reproducible budget for flat Monte Carlo action evaluation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -19,11 +21,23 @@ pub struct MonteCarloConfig {
 pub struct ActionEvaluation {
     pub action: Action,
     pub samples: u32,
+    /// Mean official Hanabi score, including zero for strikeouts.
     pub mean_score: f64,
+    /// Mean raw stack score, including progress made before strikeouts.
+    pub mean_raw_score: f64,
+    /// Mean terminal utility used to rank actions.
+    pub mean_utility: f64,
     pub score_variance: f64,
     pub strikeout_rate: f64,
     pub min_score: u8,
     pub max_score: u8,
+}
+
+/// Flat Monte Carlo evaluations plus measured search diagnostics.
+#[derive(Clone, Debug)]
+pub struct MonteCarloReport {
+    pub evaluations: Vec<ActionEvaluation>,
+    pub diagnostics: SearchDiagnostics,
 }
 
 /// Evaluates every legal root action using the same sampled hidden worlds.
@@ -45,6 +59,33 @@ pub fn evaluate_actions<P: RolloutPolicy>(
     policy: &P,
     config: MonteCarloConfig,
 ) -> Result<Vec<ActionEvaluation>, SearchError> {
+    Ok(run_evaluation(information_set, policy, config, false)?.evaluations)
+}
+
+/// Evaluates every legal root action and records work and timing diagnostics.
+///
+/// Candidate statistics and random-number consumption are identical to
+/// [`evaluate_actions`]. Timing fields are observational and do not participate
+/// in candidate selection.
+///
+/// # Errors
+///
+/// Returns the same [`SearchError`] conditions as [`evaluate_actions`].
+pub fn evaluate_actions_with_diagnostics<P: RolloutPolicy>(
+    information_set: &InformationSet,
+    policy: &P,
+    config: MonteCarloConfig,
+) -> Result<MonteCarloReport, SearchError> {
+    run_evaluation(information_set, policy, config, true)
+}
+
+fn run_evaluation<P: RolloutPolicy>(
+    information_set: &InformationSet,
+    policy: &P,
+    config: MonteCarloConfig,
+    measure_timing: bool,
+) -> Result<MonteCarloReport, SearchError> {
+    let search_started = measure_timing.then(Instant::now);
     if config.samples_per_action == 0 {
         return Err(SearchError::ZeroSamples);
     }
@@ -59,24 +100,38 @@ pub fn evaluate_actions<P: RolloutPolicy>(
         .into_iter()
         .map(ActionAccumulator::new)
         .collect::<Vec<_>>();
+    let mut diagnostics = SearchDiagnostics::default();
     for sample in 0..config.samples_per_action {
-        let world = information_set
-            .sample(&mut rng)
-            .map_err(|source| SearchError::Sample { sample, source })?;
+        let sampling_started = measure_timing.then(Instant::now);
+        let sampled = information_set.sample(&mut rng);
+        if let Some(started) = sampling_started {
+            diagnostics.sampling_time += started.elapsed();
+        }
+        let world = sampled.map_err(|source| SearchError::Sample { sample, source })?;
+        diagnostics.worlds_sampled += 1;
         for accumulator in &mut accumulators {
-            accumulator.observe(&world, policy, sample)?;
+            accumulator.observe(&world, policy, sample, &mut diagnostics, measure_timing)?;
         }
     }
 
-    Ok(accumulators
+    let evaluations = accumulators
         .into_iter()
         .map(|accumulator| accumulator.finish(config.samples_per_action))
-        .collect())
+        .collect();
+    if let Some(started) = search_started {
+        diagnostics.finish_timing(started.elapsed());
+    }
+    Ok(MonteCarloReport {
+        evaluations,
+        diagnostics,
+    })
 }
 
 struct ActionAccumulator {
     action: Action,
     score_sum: f64,
+    raw_score_sum: f64,
+    utility_sum: f64,
     squared_score_sum: f64,
     strikeouts: u32,
     min_score: u8,
@@ -88,6 +143,8 @@ impl ActionAccumulator {
         Self {
             action,
             score_sum: 0.0,
+            raw_score_sum: 0.0,
+            utility_sum: 0.0,
             squared_score_sum: 0.0,
             strikeouts: 0,
             min_score: u8::MAX,
@@ -100,8 +157,11 @@ impl ActionAccumulator {
         world: &FullState,
         policy: &P,
         sample: u32,
+        diagnostics: &mut SearchDiagnostics,
+        measure_timing: bool,
     ) -> Result<(), SearchError> {
         let mut candidate = world.clone();
+        diagnostics.candidate_state_clones += 1;
         candidate
             .apply(self.action)
             .map_err(|source| SearchError::RootAction {
@@ -109,16 +169,29 @@ impl ActionAccumulator {
                 sample,
                 source,
             })?;
-        let outcome =
-            rollout_to_terminal(candidate, policy).map_err(|source| SearchError::Rollout {
+        diagnostics.search_actions_applied += 1;
+        diagnostics.observe_tree_depth(1);
+        let report = rollout_for_search(candidate, policy, measure_timing).map_err(|source| {
+            SearchError::Rollout {
                 action: self.action,
                 sample,
                 source,
-            })?;
+            }
+        })?;
+        if measure_timing {
+            diagnostics.add_rollout_timing(report.diagnostics);
+        }
+        let outcome = report.outcome;
+        diagnostics.rollouts += 1;
+        diagnostics.rollout_turns +=
+            u64::try_from(outcome.turns()).expect("a rollout turn count fits in u64");
 
         let score = outcome.score();
         let score_float = f64::from(score);
+        let raw_score_float = f64::from(outcome.raw_score());
         self.score_sum += score_float;
+        self.raw_score_sum += raw_score_float;
+        self.utility_sum += f64::from(outcome.utility());
         self.squared_score_sum += score_float * score_float;
         self.min_score = self.min_score.min(score);
         self.max_score = self.max_score.max(score);
@@ -138,6 +211,8 @@ impl ActionAccumulator {
             action: self.action,
             samples: sample_count,
             mean_score,
+            mean_raw_score: self.raw_score_sum / denominator,
+            mean_utility: self.utility_sum / denominator,
             score_variance,
             strikeout_rate: f64::from(self.strikeouts) / denominator,
             min_score: self.min_score,
@@ -146,7 +221,7 @@ impl ActionAccumulator {
     }
 }
 
-/// Selects the first evaluation with the highest expected score.
+/// Selects the first evaluation with the highest expected terminal utility.
 ///
 /// Since evaluations retain `PlayerView::legal_actions` order, exact ties are
 /// deterministic and independent of hash-map ordering.
@@ -154,7 +229,7 @@ impl ActionAccumulator {
 pub fn select_best_action(evaluations: &[ActionEvaluation]) -> Option<Action> {
     let mut best = evaluations.first()?;
     for evaluation in &evaluations[1..] {
-        if evaluation.mean_score > best.mean_score {
+        if evaluation.mean_utility > best.mean_utility {
             best = evaluation;
         }
     }

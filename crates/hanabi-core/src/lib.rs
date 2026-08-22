@@ -14,7 +14,10 @@ pub use action::{Action, Clue};
 pub use card::{Card, Rank, Suit, standard_deck};
 pub use ids::{CardId, PlayerId};
 pub use state::{
-    DeterminizationError, EndReason, FullState, GameEvent, GameStatus, HistoryEntry,
-    InvariantViolation, MAX_CLUE_TOKENS, MAX_STRIKES, RuleError, SetupError, TurnResult,
+    DeterminizationError, DeterminizationTemplate, EndReason, FullState, GameEvent, GameStatus,
+    HistoryEntry, InvariantViolation, MAX_CLUE_TOKENS, MAX_STRIKES, RuleError, SetupError,
+    TurnResult,
 };
-pub use view::{ClueFacts, ObservedCard, ObservedEvent, ObservedHistoryEntry, PlayerView};
+pub use view::{
+    ClueFacts, ObservedCard, ObservedEvent, ObservedHistoryEntry, PlayerView, PolicyObservation,
+};

@@ -26,12 +26,12 @@ fn clued_player_zero_view() -> (FullState, hanabi_core::PlayerView) {
         card(Suit::Blue, Rank::Two),
         card(Suit::Green, Rank::Three),
         card(Suit::Yellow, Rank::Four),
-        card(Suit::White, Rank::Five),
+        card(Suit::Purple, Rank::Five),
         card(Suit::Red, Rank::Five),
         card(Suit::Blue, Rank::One),
         card(Suit::Green, Rank::Two),
         card(Suit::Yellow, Rank::Three),
-        card(Suit::White, Rank::Four),
+        card(Suit::Purple, Rank::Four),
     ];
     let mut state = FullState::new_standard(2, deck_with_prefix(&prefix)).unwrap();
     state
@@ -64,7 +64,7 @@ fn samples_preserve_the_complete_player_view() {
             .possible_identities(rank_one)
             .unwrap()
             .iter()
-            .all(|identity| identity.rank == Rank::One && *identity != red_five)
+            .all(|identity| identity.rank == Rank::One && identity != red_five)
     );
     for card_id in &own_hand[1..] {
         assert!(
@@ -72,7 +72,7 @@ fn samples_preserve_the_complete_player_view() {
                 .possible_identities(*card_id)
                 .unwrap()
                 .iter()
-                .all(|identity| identity.rank != Rank::One && *identity != red_five)
+                .all(|identity| identity.rank != Rank::One && identity != red_five)
         );
     }
 
@@ -113,8 +113,8 @@ fn rejects_logically_impossible_clue_constraints() {
     let state = FullState::new_standard(2, standard_deck()).unwrap();
     let mut view = state.view_for(PlayerId::new(0)).unwrap();
     let hidden = &mut view.hands[0][0];
-    hidden.clues.positive_suits.push(Suit::Red);
-    hidden.clues.negative_suits.push(Suit::Red);
+    hidden.clues.add_positive_clue(Clue::Suit(Suit::Red));
+    hidden.clues.add_negative_clue(Clue::Suit(Suit::Red));
 
     assert_eq!(
         InformationSet::new(view),

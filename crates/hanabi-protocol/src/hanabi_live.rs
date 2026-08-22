@@ -179,7 +179,7 @@ fn suit_from_index(index: u8) -> Result<Suit, ReplayError> {
         1 => Ok(Suit::Yellow),
         2 => Ok(Suit::Green),
         3 => Ok(Suit::Blue),
-        4 => Ok(Suit::White),
+        4 => Ok(Suit::Purple),
         _ => Err(ReplayError::InvalidSuit(index)),
     }
 }

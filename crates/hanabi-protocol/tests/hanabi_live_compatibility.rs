@@ -1,6 +1,6 @@
 use std::{fs, path::PathBuf};
 
-use hanabi_core::{CardId, EndReason, GameStatus};
+use hanabi_core::{CardId, Clue, EndReason, GameEvent, GameStatus, Suit};
 use hanabi_protocol::{HanabiLiveReplay, ReplayError};
 
 #[test]
@@ -69,11 +69,36 @@ fn reconstructs_actionable_replay_prefixes_by_game_turn() {
     assert_eq!(initial.turn(), 0);
     assert_eq!(initial.score(), 0);
     assert_eq!(initial.current_player(), hanabi_core::PlayerId::new(0));
+    let purple_card = replay
+        .deck
+        .iter()
+        .position(|card| card.suit_index == 4)
+        .unwrap();
+    assert_eq!(
+        initial.card(CardId::new(purple_card)).unwrap().suit,
+        Suit::Purple
+    );
 
     let middle = replay.state_at_turn(17).unwrap();
     assert_eq!(middle.turn(), 17);
     assert_eq!(middle.current_player(), hanabi_core::PlayerId::new(2));
     assert_eq!(middle.status(), GameStatus::InProgress);
+
+    let purple_clue_turn = replay
+        .actions
+        .iter()
+        .position(|action| action.action_type == 2 && action.value == 4)
+        .unwrap();
+    let after_purple_clue = replay
+        .state_at_turn(u32::try_from(purple_clue_turn + 1).unwrap())
+        .unwrap();
+    assert!(matches!(
+        &after_purple_clue.history().last().unwrap().event,
+        GameEvent::Clued {
+            clue: Clue::Suit(Suit::Purple),
+            ..
+        }
+    ));
 
     assert_eq!(replay.state_at_turn(53).unwrap(), replay.replay().unwrap());
     assert!(matches!(

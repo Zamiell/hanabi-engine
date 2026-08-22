@@ -1,5 +1,11 @@
 use core::fmt;
-use std::{env, fs, io, path::PathBuf, process::ExitCode, str::FromStr, time::Instant};
+use std::{
+    env, fs, io,
+    path::{Path, PathBuf},
+    process::ExitCode,
+    str::FromStr,
+    time::Instant,
+};
 
 use hanabi_core::{Action, CardId, Clue, FullState, PlayerView};
 use hanabi_protocol::{HanabiLiveReplay, ReplayError};
@@ -9,9 +15,12 @@ use hanabi_search::{
     ismcts_search, select_best_action,
 };
 
+mod benchmark;
+
 const DEFAULT_ITERATIONS: u32 = 1_000;
 const DEFAULT_SAMPLES: u32 = 100;
 const DEFAULT_SEED: u64 = 0;
+const DEFAULT_TRIALS: u32 = 5;
 
 fn main() -> ExitCode {
     match run() {
@@ -28,16 +37,19 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), CliError> {
-    let Some(arguments) = parse_arguments()? else {
+    let Some(command) = parse_arguments()? else {
         print_usage();
         return Ok(());
     };
 
-    let json = fs::read_to_string(&arguments.replay).map_err(|source| CliError::ReadReplay {
-        path: arguments.replay.clone(),
-        source,
-    })?;
-    let replay = HanabiLiveReplay::from_json(&json).map_err(CliError::Replay)?;
+    match command {
+        Command::Analyze(arguments) => run_analyze(&arguments),
+        Command::Benchmark(arguments) => benchmark::run(&arguments),
+    }
+}
+
+fn run_analyze(arguments: &AnalyzeArguments) -> Result<(), CliError> {
+    let replay = read_replay(&arguments.replay)?;
     let state = replay
         .state_at_turn(arguments.turn)
         .map_err(CliError::Replay)?;
@@ -53,9 +65,17 @@ fn run() -> Result<(), CliError> {
 
     print_position(&replay, &state, &view);
     match arguments.mode {
-        SearchMode::Ismcts => analyze_ismcts(&arguments, &view, &replay.players, &information_set),
-        SearchMode::Flat => analyze_flat(&arguments, &view, &replay.players, &information_set),
+        SearchMode::Ismcts => analyze_ismcts(arguments, &view, &replay.players, &information_set),
+        SearchMode::Flat => analyze_flat(arguments, &view, &replay.players, &information_set),
     }
+}
+
+fn read_replay(path: &Path) -> Result<HanabiLiveReplay, CliError> {
+    let json = fs::read_to_string(path).map_err(|source| CliError::ReadReplay {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    HanabiLiveReplay::from_json(&json).map_err(CliError::Replay)
 }
 
 fn analyze_ismcts(
@@ -88,17 +108,17 @@ fn analyze_ismcts(
     );
     println!();
     println!(
-        "   {:<42} {:>7} {:>7} {:>7} {:>10} {:>7}",
-        "Action", "Visits", "Avail", "Mean", "Strikeout", "Range"
+        "   {:<42} {:>7} {:>7} {:>8} {:>7} {:>8} {:>10} {:>7}",
+        "Action", "Visits", "Avail", "Official", "Raw", "Utility", "Strikeout", "Range"
     );
 
     let mut statistics = result.root_actions;
     statistics.sort_by(|left, right| {
         right.visits.cmp(&left.visits).then_with(|| {
             right
-                .mean_score
+                .mean_utility
                 .unwrap_or(f64::NEG_INFINITY)
-                .total_cmp(&left.mean_score.unwrap_or(f64::NEG_INFINITY))
+                .total_cmp(&left.mean_utility.unwrap_or(f64::NEG_INFINITY))
         })
     });
     for entry in statistics {
@@ -145,18 +165,20 @@ fn analyze_flat(
     );
     println!();
     println!(
-        "   {:<42} {:>7} {:>10} {:>10} {:>7}",
-        "Action", "Mean", "Variance", "Strikeout", "Range"
+        "   {:<42} {:>8} {:>7} {:>8} {:>10} {:>10} {:>7}",
+        "Action", "Official", "Raw", "Utility", "Variance", "Strikeout", "Range"
     );
 
-    evaluations.sort_by(|left, right| right.mean_score.total_cmp(&left.mean_score));
+    evaluations.sort_by(|left, right| right.mean_utility.total_cmp(&left.mean_utility));
     for entry in evaluations {
         let marker = if entry.action == best { '*' } else { ' ' };
         let range = format!("{}-{}", entry.min_score, entry.max_score);
         println!(
-            "{marker}  {:<42} {:>7.3} {:>10.3} {:>9.1}% {range:>7}",
+            "{marker}  {:<42} {:>8.3} {:>7.3} {:>8.3} {:>10.3} {:>9.1}% {range:>7}",
             action_label(view, players, entry.action),
             entry.mean_score,
+            entry.mean_raw_score,
+            entry.mean_utility,
             entry.score_variance,
             entry.strikeout_rate * 100.0,
         );
@@ -189,8 +211,14 @@ fn print_position(replay: &HanabiLiveReplay, state: &FullState, view: &PlayerVie
 }
 
 fn print_tree_row(marker: char, label: &str, entry: TreeActionStatistics) {
-    let mean = entry
+    let official = entry
         .mean_score
+        .map_or_else(|| "-".to_owned(), |value| format!("{value:.3}"));
+    let raw = entry
+        .mean_raw_score
+        .map_or_else(|| "-".to_owned(), |value| format!("{value:.3}"));
+    let utility = entry
+        .mean_utility
         .map_or_else(|| "-".to_owned(), |value| format!("{value:.3}"));
     let strikeout = entry
         .strikeout_rate
@@ -200,7 +228,7 @@ fn print_tree_row(marker: char, label: &str, entry: TreeActionStatistics) {
         _ => "-".to_owned(),
     };
     println!(
-        "{marker}  {label:<42} {:>7} {:>7} {mean:>7} {strikeout:>10} {range:>7}",
+        "{marker}  {label:<42} {:>7} {:>7} {official:>8} {raw:>7} {utility:>8} {strikeout:>10} {range:>7}",
         entry.visits, entry.availability
     );
 }
@@ -270,7 +298,22 @@ struct AnalyzeArguments {
     exploration: f64,
 }
 
-fn parse_arguments() -> Result<Option<AnalyzeArguments>, CliError> {
+struct BenchmarkArguments {
+    replay: PathBuf,
+    turns: Vec<u32>,
+    trials: u32,
+    iterations: u32,
+    samples: u32,
+    seed: u64,
+    exploration: f64,
+}
+
+enum Command {
+    Analyze(AnalyzeArguments),
+    Benchmark(BenchmarkArguments),
+}
+
+fn parse_arguments() -> Result<Option<Command>, CliError> {
     let mut arguments = env::args().skip(1);
     let Some(command) = arguments.next() else {
         return Ok(None);
@@ -278,10 +321,20 @@ fn parse_arguments() -> Result<Option<AnalyzeArguments>, CliError> {
     if command == "help" || command == "--help" || command == "-h" {
         return Ok(None);
     }
-    if command != "analyze" {
-        return Err(CliError::Usage(format!("unknown command {command:?}")));
+    match command.as_str() {
+        "analyze" => {
+            parse_analyze_arguments(&mut arguments).map(|value| value.map(Command::Analyze))
+        }
+        "benchmark" => {
+            parse_benchmark_arguments(&mut arguments).map(|value| value.map(Command::Benchmark))
+        }
+        _ => Err(CliError::Usage(format!("unknown command {command:?}"))),
     }
+}
 
+fn parse_analyze_arguments(
+    arguments: &mut impl Iterator<Item = String>,
+) -> Result<Option<AnalyzeArguments>, CliError> {
     let Some(replay) = arguments.next() else {
         return Err(CliError::Usage("missing replay JSON path".to_owned()));
     };
@@ -299,25 +352,19 @@ fn parse_arguments() -> Result<Option<AnalyzeArguments>, CliError> {
     while let Some(flag) = arguments.next() {
         match flag.as_str() {
             "--turn" => {
-                turn = Some(parse_value(
-                    "--turn",
-                    &next_value(&mut arguments, "--turn")?,
-                )?);
+                turn = Some(parse_value("--turn", &next_value(arguments, "--turn")?)?);
             }
-            "--mode" => mode = next_value(&mut arguments, "--mode")?.parse()?,
+            "--mode" => mode = next_value(arguments, "--mode")?.parse()?,
             "--iterations" => {
-                iterations =
-                    parse_value("--iterations", &next_value(&mut arguments, "--iterations")?)?;
+                iterations = parse_value("--iterations", &next_value(arguments, "--iterations")?)?;
             }
             "--samples" => {
-                samples = parse_value("--samples", &next_value(&mut arguments, "--samples")?)?;
+                samples = parse_value("--samples", &next_value(arguments, "--samples")?)?;
             }
-            "--seed" => seed = parse_value("--seed", &next_value(&mut arguments, "--seed")?)?,
+            "--seed" => seed = parse_value("--seed", &next_value(arguments, "--seed")?)?,
             "--exploration" => {
-                exploration = parse_value(
-                    "--exploration",
-                    &next_value(&mut arguments, "--exploration")?,
-                )?;
+                exploration =
+                    parse_value("--exploration", &next_value(arguments, "--exploration")?)?;
             }
             "--help" | "-h" => return Ok(None),
             _ => return Err(CliError::Usage(format!("unknown option {flag:?}"))),
@@ -328,6 +375,65 @@ fn parse_arguments() -> Result<Option<AnalyzeArguments>, CliError> {
         replay: replay.into(),
         turn: turn.ok_or_else(|| CliError::Usage("missing required --turn".to_owned()))?,
         mode,
+        iterations,
+        samples,
+        seed,
+        exploration,
+    }))
+}
+
+fn parse_benchmark_arguments(
+    arguments: &mut impl Iterator<Item = String>,
+) -> Result<Option<BenchmarkArguments>, CliError> {
+    let Some(replay) = arguments.next() else {
+        return Err(CliError::Usage("missing replay JSON path".to_owned()));
+    };
+    if replay == "--help" || replay == "-h" {
+        return Ok(None);
+    }
+
+    let mut turns = Vec::new();
+    let mut trials = DEFAULT_TRIALS;
+    let mut iterations = DEFAULT_ITERATIONS;
+    let mut samples = DEFAULT_SAMPLES;
+    let mut seed = DEFAULT_SEED;
+    let mut exploration = core::f64::consts::SQRT_2;
+
+    while let Some(flag) = arguments.next() {
+        match flag.as_str() {
+            "--turn" => turns.push(parse_value("--turn", &next_value(arguments, "--turn")?)?),
+            "--trials" => {
+                trials = parse_value("--trials", &next_value(arguments, "--trials")?)?;
+            }
+            "--iterations" => {
+                iterations = parse_value("--iterations", &next_value(arguments, "--iterations")?)?;
+            }
+            "--samples" => {
+                samples = parse_value("--samples", &next_value(arguments, "--samples")?)?;
+            }
+            "--seed" => seed = parse_value("--seed", &next_value(arguments, "--seed")?)?,
+            "--exploration" => {
+                exploration =
+                    parse_value("--exploration", &next_value(arguments, "--exploration")?)?;
+            }
+            "--help" | "-h" => return Ok(None),
+            _ => return Err(CliError::Usage(format!("unknown option {flag:?}"))),
+        }
+    }
+
+    if turns.is_empty() {
+        return Err(CliError::Usage(
+            "missing required --turn; repeat it to benchmark multiple positions".to_owned(),
+        ));
+    }
+    if trials == 0 {
+        return Err(CliError::Usage("--trials must be positive".to_owned()));
+    }
+
+    Ok(Some(BenchmarkArguments {
+        replay: replay.into(),
+        turns,
+        trials,
         iterations,
         samples,
         seed,
@@ -363,13 +469,21 @@ fn print_usage_to_stderr() {
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  hanabi-engine analyze <replay.json> --turn <N> [options]\n\n\
+    "Usage:\n  hanabi-engine analyze <replay.json> --turn <N> [options]\n  \
+     hanabi-engine benchmark <replay.json> --turn <N> [--turn <N> ...] [options]\n\n\
      Turn N is the position after N completed game actions; turn 0 is the initial deal.\n\n\
-     Options:\n  --mode <ismcts|flat>   Search mode (default: ismcts)\n  \
+     Analyze options:\n  --mode <ismcts|flat>   Search mode (default: ismcts)\n  \
      --iterations <N>       ISMCTS iterations (default: 1000)\n  \
      --samples <N>          Flat Monte Carlo samples/action (default: 100)\n  \
      --seed <N>             Reproducible random seed (default: 0)\n  \
-     --exploration <X>      ISMCTS UCB coefficient (default: sqrt(2))"
+     --exploration <X>      ISMCTS UCB coefficient (default: sqrt(2))\n\n\
+     Benchmark options:\n  --turn <N>             Position to benchmark; may be repeated\n  \
+     --trials <N>           Consecutive seeds per mode (default: 5)\n  \
+     --iterations <N>       ISMCTS iterations/trial (default: 1000)\n  \
+     --samples <N>          Flat Monte Carlo samples/action/trial (default: 100)\n  \
+     --seed <N>             Base seed; trial N uses seed + N (default: 0)\n  \
+     --exploration <X>      ISMCTS UCB coefficient (default: sqrt(2))\n\n\
+     Benchmark writes a versioned JSON report to standard output."
 }
 
 #[derive(Debug)]
@@ -383,6 +497,7 @@ enum CliError {
     Flat(FlatSearchError),
     Ismcts(IsmctsError),
     NoBestAction,
+    SerializeReport(serde_json::Error),
 }
 
 impl fmt::Display for CliError {
@@ -404,6 +519,9 @@ impl fmt::Display for CliError {
             Self::Flat(error) => write!(formatter, "flat Monte Carlo search failed: {error}"),
             Self::Ismcts(error) => write!(formatter, "ISMCTS failed: {error}"),
             Self::NoBestAction => formatter.write_str("search returned no best action"),
+            Self::SerializeReport(error) => {
+                write!(formatter, "could not serialize report: {error}")
+            }
         }
     }
 }
@@ -416,6 +534,7 @@ impl std::error::Error for CliError {
             Self::InformationSet(error) => Some(error),
             Self::Flat(error) => Some(error),
             Self::Ismcts(error) => Some(error),
+            Self::SerializeReport(error) => Some(error),
             Self::Usage(_)
             | Self::TerminalPosition(_)
             | Self::InvalidCurrentPlayer

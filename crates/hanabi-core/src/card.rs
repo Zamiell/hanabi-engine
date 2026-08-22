@@ -8,7 +8,7 @@ pub enum Suit {
     Yellow,
     Green,
     Blue,
-    White,
+    Purple,
 }
 
 impl Suit {
@@ -17,7 +17,7 @@ impl Suit {
         Self::Yellow,
         Self::Green,
         Self::Blue,
-        Self::White,
+        Self::Purple,
     ];
 
     #[must_use]
@@ -33,7 +33,7 @@ impl fmt::Display for Suit {
             Self::Yellow => "yellow",
             Self::Green => "green",
             Self::Blue => "blue",
-            Self::White => "white",
+            Self::Purple => "purple",
         };
         formatter.write_str(name)
     }
@@ -90,6 +90,12 @@ impl Card {
     #[must_use]
     pub const fn new(suit: Suit, rank: Rank) -> Self {
         Self { suit, rank }
+    }
+
+    /// Stable index in the 25 standard suit-rank identities.
+    #[must_use]
+    pub const fn index(self) -> usize {
+        self.suit.index() * 5 + self.rank.index()
     }
 }
 

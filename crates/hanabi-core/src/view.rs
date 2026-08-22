@@ -1,69 +1,100 @@
 use crate::{
-    Action, Card, CardId, Clue, FullState, GameEvent, GameStatus, HistoryEntry, MAX_CLUE_TOKENS,
-    PlayerId, Rank, Suit,
+    Action, Card, CardId, Clue, FullState, GameEvent, GameStatus, MAX_CLUE_TOKENS, PlayerId, Rank,
+    Suit,
 };
 
 /// Objective positive and negative clue facts attached to one physical card.
 /// These are derived from authoritative history rather than stored as a second
 /// source of truth.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ClueFacts {
-    pub positive_suits: Vec<Suit>,
-    pub negative_suits: Vec<Suit>,
-    pub positive_ranks: Vec<Rank>,
-    pub negative_ranks: Vec<Rank>,
+    positive_suits: u8,
+    negative_suits: u8,
+    positive_ranks: u8,
+    negative_ranks: u8,
 }
 
 impl ClueFacts {
     /// Whether an identity is consistent with direct positive and negative clues.
     #[must_use]
     pub fn allows(&self, card: Card) -> bool {
-        (self.positive_suits.is_empty() || self.positive_suits.contains(&card.suit))
-            && !self.negative_suits.contains(&card.suit)
-            && (self.positive_ranks.is_empty() || self.positive_ranks.contains(&card.rank))
-            && !self.negative_ranks.contains(&card.rank)
+        let suit = 1 << card.suit.index();
+        let rank = 1 << card.rank.index();
+        (self.positive_suits == 0 || self.positive_suits & suit != 0)
+            && self.negative_suits & suit == 0
+            && (self.positive_ranks == 0 || self.positive_ranks & rank != 0)
+            && self.negative_ranks & rank == 0
     }
 
-    fn from_history(card: CardId, history: &[HistoryEntry]) -> Self {
-        let mut facts = Self::default();
-        for entry in history {
-            let GameEvent::Clued {
-                clue,
-                touched,
-                untouched,
-                ..
-            } = &entry.event
-            else {
-                continue;
-            };
+    /// Bit set of all 25 standard identities allowed by these direct clues.
+    /// Identity bits use [`Card::index`] order.
+    #[must_use]
+    pub fn identity_mask(self) -> u32 {
+        let allowed_suits = if self.positive_suits == 0 {
+            0b1_1111
+        } else {
+            self.positive_suits
+        } & !self.negative_suits;
+        let allowed_ranks = if self.positive_ranks == 0 {
+            0b1_1111
+        } else {
+            self.positive_ranks
+        } & !self.negative_ranks;
 
-            if touched.contains(&card) {
-                facts.record(*clue, true);
-            } else if untouched.contains(&card) {
-                facts.record(*clue, false);
-            }
+        (0..5).fold(0, |mask, suit| {
+            mask | ((u32::from(allowed_suits & (1 << suit) != 0) * u32::from(allowed_ranks))
+                << (suit * 5))
+        })
+    }
+
+    /// Records a direct positive clue fact.
+    pub fn add_positive_clue(&mut self, clue: Clue) {
+        self.record(clue, true);
+    }
+
+    /// Records a direct negative clue fact.
+    pub fn add_negative_clue(&mut self, clue: Clue) {
+        self.record(clue, false);
+    }
+
+    /// Whether this card was positively touched by `clue`.
+    #[must_use]
+    pub fn has_positive_clue(self, clue: Clue) -> bool {
+        match clue {
+            Clue::Suit(value) => self.positive_suits & (1 << value.index()) != 0,
+            Clue::Rank(value) => self.positive_ranks & (1 << value.index()) != 0,
         }
-        facts
     }
 
-    fn record(&mut self, clue: Clue, positive: bool) {
+    /// Whether this card was negatively excluded by `clue`.
+    #[must_use]
+    pub fn has_negative_clue(self, clue: Clue) -> bool {
+        match clue {
+            Clue::Suit(value) => self.negative_suits & (1 << value.index()) != 0,
+            Clue::Rank(value) => self.negative_ranks & (1 << value.index()) != 0,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.positive_suits == 0
+            && self.negative_suits == 0
+            && self.positive_ranks == 0
+            && self.negative_ranks == 0
+    }
+
+    pub(crate) fn record(&mut self, clue: Clue, positive: bool) {
         match (clue, positive) {
-            (Clue::Suit(value), true) => push_unique(&mut self.positive_suits, value),
-            (Clue::Suit(value), false) => push_unique(&mut self.negative_suits, value),
-            (Clue::Rank(value), true) => push_unique(&mut self.positive_ranks, value),
-            (Clue::Rank(value), false) => push_unique(&mut self.negative_ranks, value),
+            (Clue::Suit(value), true) => self.positive_suits |= 1 << value.index(),
+            (Clue::Suit(value), false) => self.negative_suits |= 1 << value.index(),
+            (Clue::Rank(value), true) => self.positive_ranks |= 1 << value.index(),
+            (Clue::Rank(value), false) => self.negative_ranks |= 1 << value.index(),
         }
-    }
-}
-
-fn push_unique<T: Copy + Eq>(values: &mut Vec<T>, value: T) {
-    if !values.contains(&value) {
-        values.push(value);
     }
 }
 
 /// A card as legally observed by one player.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ObservedCard {
     pub id: CardId,
     /// `None` only for a card in the observer's own hand.
@@ -122,6 +153,23 @@ pub struct PlayerView {
     pub final_turns_remaining: Option<u8>,
     pub status: GameStatus,
     pub history: Vec<ObservedHistoryEntry>,
+}
+
+/// Compact current-state observation for convention-free rollout deductions.
+///
+/// It exposes only legally observable aggregates and intentionally omits
+/// teammate hand layouts and event history.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PolicyObservation {
+    pub observer: PlayerId,
+    pub current_player: PlayerId,
+    pub status: GameStatus,
+    pub clue_tokens: u8,
+    pub own_hand: Vec<ObservedCard>,
+    pub stack_heights: [u8; 5],
+    pub discarded_counts: [u8; 25],
+    /// Copies not visible to this player: their own hand plus the deck.
+    pub remaining_counts: [u8; 25],
 }
 
 impl PlayerView {
@@ -185,6 +233,79 @@ impl PlayerView {
 }
 
 impl FullState {
+    /// Builds a compact, hidden-information-safe current-state observation.
+    ///
+    /// # Panics
+    ///
+    /// Panics only if this authoritative state violates its standard stack or
+    /// card-location invariants.
+    #[must_use]
+    pub fn policy_observation_for(&self, observer: PlayerId) -> Option<PolicyObservation> {
+        if observer.index() >= usize::from(self.num_players()) {
+            return None;
+        }
+
+        let own_hand = self.hands()[observer.index()]
+            .iter()
+            .map(|card| ObservedCard {
+                id: *card,
+                identity: None,
+                clues: *self.clue_facts(*card),
+            })
+            .collect();
+        let stack_heights = std::array::from_fn(|suit| {
+            u8::try_from(self.play_stacks()[suit].len())
+                .expect("a standard stack has at most five cards")
+        });
+        let mut discarded_counts = [0_u8; 25];
+        for card in self.discard_pile() {
+            let identity = self.card(*card).expect("located cards have identities");
+            discarded_counts[identity.index()] += 1;
+        }
+        let mut remaining_counts = [0_u8; 25];
+        for suit in Suit::ALL {
+            for rank in Rank::ALL {
+                remaining_counts[Card::new(suit, rank).index()] = rank.copies();
+            }
+        }
+        for (player, hand) in self.hands().iter().enumerate() {
+            if player == observer.index() {
+                continue;
+            }
+            for card in hand {
+                remaining_counts[self
+                    .card(*card)
+                    .expect("located cards have identities")
+                    .index()] -= 1;
+            }
+        }
+        for stack in self.play_stacks() {
+            for card in stack {
+                remaining_counts[self
+                    .card(*card)
+                    .expect("located cards have identities")
+                    .index()] -= 1;
+            }
+        }
+        for card in self.discard_pile() {
+            remaining_counts[self
+                .card(*card)
+                .expect("located cards have identities")
+                .index()] -= 1;
+        }
+
+        Some(PolicyObservation {
+            observer,
+            current_player: self.current_player(),
+            status: self.status(),
+            clue_tokens: self.clue_tokens(),
+            own_hand,
+            stack_heights,
+            discarded_counts,
+            remaining_counts,
+        })
+    }
+
     /// Projects authoritative state into the legal observation for `observer`.
     ///
     /// # Panics
@@ -193,6 +314,20 @@ impl FullState {
     /// invariant.
     #[must_use]
     pub fn view_for(&self, observer: PlayerId) -> Option<PlayerView> {
+        self.build_view(observer, true)
+    }
+
+    /// Projects a legal observation without copying public event history.
+    ///
+    /// This is intended for rollout policies that use only current public state
+    /// and direct clue facts. The returned view must not be used as the source
+    /// of a later determinization because it deliberately omits history.
+    #[must_use]
+    pub fn view_for_without_history(&self, observer: PlayerId) -> Option<PlayerView> {
+        self.build_view(observer, false)
+    }
+
+    fn build_view(&self, observer: PlayerId, include_history: bool) -> Option<PlayerView> {
         if observer.index() >= usize::from(self.num_players()) {
             return None;
         }
@@ -207,7 +342,7 @@ impl FullState {
                         id: *id,
                         identity: (player_index != observer.index())
                             .then(|| self.card(*id).expect("located cards have identities")),
-                        clues: ClueFacts::from_history(*id, self.history()),
+                        clues: *self.clue_facts(*id),
                     })
                     .collect()
             })
@@ -224,14 +359,17 @@ impl FullState {
             .iter()
             .map(|id| (*id, self.card(*id).expect("located cards have identities")))
             .collect();
-        let history = self
-            .history()
-            .iter()
-            .map(|entry| ObservedHistoryEntry {
-                turn: entry.turn,
-                event: observed_event(self, observer, &entry.event),
-            })
-            .collect();
+        let history = if include_history {
+            self.history()
+                .iter()
+                .map(|entry| ObservedHistoryEntry {
+                    turn: entry.turn,
+                    event: observed_event(self, observer, &entry.event),
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
 
         Some(PlayerView {
             observer,

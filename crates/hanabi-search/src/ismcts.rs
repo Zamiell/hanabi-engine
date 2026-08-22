@@ -1,12 +1,17 @@
 use core::fmt;
+use std::time::Instant;
 
 use hanabi_core::{Action, EndReason, FullState, GameStatus, PlayerId, RuleError};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
-use crate::{InformationSet, RolloutError, RolloutPolicy, SampleError, rollout_to_terminal};
+use crate::rollout::rollout_for_search;
+use crate::{
+    InformationSet, MAX_TERMINAL_UTILITY, RolloutError, RolloutPolicy, SampleError,
+    SearchDiagnostics, terminal_utility,
+};
 
 const MAX_TREE_DEPTH: u32 = 512;
-const PERFECT_SCORE: f64 = 25.0;
+const MAX_LEGAL_ACTIONS: usize = 50;
 
 /// Reproducible single-observer information-set MCTS configuration.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -27,7 +32,12 @@ pub struct TreeActionStatistics {
     pub visits: u32,
     /// Iterations in which this action was legal in the sampled world.
     pub availability: u32,
+    /// Mean official Hanabi score, including zero for strikeouts.
     pub mean_score: Option<f64>,
+    /// Mean raw stack score, including progress made before strikeouts.
+    pub mean_raw_score: Option<f64>,
+    /// Mean terminal utility used by UCB and robust-child tie-breaking.
+    pub mean_utility: Option<f64>,
     pub strikeout_rate: Option<f64>,
     pub min_score: Option<u8>,
     pub max_score: Option<u8>,
@@ -41,13 +51,21 @@ pub struct IsmctsResult {
     pub root_actions: Vec<TreeActionStatistics>,
 }
 
+/// ISMCTS result plus measured search diagnostics.
+#[derive(Clone, Debug)]
+pub struct IsmctsReport {
+    pub result: IsmctsResult,
+    pub diagnostics: SearchDiagnostics,
+}
+
 /// Runs cooperative single-observer information-set Monte Carlo tree search.
 ///
 /// Every iteration samples a new root-consistent [`FullState`]. Tree nodes are
 /// shared by action history, while edges track how often an action was legally
 /// available across determinizations. Selection uses availability-aware UCB,
 /// expansion adds one node, and the remaining position is completed by
-/// `rollout_policy`. All players backpropagate the same official team score.
+/// `rollout_policy`. All players backpropagate the same convention-free team
+/// utility: official score first, with raw stack score as a terminal tie-break.
 ///
 /// Tree decisions enumerate actions from the acting player's legal view. The
 /// sampled authoritative state is used only by the simulation environment to
@@ -63,6 +81,33 @@ pub fn ismcts_search<P: RolloutPolicy>(
     rollout_policy: &P,
     config: IsmctsConfig,
 ) -> Result<IsmctsResult, IsmctsError> {
+    Ok(run_ismcts(information_set, rollout_policy, config, false)?.result)
+}
+
+/// Runs ISMCTS and records work and timing diagnostics.
+///
+/// Search results and random-number consumption are identical to
+/// [`ismcts_search`]. Timing fields are observational and do not participate in
+/// tree selection.
+///
+/// # Errors
+///
+/// Returns the same [`IsmctsError`] conditions as [`ismcts_search`].
+pub fn ismcts_search_with_diagnostics<P: RolloutPolicy>(
+    information_set: &InformationSet,
+    rollout_policy: &P,
+    config: IsmctsConfig,
+) -> Result<IsmctsReport, IsmctsError> {
+    run_ismcts(information_set, rollout_policy, config, true)
+}
+
+fn run_ismcts<P: RolloutPolicy>(
+    information_set: &InformationSet,
+    rollout_policy: &P,
+    config: IsmctsConfig,
+    measure_timing: bool,
+) -> Result<IsmctsReport, IsmctsError> {
+    let search_started = measure_timing.then(Instant::now);
     validate_config(config)?;
     if information_set.view().legal_actions().is_empty() {
         return Err(IsmctsError::NoLegalActions);
@@ -70,26 +115,40 @@ pub fn ismcts_search<P: RolloutPolicy>(
 
     let mut root = Node::default();
     let mut rng = StdRng::seed_from_u64(config.seed);
+    let mut diagnostics = SearchDiagnostics::default();
+    let mut legal_actions = Vec::with_capacity(MAX_LEGAL_ACTIONS);
     for iteration in 0..config.iterations {
-        let state = information_set
-            .sample(&mut rng)
-            .map_err(|source| IsmctsError::Sample { iteration, source })?;
-        simulate(
-            &mut root,
-            state,
+        let sampling_started = measure_timing.then(Instant::now);
+        let sampled = information_set.sample(&mut rng);
+        if let Some(started) = sampling_started {
+            diagnostics.sampling_time += started.elapsed();
+        }
+        let state = sampled.map_err(|source| IsmctsError::Sample { iteration, source })?;
+        diagnostics.worlds_sampled += 1;
+        let mut context = SimulationContext {
             rollout_policy,
-            config.exploration,
-            &mut rng,
-            0,
-        )?;
+            exploration: config.exploration,
+            rng: &mut rng,
+            diagnostics: &mut diagnostics,
+            legal_actions: &mut legal_actions,
+            measure_timing,
+        };
+        simulate(&mut root, state, 0, &mut context)?;
     }
 
     let root_actions = root.edges.iter().map(Edge::statistics).collect::<Vec<_>>();
     let best_action = robust_child(&root.edges).ok_or(IsmctsError::NoVisitedActions)?;
-    Ok(IsmctsResult {
+    let result = IsmctsResult {
         iterations: config.iterations,
         best_action,
         root_actions,
+    };
+    if let Some(started) = search_started {
+        diagnostics.finish_timing(started.elapsed());
+    }
+    Ok(IsmctsReport {
+        result,
+        diagnostics,
     })
 }
 
@@ -114,6 +173,8 @@ struct Edge {
     availability: u32,
     visits: u32,
     score_sum: f64,
+    raw_score_sum: f64,
+    utility_sum: f64,
     strikeouts: u32,
     min_score: u8,
     max_score: u8,
@@ -127,6 +188,8 @@ impl Edge {
             availability: 0,
             visits: 0,
             score_sum: 0.0,
+            raw_score_sum: 0.0,
+            utility_sum: 0.0,
             strikeouts: 0,
             min_score: u8::MAX,
             max_score: u8::MIN,
@@ -137,6 +200,8 @@ impl Edge {
     fn observe(&mut self, reward: Reward) {
         self.visits += 1;
         self.score_sum += f64::from(reward.score);
+        self.raw_score_sum += f64::from(reward.raw_score);
+        self.utility_sum += f64::from(reward.utility());
         self.min_score = self.min_score.min(reward.score);
         self.max_score = self.max_score.max(reward.score);
         if reward.strikeout {
@@ -148,6 +213,14 @@ impl Edge {
         self.score_sum / f64::from(self.visits)
     }
 
+    fn mean_raw_score(&self) -> f64 {
+        self.raw_score_sum / f64::from(self.visits)
+    }
+
+    fn mean_utility(&self) -> f64 {
+        self.utility_sum / f64::from(self.visits)
+    }
+
     fn statistics(&self) -> TreeActionStatistics {
         let visited = self.visits > 0;
         TreeActionStatistics {
@@ -155,6 +228,8 @@ impl Edge {
             visits: self.visits,
             availability: self.availability,
             mean_score: visited.then(|| self.mean_score()),
+            mean_raw_score: visited.then(|| self.mean_raw_score()),
+            mean_utility: visited.then(|| self.mean_utility()),
             strikeout_rate: visited.then(|| f64::from(self.strikeouts) / f64::from(self.visits)),
             min_score: visited.then_some(self.min_score),
             max_score: visited.then_some(self.max_score),
@@ -165,17 +240,40 @@ impl Edge {
 #[derive(Clone, Copy)]
 struct Reward {
     score: u8,
+    raw_score: u8,
     strikeout: bool,
+}
+
+impl Reward {
+    const fn new(score: u8, raw_score: u8, strikeout: bool) -> Self {
+        Self {
+            score,
+            raw_score,
+            strikeout,
+        }
+    }
+
+    const fn utility(self) -> u16 {
+        terminal_utility(self.score, self.raw_score)
+    }
+}
+
+struct SimulationContext<'a, P, R: ?Sized> {
+    rollout_policy: &'a P,
+    exploration: f64,
+    rng: &'a mut R,
+    diagnostics: &'a mut SearchDiagnostics,
+    legal_actions: &'a mut Vec<Action>,
+    measure_timing: bool,
 }
 
 fn simulate<P: RolloutPolicy, R: Rng + ?Sized>(
     node: &mut Node,
     mut state: FullState,
-    rollout_policy: &P,
-    exploration: f64,
-    rng: &mut R,
     depth: u32,
+    context: &mut SimulationContext<'_, P, R>,
 ) -> Result<Reward, IsmctsError> {
+    context.diagnostics.observe_tree_depth(depth);
     if state.is_terminal() {
         node.visits += 1;
         return terminal_reward(&state).ok_or(IsmctsError::NonTerminalOutcome);
@@ -185,16 +283,18 @@ fn simulate<P: RolloutPolicy, R: Rng + ?Sized>(
     }
 
     let actor = state.current_player();
-    let view = state
-        .view_for(actor)
-        .ok_or(IsmctsError::InvalidCurrentPlayer(actor))?;
-    let legal_actions = view.legal_actions();
-    if legal_actions.is_empty() {
+    state.legal_actions_into(context.legal_actions);
+    if context.legal_actions.is_empty() {
         return Err(IsmctsError::NoLegalTreeActions { depth, actor });
     }
 
-    let legal_edges = register_available_actions(node, &legal_actions);
-    let selected = select_edge(node, &legal_edges, exploration, rng);
+    let legal_edges = register_available_actions(node, context.legal_actions);
+    let selected = select_edge(
+        node,
+        legal_edges.as_slice(),
+        context.exploration,
+        context.rng,
+    );
     let action = node.edges[selected].action;
     state
         .apply(action)
@@ -203,23 +303,35 @@ fn simulate<P: RolloutPolicy, R: Rng + ?Sized>(
             action,
             source,
         })?;
+    context.diagnostics.search_actions_applied += 1;
+    context
+        .diagnostics
+        .observe_tree_depth(depth.saturating_add(1));
 
     let reward = if node.edges[selected].child.is_none() {
-        let outcome =
-            rollout_to_terminal(state, rollout_policy).map_err(|source| IsmctsError::Rollout {
+        let report = rollout_for_search(state, context.rollout_policy, context.measure_timing)
+            .map_err(|source| IsmctsError::Rollout {
                 depth,
                 action,
                 source,
             })?;
+        if context.measure_timing {
+            context.diagnostics.add_rollout_timing(report.diagnostics);
+        }
+        let outcome = report.outcome;
+        context.diagnostics.rollouts += 1;
+        context.diagnostics.rollout_turns +=
+            u64::try_from(outcome.turns()).expect("a rollout turn count fits in u64");
+        context.diagnostics.tree_nodes_expanded += 1;
         node.edges[selected].child = Some(Box::new(Node {
             visits: 1,
             edges: Vec::new(),
         }));
-        Reward {
-            score: outcome.score(),
-            strikeout: outcome.final_state().status()
-                == GameStatus::Finished(EndReason::TooManyStrikes),
-        }
+        Reward::new(
+            outcome.score(),
+            outcome.raw_score(),
+            outcome.final_state().status() == GameStatus::Finished(EndReason::TooManyStrikes),
+        )
     } else {
         simulate(
             node.edges[selected]
@@ -227,10 +339,8 @@ fn simulate<P: RolloutPolicy, R: Rng + ?Sized>(
                 .as_deref_mut()
                 .expect("the expanded child was checked as present"),
             state,
-            rollout_policy,
-            exploration,
-            rng,
             depth + 1,
+            context,
         )?
     };
 
@@ -239,22 +349,36 @@ fn simulate<P: RolloutPolicy, R: Rng + ?Sized>(
     Ok(reward)
 }
 
-fn register_available_actions(node: &mut Node, legal_actions: &[Action]) -> Vec<usize> {
-    legal_actions
-        .iter()
-        .map(|action| {
-            let index = node
-                .edges
-                .iter()
-                .position(|edge| edge.action == *action)
-                .unwrap_or_else(|| {
-                    node.edges.push(Edge::new(*action));
-                    node.edges.len() - 1
-                });
-            node.edges[index].availability += 1;
-            index
-        })
-        .collect()
+struct LegalEdges {
+    indices: [usize; MAX_LEGAL_ACTIONS],
+    len: usize,
+}
+
+impl LegalEdges {
+    fn as_slice(&self) -> &[usize] {
+        &self.indices[..self.len]
+    }
+}
+
+fn register_available_actions(node: &mut Node, legal_actions: &[Action]) -> LegalEdges {
+    let mut legal_edges = LegalEdges {
+        indices: [0; MAX_LEGAL_ACTIONS],
+        len: 0,
+    };
+    for action in legal_actions {
+        let index = node
+            .edges
+            .iter()
+            .position(|edge| edge.action == *action)
+            .unwrap_or_else(|| {
+                node.edges.push(Edge::new(*action));
+                node.edges.len() - 1
+            });
+        node.edges[index].availability += 1;
+        legal_edges.indices[legal_edges.len] = index;
+        legal_edges.len += 1;
+    }
+    legal_edges
 }
 
 fn select_edge<R: Rng + ?Sized>(
@@ -263,13 +387,19 @@ fn select_edge<R: Rng + ?Sized>(
     exploration: f64,
     rng: &mut R,
 ) -> usize {
-    let unexpanded = legal_edges
+    let unexpanded_count = legal_edges
         .iter()
         .copied()
         .filter(|index| node.edges[*index].child.is_none())
-        .collect::<Vec<_>>();
-    if !unexpanded.is_empty() {
-        return unexpanded[rng.random_range(0..unexpanded.len())];
+        .count();
+    if unexpanded_count > 0 {
+        let selected = rng.random_range(0..unexpanded_count);
+        return legal_edges
+            .iter()
+            .copied()
+            .filter(|index| node.edges[*index].child.is_none())
+            .nth(selected)
+            .expect("the selected unexpanded edge was counted");
     }
 
     let mut selected = legal_edges[0];
@@ -278,7 +408,7 @@ fn select_edge<R: Rng + ?Sized>(
         let edge = &node.edges[index];
         let availability = f64::from(edge.availability);
         let exploration_bonus = exploration * (availability.ln() / f64::from(edge.visits)).sqrt();
-        let value = edge.mean_score() / PERFECT_SCORE + exploration_bonus;
+        let value = edge.mean_utility() / f64::from(MAX_TERMINAL_UTILITY) + exploration_bonus;
         if value > best_value {
             selected = index;
             best_value = value;
@@ -292,7 +422,7 @@ fn robust_child(edges: &[Edge]) -> Option<Action> {
     for edge in edges.iter().filter(|edge| edge.visits > 0) {
         let replace = best.is_none_or(|current| {
             edge.visits > current.visits
-                || (edge.visits == current.visits && edge.mean_score() > current.mean_score())
+                || (edge.visits == current.visits && edge.mean_utility() > current.mean_utility())
         });
         if replace {
             best = Some(edge);
@@ -302,10 +432,11 @@ fn robust_child(edges: &[Edge]) -> Option<Action> {
 }
 
 fn terminal_reward(state: &FullState) -> Option<Reward> {
-    Some(Reward {
-        score: state.final_score()?,
-        strikeout: state.status() == GameStatus::Finished(EndReason::TooManyStrikes),
-    })
+    Some(Reward::new(
+        state.final_score()?,
+        state.score(),
+        state.status() == GameStatus::Finished(EndReason::TooManyStrikes),
+    ))
 }
 
 /// Why ISMCTS could not complete.
@@ -437,39 +568,29 @@ mod tests {
     }
 
     #[test]
-    fn robust_child_prefers_visits_then_score_then_stable_order() {
+    fn robust_child_prefers_visits_then_utility_then_stable_order() {
         let first = Action::Play(CardId::new(1));
         let second = Action::Play(CardId::new(2));
         let mut edges = vec![Edge::new(first), Edge::new(second)];
 
-        edges[0].observe(Reward {
-            score: 20,
-            strikeout: false,
-        });
-        edges[1].observe(Reward {
-            score: 25,
-            strikeout: false,
-        });
+        edges[0].observe(Reward::new(20, 20, false));
+        edges[1].observe(Reward::new(25, 25, false));
         assert_eq!(robust_child(&edges), Some(second));
 
-        edges[0].observe(Reward {
-            score: 0,
-            strikeout: true,
-        });
+        edges[0].observe(Reward::new(0, 0, true));
         assert_eq!(robust_child(&edges), Some(first));
 
-        edges[1].observe(Reward {
-            score: 0,
-            strikeout: true,
-        });
+        edges[1].observe(Reward::new(0, 0, true));
         assert_eq!(robust_child(&edges), Some(second));
+
+        let mut raw_progress = vec![Edge::new(first), Edge::new(second)];
+        raw_progress[0].observe(Reward::new(0, 8, true));
+        raw_progress[1].observe(Reward::new(0, 9, true));
+        assert_eq!(robust_child(&raw_progress), Some(second));
 
         let mut tied = vec![Edge::new(first), Edge::new(second)];
         for edge in &mut tied {
-            edge.observe(Reward {
-                score: 20,
-                strikeout: false,
-            });
+            edge.observe(Reward::new(20, 20, false));
         }
         assert_eq!(robust_child(&tied), Some(first));
     }

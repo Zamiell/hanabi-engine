@@ -14,6 +14,8 @@ path = "src/main.rs"
 hanabi-core = { path = "../hanabi-core" }
 hanabi-protocol = { path = "../hanabi-protocol" }
 hanabi-search = { path = "../hanabi-search" }
+serde.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

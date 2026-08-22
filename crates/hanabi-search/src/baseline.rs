@@ -1,8 +1,10 @@
 use core::fmt;
 
-use hanabi_core::{Action, Card, CardId, GameStatus, MAX_CLUE_TOKENS, Rank};
+use hanabi_core::{
+    Action, CardId, GameStatus, MAX_CLUE_TOKENS, ObservedCard, PlayerId, PolicyObservation, Rank,
+};
 
-use crate::InformationSet;
+use crate::{IdentitySet, LogicalDeductions, PolicyDeductions};
 
 /// What direct clues, public cards, and card-count elimination prove about one
 /// card. No meaning is assigned to why any clue was given.
@@ -19,62 +21,101 @@ pub struct CardAssessment {
 /// already played or can never play because a required lower rank is exhausted.
 /// Returns `None` when `card` is not an unknown card in this information set.
 #[must_use]
-pub fn assess_card(information_set: &InformationSet, card: CardId) -> Option<CardAssessment> {
-    let possibilities = information_set.possible_identities(card)?;
-    let view = information_set.view();
+pub fn assess_card(deductions: &LogicalDeductions, card: CardId) -> Option<CardAssessment> {
+    let possibilities = deductions.possible_identities(card)?;
+    let context = AssessmentContext::new(deductions.view());
 
-    Some(CardAssessment {
-        certainly_playable: !possibilities.is_empty()
-            && possibilities
-                .iter()
-                .copied()
-                .all(|identity| is_playable(view, identity)),
-        certainly_useless: !possibilities.is_empty()
-            && possibilities
-                .iter()
-                .copied()
-                .all(|identity| is_useless(view, identity)),
-    })
+    Some(context.assess(possibilities))
 }
 
-fn is_playable(view: &hanabi_core::PlayerView, card: Card) -> bool {
-    let stack_height = view.play_stacks[card.suit.index()].len();
-    usize::from(card.rank.number()) == stack_height + 1
+struct AssessmentContext {
+    stack_heights: [u8; 5],
+    maximum_reachable_ranks: [u8; 5],
 }
 
-fn is_useless(view: &hanabi_core::PlayerView, card: Card) -> bool {
-    let stack_height = view.play_stacks[card.suit.index()].len();
-    let rank = usize::from(card.rank.number());
-    if rank <= stack_height {
-        return true;
+impl AssessmentContext {
+    fn new(view: &hanabi_core::PlayerView) -> Self {
+        let stack_heights = std::array::from_fn(|suit| {
+            u8::try_from(view.play_stacks[suit].len())
+                .expect("a standard stack has at most five cards")
+        });
+        let mut discarded_counts = [0_u8; 25];
+        for (_, card) in &view.discard_pile {
+            discarded_counts[card.suit.index() * 5 + card.rank.index()] += 1;
+        }
+        Self::from_counts(stack_heights, discarded_counts)
     }
 
-    Rank::ALL
-        .into_iter()
-        .filter(|required| {
-            let required = usize::from(required.number());
-            required > stack_height && required < rank
-        })
-        .any(|required| {
-            let discarded = view
-                .discard_pile
-                .iter()
-                .filter(|(_, identity)| identity.suit == card.suit && identity.rank == required)
-                .count();
-            discarded == usize::from(required.copies())
-        })
+    fn from_observation(observation: &PolicyObservation) -> Self {
+        Self::from_counts(observation.stack_heights, observation.discarded_counts)
+    }
+
+    fn from_counts(stack_heights: [u8; 5], discarded_counts: [u8; 25]) -> Self {
+        let maximum_reachable_ranks = std::array::from_fn(|suit| {
+            let stack_height = stack_heights[suit];
+            Rank::ALL
+                .into_iter()
+                .find(|rank| {
+                    rank.number() > stack_height
+                        && discarded_counts[suit * 5 + rank.index()] == rank.copies()
+                })
+                .map_or(5, |rank| rank.number() - 1)
+        });
+        Self {
+            stack_heights,
+            maximum_reachable_ranks,
+        }
+    }
+
+    fn assess(&self, possibilities: IdentitySet) -> CardAssessment {
+        CardAssessment {
+            certainly_playable: !possibilities.is_empty()
+                && possibilities
+                    .iter()
+                    .all(|card| card.rank.number() == self.stack_heights[card.suit.index()] + 1),
+            certainly_useless: !possibilities.is_empty()
+                && possibilities.iter().all(|card| {
+                    let rank = card.rank.number();
+                    rank <= self.stack_heights[card.suit.index()]
+                        || rank > self.maximum_reachable_ranks[card.suit.index()]
+                }),
+        }
+    }
 }
 
 /// Selects an action using only a player's legal observation and its logical
 /// information set.
 pub trait RolloutPolicy {
+    /// Whether rollout observations must include a copy of public event history.
+    /// Convention-aware policies will normally retain the default.
+    #[must_use]
+    fn uses_history(&self) -> bool {
+        true
+    }
+
     /// Chooses one legal action for the current player.
     ///
     /// # Errors
     ///
     /// Returns [`PolicyError`] when the information set is not an actionable
     /// current-player position or does not contain its own hidden hand.
-    fn select_action(&self, information_set: &InformationSet) -> Result<Action, PolicyError>;
+    fn select_action(&self, deductions: &LogicalDeductions) -> Result<Action, PolicyError>;
+
+    /// Chooses from the compact convention-free rollout representation.
+    ///
+    /// Policies returning `false` from [`Self::uses_history`] must implement
+    /// this method.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PolicyError::CompactObservationUnsupported`] unless the
+    /// policy implements compact observation support.
+    fn select_policy_action(
+        &self,
+        _deductions: &PolicyDeductions<'_>,
+    ) -> Result<Action, PolicyError> {
+        Err(PolicyError::CompactObservationUnsupported)
+    }
 }
 
 /// A deliberately convention-agnostic rollout policy.
@@ -89,49 +130,82 @@ pub trait RolloutPolicy {
 pub struct ConventionAgnosticPolicy;
 
 impl RolloutPolicy for ConventionAgnosticPolicy {
-    fn select_action(&self, information_set: &InformationSet) -> Result<Action, PolicyError> {
-        let view = information_set.view();
-        if view.status != GameStatus::InProgress || view.observer != view.current_player {
-            return Err(PolicyError::NotCurrentPlayer);
-        }
+    fn uses_history(&self) -> bool {
+        false
+    }
 
+    fn select_action(&self, deductions: &LogicalDeductions) -> Result<Action, PolicyError> {
+        let view = deductions.view();
         let hand = view
             .hands
             .get(view.observer.index())
             .ok_or(PolicyError::MissingOwnHand)?;
-        if hand.is_empty() {
-            return Err(PolicyError::EmptyOwnHand);
-        }
-
-        let mut assessments = Vec::with_capacity(hand.len());
-        for observed in hand {
-            let assessment = assess_card(information_set, observed.id)
-                .ok_or(PolicyError::MissingPossibilities(observed.id))?;
-            assessments.push((observed.id, assessment));
-        }
-
-        // Hands are stored oldest-to-newest; a drawn card is appended.
-        if let Some((card, _)) = assessments
-            .iter()
-            .find(|(_, assessment)| assessment.certainly_playable)
-        {
-            return Ok(Action::Play(*card));
-        }
-
-        if view.clue_tokens < MAX_CLUE_TOKENS {
-            if let Some((card, _)) = assessments
-                .iter()
-                .find(|(_, assessment)| assessment.certainly_useless)
-            {
-                return Ok(Action::Discard(*card));
-            }
-            return Ok(Action::Discard(hand[0].id));
-        }
-
-        Ok(Action::Play(
-            hand.last().expect("the hand was checked as nonempty").id,
-        ))
+        let context = AssessmentContext::new(view);
+        select_action_from_knowledge(
+            view.observer,
+            view.current_player,
+            view.status,
+            view.clue_tokens,
+            hand,
+            &context,
+            |card| deductions.possible_identities(card),
+        )
     }
+
+    fn select_policy_action(
+        &self,
+        deductions: &PolicyDeductions<'_>,
+    ) -> Result<Action, PolicyError> {
+        let observation = deductions.observation();
+        let context = AssessmentContext::from_observation(observation);
+        select_action_from_knowledge(
+            observation.observer,
+            observation.current_player,
+            observation.status,
+            observation.clue_tokens,
+            &observation.own_hand,
+            &context,
+            |card| deductions.possible_identities(card),
+        )
+    }
+}
+
+fn select_action_from_knowledge(
+    observer: PlayerId,
+    current_player: PlayerId,
+    status: GameStatus,
+    clue_tokens: u8,
+    hand: &[ObservedCard],
+    context: &AssessmentContext,
+    possible_identities: impl Fn(CardId) -> Option<IdentitySet>,
+) -> Result<Action, PolicyError> {
+    if status != GameStatus::InProgress || observer != current_player {
+        return Err(PolicyError::NotCurrentPlayer);
+    }
+    if hand.is_empty() {
+        return Err(PolicyError::EmptyOwnHand);
+    }
+
+    let mut first_useless = None;
+    for observed in hand {
+        let possibilities = possible_identities(observed.id)
+            .ok_or(PolicyError::MissingPossibilities(observed.id))?;
+        let assessment = context.assess(possibilities);
+        if assessment.certainly_playable {
+            return Ok(Action::Play(observed.id));
+        }
+        if first_useless.is_none() && assessment.certainly_useless {
+            first_useless = Some(observed.id);
+        }
+    }
+
+    // Hands are stored oldest-to-newest; a drawn card is appended.
+    if clue_tokens < MAX_CLUE_TOKENS {
+        return Ok(Action::Discard(first_useless.unwrap_or(hand[0].id)));
+    }
+    Ok(Action::Play(
+        hand.last().expect("the hand was checked as nonempty").id,
+    ))
 }
 
 /// Why a rollout policy could not choose an action.
@@ -141,6 +215,7 @@ pub enum PolicyError {
     MissingOwnHand,
     EmptyOwnHand,
     MissingPossibilities(CardId),
+    CompactObservationUnsupported,
 }
 
 impl fmt::Display for PolicyError {
@@ -156,6 +231,9 @@ impl fmt::Display for PolicyError {
                     formatter,
                     "the information set has no possibilities for {card}"
                 )
+            }
+            Self::CompactObservationUnsupported => {
+                formatter.write_str("policy does not support compact rollout observations")
             }
         }
     }
