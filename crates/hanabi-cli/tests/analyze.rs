@@ -11,7 +11,8 @@ fn help_describes_turn_semantics_and_search_modes() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("turn 0 is the initial deal"));
     assert!(stdout.contains("--mode <ismcts|flat>"));
-    assert!(stdout.contains("--convention <none>"));
+    assert!(stdout.contains("--convention <none|h-group>"));
+    assert!(stdout.contains("--h-group-level <1-25|max>"));
     assert!(stdout.contains("hanabi-engine benchmark"));
     assert!(stdout.contains("versioned JSON report"));
 }
@@ -25,14 +26,73 @@ fn rejects_an_unregistered_convention() {
             "--turn",
             "0",
             "--convention",
-            "h-group",
+            "rainbow",
         ])
         .output()
         .unwrap();
 
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).unwrap();
-    assert!(stderr.contains("unknown convention \"h-group\"; expected none"));
+    assert!(stderr.contains("unknown convention \"rainbow\"; expected none or h-group"));
+}
+
+#[test]
+fn validates_h_group_profile_options_before_reading_a_replay() {
+    let missing = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
+        .args([
+            "analyze",
+            "unused.json",
+            "--turn",
+            "0",
+            "--convention",
+            "h-group",
+        ])
+        .output()
+        .unwrap();
+    assert!(!missing.status.success());
+    assert!(
+        String::from_utf8(missing.stderr)
+            .unwrap()
+            .contains("--h-group-level is required when --convention h-group")
+    );
+
+    let irrelevant = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
+        .args([
+            "analyze",
+            "unused.json",
+            "--turn",
+            "0",
+            "--h-group-level",
+            "5",
+        ])
+        .output()
+        .unwrap();
+    assert!(!irrelevant.status.success());
+    assert!(
+        String::from_utf8(irrelevant.stderr)
+            .unwrap()
+            .contains("--h-group-level requires --convention h-group")
+    );
+
+    let out_of_range = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
+        .args([
+            "analyze",
+            "unused.json",
+            "--turn",
+            "0",
+            "--convention",
+            "h-group",
+            "--h-group-level",
+            "26",
+        ])
+        .output()
+        .unwrap();
+    assert!(!out_of_range.status.success());
+    assert!(
+        String::from_utf8(out_of_range.stderr)
+            .unwrap()
+            .contains("expected 1 through 25, or max")
+    );
 }
 
 #[test]
@@ -100,6 +160,32 @@ fn analyzes_a_real_hanabi_live_prefix() {
     assert!(stdout.contains("Raw"));
     assert!(stdout.contains("Utility"));
     assert!(stdout.contains("Variance"));
+
+    let h_group = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
+        .args([
+            "analyze",
+            fixture.to_str().unwrap(),
+            "--turn",
+            "17",
+            "--iterations",
+            "1",
+            "--convention",
+            "h-group",
+            "--h-group-level",
+            "5",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        h_group.status.success(),
+        "{}",
+        String::from_utf8_lossy(&h_group.stderr)
+    );
+    let stdout = String::from_utf8(h_group.stdout).unwrap();
+    assert!(stdout.contains("Convention: h-group (level 5)"));
+    assert!(
+        stdout.contains("Convention ruleset revision: 1ef83242d71c62f2db6422f09e83abddba9611dd")
+    );
 }
 
 #[test]
@@ -136,9 +222,11 @@ fn benchmarks_both_search_modes_with_reproducible_trials() {
     );
 
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["schema_version"], 2);
+    assert_eq!(report["schema_version"], 3);
     assert_eq!(report["policy"], "convention_agnostic");
     assert_eq!(report["convention"], "none");
+    assert!(report["convention_profile"].is_null());
+    assert!(report["convention_ruleset_revision"].is_null());
     assert_eq!(report["base_seed"], 42);
     let position = &report["positions"][0];
     assert_eq!(position["turn"], 17);
@@ -198,4 +286,49 @@ fn benchmarks_both_search_modes_with_reproducible_trials() {
             assert!((timing["rollout"].as_f64().unwrap() - rollout_accounted).abs() < 1e-9);
         }
     }
+}
+
+#[test]
+fn benchmark_reports_structured_h_group_profile_and_revision() {
+    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../hanabi-live/packages/client/test_data/no_variant.json");
+    if !fixture.exists() {
+        return;
+    }
+
+    let output = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
+        .args([
+            "benchmark",
+            fixture.to_str().unwrap(),
+            "--turn",
+            "17",
+            "--trials",
+            "1",
+            "--iterations",
+            "1",
+            "--samples",
+            "1",
+            "--convention",
+            "h-group",
+            "--h-group-level",
+            "max",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["schema_version"], 3);
+    assert_eq!(report["policy"], "h_group");
+    assert_eq!(report["convention"], "h-group");
+    assert_eq!(report["convention_profile"]["maximum_level"], 25);
+    assert_eq!(report["convention_profile"]["extras"], true);
+    assert_eq!(
+        report["convention_ruleset_revision"],
+        "1ef83242d71c62f2db6422f09e83abddba9611dd"
+    );
 }

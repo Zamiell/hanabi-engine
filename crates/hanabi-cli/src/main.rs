@@ -10,9 +10,9 @@ use std::{
 use hanabi_core::{Action, CardId, Clue, FullState, PlayerView};
 use hanabi_protocol::{HanabiLiveReplay, ReplayError};
 use hanabi_search::{
-    InformationSet, InformationSetError, IsmctsConfig, IsmctsError, MonteCarloConfig,
-    SearchError as FlatSearchError, SupportedConvention, TreeActionStatistics, evaluate_actions,
-    ismcts_search, select_best_action,
+    HGroupProfile, InformationSet, InformationSetError, IsmctsConfig, IsmctsError,
+    MonteCarloConfig, SearchError as FlatSearchError, SupportedConvention, TreeActionStatistics,
+    evaluate_actions, ismcts_search, select_best_action,
 };
 
 mod benchmark;
@@ -65,6 +65,9 @@ fn run_analyze(arguments: &AnalyzeArguments) -> Result<(), CliError> {
 
     print_position(&replay, &state, &view);
     println!("Convention: {}", arguments.convention);
+    if let Some(revision) = arguments.convention.ruleset_revision() {
+        println!("Convention ruleset revision: {revision}");
+    }
     match arguments.mode {
         SearchMode::Ismcts => analyze_ismcts(arguments, &view, &replay.players, &information_set),
         SearchMode::Flat => analyze_flat(arguments, &view, &replay.players, &information_set),
@@ -289,6 +292,43 @@ impl FromStr for SearchMode {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+enum ConventionChoice {
+    #[default]
+    None,
+    HGroup,
+}
+
+impl FromStr for ConventionChoice {
+    type Err = CliError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "none" => Ok(Self::None),
+            "h-group" => Ok(Self::HGroup),
+            _ => Err(CliError::Usage(format!(
+                "unknown convention {value:?}; expected none or h-group"
+            ))),
+        }
+    }
+}
+
+fn select_convention(
+    choice: ConventionChoice,
+    h_group_profile: Option<HGroupProfile>,
+) -> Result<SupportedConvention, CliError> {
+    match (choice, h_group_profile) {
+        (ConventionChoice::None, None) => Ok(SupportedConvention::None),
+        (ConventionChoice::None, Some(_)) => Err(CliError::Usage(
+            "--h-group-level requires --convention h-group".to_owned(),
+        )),
+        (ConventionChoice::HGroup, Some(profile)) => Ok(SupportedConvention::HGroup(profile)),
+        (ConventionChoice::HGroup, None) => Err(CliError::Usage(
+            "--h-group-level is required when --convention h-group".to_owned(),
+        )),
+    }
+}
+
 struct AnalyzeArguments {
     replay: PathBuf,
     turn: u32,
@@ -351,7 +391,8 @@ fn parse_analyze_arguments(
     let mut samples = DEFAULT_SAMPLES;
     let mut seed = DEFAULT_SEED;
     let mut exploration = core::f64::consts::SQRT_2;
-    let mut convention = SupportedConvention::default();
+    let mut convention = ConventionChoice::default();
+    let mut h_group_profile = None;
 
     while let Some(flag) = arguments.next() {
         match flag.as_str() {
@@ -373,11 +414,18 @@ fn parse_analyze_arguments(
             "--convention" => {
                 convention = parse_value("--convention", &next_value(arguments, "--convention")?)?;
             }
+            "--h-group-level" => {
+                h_group_profile = Some(parse_value(
+                    "--h-group-level",
+                    &next_value(arguments, "--h-group-level")?,
+                )?);
+            }
             "--help" | "-h" => return Ok(None),
             _ => return Err(CliError::Usage(format!("unknown option {flag:?}"))),
         }
     }
 
+    let convention = select_convention(convention, h_group_profile)?;
     Ok(Some(AnalyzeArguments {
         replay: replay.into(),
         turn: turn.ok_or_else(|| CliError::Usage("missing required --turn".to_owned()))?,
@@ -406,7 +454,8 @@ fn parse_benchmark_arguments(
     let mut samples = DEFAULT_SAMPLES;
     let mut seed = DEFAULT_SEED;
     let mut exploration = core::f64::consts::SQRT_2;
-    let mut convention = SupportedConvention::default();
+    let mut convention = ConventionChoice::default();
+    let mut h_group_profile = None;
 
     while let Some(flag) = arguments.next() {
         match flag.as_str() {
@@ -428,6 +477,12 @@ fn parse_benchmark_arguments(
             "--convention" => {
                 convention = parse_value("--convention", &next_value(arguments, "--convention")?)?;
             }
+            "--h-group-level" => {
+                h_group_profile = Some(parse_value(
+                    "--h-group-level",
+                    &next_value(arguments, "--h-group-level")?,
+                )?);
+            }
             "--help" | "-h" => return Ok(None),
             _ => return Err(CliError::Usage(format!("unknown option {flag:?}"))),
         }
@@ -442,6 +497,7 @@ fn parse_benchmark_arguments(
         return Err(CliError::Usage("--trials must be positive".to_owned()));
     }
 
+    let convention = select_convention(convention, h_group_profile)?;
     Ok(Some(BenchmarkArguments {
         replay: replay.into(),
         turns,
@@ -490,14 +546,16 @@ fn usage() -> &'static str {
      --samples <N>          Flat Monte Carlo samples/action (default: 100)\n  \
      --seed <N>             Reproducible random seed (default: 0)\n  \
      --exploration <X>      ISMCTS UCB coefficient (default: sqrt(2))\n  \
-     --convention <none>    Convention framework (default: none)\n\n\
+     --convention <none|h-group>  Convention framework (default: none)\n  \
+     --h-group-level <1-25|max>   Required H-Group cumulative profile\n\n\
      Benchmark options:\n  --turn <N>             Position to benchmark; may be repeated\n  \
      --trials <N>           Consecutive seeds per mode (default: 5)\n  \
      --iterations <N>       ISMCTS iterations/trial (default: 1000)\n  \
      --samples <N>          Flat Monte Carlo samples/action/trial (default: 100)\n  \
      --seed <N>             Base seed; trial N uses seed + N (default: 0)\n  \
      --exploration <X>      ISMCTS UCB coefficient (default: sqrt(2))\n  \
-     --convention <none>    Convention framework (default: none)\n\n\
+     --convention <none|h-group>  Convention framework (default: none)\n  \
+     --h-group-level <1-25|max>   Required H-Group cumulative profile\n\n\
      Benchmark writes a versioned JSON report to standard output."
 }
 

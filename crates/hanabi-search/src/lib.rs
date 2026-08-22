@@ -14,7 +14,9 @@ pub use baseline::{
     CardAssessment, ConventionAgnosticPolicy, PolicyError, RolloutPolicy, assess_card,
 };
 pub use convention::{
-    ConventionFramework, ConventionInferences, ParseConventionError, SupportedConvention,
+    CONVENTION_DESCRIPTORS, ConventionDescriptor, ConventionFramework, ConventionInferences,
+    H_GROUP_RULESET_REVISION, HGroupInferences, HGroupLevel, HGroupProfile, ParseConventionError,
+    ParseHGroupProfileError, SupportedConvention,
 };
 pub use diagnostics::SearchDiagnostics;
 pub use information_set::{

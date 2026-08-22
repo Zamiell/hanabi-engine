@@ -105,6 +105,7 @@ impl std::error::Error for BestMoveError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{HGroupLevel, HGroupProfile};
     use hanabi_core::{FullState, PlayerId, standard_deck};
 
     fn initial_view() -> PlayerView {
@@ -140,5 +141,18 @@ mod tests {
         .unwrap();
         assert_eq!(flat.convention, SupportedConvention::None);
         assert!(matches!(flat.details, SearchDetails::Flat(_)));
+
+        let h_group = SupportedConvention::HGroup(HGroupProfile::Level(HGroupLevel::Level4));
+        let result = best_move(
+            initial_view(),
+            h_group,
+            SearchConfig::Ismcts(IsmctsConfig {
+                iterations: 1,
+                exploration: core::f64::consts::SQRT_2,
+                seed: 42,
+            }),
+        )
+        .unwrap();
+        assert_eq!(result.convention, h_group);
     }
 }

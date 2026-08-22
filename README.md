@@ -44,10 +44,17 @@ The workspace currently contains:
   selection, expansion, rollout, cooperative backpropagation, and robust-child
   root selection. Search traversal reuses legal-action buffers, while the
   non-diagnostic APIs avoid profiling timers entirely.
-- `SupportedConvention`: the built-in convention registry. `none` preserves the
-  convention-agnostic baseline. Every framework supplies both rollout behavior
-  and root-world sampling, so future convention beliefs cannot be applied to
-  one part of search and accidentally omitted from the other.
+- `SupportedConvention`: a concrete built-in convention selection. `none`
+  preserves the convention-agnostic baseline. `h-group` carries an explicit
+  cumulative profile: levels 1 through 25 include all preceding numbered
+  levels, while `max` means level 25 plus the unnumbered extras. Static
+  `CONVENTION_DESCRIPTORS` expose framework metadata without pretending every
+  parameterized selection can be enumerated. Every framework supplies both
+  rollout behavior and root-world sampling, so future convention beliefs cannot
+  be applied to one part of search and accidentally omitted from the other.
+  The H-Group selection and typed inference container are scaffolded, but its
+  actual move interpretations are not implemented yet and currently delegate
+  action selection and sampling to the convention-agnostic baseline.
 - `hanabi-protocol`: Hanabi Live compact replay parsing for standard games.
 
 The Hanabi Live compatibility test uses the sibling `hanabi-live` repository
@@ -73,7 +80,18 @@ cargo run --release -p hanabi-cli --bin hanabi-engine -- \
 cargo run --release -p hanabi-cli --bin hanabi-engine -- \
   analyze /path/to/replay.json --turn 17 --convention none \
   --mode flat --samples 100 --seed 42
+
+cargo run --release -p hanabi-cli --bin hanabi-engine -- \
+  analyze /path/to/replay.json --turn 17 --convention h-group \
+  --h-group-level 5 --iterations 10000 --seed 42
 ```
+
+`--h-group-level` accepts `1` through `25`, or `max`. Level 5 means levels
+1-5 cumulatively; `max` additionally enables the unnumbered extras. H-Group
+analysis output records the source documentation revision implemented by the
+engine. Game variants will remain game-state metadata rather than convention
+selection metadata, so the convention interpreter cannot be configured for a
+different variant than the simulator.
 
 The report marks the selected action with `*`, uses slot 1 for the newest card,
 and includes official score, raw stack score, terminal utility, strikeout,
