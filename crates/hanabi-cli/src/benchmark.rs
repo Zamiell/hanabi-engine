@@ -3,20 +3,21 @@ use std::collections::BTreeMap;
 use hanabi_core::{Action, Clue, PlayerView};
 use hanabi_protocol::HanabiLiveReplay;
 use hanabi_search::{
-    ConventionAgnosticPolicy, InformationSet, IsmctsConfig, MonteCarloConfig, SearchDiagnostics,
+    InformationSet, IsmctsConfig, MonteCarloConfig, SearchDiagnostics,
     evaluate_actions_with_diagnostics, ismcts_search_with_diagnostics, select_best_action,
 };
 use serde::Serialize;
 
 use crate::{BenchmarkArguments, CliError, action_label, read_replay};
 
-const REPORT_SCHEMA_VERSION: u8 = 1;
+const REPORT_SCHEMA_VERSION: u8 = 2;
 
 #[derive(Serialize)]
 struct BenchmarkReport {
     schema_version: u8,
     replay: String,
     policy: &'static str,
+    convention: &'static str,
     base_seed: u64,
     positions: Vec<PositionReport>,
 }
@@ -120,7 +121,8 @@ fn build_report(
     Ok(BenchmarkReport {
         schema_version: REPORT_SCHEMA_VERSION,
         replay: arguments.replay.display().to_string(),
-        policy: "convention_agnostic",
+        policy: arguments.convention.policy_id(),
+        convention: arguments.convention.id(),
         base_seed: arguments.seed,
         positions,
     })
@@ -174,7 +176,7 @@ fn benchmark_ismcts(
         let seed = arguments.seed.wrapping_add(u64::from(trial));
         let report = ismcts_search_with_diagnostics(
             information_set,
-            &ConventionAgnosticPolicy,
+            &arguments.convention,
             IsmctsConfig {
                 iterations: arguments.iterations,
                 exploration: arguments.exploration,
@@ -224,7 +226,7 @@ fn benchmark_flat(
         let seed = arguments.seed.wrapping_add(u64::from(trial));
         let report = evaluate_actions_with_diagnostics(
             information_set,
-            &ConventionAgnosticPolicy,
+            &arguments.convention,
             MonteCarloConfig {
                 samples_per_action: arguments.samples,
                 seed,

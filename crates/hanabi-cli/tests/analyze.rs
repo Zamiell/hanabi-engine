@@ -11,8 +11,28 @@ fn help_describes_turn_semantics_and_search_modes() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("turn 0 is the initial deal"));
     assert!(stdout.contains("--mode <ismcts|flat>"));
+    assert!(stdout.contains("--convention <none>"));
     assert!(stdout.contains("hanabi-engine benchmark"));
     assert!(stdout.contains("versioned JSON report"));
+}
+
+#[test]
+fn rejects_an_unregistered_convention() {
+    let output = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
+        .args([
+            "analyze",
+            "unused.json",
+            "--turn",
+            "0",
+            "--convention",
+            "h-group",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).unwrap();
+    assert!(stderr.contains("unknown convention \"h-group\"; expected none"));
 }
 
 #[test]
@@ -44,6 +64,7 @@ fn analyzes_a_real_hanabi_live_prefix() {
     );
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("Turn: 17  Actor: Cathy (P2)"));
+    assert!(stdout.contains("Convention: none"));
     assert!(stdout.contains("Search: ISMCTS, 8 iterations, seed 42"));
     assert!(stdout.contains("Visits"));
     assert!(stdout.contains("Official"));
@@ -61,6 +82,8 @@ fn analyzes_a_real_hanabi_live_prefix() {
             "flat",
             "--samples",
             "2",
+            "--convention",
+            "none",
             "--seed",
             "42",
         ])
@@ -95,6 +118,8 @@ fn benchmarks_both_search_modes_with_reproducible_trials() {
             "17",
             "--trials",
             "2",
+            "--convention",
+            "none",
             "--iterations",
             "8",
             "--samples",
@@ -111,8 +136,9 @@ fn benchmarks_both_search_modes_with_reproducible_trials() {
     );
 
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["schema_version"], 1);
+    assert_eq!(report["schema_version"], 2);
     assert_eq!(report["policy"], "convention_agnostic");
+    assert_eq!(report["convention"], "none");
     assert_eq!(report["base_seed"], 42);
     let position = &report["positions"][0];
     assert_eq!(position["turn"], 17);

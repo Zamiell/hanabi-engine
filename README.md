@@ -14,7 +14,8 @@ on top of this rules core.
   visible cards, and exact card-count elimination.
 - `InformationSet`: search-layer constraints and card-copy-weighted sampling of
   worlds consistent with a `PlayerView`.
-- `ConventionInferences`: planned policy-layer interpretations of player intent.
+- `ConventionInferences`: a closed, typed registry of framework-specific
+  interpretations kept separate from logical truth.
 
 Action-selection code must consume `PlayerView`, `LogicalDeductions`, or the
 equivalent compact rollout observation, never `FullState`.
@@ -43,6 +44,10 @@ The workspace currently contains:
   selection, expansion, rollout, cooperative backpropagation, and robust-child
   root selection. Search traversal reuses legal-action buffers, while the
   non-diagnostic APIs avoid profiling timers entirely.
+- `SupportedConvention`: the built-in convention registry. `none` preserves the
+  convention-agnostic baseline. Every framework supplies both rollout behavior
+  and root-world sampling, so future convention beliefs cannot be applied to
+  one part of search and accidentally omitted from the other.
 - `hanabi-protocol`: Hanabi Live compact replay parsing for standard games.
 
 The Hanabi Live compatibility test uses the sibling `hanabi-live` repository
@@ -62,15 +67,35 @@ initial deal. Run searches in release mode for representative throughput.
 
 ```sh
 cargo run --release -p hanabi-cli --bin hanabi-engine -- \
-  analyze /path/to/replay.json --turn 17 --iterations 10000 --seed 42
+  analyze /path/to/replay.json --turn 17 --convention none \
+  --iterations 10000 --seed 42
 
 cargo run --release -p hanabi-cli --bin hanabi-engine -- \
-  analyze /path/to/replay.json --turn 17 --mode flat --samples 100 --seed 42
+  analyze /path/to/replay.json --turn 17 --convention none \
+  --mode flat --samples 100 --seed 42
 ```
 
 The report marks the selected action with `*`, uses slot 1 for the newest card,
 and includes official score, raw stack score, terminal utility, strikeout,
 visit, action-availability, and throughput data.
+
+Applications with an arbitrary legal `PlayerView` can use the library façade:
+
+```rust
+let result = hanabi_search::best_move(
+    view,
+    hanabi_search::SupportedConvention::None,
+    hanabi_search::SearchConfig::Ismcts(hanabi_search::IsmctsConfig {
+        iterations: 10_000,
+        exploration: core::f64::consts::SQRT_2,
+        seed: 42,
+    }),
+)?;
+```
+
+The same entry point accepts `SearchConfig::Flat`. Lower-level search APIs also
+accept any Rust type implementing `ConventionFramework`, while user-facing
+configuration remains the closed `SupportedConvention` enum.
 
 ## Benchmark search
 
@@ -83,12 +108,14 @@ multiple hidden worlds.
 cargo run --release -p hanabi-cli --bin hanabi-engine -- \
   benchmark /path/to/replay.json \
   --turn 0 --turn 17 \
-  --trials 5 --iterations 10000 --samples 100 --seed 42 \
+  --convention none --trials 5 \
+  --iterations 10000 --samples 100 --seed 42 \
   > benchmark.json
 ```
 
-The versioned JSON report contains every trial's selected action, mean official
-score, raw stack score, terminal utility, strikeout rate, work count, elapsed
+The versioned JSON report records the selected convention and contains every
+trial's selected action, mean official score, raw stack score, terminal utility,
+strikeout rate, work count, elapsed
 time, and throughput. It also aggregates selection frequencies and reports
 `action_stability`, the fraction of trials choosing the most common action.
 Per-trial diagnostics break the work down into sampled worlds, explicit

@@ -1,14 +1,20 @@
 //! Hidden-information modeling and search policies for Hanabi.
 
+pub mod analysis;
 pub mod baseline;
+pub mod convention;
 pub mod diagnostics;
 pub mod information_set;
 pub mod ismcts;
 pub mod monte_carlo;
 pub mod rollout;
 
+pub use analysis::{BestMove, BestMoveError, SearchConfig, SearchDetails, best_move};
 pub use baseline::{
     CardAssessment, ConventionAgnosticPolicy, PolicyError, RolloutPolicy, assess_card,
+};
+pub use convention::{
+    ConventionFramework, ConventionInferences, ParseConventionError, SupportedConvention,
 };
 pub use diagnostics::SearchDiagnostics;
 pub use information_set::{

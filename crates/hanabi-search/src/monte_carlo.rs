@@ -5,7 +5,10 @@ use hanabi_core::{Action, EndReason, FullState, GameStatus, RuleError};
 use rand::{SeedableRng, rngs::StdRng};
 
 use crate::rollout::rollout_for_search;
-use crate::{InformationSet, RolloutError, RolloutPolicy, SampleError, SearchDiagnostics};
+use crate::{
+    ConventionFramework, InformationSet, RolloutError, RolloutPolicy, SampleError,
+    SearchDiagnostics,
+};
 
 /// Reproducible budget for flat Monte Carlo action evaluation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -44,17 +47,19 @@ pub struct MonteCarloReport {
 ///
 /// Reusing determinizations across candidates is a common-random-numbers
 /// variance reduction technique: action comparisons are not distorted by one
-/// candidate receiving luckier hidden cards or deck orders than another.
-/// Candidate generation uses the root [`hanabi_core::PlayerView`]. Only the
-/// simulation driver sees sampled authoritative states; `policy` continues to
-/// receive only the acting player's [`InformationSet`].
+/// candidate receiving luckier hidden cards or deck orders than another. The
+/// selected [`ConventionFramework`] supplies both those root worlds and the
+/// rollout behavior used to evaluate them. Candidate generation uses the root
+/// [`hanabi_core::PlayerView`]. Only the simulation driver sees sampled
+/// authoritative states; convention decisions continue to receive only legal
+/// deductions for the acting player.
 ///
 /// # Errors
 ///
 /// Returns [`SearchError`] for a zero budget, a root with no legal actions, a
 /// failed determinization, an unexpectedly illegal root action, or a failed
 /// rollout.
-pub fn evaluate_actions<P: RolloutPolicy>(
+pub fn evaluate_actions<P: ConventionFramework>(
     information_set: &InformationSet,
     policy: &P,
     config: MonteCarloConfig,
@@ -71,7 +76,7 @@ pub fn evaluate_actions<P: RolloutPolicy>(
 /// # Errors
 ///
 /// Returns the same [`SearchError`] conditions as [`evaluate_actions`].
-pub fn evaluate_actions_with_diagnostics<P: RolloutPolicy>(
+pub fn evaluate_actions_with_diagnostics<P: ConventionFramework>(
     information_set: &InformationSet,
     policy: &P,
     config: MonteCarloConfig,
@@ -79,7 +84,7 @@ pub fn evaluate_actions_with_diagnostics<P: RolloutPolicy>(
     run_evaluation(information_set, policy, config, true)
 }
 
-fn run_evaluation<P: RolloutPolicy>(
+fn run_evaluation<P: ConventionFramework>(
     information_set: &InformationSet,
     policy: &P,
     config: MonteCarloConfig,
@@ -103,7 +108,7 @@ fn run_evaluation<P: RolloutPolicy>(
     let mut diagnostics = SearchDiagnostics::default();
     for sample in 0..config.samples_per_action {
         let sampling_started = measure_timing.then(Instant::now);
-        let sampled = information_set.sample(&mut rng);
+        let sampled = policy.sample_root_world(information_set, &mut rng);
         if let Some(started) = sampling_started {
             diagnostics.sampling_time += started.elapsed();
         }

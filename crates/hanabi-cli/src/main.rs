@@ -10,8 +10,8 @@ use std::{
 use hanabi_core::{Action, CardId, Clue, FullState, PlayerView};
 use hanabi_protocol::{HanabiLiveReplay, ReplayError};
 use hanabi_search::{
-    ConventionAgnosticPolicy, InformationSet, InformationSetError, IsmctsConfig, IsmctsError,
-    MonteCarloConfig, SearchError as FlatSearchError, TreeActionStatistics, evaluate_actions,
+    InformationSet, InformationSetError, IsmctsConfig, IsmctsError, MonteCarloConfig,
+    SearchError as FlatSearchError, SupportedConvention, TreeActionStatistics, evaluate_actions,
     ismcts_search, select_best_action,
 };
 
@@ -64,6 +64,7 @@ fn run_analyze(arguments: &AnalyzeArguments) -> Result<(), CliError> {
     let information_set = InformationSet::new(view.clone()).map_err(CliError::InformationSet)?;
 
     print_position(&replay, &state, &view);
+    println!("Convention: {}", arguments.convention);
     match arguments.mode {
         SearchMode::Ismcts => analyze_ismcts(arguments, &view, &replay.players, &information_set),
         SearchMode::Flat => analyze_flat(arguments, &view, &replay.players, &information_set),
@@ -87,7 +88,7 @@ fn analyze_ismcts(
     let started = Instant::now();
     let result = ismcts_search(
         information_set,
-        &ConventionAgnosticPolicy,
+        &arguments.convention,
         IsmctsConfig {
             iterations: arguments.iterations,
             exploration: arguments.exploration,
@@ -141,7 +142,7 @@ fn analyze_flat(
     let started = Instant::now();
     let mut evaluations = evaluate_actions(
         information_set,
-        &ConventionAgnosticPolicy,
+        &arguments.convention,
         MonteCarloConfig {
             samples_per_action: arguments.samples,
             seed: arguments.seed,
@@ -296,6 +297,7 @@ struct AnalyzeArguments {
     samples: u32,
     seed: u64,
     exploration: f64,
+    convention: SupportedConvention,
 }
 
 struct BenchmarkArguments {
@@ -306,6 +308,7 @@ struct BenchmarkArguments {
     samples: u32,
     seed: u64,
     exploration: f64,
+    convention: SupportedConvention,
 }
 
 enum Command {
@@ -348,6 +351,7 @@ fn parse_analyze_arguments(
     let mut samples = DEFAULT_SAMPLES;
     let mut seed = DEFAULT_SEED;
     let mut exploration = core::f64::consts::SQRT_2;
+    let mut convention = SupportedConvention::default();
 
     while let Some(flag) = arguments.next() {
         match flag.as_str() {
@@ -366,6 +370,9 @@ fn parse_analyze_arguments(
                 exploration =
                     parse_value("--exploration", &next_value(arguments, "--exploration")?)?;
             }
+            "--convention" => {
+                convention = parse_value("--convention", &next_value(arguments, "--convention")?)?;
+            }
             "--help" | "-h" => return Ok(None),
             _ => return Err(CliError::Usage(format!("unknown option {flag:?}"))),
         }
@@ -379,6 +386,7 @@ fn parse_analyze_arguments(
         samples,
         seed,
         exploration,
+        convention,
     }))
 }
 
@@ -398,6 +406,7 @@ fn parse_benchmark_arguments(
     let mut samples = DEFAULT_SAMPLES;
     let mut seed = DEFAULT_SEED;
     let mut exploration = core::f64::consts::SQRT_2;
+    let mut convention = SupportedConvention::default();
 
     while let Some(flag) = arguments.next() {
         match flag.as_str() {
@@ -415,6 +424,9 @@ fn parse_benchmark_arguments(
             "--exploration" => {
                 exploration =
                     parse_value("--exploration", &next_value(arguments, "--exploration")?)?;
+            }
+            "--convention" => {
+                convention = parse_value("--convention", &next_value(arguments, "--convention")?)?;
             }
             "--help" | "-h" => return Ok(None),
             _ => return Err(CliError::Usage(format!("unknown option {flag:?}"))),
@@ -438,6 +450,7 @@ fn parse_benchmark_arguments(
         samples,
         seed,
         exploration,
+        convention,
     }))
 }
 
@@ -476,13 +489,15 @@ fn usage() -> &'static str {
      --iterations <N>       ISMCTS iterations (default: 1000)\n  \
      --samples <N>          Flat Monte Carlo samples/action (default: 100)\n  \
      --seed <N>             Reproducible random seed (default: 0)\n  \
-     --exploration <X>      ISMCTS UCB coefficient (default: sqrt(2))\n\n\
+     --exploration <X>      ISMCTS UCB coefficient (default: sqrt(2))\n  \
+     --convention <none>    Convention framework (default: none)\n\n\
      Benchmark options:\n  --turn <N>             Position to benchmark; may be repeated\n  \
      --trials <N>           Consecutive seeds per mode (default: 5)\n  \
      --iterations <N>       ISMCTS iterations/trial (default: 1000)\n  \
      --samples <N>          Flat Monte Carlo samples/action/trial (default: 100)\n  \
      --seed <N>             Base seed; trial N uses seed + N (default: 0)\n  \
-     --exploration <X>      ISMCTS UCB coefficient (default: sqrt(2))\n\n\
+     --exploration <X>      ISMCTS UCB coefficient (default: sqrt(2))\n  \
+     --convention <none>    Convention framework (default: none)\n\n\
      Benchmark writes a versioned JSON report to standard output."
 }
 

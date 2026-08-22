@@ -6,8 +6,8 @@ use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::rollout::rollout_for_search;
 use crate::{
-    InformationSet, MAX_TERMINAL_UTILITY, RolloutError, RolloutPolicy, SampleError,
-    SearchDiagnostics, terminal_utility,
+    ConventionFramework, InformationSet, MAX_TERMINAL_UTILITY, RolloutError, RolloutPolicy,
+    SampleError, SearchDiagnostics, terminal_utility,
 };
 
 const MAX_TREE_DEPTH: u32 = 512;
@@ -60,11 +60,12 @@ pub struct IsmctsReport {
 
 /// Runs cooperative single-observer information-set Monte Carlo tree search.
 ///
-/// Every iteration samples a new root-consistent [`FullState`]. Tree nodes are
-/// shared by action history, while edges track how often an action was legally
-/// available across determinizations. Selection uses availability-aware UCB,
-/// expansion adds one node, and the remaining position is completed by
-/// `rollout_policy`. All players backpropagate the same convention-free team
+/// Every iteration asks the selected [`ConventionFramework`] to sample a new
+/// root-consistent [`FullState`], allowing convention beliefs to weight worlds.
+/// Tree nodes are shared by action history, while edges track how often an
+/// action was legally available across determinizations. Selection uses
+/// availability-aware UCB, expansion adds one node, and the remaining position
+/// is completed by the framework's rollout policy. All players backpropagate the same team
 /// utility: official score first, with raw stack score as a terminal tie-break.
 ///
 /// Tree decisions enumerate actions from the acting player's legal view. The
@@ -76,7 +77,7 @@ pub struct IsmctsReport {
 /// Returns [`IsmctsError`] for invalid configuration, an unactionable root,
 /// failed determinization, an invalid current player, an unexpectedly illegal
 /// selected action, a failed rollout, or excessive tree depth.
-pub fn ismcts_search<P: RolloutPolicy>(
+pub fn ismcts_search<P: ConventionFramework>(
     information_set: &InformationSet,
     rollout_policy: &P,
     config: IsmctsConfig,
@@ -93,7 +94,7 @@ pub fn ismcts_search<P: RolloutPolicy>(
 /// # Errors
 ///
 /// Returns the same [`IsmctsError`] conditions as [`ismcts_search`].
-pub fn ismcts_search_with_diagnostics<P: RolloutPolicy>(
+pub fn ismcts_search_with_diagnostics<P: ConventionFramework>(
     information_set: &InformationSet,
     rollout_policy: &P,
     config: IsmctsConfig,
@@ -101,7 +102,7 @@ pub fn ismcts_search_with_diagnostics<P: RolloutPolicy>(
     run_ismcts(information_set, rollout_policy, config, true)
 }
 
-fn run_ismcts<P: RolloutPolicy>(
+fn run_ismcts<P: ConventionFramework>(
     information_set: &InformationSet,
     rollout_policy: &P,
     config: IsmctsConfig,
@@ -119,7 +120,7 @@ fn run_ismcts<P: RolloutPolicy>(
     let mut legal_actions = Vec::with_capacity(MAX_LEGAL_ACTIONS);
     for iteration in 0..config.iterations {
         let sampling_started = measure_timing.then(Instant::now);
-        let sampled = information_set.sample(&mut rng);
+        let sampled = rollout_policy.sample_root_world(information_set, &mut rng);
         if let Some(started) = sampling_started {
             diagnostics.sampling_time += started.elapsed();
         }
