@@ -222,7 +222,7 @@ fn benchmarks_both_search_modes_with_reproducible_trials() {
     );
 
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["schema_version"], 3);
+    assert_eq!(report["schema_version"], 4);
     assert_eq!(report["policy"], "convention_agnostic");
     assert_eq!(report["convention"], "none");
     assert!(report["convention_profile"].is_null());
@@ -322,11 +322,10 @@ fn benchmark_reports_structured_h_group_profile_and_revision() {
     );
 
     let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["schema_version"], 3);
     assert_eq!(report["policy"], "h_group");
     assert_eq!(report["convention"], "h-group");
-    assert_eq!(report["convention_profile"]["maximum_level"], 25);
-    assert_eq!(report["convention_profile"]["extras"], true);
+    assert_eq!(report["schema_version"], 4);
+    assert_eq!(report["convention_profile"]["level"], 26);
     assert_eq!(
         report["convention_ruleset_revision"],
         "1ef83242d71c62f2db6422f09e83abddba9611dd"

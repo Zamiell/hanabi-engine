@@ -95,7 +95,7 @@ fn run_evaluation<P: ConventionFramework>(
         return Err(SearchError::ZeroSamples);
     }
 
-    let actions = information_set.view().legal_actions();
+    let actions = policy.candidate_actions(information_set);
     if actions.is_empty() {
         return Err(SearchError::NoLegalActions);
     }

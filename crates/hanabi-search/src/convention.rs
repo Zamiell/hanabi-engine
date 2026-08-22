@@ -4,7 +4,8 @@ use hanabi_core::FullState;
 use rand::Rng;
 
 use crate::{
-    ConventionAgnosticPolicy, InformationSet, LogicalDeductions, RolloutPolicy, SampleError,
+    ConventionAgnosticPolicy, HGroupInferences, IdentitySet, InformationSet, LogicalDeductions,
+    RolloutPolicy, SampleError, h_group::select_h_group_action, infer_h_group,
 };
 
 /// H-Group documentation revision implemented by this engine.
@@ -119,8 +120,8 @@ impl TryFrom<u8> for HGroupLevel {
 
 /// Cumulative H-Group conventions enabled for a game.
 ///
-/// `Max` is deliberately distinct from level 25 because the H-Group learning
-/// path lists its rare `extras` outside the numbered levels.
+/// `Max` is the effective 26th cumulative level. It is spelled `max` in user
+/// interfaces because that is the name used by H-Group players.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum HGroupProfile {
     Level(HGroupLevel),
@@ -129,20 +130,20 @@ pub enum HGroupProfile {
 
 impl HGroupProfile {
     #[must_use]
-    pub const fn maximum_level(self) -> HGroupLevel {
+    pub const fn effective_level(self) -> u8 {
         match self {
-            Self::Level(level) => level,
-            Self::Max => HGroupLevel::MAX,
+            Self::Level(level) => level.number(),
+            Self::Max => 26,
         }
     }
 
     #[must_use]
     pub const fn includes(self, required: HGroupLevel) -> bool {
-        self.maximum_level().number() >= required.number()
+        self.effective_level() >= required.number()
     }
 
     #[must_use]
-    pub const fn includes_extras(self) -> bool {
+    pub const fn is_max(self) -> bool {
         matches!(self, Self::Max)
     }
 }
@@ -186,15 +187,6 @@ impl fmt::Display for ParseHGroupProfileError {
 
 impl std::error::Error for ParseHGroupProfileError {}
 
-/// Typed placeholder for H-Group-specific conclusions.
-///
-/// Concrete inference state will be added here as numbered conventions are
-/// implemented; the type exists now so it never has to share an untyped bag
-/// with another framework.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-#[non_exhaustive]
-pub struct HGroupInferences {}
-
 /// Convention-specific conclusions kept separate from logical certainties.
 ///
 /// This is a closed registry parallel to [`SupportedConvention`]. Each newly
@@ -206,7 +198,7 @@ pub enum ConventionInferences {
     /// No meaning is assigned to why actions were taken.
     #[default]
     None,
-    HGroup(HGroupInferences),
+    HGroup(Box<HGroupInferences>),
 }
 
 /// Convention frameworks built into this engine.
@@ -293,6 +285,12 @@ pub trait ConventionFramework: RolloutPolicy {
     #[must_use]
     fn infer(&self, deductions: &LogicalDeductions) -> ConventionInferences;
 
+    /// Rule-legal actions that are also permitted by this framework.
+    #[must_use]
+    fn candidate_actions(&self, deductions: &LogicalDeductions) -> Vec<hanabi_core::Action> {
+        deductions.view().legal_actions()
+    }
+
     /// Samples one root world according to this framework's beliefs.
     ///
     /// The no-convention implementation preserves the exact card-copy-weighted
@@ -322,7 +320,9 @@ impl RolloutPolicy for SupportedConvention {
         deductions: &LogicalDeductions,
     ) -> Result<hanabi_core::Action, crate::PolicyError> {
         match self {
-            Self::None | Self::HGroup(_) => ConventionAgnosticPolicy.select_action(deductions),
+            Self::None => ConventionAgnosticPolicy.select_action(deductions),
+            Self::HGroup(profile) => select_h_group_action(deductions, *profile)
+                .ok_or(crate::PolicyError::NoConventionAction),
         }
     }
 
@@ -339,10 +339,21 @@ impl RolloutPolicy for SupportedConvention {
 }
 
 impl ConventionFramework for SupportedConvention {
-    fn infer(&self, _deductions: &LogicalDeductions) -> ConventionInferences {
+    fn infer(&self, deductions: &LogicalDeductions) -> ConventionInferences {
         match self {
             Self::None => ConventionInferences::None,
-            Self::HGroup(_) => ConventionInferences::HGroup(HGroupInferences::default()),
+            Self::HGroup(profile) => {
+                ConventionInferences::HGroup(Box::new(infer_h_group(deductions, *profile)))
+            }
+        }
+    }
+
+    fn candidate_actions(&self, deductions: &LogicalDeductions) -> Vec<hanabi_core::Action> {
+        match self {
+            Self::None => deductions.view().legal_actions(),
+            Self::HGroup(profile) => {
+                crate::h_group::h_group_candidate_actions(deductions, *profile)
+            }
         }
     }
 
@@ -352,7 +363,72 @@ impl ConventionFramework for SupportedConvention {
         rng: &mut R,
     ) -> Result<FullState, SampleError> {
         match self {
-            Self::None | Self::HGroup(_) => information_set.sample(rng),
+            Self::None => information_set.sample(rng),
+            Self::HGroup(profile) => {
+                let inferred = infer_h_group(information_set, *profile);
+                let constraints = inferred
+                    .cards
+                    .iter()
+                    .map(|card| (card.card, card.identities))
+                    .collect::<Vec<_>>();
+                let view = information_set.view();
+                let immediately_playable = IdentitySet::from_mask(
+                    IdentitySet::all()
+                        .iter()
+                        .filter(|identity| {
+                            identity.rank.number()
+                                == u8::try_from(view.play_stacks[identity.suit.index()].len())
+                                    .expect("a standard stack has at most five cards")
+                                    + 1
+                        })
+                        .fold(0, |mask, identity| mask | (1 << identity.index())),
+                );
+                let mut branches = vec![Vec::new()];
+                for promise in &inferred.connection_promises {
+                    let expected = IdentitySet::singleton(promise.identity);
+                    let wrong_success = immediately_playable.without(expected);
+                    let alternatives = promise
+                        .cards
+                        .iter()
+                        .enumerate()
+                        .map(|(correct, card)| {
+                            promise.cards[..correct]
+                                .iter()
+                                .copied()
+                                .map(|prior| (prior, wrong_success))
+                                .chain(core::iter::once((*card, expected)))
+                                .collect::<Vec<_>>()
+                        })
+                        .collect::<Vec<_>>();
+                    branches = branches
+                        .into_iter()
+                        .flat_map(|branch| {
+                            alternatives.iter().map(move |alternative| {
+                                branch
+                                    .iter()
+                                    .copied()
+                                    .chain(alternative.iter().copied())
+                                    .collect()
+                            })
+                        })
+                        .collect();
+                }
+                if inferred.connection_promises.is_empty() {
+                    information_set
+                        .sample_constrained(&constraints, rng)
+                        .or_else(|error| match error {
+                            SampleError::NoConsistentWorld => information_set.sample(rng),
+                            other @ SampleError::Determinization(_) => Err(other),
+                        })
+                } else {
+                    information_set
+                        .sample_constrained_branches(&constraints, &branches, rng)
+                        .or_else(|error| match error {
+                            SampleError::NoConsistentWorld => information_set.sample(rng),
+                            other @ SampleError::Determinization(_) => Err(other),
+                        })
+                }
+            }
         }
     }
 }
@@ -468,15 +544,16 @@ mod tests {
     }
 
     #[test]
-    fn h_group_profiles_are_cumulative_and_keep_extras_separate() {
+    fn h_group_profiles_are_cumulative_and_max_is_level_26() {
         let level_five = HGroupProfile::Level(HGroupLevel::Level5);
         assert!(level_five.includes(HGroupLevel::Level1));
         assert!(level_five.includes(HGroupLevel::Level5));
         assert!(!level_five.includes(HGroupLevel::Level6));
-        assert!(!level_five.includes_extras());
+        assert!(!level_five.is_max());
 
         assert!(HGroupProfile::Max.includes(HGroupLevel::Level25));
-        assert!(HGroupProfile::Max.includes_extras());
+        assert!(HGroupProfile::Max.is_max());
+        assert_eq!(HGroupProfile::Max.effective_level(), 26);
         assert_eq!("1".parse(), Ok(HGroupProfile::Level(HGroupLevel::Level1)));
         assert_eq!("25".parse(), Ok(HGroupProfile::Level(HGroupLevel::Level25)));
         assert!("0".parse::<HGroupProfile>().is_err());
@@ -513,10 +590,10 @@ mod tests {
         let deductions = LogicalDeductions::new(view).unwrap();
         let convention = SupportedConvention::HGroup(HGroupProfile::Level(HGroupLevel::Level3));
 
-        assert_eq!(
+        assert!(matches!(
             convention.infer(&deductions),
-            ConventionInferences::HGroup(HGroupInferences::default())
-        );
+            ConventionInferences::HGroup(inferred) if inferred.clues.is_empty()
+        ));
         assert_eq!(
             convention.profile(),
             Some(HGroupProfile::Level(HGroupLevel::Level3))

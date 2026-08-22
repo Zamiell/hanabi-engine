@@ -10,7 +10,7 @@ use serde::Serialize;
 
 use crate::{BenchmarkArguments, CliError, action_label, read_replay};
 
-const REPORT_SCHEMA_VERSION: u8 = 3;
+const REPORT_SCHEMA_VERSION: u8 = 4;
 
 #[derive(Serialize)]
 struct BenchmarkReport {
@@ -26,8 +26,7 @@ struct BenchmarkReport {
 
 #[derive(Serialize)]
 struct ConventionProfileReport {
-    maximum_level: u8,
-    extras: bool,
+    level: u8,
 }
 
 #[derive(Serialize)]
@@ -135,8 +134,7 @@ fn build_report(
             .convention
             .profile()
             .map(|profile| ConventionProfileReport {
-                maximum_level: profile.maximum_level().number(),
-                extras: profile.includes_extras(),
+                level: profile.effective_level(),
             }),
         convention_ruleset_revision: arguments.convention.ruleset_revision(),
         base_seed: arguments.seed,

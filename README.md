@@ -1,9 +1,13 @@
 # Hanabi Engine
 
-A Hanabi engine written in Rust. The first crate, `hanabi-core`, provides a
-deterministic standard-game simulator and player-safe observations. Search,
-belief modeling, conventions, and integration with Hanabi Live will be layered
-on top of this rules core.
+A Hanabi engine written in Rust. The workspace includes a deterministic
+standard-game simulator, player-safe observations, Hanabi Live replay parsing,
+hidden-world sampling, flat Monte Carlo and ISMCTS search, a deliberately
+convention-free baseline, and cumulative H-Group convention profiles.
+
+The current rules implementation targets standard five-suit Hanabi. The replay
+adapter accepts Hanabi Live no-variant games; variant-specific rules are not yet
+modeled.
 
 ## Architecture
 
@@ -12,60 +16,89 @@ on top of this rules core.
 - `PlayerView`: the legal observation projected for one player.
 - `LogicalDeductions`: convention-free certainties derived from direct clues,
   visible cards, and exact card-count elimination.
-- `InformationSet`: search-layer constraints and card-copy-weighted sampling of
-  worlds consistent with a `PlayerView`.
+- `InformationSet`: search-layer identity constraints and card-copy-weighted
+  sampling of worlds consistent with a `PlayerView`.
 - `ConventionInferences`: a closed, typed registry of framework-specific
   interpretations kept separate from logical truth.
 
-Action-selection code must consume `PlayerView`, `LogicalDeductions`, or the
-equivalent compact rollout observation, never `FullState`.
+Policy decisions consume `PlayerView`, `LogicalDeductions`, or the equivalent
+compact rollout observation. Search uses sampled `FullState` values to play
+hypothetical games forward, but hidden simulator truth is never exposed to a
+player's decision policy.
 
-The workspace currently contains:
+The workspace contains:
 
 - `hanabi-cli`: the `hanabi-engine` executable for analyzing actionable turns
-  from Hanabi Live replay JSON.
-- `hanabi-core`: deterministic rules, event history, observations, and sampled
-  world reconstruction.
-- `hanabi-search`: direct-clue/card-count information sets, reproducible
-  determinization, and a convention-agnostic rollout baseline. The baseline
-  acts only on certainly playable or useless cards, then falls back to the
-  oldest discard or (at full clues) the newest blind play. It never clues.
-  Logical feasibility uses compact 25-bit identity sets and exact Hall-capacity
-  matching. Exact assignment counts and card-copy sampling weights are
-  initialized lazily, with packed memoization keys and a reusable validated
-  determinization template. Rollouts incrementally retain clue facts and use a
-  compact history-free observation until convention-aware policy work begins. A
-  flat Monte Carlo evaluator compares every legal root action on the same
-  stream of sampled worlds and reports official score, raw stack progress,
-  terminal utility, and strikeout statistics. Search utility is
-  `official_score * 26 + raw_stack_score`: official score remains primary,
-  while raw progress distinguishes otherwise identical strikeout outcomes. A
-  single-observer ISMCTS implementation adds availability-aware UCB tree
-  selection, expansion, rollout, cooperative backpropagation, and robust-child
-  root selection. Search traversal reuses legal-action buffers, while the
-  non-diagnostic APIs avoid profiling timers entirely.
-- `SupportedConvention`: a concrete built-in convention selection. `none`
-  preserves the convention-agnostic baseline. `h-group` carries an explicit
-  cumulative profile: levels 1 through 25 include all preceding numbered
-  levels, while `max` means level 25 plus the unnumbered extras. Static
-  `CONVENTION_DESCRIPTORS` expose framework metadata without pretending every
-  parameterized selection can be enumerated. Every framework supplies both
-  rollout behavior and root-world sampling, so future convention beliefs cannot
-  be applied to one part of search and accidentally omitted from the other.
-  The H-Group selection and typed inference container are scaffolded, but its
-  actual move interpretations are not implemented yet and currently delegate
-  action selection and sampling to the convention-agnostic baseline.
-- `hanabi-protocol`: Hanabi Live compact replay parsing for standard games.
+  from Hanabi Live replay JSON and benchmarking both search modes.
+- `hanabi-core`: deterministic rules, complete state, event history, legal
+  player observations, and world determinization.
+- `hanabi-protocol`: Hanabi Live compact replay parsing and reconstruction for
+  standard no-variant games.
+- `hanabi-search`: logical deduction, information sets, convention
+  interpretation, rollout policies, flat Monte Carlo, ISMCTS, diagnostics, and
+  the high-level `best_move` API.
 
-The Hanabi Live compatibility test uses the sibling `hanabi-live` repository
-when it is available and otherwise skips that cross-repository assertion.
+The convention-free baseline plays the oldest certainly playable card.
+Otherwise, when discarding is legal, it discards the oldest certainly useless
+card or falls back to the oldest card. At full clue tokens, when discarding is
+illegal, it blind-plays the newest card. It never gives or interprets a clue.
+
+Logical feasibility uses compact 25-bit identity sets and exact Hall-capacity
+matching. Assignment counts and card-copy sampling weights are initialized
+lazily, with packed memoization keys and a reusable validated determinization
+template. Convention-free rollouts use a compact history-free observation;
+H-Group rollouts retain public history and convention state.
+
+Flat Monte Carlo compares every legal root action on the same stream of sampled
+worlds. Single-observer ISMCTS uses availability-aware UCB selection,
+expansion, rollout, cooperative backpropagation, and robust-child root
+selection. Both report official score, raw stack progress, terminal utility,
+strikeout statistics, and optional diagnostic timings. Search utility is
+`official_score * 26 + raw_stack_score`: official score remains primary, while
+raw progress distinguishes otherwise identical strikeout outcomes.
+
+## Convention support
+
+`SupportedConvention` is the closed registry used by the CLI and high-level
+API. `none` selects the convention-agnostic baseline. `h-group` requires a
+cumulative profile: levels 1 through 25 include all preceding levels, and
+`max` is the effective 26th level. The single machine-readable
+`H_GROUP_LEVELS` catalog contains all 26 entries.
+
+Every convention framework supplies rollout behavior,
+convention-permitted search actions, and root-world sampling. This prevents a
+clue from being interpreted under one belief model while search samples worlds
+under another. H-Group is pinned to the documentation revision exposed as
+`H_GROUP_RULESET_REVISION`. Its event-history interpreter records typed signals
+for play/save clues, connections, chop movement, tempo and stalls, special
+discards, bluffs, ejections and discharges, elimination, 5 tech, ignition,
+charms, and Priority. Ambiguous Prompt and layered-Finesse promises are sampled
+as exact mutually exclusive branches. Convention-inconsistent arbitrary inputs
+fall back to logical world sampling and safe default card behavior.
+
+See [the H-Group interpreter design](docs/h-group.md) for the complete level
+matrix and algorithm.
 
 ## Development
 
+The workspace uses Rust 2024 and supports Rust 1.85 or newer. Development from
+WSL works normally as long as the Rust toolchain is installed inside the WSL
+distribution.
+
+The checks below match the GitHub Actions workflow:
+
 ```sh
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
+cargo fmt --all -- --check
+cargo build --workspace --all-targets --all-features --locked
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --all-targets --all-features --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked
+cargo +1.85.0 check --workspace --all-targets --all-features --locked
 ```
+
+The Hanabi Live compatibility tests use the sibling `hanabi-live` repository
+when it is available and skip only those cross-repository assertions when it is
+absent.
 
 ## Analyze a Hanabi Live position
 
@@ -84,20 +117,24 @@ cargo run --release -p hanabi-cli --bin hanabi-engine -- \
 cargo run --release -p hanabi-cli --bin hanabi-engine -- \
   analyze /path/to/replay.json --turn 17 --convention h-group \
   --h-group-level 5 --iterations 10000 --seed 42
+
+cargo run --release -p hanabi-cli --bin hanabi-engine -- \
+  analyze /path/to/replay.json --turn 17 --convention h-group \
+  --h-group-level max --iterations 10000 --seed 42
 ```
 
-`--h-group-level` accepts `1` through `25`, or `max`. Level 5 means levels
-1-5 cumulatively; `max` additionally enables the unnumbered extras. H-Group
-analysis output records the source documentation revision implemented by the
-engine. Game variants will remain game-state metadata rather than convention
-selection metadata, so the convention interpreter cannot be configured for a
-different variant than the simulator.
+`--h-group-level` accepts `1` through `25`, or `max`. Level 5 means levels 1-5
+cumulatively; `max` is the effective cumulative level 26. H-Group analysis
+output records the source documentation revision implemented by the engine.
+Game variants remain game-state metadata rather than convention-selection
+metadata, so the convention interpreter cannot be configured for a different
+variant than the simulator.
 
 The report marks the selected action with `*`, uses slot 1 for the newest card,
 and includes official score, raw stack score, terminal utility, strikeout,
 visit, action-availability, and throughput data.
 
-Applications with an arbitrary legal `PlayerView` can use the library façade:
+Applications with an arbitrary legal `PlayerView` can use the library facade:
 
 ```rust
 let result = hanabi_search::best_move(
@@ -131,12 +168,13 @@ cargo run --release -p hanabi-cli --bin hanabi-engine -- \
   > benchmark.json
 ```
 
-The versioned JSON report records the selected convention and contains every
-trial's selected action, mean official score, raw stack score, terminal utility,
-strikeout rate, work count, elapsed
-time, and throughput. It also aggregates selection frequencies and reports
+The schema-version-4 JSON report records the selected convention and contains
+every trial's selected action, mean official score, raw stack score, terminal
+utility, strikeout rate, work count, elapsed time, and throughput. An H-Group
+profile is recorded as one effective `level` value, including `26` for `max`.
+The report also aggregates selection frequencies and reports
 `action_stability`, the fraction of trials choosing the most common action.
-Per-trial diagnostics break the work down into sampled worlds, explicit
+Per-trial diagnostics break work down into sampled worlds, explicit
 candidate-state clones, expanded tree nodes, search actions, rollouts, rollout
 turns, maximum tree depth, and time spent sampling, traversing the tree, and
 rolling out. Rollout time is further separated into observation, logical

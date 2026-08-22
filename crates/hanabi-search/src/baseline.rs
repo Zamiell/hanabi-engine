@@ -216,6 +216,7 @@ pub enum PolicyError {
     EmptyOwnHand,
     MissingPossibilities(CardId),
     CompactObservationUnsupported,
+    NoConventionAction,
 }
 
 impl fmt::Display for PolicyError {
@@ -234,6 +235,9 @@ impl fmt::Display for PolicyError {
             }
             Self::CompactObservationUnsupported => {
                 formatter.write_str("policy does not support compact rollout observations")
+            }
+            Self::NoConventionAction => {
+                formatter.write_str("the convention admits no action in this position")
             }
         }
     }

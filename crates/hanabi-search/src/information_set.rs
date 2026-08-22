@@ -53,8 +53,40 @@ pub struct PolicyDeductions<'a> {
 }
 
 impl IdentitySet {
-    const fn from_mask(mask: u32) -> Self {
-        Self(mask)
+    pub(crate) const ALL_MASK: u32 = (1 << CARD_IDENTITY_COUNT) - 1;
+
+    pub(crate) const fn from_mask(mask: u32) -> Self {
+        Self(mask & Self::ALL_MASK)
+    }
+
+    #[must_use]
+    pub const fn all() -> Self {
+        Self(Self::ALL_MASK)
+    }
+
+    #[must_use]
+    pub const fn singleton(card: Card) -> Self {
+        Self(1 << card.index())
+    }
+
+    #[must_use]
+    pub const fn contains(self, card: Card) -> bool {
+        self.0 & (1 << card.index()) != 0
+    }
+
+    #[must_use]
+    pub const fn intersection(self, other: Self) -> Self {
+        Self(self.0 & other.0)
+    }
+
+    #[must_use]
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    #[must_use]
+    pub const fn without(self, other: Self) -> Self {
+        Self(self.0 & !other.0)
     }
 
     #[must_use]
@@ -379,7 +411,110 @@ impl InformationSet {
     /// source observation. A successfully constructed information set always
     /// has at least one assignment.
     pub fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Result<FullState, SampleError> {
-        let completion_cache = self.completion_cache();
+        self.sample_with_masks(&self.constraint_masks, self.completion_cache(), rng)
+    }
+
+    /// Samples a world satisfying additional convention identity constraints.
+    ///
+    /// Sampling remains exact and card-copy weighted over the worlds admitted
+    /// by the intersection of direct clues and `constraints`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SampleError::NoConsistentWorld`] when the additional
+    /// constraints contradict direct clues or public card counts.
+    pub fn sample_constrained<R: Rng + ?Sized>(
+        &self,
+        constraints: &[(CardId, IdentitySet)],
+        rng: &mut R,
+    ) -> Result<FullState, SampleError> {
+        let masks = self.constrained_masks(constraints);
+        if masks.contains(&0) {
+            return Err(SampleError::NoConsistentWorld);
+        }
+        let cache = self.cache_for_masks(&masks);
+        if cache.hand_assignment_count == 0 {
+            return Err(SampleError::NoConsistentWorld);
+        }
+        self.sample_with_masks(&masks, &cache, rng)
+    }
+
+    /// Samples exactly from a union of mutually-exclusive convention branches.
+    /// Every branch is intersected with `constraints` and direct clue facts.
+    pub(crate) fn sample_constrained_branches<R: Rng + ?Sized>(
+        &self,
+        constraints: &[(CardId, IdentitySet)],
+        branches: &[Vec<(CardId, IdentitySet)>],
+        rng: &mut R,
+    ) -> Result<FullState, SampleError> {
+        if branches.is_empty() {
+            return self.sample_constrained(constraints, rng);
+        }
+        let base_masks = self.constrained_masks(constraints);
+        let mut admitted = Vec::new();
+        let mut total = 0_u64;
+        for branch in branches {
+            let mut masks = base_masks.clone();
+            self.intersect_masks(&mut masks, branch);
+            if masks.contains(&0) {
+                continue;
+            }
+            let cache = self.cache_for_masks(&masks);
+            if cache.hand_assignment_count == 0 {
+                continue;
+            }
+            total += cache.hand_assignment_count;
+            admitted.push((masks, cache));
+        }
+        if total == 0 {
+            return Err(SampleError::NoConsistentWorld);
+        }
+        let mut draw = rng.random_range(0..total);
+        for (masks, cache) in &admitted {
+            if draw < cache.hand_assignment_count {
+                return self.sample_with_masks(masks, cache, rng);
+            }
+            draw -= cache.hand_assignment_count;
+        }
+        Err(SampleError::NoConsistentWorld)
+    }
+
+    fn constrained_masks(&self, constraints: &[(CardId, IdentitySet)]) -> Vec<u32> {
+        let mut masks = self.constraint_masks.clone();
+        self.intersect_masks(&mut masks, constraints);
+        masks
+    }
+
+    fn intersect_masks(&self, masks: &mut [u32], constraints: &[(CardId, IdentitySet)]) {
+        for (card, identities) in constraints {
+            let Some(slot) = self
+                .deductions
+                .unknown_hand_cards
+                .iter()
+                .position(|candidate| candidate == card)
+            else {
+                continue;
+            };
+            masks[slot] &= identities.0;
+        }
+    }
+
+    fn cache_for_masks(&self, masks: &[u32]) -> CompletionCache {
+        let mut counts = self.remaining_counts;
+        let mut completion_memo = HashMap::new();
+        let hand_assignment_count = count_completions(masks, 0, &mut counts, &mut completion_memo);
+        CompletionCache {
+            hand_assignment_count,
+            completion_memo,
+        }
+    }
+
+    fn sample_with_masks<R: Rng + ?Sized>(
+        &self,
+        masks: &[u32],
+        completion_cache: &CompletionCache,
+        rng: &mut R,
+    ) -> Result<FullState, SampleError> {
         let mut counts = self.remaining_counts;
         let placeholder = Card::new(Suit::Red, Rank::One);
         let mut cards = self
@@ -400,13 +535,13 @@ impl InformationSet {
             let mut total_weight = 0_u64;
             for index in 0..CARD_IDENTITY_COUNT {
                 let copies = counts[index];
-                if copies == 0 || self.constraint_masks[slot] & (1 << index) == 0 {
+                if copies == 0 || masks[slot] & (1 << index) == 0 {
                     continue;
                 }
                 counts[index] -= 1;
                 let completions = cached_completions(
                     slot + 1,
-                    self.constraint_masks.len(),
+                    masks.len(),
                     counts,
                     &completion_cache.completion_memo,
                 );

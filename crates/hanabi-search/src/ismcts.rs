@@ -6,8 +6,8 @@ use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::rollout::rollout_for_search;
 use crate::{
-    ConventionFramework, InformationSet, MAX_TERMINAL_UTILITY, RolloutError, RolloutPolicy,
-    SampleError, SearchDiagnostics, terminal_utility,
+    ConventionFramework, InformationSet, InformationSetError, LogicalDeductions,
+    MAX_TERMINAL_UTILITY, RolloutError, SampleError, SearchDiagnostics, terminal_utility,
 };
 
 const MAX_TREE_DEPTH: u32 = 512;
@@ -110,7 +110,7 @@ fn run_ismcts<P: ConventionFramework>(
 ) -> Result<IsmctsReport, IsmctsError> {
     let search_started = measure_timing.then(Instant::now);
     validate_config(config)?;
-    if information_set.view().legal_actions().is_empty() {
+    if rollout_policy.candidate_actions(information_set).is_empty() {
         return Err(IsmctsError::NoLegalActions);
     }
 
@@ -268,7 +268,7 @@ struct SimulationContext<'a, P, R: ?Sized> {
     measure_timing: bool,
 }
 
-fn simulate<P: RolloutPolicy, R: Rng + ?Sized>(
+fn simulate<P: ConventionFramework, R: Rng + ?Sized>(
     node: &mut Node,
     mut state: FullState,
     depth: u32,
@@ -284,7 +284,15 @@ fn simulate<P: RolloutPolicy, R: Rng + ?Sized>(
     }
 
     let actor = state.current_player();
-    state.legal_actions_into(context.legal_actions);
+    let view = state
+        .view_for(actor)
+        .ok_or(IsmctsError::InvalidCurrentPlayer(actor))?;
+    let deductions = LogicalDeductions::new(view)
+        .map_err(|source| IsmctsError::TreeInformationSet { depth, source })?;
+    context.legal_actions.clear();
+    context
+        .legal_actions
+        .extend(context.rollout_policy.candidate_actions(&deductions));
     if context.legal_actions.is_empty() {
         return Err(IsmctsError::NoLegalTreeActions { depth, actor });
     }
@@ -456,6 +464,10 @@ pub enum IsmctsError {
         depth: u32,
         actor: PlayerId,
     },
+    TreeInformationSet {
+        depth: u32,
+        source: InformationSetError,
+    },
     TreeAction {
         depth: u32,
         action: Action,
@@ -500,6 +512,12 @@ impl fmt::Display for IsmctsError {
                     "player {actor} has no legal action at tree depth {depth}"
                 )
             }
+            Self::TreeInformationSet { depth, source } => {
+                write!(
+                    formatter,
+                    "invalid information set at tree depth {depth}: {source}"
+                )
+            }
             Self::TreeAction {
                 depth,
                 action,
@@ -530,6 +548,7 @@ impl std::error::Error for IsmctsError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Sample { source, .. } => Some(source),
+            Self::TreeInformationSet { source, .. } => Some(source),
             Self::TreeAction { source, .. } => Some(source),
             Self::Rollout { source, .. } => Some(source),
             Self::ZeroIterations

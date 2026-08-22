@@ -4,6 +4,7 @@ pub mod analysis;
 pub mod baseline;
 pub mod convention;
 pub mod diagnostics;
+pub mod h_group;
 pub mod information_set;
 pub mod ismcts;
 pub mod monte_carlo;
@@ -15,10 +16,16 @@ pub use baseline::{
 };
 pub use convention::{
     CONVENTION_DESCRIPTORS, ConventionDescriptor, ConventionFramework, ConventionInferences,
-    H_GROUP_RULESET_REVISION, HGroupInferences, HGroupLevel, HGroupProfile, ParseConventionError,
+    H_GROUP_RULESET_REVISION, HGroupLevel, HGroupProfile, ParseConventionError,
     ParseHGroupProfileError, SupportedConvention,
 };
 pub use diagnostics::SearchDiagnostics;
+pub use h_group::{
+    H_GROUP_LEVELS, HGroupClueInterpretation, HGroupClueKind, HGroupConnection,
+    HGroupConnectionKind, HGroupConnectionPromise, HGroupInferences, HGroupLevelDescriptor,
+    HGroupMoveKind, HGroupPhase, HGroupSaveKind, HGroupSignal, enabled_h_group_levels,
+    infer_h_group,
+};
 pub use information_set::{
     IdentitySet, InformationSet, InformationSetError, LogicalDeductions, PolicyDeductions,
     SampleError,
