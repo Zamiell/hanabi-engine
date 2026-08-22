@@ -361,6 +361,7 @@ struct LiveActionArguments {
     seed: u64,
     exploration: f64,
     convention: SupportedConvention,
+    include_search_details: bool,
 }
 
 enum Command {
@@ -540,6 +541,7 @@ fn parse_live_action_arguments(
     let mut exploration = core::f64::consts::SQRT_2;
     let mut convention = None;
     let mut h_group_profile = None;
+    let mut include_search_details = false;
 
     while let Some(flag) = arguments.next() {
         match flag.as_str() {
@@ -567,6 +569,7 @@ fn parse_live_action_arguments(
                     &next_value(arguments, "--h-group-level")?,
                 )?);
             }
+            "--include-search-details" => include_search_details = true,
             "--help" | "-h" => return Ok(None),
             _ => return Err(CliError::Usage(format!("unknown option {flag:?}"))),
         }
@@ -593,6 +596,7 @@ fn parse_live_action_arguments(
         seed,
         exploration,
         convention,
+        include_search_details,
     }))
 }
 
@@ -651,6 +655,7 @@ fn usage() -> &'static str {
      --exploration <X>      ISMCTS UCB coefficient (default: sqrt(2))\n  \
      --convention <none|h-group>  Convention framework (default: h-group)\n  \
      --h-group-level <1-25|max>   H-Group profile (default: max)\n\n\
+     --include-search-details     Emit an action envelope with diagnostic evidence\n\n\
      Live-session accepts one initialize request followed by append requests as NDJSON.\n\
      It emits one action or error JSON object per input line.\n\n\
      Benchmark writes a versioned JSON report to standard output."

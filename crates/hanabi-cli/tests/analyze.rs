@@ -136,6 +136,42 @@ fn live_session_serves_multiple_requests_from_one_process() {
 }
 
 #[test]
+fn live_session_can_emit_player_safe_search_details() {
+    let initialize = serde_json::json!({
+        "kind": "initialize",
+        "snapshot": live_snapshot(),
+    });
+    let mut child = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
+        .args([
+            "live-session",
+            "--iterations",
+            "1",
+            "--seed",
+            "42",
+            "--include-search-details",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    writeln!(child.stdin.take().unwrap(), "{initialize}").unwrap();
+    let output = child.wait_with_output().unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(response["action"]["tableID"], 17);
+    assert_eq!(response["search"]["mode"], "ismcts");
+    assert!(response["search"]["rootActions"].is_array());
+    assert!(response["logicalDeductions"]["ownCards"].is_array());
+    assert_eq!(response["conventionInferences"]["framework"], "h-group");
+}
+
+#[test]
 fn rejects_an_unregistered_convention() {
     let output = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
         .args([

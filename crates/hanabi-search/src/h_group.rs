@@ -494,14 +494,9 @@ pub(crate) fn h_group_candidate_actions(
         }
     }
 
-    if let Some(connection) = inferred.connection {
-        let mut actions = clue_candidates
-            .iter()
-            .filter(|candidate| candidate.score >= 450)
-            .map(|candidate| candidate.action)
-            .collect::<Vec<_>>();
-        actions.push(Action::Play(connection.card));
-        actions.dedup();
+    if let Some(actions) = inferred.connection.and_then(|connection| {
+        legal_connection_actions(connection, &clue_candidates, &legal_actions)
+    }) {
         return actions;
     }
 
@@ -581,6 +576,22 @@ pub(crate) fn h_group_candidate_actions(
     own_hand
         .last()
         .map_or_else(Vec::new, |newest| vec![Action::Play(newest.id)])
+}
+
+fn legal_connection_actions(
+    connection: HGroupConnection,
+    clue_candidates: &[ClueCandidate],
+    legal_actions: &[Action],
+) -> Option<Vec<Action>> {
+    let mut actions = clue_candidates
+        .iter()
+        .filter(|candidate| candidate.score >= 450)
+        .map(|candidate| candidate.action)
+        .chain(core::iter::once(Action::Play(connection.card)))
+        .collect::<Vec<_>>();
+    actions.dedup();
+    actions.retain(|action| legal_actions.contains(action));
+    (!actions.is_empty()).then_some(actions)
 }
 
 fn ordered_playable_cards(
@@ -4088,6 +4099,29 @@ mod tests {
                 focus: CardId::new(10),
             })
         );
+
+        // A reconstructed or otherwise arbitrary view can invalidate a
+        // convention promise while retaining its public clue history. Such a
+        // stale promise must never escape as an illegal search candidate.
+        let mut stale_view = state.view_for(PlayerId::new(1)).unwrap();
+        stale_view.hands[1]
+            .iter_mut()
+            .find(|card| card.id == CardId::new(9))
+            .unwrap()
+            .id = CardId::new(15);
+        let stale_deductions = LogicalDeductions::new(stale_view).unwrap();
+        let stale_legal = stale_deductions.view().legal_actions();
+        let stale_candidates = h_group_candidate_actions(
+            &stale_deductions,
+            HGroupProfile::Level(crate::HGroupLevel::Level1),
+        );
+        assert!(!stale_candidates.contains(&Action::Play(CardId::new(9))));
+        assert!(
+            stale_candidates
+                .iter()
+                .all(|action| stale_legal.contains(action))
+        );
+
         let finesse = crate::RolloutPolicy::select_action(&convention, &deductions).unwrap();
         assert_eq!(finesse, Action::Play(CardId::new(9)));
         state.apply(finesse).unwrap();

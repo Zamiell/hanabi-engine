@@ -176,7 +176,24 @@ cards with simulator truth. The live command defaults to ISMCTS with 1,000
 iterations and H-Group `max`. Searches run on background workers, independently
 per table, so the WebSocket receive loop remains responsive. A failed engine
 session is restarted from the complete scrubbed snapshot, and a dropped server
-connection is reauthenticated with bounded exponential backoff.
+connection is reauthenticated with bounded exponential backoff. On either an
+in-process reconnect or a complete launcher restart, the bot reattends its
+ongoing table from the server's `playingAtTables` welcome field and rebuilds
+its incremental engine session from the authoritative action list. `Ctrl+C`
+and `SIGTERM` take the clean shutdown path and do not trigger reconnection.
+
+Every launcher invocation writes a player-safe diagnostic bundle by default to
+`logs/hanabi-live/<UTC-start-time>-<process-id>/`. `bot.log` mirrors console
+messages, `run.json` records the non-secret engine configuration, and
+`events.jsonl` indexes every decision. Each table subdirectory contains the
+complete scrubbed snapshot seen by the bot, the exact request and response for
+each engine attempt, and the final sent/stale/failed result. Detailed responses
+include direct-clue/card-count identity possibilities, convention inferences,
+all root candidates, and their ISMCTS or flat Monte Carlo statistics. These
+snapshots and diagnostics do not reveal the bot's hidden card identities or
+contain its password or session cookie. A `*.snapshot.json` file can be passed
+directly to `hanabi-engine live-action` with the options recorded in `run.json`
+to reproduce and diagnose the position.
 
 Use a dedicated Hanabi Live bot account, then build the release binary and set
 up the one Python dependency:

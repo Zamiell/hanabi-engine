@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import atexit
 import concurrent.futures
+import datetime
 import http.cookies
 import json
 import os
 import queue
+import signal
 import subprocess
 import sys
 import threading
@@ -32,10 +35,239 @@ DEFAULT_ENGINE_TIMEOUT = 180.0
 INITIAL_RECONNECT_DELAY = 1.0
 MAX_RECONNECT_DELAY = 30.0
 STABLE_CONNECTION_SECONDS = 30.0
+TRACE_SCHEMA_VERSION = 1
+
+_LOG_LOCK = threading.Lock()
+_LOG_STREAM: Any = None
+
+
+def configure_log_file(path: Path) -> None:
+    global _LOG_STREAM
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _LOG_LOCK:
+        if _LOG_STREAM is not None:
+            _LOG_STREAM.close()
+        _LOG_STREAM = path.open("a", encoding="utf-8", buffering=1)
+
+
+def close_log_file() -> None:
+    global _LOG_STREAM
+    with _LOG_LOCK:
+        stream = _LOG_STREAM
+        _LOG_STREAM = None
+        if stream is not None:
+            stream.close()
+
+
+atexit.register(close_log_file)
 
 
 def log(message: str) -> None:
-    print(message, flush=True)
+    with _LOG_LOCK:
+        print(message, flush=True)
+        if _LOG_STREAM is not None:
+            timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            try:
+                _LOG_STREAM.write(f"{timestamp} {message}\n")
+            except OSError:
+                # Console logging must remain usable if the trace volume disappears.
+                pass
+
+
+class TraceRecorder:
+    """Writes player-safe, replayable diagnostics for one bridge invocation."""
+
+    def __init__(self, root: Path, metadata: dict[str, Any]) -> None:
+        root.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.datetime.now(datetime.timezone.utc).strftime(
+            "%Y%m%dT%H%M%S.%fZ"
+        )
+        candidate = root / f"{timestamp}-{os.getpid()}"
+        suffix = 1
+        while candidate.exists():
+            candidate = root / f"{timestamp}-{os.getpid()}-{suffix}"
+            suffix += 1
+        candidate.mkdir()
+        self.run_directory = candidate
+        self.events_path = candidate / "events.jsonl"
+        self.lock = threading.RLock()
+        self.next_decision_id = 1
+        manifest = {
+            "schemaVersion": TRACE_SCHEMA_VERSION,
+            "startedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            **metadata,
+        }
+        self._write_json(candidate / "run.json", manifest)
+
+    def begin_decision(
+        self,
+        table_id: int,
+        turn: int,
+        action_count: int,
+        generation: int,
+        snapshot: dict[str, Any],
+    ) -> dict[str, Any]:
+        with self.lock:
+            decision_id = self.next_decision_id
+            self.next_decision_id += 1
+            stem = f"decision-{decision_id:06d}-turn-{turn:06d}"
+            table_directory = self.run_directory / "tables" / str(table_id)
+            table_directory.mkdir(parents=True, exist_ok=True)
+            snapshot_path = table_directory / f"{stem}.snapshot.json"
+            self._write_json(snapshot_path, snapshot)
+            context = {
+                "decisionId": decision_id,
+                "tableID": table_id,
+                "turn": turn,
+                "actionCount": action_count,
+                "generation": generation,
+                "stem": stem,
+                "tableDirectory": table_directory,
+            }
+            self._record_event(
+                "decisionStarted",
+                context,
+                {"snapshot": self._relative(snapshot_path)},
+            )
+            return context
+
+    def record_request(
+        self,
+        context: dict[str, Any],
+        attempt: int,
+        payload: dict[str, Any],
+    ) -> None:
+        path = self._decision_path(context, f"attempt-{attempt:02d}.request.json")
+        self._write_json(path, payload)
+        self._record_event(
+            "engineRequest",
+            context,
+            {"attempt": attempt, "request": self._relative(path)},
+        )
+
+    def record_response(
+        self,
+        context: dict[str, Any],
+        attempt: int,
+        response: dict[str, Any],
+    ) -> None:
+        path = self._decision_path(context, f"attempt-{attempt:02d}.response.json")
+        self._write_json(path, response)
+        self._record_event(
+            "engineResponse",
+            context,
+            {"attempt": attempt, "response": self._relative(path)},
+        )
+
+    def record_engine_error(
+        self,
+        context: dict[str, Any],
+        attempt: int,
+        error: Exception,
+    ) -> None:
+        path = self._decision_path(context, f"attempt-{attempt:02d}.error.json")
+        self._write_json(path, {"error": str(error)})
+        self._record_event(
+            "engineError",
+            context,
+            {"attempt": attempt, "error": str(error), "details": self._relative(path)},
+        )
+
+    def finish_decision(
+        self,
+        context: dict[str, Any],
+        status: str,
+        *,
+        action: dict[str, Any] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        result: dict[str, Any] = {"status": status}
+        if action is not None:
+            result["action"] = action
+        if error is not None:
+            result["error"] = str(error)
+        path = self._decision_path(context, "result.json")
+        self._write_json(path, result)
+        self._record_event(
+            "decisionFinished",
+            context,
+            {**result, "result": self._relative(path)},
+        )
+
+    def _decision_path(self, context: dict[str, Any], suffix: str) -> Path:
+        return context["tableDirectory"] / f"{context['stem']}.{suffix}"
+
+    def _relative(self, path: Path) -> str:
+        return path.relative_to(self.run_directory).as_posix()
+
+    def _record_event(
+        self,
+        kind: str,
+        context: dict[str, Any],
+        details: dict[str, Any],
+    ) -> None:
+        event = {
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "kind": kind,
+            "decisionId": context["decisionId"],
+            "tableID": context["tableID"],
+            "turn": context["turn"],
+            **details,
+        }
+        with self.lock:
+            with self.events_path.open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(event, separators=(",", ":")) + "\n")
+
+    @staticmethod
+    def _write_json(path: Path, value: Any) -> None:
+        temporary = path.with_name(
+            f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
+        )
+        try:
+            with temporary.open("w", encoding="utf-8") as stream:
+                json.dump(value, stream, indent=2, ensure_ascii=False)
+                stream.write("\n")
+            os.replace(temporary, path)
+        finally:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
+
+
+def engine_environment() -> dict[str, str]:
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if key not in {"HANABI_USERNAME", "HANABI_PASSWORD"}
+    }
+
+
+def validate_engine_binary(engine: Path) -> None:
+    try:
+        result = subprocess.run(
+            [str(engine), "--help"],
+            text=True,
+            capture_output=True,
+            timeout=10,
+            check=False,
+            env=engine_environment(),
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise EngineProcessError(f"could not inspect engine binary: {error}") from error
+    help_text = result.stdout + result.stderr
+    if result.returncode != 0:
+        detail = help_text.strip() or f"exit status {result.returncode}"
+        raise EngineProcessError(f"engine self-check failed: {detail}")
+    if (
+        "hanabi-engine live-session" not in help_text
+        or "--include-search-details" not in help_text
+    ):
+        raise EngineProcessError(
+            "engine binary is older than the live bridge and does not support "
+            "the detailed live-session protocol; rebuild it with "
+            "'cargo build --release --locked'"
+        )
 
 
 def authenticate(base_url: str, username: str, password: str) -> tuple[str, str]:
@@ -147,11 +379,6 @@ class PersistentEngine:
         with self.process_lock:
             if self.process is not None and self.process.poll() is None:
                 return
-            environment = {
-                key: value
-                for key, value in os.environ.items()
-                if key not in {"HANABI_USERNAME", "HANABI_PASSWORD"}
-            }
             try:
                 self.process = subprocess.Popen(
                     self.command,
@@ -160,7 +387,7 @@ class PersistentEngine:
                     stderr=subprocess.PIPE,
                     text=True,
                     bufsize=1,
-                    env=environment,
+                    env=engine_environment(),
                 )
             except OSError as error:
                 raise EngineProcessError(f"could not start engine: {error}") from error
@@ -247,6 +474,7 @@ class HanabiEngineBot:
         engine_timeout: float = DEFAULT_ENGINE_TIMEOUT,
         authenticator: Callable[[str, str, str], tuple[str, str]] = authenticate,
         engine_factory: Callable[[list[str], float], PersistentEngine] = PersistentEngine,
+        trace_recorder: TraceRecorder | None = None,
     ) -> None:
         self.base_url = base_url
         self.username = username
@@ -256,6 +484,7 @@ class HanabiEngineBot:
         self.engine_timeout = engine_timeout
         self.authenticator = authenticator
         self.engine_factory = engine_factory
+        self.trace_recorder = trace_recorder
         self.tables: dict[int, dict[str, Any]] = {}
         self.games: dict[int, dict[str, Any]] = {}
         self.ws: Any = None
@@ -279,6 +508,8 @@ class HanabiEngineBot:
                         self.username,
                         self.password,
                     )
+                    if self.stop_event.is_set():
+                        break
                     app = websocket.WebSocketApp(
                         ws_url,
                         cookie=cookie,
@@ -316,13 +547,22 @@ class HanabiEngineBot:
             self.shutdown()
 
     def shutdown(self) -> None:
+        self.stop()
+        self._reset_connection()
+        self.executor.shutdown(wait=True, cancel_futures=True)
+
+    def stop(self) -> None:
+        """Requests a clean shutdown without allowing a reconnect."""
+        already_stopping = self.stop_event.is_set()
         self.stop_event.set()
         with self.lock:
             ws = self.ws
-        if ws is not None:
-            ws.close()
-        self._reset_connection()
-        self.executor.shutdown(wait=True, cancel_futures=True)
+        if ws is not None and not already_stopping:
+            try:
+                ws.close()
+            except Exception as error:
+                if self.debug:
+                    log(f"WebSocket close failed during shutdown: {error}")
 
     def on_open(self, _ws: websocket.WebSocketApp) -> None:
         with self.lock:
@@ -379,6 +619,18 @@ class HanabiEngineBot:
     def handle_welcome(self, data: dict[str, Any]) -> None:
         self.username = str(data["username"])
         log(f"Authenticated as {self.username}.")
+        playing_at_tables = data.get("playingAtTables", [])
+        if playing_at_tables:
+            table_id = int(playing_at_tables[0])
+            if len(playing_at_tables) > 1:
+                log(
+                    "Account is seated at multiple ongoing tables; "
+                    f"reattending table {table_id} first."
+                )
+            else:
+                log(f"Reattending ongoing table {table_id}.")
+            self.send("tableReattend", {"tableID": table_id})
+            return
         log(f"To invite the bot, privately message it: /msg {self.username} /join")
 
     @staticmethod
@@ -511,6 +763,7 @@ class HanabiEngineBot:
             turn = int(game["turn"])
             action_count = len(game["actions"])
             generation = int(game["generation"])
+            snapshot = self._snapshot(game, action_count)
         try:
             self.executor.submit(
                 self._decide,
@@ -518,6 +771,7 @@ class HanabiEngineBot:
                 turn,
                 action_count,
                 generation,
+                snapshot,
             )
         except RuntimeError:
             with self.lock:
@@ -531,9 +785,28 @@ class HanabiEngineBot:
         turn: int,
         action_count: int,
         generation: int,
+        snapshot: dict[str, Any],
     ) -> None:
+        trace_context = None
         try:
-            action = self._request_action(table_id, action_count, generation)
+            trace_context = self._trace(
+                "begin_decision",
+                table_id,
+                turn,
+                action_count,
+                generation,
+                snapshot,
+            )
+            engine_response = self._request_action(
+                table_id,
+                action_count,
+                generation,
+                trace_context,
+            )
+            action_value = engine_response.get("action", engine_response)
+            if not isinstance(action_value, dict):
+                raise EngineProcessError("engine response action is not a JSON object")
+            action = action_value
             with self.lock:
                 game = self.games.get(table_id)
                 current = (
@@ -545,17 +818,38 @@ class HanabiEngineBot:
                 )
             if not current:
                 log(f"Discarding stale engine result for table {table_id}, turn {turn}.")
+                if trace_context is not None:
+                    self._trace(
+                        "finish_decision",
+                        trace_context,
+                        "stale",
+                        action=action,
+                    )
                 return
             if int(action.get("tableID", -1)) != table_id:
                 raise EngineProcessError("engine response targets the wrong table")
             log(f"Table {table_id}, turn {turn}: sending {action}")
             self.send("action", action)
+            if trace_context is not None:
+                self._trace(
+                    "finish_decision",
+                    trace_context,
+                    "sent",
+                    action=action,
+                )
             with self.lock:
                 game = self.games.get(table_id)
                 if game is not None and game["generation"] == generation:
                     game["lastDecidedTurn"] = turn
         except (EngineProcessError, OSError, TypeError, ValueError) as error:
             log(f"Engine failed on table {table_id}, turn {turn}: {error}")
+            if trace_context is not None:
+                self._trace(
+                    "finish_decision",
+                    trace_context,
+                    "failed",
+                    error=error,
+                )
         finally:
             with self.lock:
                 game = self.games.get(table_id)
@@ -567,9 +861,10 @@ class HanabiEngineBot:
         table_id: int,
         action_count: int,
         generation: int,
+        trace_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         last_error: EngineProcessError | None = None
-        for _attempt in range(2):
+        for attempt in range(1, 3):
             with self.lock:
                 game = self.games.get(table_id)
                 if game is None or game["generation"] != generation:
@@ -592,23 +887,21 @@ class HanabiEngineBot:
                         "actions": game["actions"][synced:action_count],
                     }
                 else:
-                    snapshot = {
-                        key: game[key]
-                        for key in (
-                            "tableID",
-                            "playerNames",
-                            "ourPlayerIndex",
-                            "spectating",
-                            "replay",
-                            "options",
-                        )
-                    }
-                    snapshot["actions"] = game["actions"][:action_count]
+                    snapshot = self._snapshot(game, action_count)
                     payload = {"kind": "initialize", "snapshot": snapshot}
+            if trace_context is not None:
+                self._trace("record_request", trace_context, attempt, payload)
             try:
                 response = engine.request(payload)
             except EngineProcessError as error:
                 last_error = error
+                if trace_context is not None:
+                    self._trace(
+                        "record_engine_error",
+                        trace_context,
+                        attempt,
+                        error,
+                    )
                 with self.lock:
                     game = self.games.get(table_id)
                     if game is not None and game.get("engine") is engine:
@@ -617,6 +910,13 @@ class HanabiEngineBot:
                         game["syncedActions"] = 0
                 engine.close()
                 continue
+            if trace_context is not None:
+                self._trace(
+                    "record_response",
+                    trace_context,
+                    attempt,
+                    response,
+                )
             with self.lock:
                 game = self.games.get(table_id)
                 if game is None or game["generation"] != generation:
@@ -626,6 +926,31 @@ class HanabiEngineBot:
             return response
         assert last_error is not None
         raise last_error
+
+    @staticmethod
+    def _snapshot(game: dict[str, Any], action_count: int) -> dict[str, Any]:
+        snapshot = {
+            key: game[key]
+            for key in (
+                "tableID",
+                "playerNames",
+                "ourPlayerIndex",
+                "spectating",
+                "replay",
+                "options",
+            )
+        }
+        snapshot["actions"] = game["actions"][:action_count]
+        return snapshot
+
+    def _trace(self, method: str, *args: Any, **kwargs: Any) -> Any:
+        if self.trace_recorder is None:
+            return None
+        try:
+            return getattr(self.trace_recorder, method)(*args, **kwargs)
+        except OSError as error:
+            log(f"Could not write Hanabi Live trace data: {error}")
+            return None
 
     @staticmethod
     def _update_progress(game: dict[str, Any], action: dict[str, Any]) -> None:
@@ -715,8 +1040,34 @@ def parse_arguments() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def run_with_signal_handlers(bot: HanabiEngineBot) -> None:
+    previous_handlers: dict[signal.Signals, Any] = {}
+
+    def handle_shutdown(signum: int, _frame: Any) -> None:
+        if bot.stop_event.is_set():
+            return
+        signal_name = signal.Signals(signum).name
+        log(f"Received {signal_name}; shutting down.")
+        bot.stop()
+
+    shutdown_signals = [signal.SIGINT]
+    if hasattr(signal, "SIGTERM"):
+        shutdown_signals.append(signal.SIGTERM)
+    for shutdown_signal in shutdown_signals:
+        previous_handlers[shutdown_signal] = signal.signal(
+            shutdown_signal,
+            handle_shutdown,
+        )
+    try:
+        bot.run()
+    finally:
+        for shutdown_signal, previous_handler in previous_handlers.items():
+            signal.signal(shutdown_signal, previous_handler)
+
+
 def main() -> int:
     arguments = parse_arguments()
+    repository = Path(__file__).resolve().parents[1]
     if websocket is None:
         log(
             "error: websocket-client is not installed; run "
@@ -734,6 +1085,11 @@ def main() -> int:
             f"error: engine binary not found at {engine}; "
             "run 'cargo build --release --locked'"
         )
+        return 2
+    try:
+        validate_engine_binary(engine)
+    except EngineProcessError as error:
+        log(f"error: {error}")
         return 2
     if arguments.iterations <= 0 or arguments.samples <= 0:
         log("error: search budgets must be positive")
@@ -761,6 +1117,7 @@ def main() -> int:
         str(arguments.seed),
         "--convention",
         arguments.convention,
+        "--include-search-details",
     ]
     if arguments.exploration is not None:
         engine_command.extend(["--exploration", str(arguments.exploration)])
@@ -772,15 +1129,37 @@ def main() -> int:
         if arguments.convention == "h-group"
         else "no convention"
     )
+    trace_root = repository / "logs" / "hanabi-live"
+    try:
+        trace_recorder = TraceRecorder(
+            trace_root,
+            {
+                "baseURL": arguments.base_url,
+                "username": username,
+                "profile": profile,
+                "engineCommand": engine_command,
+                "engineTimeoutSeconds": arguments.engine_timeout,
+            },
+        )
+        configure_log_file(trace_recorder.run_directory / "bot.log")
+    except OSError as error:
+        log(f"error: could not create the default trace directory: {error}")
+        return 2
     log(f"Connecting to {arguments.base_url} with {profile}.")
-    HanabiEngineBot(
+    log(f"Writing player-safe traces to {trace_recorder.run_directory}.")
+    bot = HanabiEngineBot(
         base_url=arguments.base_url,
         engine_command=engine_command,
         username=username,
         password=password,
         debug=arguments.debug,
         engine_timeout=arguments.engine_timeout,
-    ).run()
+        trace_recorder=trace_recorder,
+    )
+    try:
+        run_with_signal_handlers(bot)
+    finally:
+        close_log_file()
     return 0
 
 

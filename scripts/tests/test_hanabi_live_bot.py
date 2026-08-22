@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import signal
 import sys
+import tempfile
 import threading
 import time
 import types
@@ -59,6 +61,17 @@ class RecordingEngine:
         self.closed = True
 
 
+class DetailedRecordingEngine(RecordingEngine):
+    def request(self, payload: dict[str, Any]) -> dict[str, Any]:
+        response = super().request(payload)
+        return {
+            "action": response,
+            "logicalDeductions": {"ownCards": []},
+            "conventionInferences": {"framework": "h-group"},
+            "search": {"mode": "ismcts", "rootActions": []},
+        }
+
+
 class BlockingEngine(RecordingEngine):
     started = threading.Barrier(3)
     release = threading.Event()
@@ -103,7 +116,10 @@ def wait_until(predicate: Any, timeout: float = 2.0) -> None:
     raise AssertionError("condition was not satisfied before timeout")
 
 
-def make_bot(engine_factory: Any) -> tuple[bridge.HanabiEngineBot, FakeWebSocket]:
+def make_bot(
+    engine_factory: Any,
+    trace_recorder: bridge.TraceRecorder | None = None,
+) -> tuple[bridge.HanabiEngineBot, FakeWebSocket]:
     bot = bridge.HanabiEngineBot(
         base_url="http://example.invalid",
         engine_command=["fake-engine", "live-session"],
@@ -111,6 +127,7 @@ def make_bot(engine_factory: Any) -> tuple[bridge.HanabiEngineBot, FakeWebSocket
         password="secret",
         debug=False,
         engine_factory=engine_factory,
+        trace_recorder=trace_recorder,
     )
     socket = FakeWebSocket()
     bot.ws = socket
@@ -119,6 +136,25 @@ def make_bot(engine_factory: Any) -> tuple[bridge.HanabiEngineBot, FakeWebSocket
 
 
 class PersistentEngineTests(unittest.TestCase):
+    def test_rejects_a_stale_engine_before_connecting(self) -> None:
+        stale = mock.Mock()
+        stale.returncode = 0
+        stale.stdout = "hanabi-engine live-action [options] < live-snapshot.json\n"
+        stale.stderr = ""
+        with (
+            mock.patch.object(bridge.subprocess, "run", return_value=stale) as run,
+            mock.patch.dict(
+                bridge.os.environ,
+                {"HANABI_USERNAME": "Bot", "HANABI_PASSWORD": "secret"},
+            ),
+            self.assertRaisesRegex(bridge.EngineProcessError, "cargo build --release"),
+        ):
+            bridge.validate_engine_binary(Path("/tmp/hanabi-engine"))
+
+        environment = run.call_args.kwargs["env"]
+        self.assertNotIn("HANABI_USERNAME", environment)
+        self.assertNotIn("HANABI_PASSWORD", environment)
+
     def test_reuses_one_child_process_for_multiple_requests(self) -> None:
         program = (
             "import json,sys\n"
@@ -194,6 +230,43 @@ class PersistentEngineTests(unittest.TestCase):
             authentications,
         )
 
+    def test_sigint_stops_instead_of_reconnecting(self) -> None:
+        authentications = 0
+
+        def authenticator(_base_url: str, _username: str, _password: str) -> tuple[str, str]:
+            nonlocal authentications
+            authentications += 1
+            return "ws://local.test/ws", "session=1"
+
+        class InterruptedWebSocket:
+            closed = False
+
+            def __init__(self, _url: str, **callbacks: Any) -> None:
+                self.on_open = callbacks["on_open"]
+
+            def run_forever(self) -> None:
+                self.on_open(self)
+                signal.raise_signal(signal.SIGINT)
+
+            def close(self) -> None:
+                self.__class__.closed = True
+
+        bot = bridge.HanabiEngineBot(
+            base_url="http://local.test",
+            engine_command=["fake-engine"],
+            username="Bot",
+            password="secret",
+            debug=False,
+            authenticator=authenticator,
+        )
+        fake_websocket = types.SimpleNamespace(WebSocketApp=InterruptedWebSocket)
+        with mock.patch.object(bridge, "websocket", fake_websocket):
+            bridge.run_with_signal_handlers(bot)
+
+        self.assertTrue(bot.stop_event.is_set())
+        self.assertTrue(InterruptedWebSocket.closed)
+        self.assertEqual(authentications, 1)
+
     def test_authenticate_works_with_a_local_http_server(self) -> None:
         received: dict[str, str] = {}
 
@@ -236,6 +309,37 @@ class PersistentEngineTests(unittest.TestCase):
 class BotConcurrencyTests(unittest.TestCase):
     def setUp(self) -> None:
         RecordingEngine.instances = []
+
+    def test_welcome_reattends_an_ongoing_game(self) -> None:
+        bot, socket = make_bot(RecordingEngine)
+        try:
+            bot.handle_welcome(
+                {
+                    "username": "hanabi-engine",
+                    "playingAtTables": [27337],
+                }
+            )
+            self.assertIn(
+                'tableReattend {"tableID":27337}',
+                socket.messages,
+            )
+        finally:
+            bot.shutdown()
+
+    def test_welcome_waits_for_an_invitation_without_an_ongoing_game(self) -> None:
+        bot, socket = make_bot(RecordingEngine)
+        try:
+            bot.handle_welcome(
+                {
+                    "username": "hanabi-engine",
+                    "playingAtTables": [],
+                }
+            )
+            self.assertFalse(
+                any(message.startswith("tableReattend ") for message in socket.messages)
+            )
+        finally:
+            bot.shutdown()
 
     def test_uses_initial_snapshot_then_only_new_actions(self) -> None:
         bot, socket = make_bot(RecordingEngine)
@@ -281,6 +385,73 @@ class BotConcurrencyTests(unittest.TestCase):
             self.assertEqual(len(payloads[1]["actions"]), 2)
         finally:
             bot.shutdown()
+
+    def test_writes_player_safe_decision_trace(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            recorder = bridge.TraceRecorder(
+                Path(temporary_directory),
+                {
+                    "username": "Bot",
+                    "engineCommand": ["fake-engine", "live-session"],
+                },
+            )
+            bot, socket = make_bot(DetailedRecordingEngine, recorder)
+            try:
+                bot.handle_init(init_message(7))
+                actions = [
+                    {
+                        "type": "draw",
+                        "playerIndex": 0,
+                        "order": 0,
+                        "suitIndex": -1,
+                        "rank": -1,
+                    },
+                    {"type": "turn", "num": 0, "currentPlayerIndex": 0},
+                ]
+                bot.handle_game_action_list({"tableID": 7, "list": actions})
+                wait_until(lambda: len(socket.actions()) == 1)
+
+                table_directory = recorder.run_directory / "tables" / "7"
+                wait_until(lambda: len(list(table_directory.glob("*.result.json"))) == 1)
+                snapshot_path = next(table_directory.glob("*.snapshot.json"))
+                request_path = next(table_directory.glob("*.request.json"))
+                response_path = next(table_directory.glob("*.response.json"))
+                result_path = next(table_directory.glob("*.result.json"))
+
+                snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+                request = json.loads(request_path.read_text(encoding="utf-8"))
+                response = json.loads(response_path.read_text(encoding="utf-8"))
+                result = json.loads(result_path.read_text(encoding="utf-8"))
+                events = [
+                    json.loads(line)
+                    for line in (recorder.run_directory / "events.jsonl")
+                    .read_text(encoding="utf-8")
+                    .splitlines()
+                ]
+
+                self.assertEqual(snapshot["actions"], actions)
+                self.assertEqual(snapshot["actions"][0]["suitIndex"], -1)
+                self.assertEqual(request["kind"], "initialize")
+                self.assertEqual(response["action"]["tableID"], 7)
+                self.assertEqual(response["search"]["mode"], "ismcts")
+                self.assertEqual(result["status"], "sent")
+                self.assertEqual(
+                    [event["kind"] for event in events],
+                    [
+                        "decisionStarted",
+                        "engineRequest",
+                        "engineResponse",
+                        "decisionFinished",
+                    ],
+                )
+                trace_text = "\n".join(
+                    path.read_text(encoding="utf-8")
+                    for path in recorder.run_directory.rglob("*")
+                    if path.is_file()
+                )
+                self.assertNotIn("secret", trace_text)
+            finally:
+                bot.shutdown()
 
     def test_searches_on_two_tables_without_blocking_callbacks(self) -> None:
         BlockingEngine.instances = []
@@ -336,6 +507,37 @@ class BotConcurrencyTests(unittest.TestCase):
             self.assertTrue(FailingEngine.instances[0].closed)
         finally:
             bot.shutdown()
+
+    def test_trace_records_failed_engine_attempt_and_retry(self) -> None:
+        FailingEngine.instances = []
+        FailingEngine.failures_remaining = 1
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            recorder = bridge.TraceRecorder(Path(temporary_directory), {})
+            bot, socket = make_bot(FailingEngine, recorder)
+            try:
+                bot.handle_init(init_message(7))
+                bot.handle_game_action_list(
+                    {
+                        "tableID": 7,
+                        "list": [
+                            {"type": "turn", "num": 0, "currentPlayerIndex": 0}
+                        ],
+                    }
+                )
+                wait_until(lambda: len(socket.actions()) == 1)
+
+                table_directory = recorder.run_directory / "tables" / "7"
+                wait_until(
+                    lambda: len(list(table_directory.glob("*.result.json"))) == 1
+                )
+                self.assertEqual(len(list(table_directory.glob("*.request.json"))), 2)
+                self.assertEqual(len(list(table_directory.glob("*.error.json"))), 1)
+                self.assertEqual(len(list(table_directory.glob("*.response.json"))), 1)
+                result_path = next(table_directory.glob("*.result.json"))
+                result = json.loads(result_path.read_text(encoding="utf-8"))
+                self.assertEqual(result["status"], "sent")
+            finally:
+                bot.shutdown()
 
 
 if __name__ == "__main__":
