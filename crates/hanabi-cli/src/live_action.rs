@@ -1,10 +1,14 @@
-use std::io::{self, BufRead, Read, Write};
+use std::{
+    io::{self, BufRead, Read, Write},
+    time::{Duration, Instant},
+};
 
 use hanabi_core::{Card, PlayerView};
 use hanabi_protocol::{HanabiLiveActionCommand, HanabiLiveSessionState, HanabiLiveSnapshot};
 use hanabi_search::{
     BestMove, BestMoveError, ConventionFramework, ConventionInferences, HGroupInferences,
-    IdentitySet, LogicalDeductions, SearchConfig, SearchDetails, best_move,
+    IdentitySet, IsmctsSession, LogicalDeductions, SearchConfig, SearchDetails,
+    TreeReuseDiagnostics, best_move, parallel_ismcts_search_until,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -34,16 +38,19 @@ pub(super) fn run_session(arguments: &LiveActionArguments) -> Result<(), CliErro
     let stdout = io::stdout();
     let mut output = stdout.lock();
     let mut session = HanabiLiveSessionState::new();
+    let mut search_session = IsmctsSession::new();
 
     for line in stdin.lock().lines() {
         let line = line.map_err(CliError::ReadLiveSnapshot)?;
         if line.trim().is_empty() {
             continue;
         }
-        let response = session
-            .apply_json(&line)
-            .map_err(CliError::LiveSnapshot)
-            .and_then(|(table_id, view)| decide(table_id, view, arguments));
+        let response = match session.apply_json(&line).map_err(CliError::LiveSnapshot) {
+            Ok((table_id, view)) => {
+                decide_with_session(table_id, view, arguments, &mut search_session)
+            }
+            Err(error) => Err(error),
+        };
         match response {
             Ok(decision) => {
                 if arguments.include_search_details {
@@ -75,28 +82,83 @@ fn decide(
     view: PlayerView,
     arguments: &LiveActionArguments,
 ) -> Result<LiveDecisionResponse, CliError> {
+    decide_inner(table_id, view, arguments, None)
+}
+
+fn decide_with_session(
+    table_id: u64,
+    view: PlayerView,
+    arguments: &LiveActionArguments,
+    session: &mut IsmctsSession,
+) -> Result<LiveDecisionResponse, CliError> {
+    decide_inner(table_id, view, arguments, Some(session))
+}
+
+fn decide_inner(
+    table_id: u64,
+    view: PlayerView,
+    arguments: &LiveActionArguments,
+    mut session: Option<&mut IsmctsSession>,
+) -> Result<LiveDecisionResponse, CliError> {
     let deductions = LogicalDeductions::new(view.clone())
         .map_err(|error| CliError::BestMove(BestMoveError::InformationSet(error)))?;
     let convention_inferences = arguments.convention.infer(&deductions);
-    let config = match arguments.mode {
-        SearchMode::Ismcts => SearchConfig::Ismcts(hanabi_search::IsmctsConfig {
-            iterations: arguments.iterations,
-            exploration: arguments.exploration,
-            seed: arguments.seed,
-            objective: arguments.objective,
-        }),
-        SearchMode::Flat => SearchConfig::Flat(hanabi_search::MonteCarloConfig {
-            samples_per_action: arguments.samples,
-            seed: arguments.seed,
-            objective: arguments.objective,
-        }),
+    let best = match arguments.mode {
+        SearchMode::Ismcts => {
+            let config = hanabi_search::IsmctsConfig {
+                iterations: arguments.iterations,
+                exploration: arguments.exploration,
+                seed: arguments.seed,
+                objective: arguments.objective,
+            };
+            let information_set = hanabi_search::InformationSet::new(view.clone())
+                .map_err(|error| CliError::BestMove(BestMoveError::InformationSet(error)))?;
+            let deadline = Instant::now() + Duration::from_millis(arguments.time_limit_ms);
+            let result = if let Some(search_session) = session.as_deref_mut() {
+                search_session.search_until(
+                    &information_set,
+                    &arguments.convention,
+                    config,
+                    arguments.threads,
+                    deadline,
+                )
+            } else {
+                parallel_ismcts_search_until(
+                    &information_set,
+                    &arguments.convention,
+                    config,
+                    arguments.threads,
+                    deadline,
+                )
+            }
+            .map_err(|error| CliError::BestMove(BestMoveError::Ismcts(error)))?;
+            BestMove {
+                convention: arguments.convention,
+                objective: arguments.objective,
+                action: result.best_action,
+                details: SearchDetails::Ismcts(result),
+            }
+        }
+        SearchMode::Flat => best_move(
+            view,
+            arguments.convention,
+            SearchConfig::Flat(hanabi_search::MonteCarloConfig {
+                samples_per_action: arguments.samples,
+                seed: arguments.seed,
+                objective: arguments.objective,
+            }),
+        )
+        .map_err(CliError::BestMove)?,
     };
-    let best = best_move(view, arguments.convention, config).map_err(CliError::BestMove)?;
     Ok(LiveDecisionResponse {
         action: HanabiLiveActionCommand::from_engine_action(table_id, best.action),
         logical_deductions: logical_deductions_json(&deductions),
         convention_inferences: convention_inferences_json(convention_inferences),
-        search: search_json(table_id, &best),
+        search: search_json(
+            table_id,
+            &best,
+            session.as_deref().map(IsmctsSession::reuse_diagnostics),
+        ),
     })
 }
 
@@ -224,12 +286,17 @@ fn h_group_inferences_json(inferences: &HGroupInferences) -> Value {
     })
 }
 
-fn search_json(table_id: u64, best: &BestMove) -> Value {
+fn search_json(table_id: u64, best: &BestMove, reuse: Option<TreeReuseDiagnostics>) -> Value {
     let common = json!({
         "convention": best.convention.id(),
         "profile": best.convention.profile().map(|profile| profile.to_string()),
         "rulesetRevision": best.convention.ruleset_revision(),
         "objective": best.objective.to_string(),
+        "treeReuse": reuse.map(|reuse| json!({
+            "advancedActions": reuse.advanced_actions,
+            "reusedRootVisits": reuse.reused_root_visits,
+            "reusedNodes": reuse.reused_nodes,
+        })),
     });
     let details = match &best.details {
         SearchDetails::Ismcts(result) => json!({

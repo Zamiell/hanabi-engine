@@ -34,11 +34,12 @@ pub struct InformationSet {
 ///
 /// This contains no convention interpretation and no determinization-only deck
 /// reconstruction data, making it suitable for the policy hot path.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub struct LogicalDeductions {
     view: PlayerView,
     unknown_hand_cards: Vec<CardId>,
     possibilities: Vec<(CardId, IdentitySet)>,
+    pub(crate) h_group_analysis: OnceLock<crate::h_group::HGroupAnalysis>,
 }
 
 /// Compact set of the 25 standard card identities.
@@ -252,6 +253,7 @@ impl LogicalDeductions {
             view,
             unknown_hand_cards,
             possibilities,
+            h_group_analysis: OnceLock::new(),
         })
     }
 
@@ -272,6 +274,27 @@ impl LogicalDeductions {
             .find_map(|(candidate, identities)| (*candidate == card).then_some(*identities))
     }
 }
+
+impl Clone for LogicalDeductions {
+    fn clone(&self) -> Self {
+        Self {
+            view: self.view.clone(),
+            unknown_hand_cards: self.unknown_hand_cards.clone(),
+            possibilities: self.possibilities.clone(),
+            h_group_analysis: OnceLock::new(),
+        }
+    }
+}
+
+impl PartialEq for LogicalDeductions {
+    fn eq(&self, other: &Self) -> bool {
+        self.view == other.view
+            && self.unknown_hand_cards == other.unknown_hand_cards
+            && self.possibilities == other.possibilities
+    }
+}
+
+impl Eq for LogicalDeductions {}
 
 impl InformationSet {
     /// Builds card-count and direct-clue constraints from a legal observation.
@@ -368,6 +391,7 @@ impl InformationSet {
                 view,
                 unknown_hand_cards,
                 possibilities,
+                h_group_analysis: OnceLock::new(),
             },
             known_identities,
             constraint_masks,

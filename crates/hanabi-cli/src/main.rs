@@ -12,13 +12,15 @@ use hanabi_protocol::{HanabiLiveReplay, ReplayError};
 use hanabi_search::{
     BestMoveError, HGroupProfile, InformationSet, InformationSetError, IsmctsConfig, IsmctsError,
     MonteCarloConfig, SearchError as FlatSearchError, SearchObjective, SupportedConvention,
-    TreeActionStatistics, evaluate_actions, ismcts_search, select_best_action,
+    TreeActionStatistics, evaluate_actions, parallel_ismcts_search, select_best_action,
 };
 
 mod benchmark;
 mod live_action;
 
 const DEFAULT_ITERATIONS: u32 = 1_000;
+const DEFAULT_THREADS: usize = 2;
+const DEFAULT_TIME_LIMIT_MS: u64 = 30_000;
 const DEFAULT_SAMPLES: u32 = 100;
 const DEFAULT_SEED: u64 = 0;
 const DEFAULT_TRIALS: u32 = 5;
@@ -93,7 +95,7 @@ fn analyze_ismcts(
     information_set: &InformationSet,
 ) -> Result<(), CliError> {
     let started = Instant::now();
-    let result = ismcts_search(
+    let result = parallel_ismcts_search(
         information_set,
         &arguments.convention,
         IsmctsConfig {
@@ -102,6 +104,7 @@ fn analyze_ismcts(
             seed: arguments.seed,
             objective: arguments.objective,
         },
+        arguments.threads,
     )
     .map_err(CliError::Ismcts)?;
     let elapsed = started.elapsed();
@@ -368,6 +371,7 @@ struct AnalyzeArguments {
     turn: u32,
     mode: SearchMode,
     iterations: u32,
+    threads: usize,
     samples: u32,
     seed: u64,
     exploration: f64,
@@ -390,6 +394,8 @@ struct BenchmarkArguments {
 struct LiveActionArguments {
     mode: SearchMode,
     iterations: u32,
+    threads: usize,
+    time_limit_ms: u64,
     samples: u32,
     seed: u64,
     exploration: f64,
@@ -443,6 +449,7 @@ fn parse_analyze_arguments(
     let mut turn = None;
     let mut mode = SearchMode::Ismcts;
     let mut iterations = DEFAULT_ITERATIONS;
+    let mut threads = DEFAULT_THREADS;
     let mut samples = DEFAULT_SAMPLES;
     let mut seed = DEFAULT_SEED;
     let mut exploration = core::f64::consts::SQRT_2;
@@ -458,6 +465,9 @@ fn parse_analyze_arguments(
             "--mode" => mode = next_value(arguments, "--mode")?.parse()?,
             "--iterations" => {
                 iterations = parse_value("--iterations", &next_value(arguments, "--iterations")?)?;
+            }
+            "--threads" => {
+                threads = parse_value("--threads", &next_value(arguments, "--threads")?)?;
             }
             "--samples" => {
                 samples = parse_value("--samples", &next_value(arguments, "--samples")?)?;
@@ -490,6 +500,7 @@ fn parse_analyze_arguments(
         turn: turn.ok_or_else(|| CliError::Usage("missing required --turn".to_owned()))?,
         mode,
         iterations,
+        threads,
         samples,
         seed,
         exploration,
@@ -580,6 +591,8 @@ fn parse_live_action_arguments(
 ) -> Result<Option<LiveActionArguments>, CliError> {
     let mut mode = SearchMode::Ismcts;
     let mut iterations = DEFAULT_ITERATIONS;
+    let mut threads = DEFAULT_THREADS;
+    let mut time_limit_ms = DEFAULT_TIME_LIMIT_MS;
     let mut samples = DEFAULT_SAMPLES;
     let mut seed = DEFAULT_SEED;
     let mut exploration = core::f64::consts::SQRT_2;
@@ -593,6 +606,15 @@ fn parse_live_action_arguments(
             "--mode" => mode = next_value(arguments, "--mode")?.parse()?,
             "--iterations" => {
                 iterations = parse_value("--iterations", &next_value(arguments, "--iterations")?)?;
+            }
+            "--threads" => {
+                threads = parse_value("--threads", &next_value(arguments, "--threads")?)?;
+            }
+            "--time-limit-ms" => {
+                time_limit_ms = parse_value(
+                    "--time-limit-ms",
+                    &next_value(arguments, "--time-limit-ms")?,
+                )?;
             }
             "--samples" => {
                 samples = parse_value("--samples", &next_value(arguments, "--samples")?)?;
@@ -640,6 +662,8 @@ fn parse_live_action_arguments(
     Ok(Some(LiveActionArguments {
         mode,
         iterations,
+        threads,
+        time_limit_ms,
         samples,
         seed,
         exploration,
@@ -684,6 +708,7 @@ fn usage() -> &'static str {
      Turn N is the position after N completed game actions; turn 0 is the initial deal.\n\n\
      Analyze options:\n  --mode <ismcts|flat>   Search mode (default: ismcts)\n  \
      --iterations <N>       ISMCTS iterations (default: 1000)\n  \
+     --threads <N>          Parallel ISMCTS workers (default: 2)\n  \
      --samples <N>          Flat Monte Carlo samples/action (default: 100)\n  \
      --seed <N>             Reproducible random seed (default: 0)\n  \
      --exploration <X>      ISMCTS UCB coefficient (default: sqrt(2))\n  \
@@ -701,6 +726,8 @@ fn usage() -> &'static str {
      --h-group-level <1-25|max>   Required H-Group cumulative profile\n\n\
      Live-action options:\n  --mode <ismcts|flat>   Search mode (default: ismcts)\n  \
      --iterations <N>       ISMCTS iterations (default: 1000)\n  \
+     --threads <N>          Parallel ISMCTS workers (default: 2)\n  \
+     --time-limit-ms <N>    Live search deadline in milliseconds (default: 30000)\n  \
      --samples <N>          Flat Monte Carlo samples/action (default: 100)\n  \
      --seed <N>             Reproducible random seed (default: 0)\n  \
      --exploration <X>      ISMCTS UCB coefficient (default: sqrt(2))\n  \

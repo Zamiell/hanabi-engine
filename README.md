@@ -48,7 +48,10 @@ Logical feasibility uses compact 25-bit identity sets and exact Hall-capacity
 matching. Assignment counts and card-copy sampling weights are initialized
 lazily, with packed memoization keys and a reusable validated determinization
 template. Convention-free rollouts use a compact history-free observation;
-H-Group rollouts retain public history and convention state. Convention-forced
+H-Group rollouts retain public history and convention state. H-Group history is
+replayed once per logical information set; candidate generation, action priors,
+and rollout selection share the resulting inference and clue analysis instead
+of reconstructing it for every query. Convention-forced
 plays, Prompts, Finesses, must-clue turns, and forced discards are resolved as
 predictable continuations. Search records the complete resulting principal
 variation, so an obvious convention line can extend for many turns rather than
@@ -190,9 +193,15 @@ The online adapter has two deliberately separate pieces:
 
 This keeps credentials and the changing network protocol outside the search
 engine, while the Rust boundary prevents the bot from filling its own hidden
-cards with simulator truth. The live command defaults to ISMCTS with 1,000
-iterations and H-Group `max`. Searches run on background workers, independently
-per table, so the WebSocket receive loop remains responsive. A failed engine
+cards with simulator truth. The live command defaults to ISMCTS with a total
+cap of 1,000 iterations, two parallel rollout workers, a 30-second search
+deadline, and H-Group `max`. Independent terminal movies and the matched-root
+prepass run concurrently while selection and backpropagation share one tree.
+The persistent session reroots that tree through observed actions between the
+bot's turns and resets safely when the actual line was not explored. Detailed
+responses report reused actions, visits, and nodes under `search.treeReuse`.
+Searches run on background workers, independently per table, so the WebSocket
+receive loop remains responsive. A failed engine
 session is restarted from the complete scrubbed snapshot, and a dropped server
 connection is reauthenticated with bounded exponential backoff. On either an
 in-process reconnect or a complete launcher restart, the bot reattends its
@@ -260,12 +269,14 @@ non-players, and `/level` requests while running `--convention none` are
 rejected with a private explanation. Send `/level` without an argument to
 query the table's current profile without restarting its engine.
 
-The launcher supports `--iterations`, `--mode`, `--seed`,
+The launcher supports `--iterations`, `--threads`, `--time-limit-ms`, `--mode`, `--seed`,
 `--h-group-level 1` through `--h-group-level 25`, and
 `--h-group-level max`. Use `--convention none` to exercise the
 convention-agnostic baseline. The Rust live command also accepts
 `--objective expected-score` or `--objective perfect-score`.
-`--engine-timeout` bounds one search attempt.
+`--time-limit-ms` is the engine's cooperative deadline; search details report
+the number of iterations actually completed if it expires before the cap.
+`--engine-timeout` is the bridge's larger process-response timeout.
 `--base-url` can point at a local Hanabi Live server for integration testing;
 the default is `https://hanab.live`.
 

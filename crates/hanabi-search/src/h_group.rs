@@ -375,11 +375,71 @@ struct PendingConnection {
     step: u8,
 }
 
+#[derive(Clone, Debug)]
+pub(crate) struct HGroupAnalysis {
+    profile: HGroupProfile,
+    inferences: HGroupInferences,
+    clue_candidates: Vec<ClueCandidate>,
+}
+
+enum HGroupAnalysisRef<'a> {
+    Cached(&'a HGroupAnalysis),
+    Uncached(Box<HGroupAnalysis>),
+}
+
+impl core::ops::Deref for HGroupAnalysisRef<'_> {
+    type Target = HGroupAnalysis;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Cached(analysis) => analysis,
+            Self::Uncached(analysis) => analysis,
+        }
+    }
+}
+
+fn h_group_analysis(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+) -> HGroupAnalysisRef<'_> {
+    if let Some(cached) = deductions.h_group_analysis.get() {
+        if cached.profile == profile {
+            return HGroupAnalysisRef::Cached(cached);
+        }
+        return HGroupAnalysisRef::Uncached(Box::new(build_h_group_analysis(deductions, profile)));
+    }
+    let analysis = build_h_group_analysis(deductions, profile);
+    let _ = deductions.h_group_analysis.set(analysis);
+    HGroupAnalysisRef::Cached(
+        deductions
+            .h_group_analysis
+            .get()
+            .expect("H-Group analysis was initialized"),
+    )
+}
+
+fn build_h_group_analysis(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+) -> HGroupAnalysis {
+    let replay = replay_h_group(deductions, profile);
+    let clue_candidates = h_group_clue_candidates_from_replay(deductions, profile, &replay);
+    let inferences = infer_h_group_from_replay(deductions, replay);
+    HGroupAnalysis {
+        profile,
+        inferences,
+        clue_candidates,
+    }
+}
+
 /// Applies the implemented cumulative H-Group semantics to a logical view.
 #[must_use]
 pub fn infer_h_group(deductions: &LogicalDeductions, profile: HGroupProfile) -> HGroupInferences {
+    h_group_analysis(deductions, profile).inferences.clone()
+}
+
+fn infer_h_group_from_replay(deductions: &LogicalDeductions, replay: Replay) -> HGroupInferences {
     let view = deductions.view();
-    let replay = replay_h_group(deductions, profile);
     let mut gotten = replay
         .explicitly_clued
         .union(&replay.invisibly_clued)
@@ -481,8 +541,9 @@ pub(crate) fn h_group_candidate_actions(
     if legal_actions.is_empty() {
         return Vec::new();
     }
-    let inferred = infer_h_group(deductions, profile);
-    let mut clue_candidates = h_group_clue_candidates(deductions, profile);
+    let analysis = h_group_analysis(deductions, profile);
+    let inferred = &analysis.inferences;
+    let mut clue_candidates = analysis.clue_candidates.clone();
     clue_candidates.sort_by_key(|candidate| core::cmp::Reverse(candidate.score));
 
     if inferred.must_clue.contains(&view.observer) {
@@ -508,7 +569,7 @@ pub(crate) fn h_group_candidate_actions(
         .map(Action::Discard)
         .collect::<Vec<_>>();
     actions.extend(
-        ordered_playable_cards(view, &inferred, profile)
+        ordered_playable_cards(view, inferred, profile)
             .into_iter()
             .map(Action::Play),
     );
@@ -604,7 +665,8 @@ pub(crate) fn h_group_action_prior(
     profile: HGroupProfile,
     action: Action,
 ) -> f64 {
-    let inferred = infer_h_group(deductions, profile);
+    let analysis = h_group_analysis(deductions, profile);
+    let inferred = &analysis.inferences;
     if inferred
         .connection
         .is_some_and(|connection| action == Action::Play(connection.card))
@@ -625,8 +687,9 @@ pub(crate) fn h_group_action_prior(
     {
         return 5.0;
     }
-    h_group_clue_candidates(deductions, profile)
-        .into_iter()
+    analysis
+        .clue_candidates
+        .iter()
         .find(|candidate| candidate.action == action)
         .map_or(0.25, |candidate| 1.0 + f64::from(candidate.score) / 100.0)
 }
@@ -653,8 +716,9 @@ pub(crate) fn h_group_predictable_action(
         }
         .then_some(action)
     };
-    let inferred = infer_h_group(deductions, profile);
-    let mut clues = h_group_clue_candidates(deductions, profile);
+    let analysis = h_group_analysis(deductions, profile);
+    let inferred = &analysis.inferences;
+    let mut clues = analysis.clue_candidates.clone();
     clues.sort_by_key(|candidate| core::cmp::Reverse(candidate.score));
     if let Some(connection) = inferred.connection {
         let actions = legal_connection_actions(connection, &clues, &view.legal_actions())?;
@@ -788,8 +852,9 @@ pub(crate) fn select_h_group_action(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
 ) -> Option<Action> {
-    let inferred = infer_h_group(deductions, profile);
-    let mut clues = h_group_clue_candidates(deductions, profile);
+    let analysis = h_group_analysis(deductions, profile);
+    let inferred = &analysis.inferences;
+    let mut clues = analysis.clue_candidates.clone();
     clues.sort_by_key(|candidate| core::cmp::Reverse(candidate.score));
     if inferred.must_clue.contains(&deductions.view().observer) {
         if let Some(clue) = clues.first() {
@@ -891,11 +956,21 @@ fn h_group_clue_candidates(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
 ) -> Vec<ClueCandidate> {
+    h_group_analysis(deductions, profile)
+        .clue_candidates
+        .clone()
+}
+
+#[allow(clippy::too_many_lines)]
+fn h_group_clue_candidates_from_replay(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+    replay: &Replay,
+) -> Vec<ClueCandidate> {
     let view = deductions.view();
     if view.clue_tokens == 0 {
         return Vec::new();
     }
-    let replay = replay_h_group(deductions, profile);
     let mut gotten = replay
         .explicitly_clued
         .union(&replay.invisibly_clued)
@@ -1000,7 +1075,7 @@ fn h_group_clue_candidates(
     }
 
     if profile.includes(HGroupLevel::Level2) {
-        for candidate in advanced_clue_candidates(view, &replay, &gotten, profile) {
+        for candidate in advanced_clue_candidates(view, replay, &gotten, profile) {
             if !candidates
                 .iter()
                 .any(|existing| existing.action == candidate.action)
@@ -1030,7 +1105,7 @@ fn h_group_clue_candidates(
             || view.clue_tokens == MAX_CLUE_TOKENS
             || has_out_of_order_prompt(view, &gotten))
     {
-        candidates.extend(tempo_clue_candidates(view, &replay, &gotten));
+        candidates.extend(tempo_clue_candidates(view, replay, &gotten));
     }
     if candidates.is_empty() && view.clue_tokens == MAX_CLUE_TOKENS {
         // A pathological deal can leave a Level 1 player with no legal

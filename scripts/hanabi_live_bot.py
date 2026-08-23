@@ -30,6 +30,8 @@ except ImportError:
 
 DEFAULT_BASE_URL = "https://hanab.live"
 DEFAULT_ITERATIONS = 1_000
+DEFAULT_THREADS = 2
+DEFAULT_TIME_LIMIT_MS = 30_000
 DEFAULT_SEED = 0
 DEFAULT_ENGINE_TIMEOUT = 180.0
 INITIAL_RECONNECT_DELAY = 1.0
@@ -1153,6 +1155,18 @@ def parse_arguments() -> argparse.Namespace:
         default=int(os.getenv("HANABI_ENGINE_ITERATIONS", DEFAULT_ITERATIONS)),
         help=f"ISMCTS iterations per move (default: {DEFAULT_ITERATIONS})",
     )
+    parser.add_argument(
+        "--threads",
+        type=int,
+        default=int(os.getenv("HANABI_ENGINE_THREADS", DEFAULT_THREADS)),
+        help=f"parallel ISMCTS workers (default: {DEFAULT_THREADS})",
+    )
+    parser.add_argument(
+        "--time-limit-ms",
+        type=int,
+        default=int(os.getenv("HANABI_ENGINE_TIME_LIMIT_MS", DEFAULT_TIME_LIMIT_MS)),
+        help=f"live search deadline in milliseconds (default: {DEFAULT_TIME_LIMIT_MS})",
+    )
     parser.add_argument("--samples", type=int, default=100)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
     parser.add_argument("--exploration", type=float)
@@ -1233,7 +1247,12 @@ def main() -> int:
     except EngineProcessError as error:
         log(f"error: {error}")
         return 2
-    if arguments.iterations <= 0 or arguments.samples <= 0:
+    if (
+        arguments.iterations <= 0
+        or arguments.samples <= 0
+        or arguments.threads <= 0
+        or arguments.time_limit_ms <= 0
+    ):
         log("error: search budgets must be positive")
         return 2
     if arguments.engine_timeout <= 0:
@@ -1253,6 +1272,10 @@ def main() -> int:
         arguments.mode,
         "--iterations",
         str(arguments.iterations),
+        "--threads",
+        str(arguments.threads),
+        "--time-limit-ms",
+        str(arguments.time_limit_ms),
         "--samples",
         str(arguments.samples),
         "--seed",

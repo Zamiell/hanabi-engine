@@ -33,8 +33,9 @@ pub use information_set::{
     SampleError,
 };
 pub use ismcts::{
-    IsmctsConfig, IsmctsError, IsmctsReport, IsmctsResult, TreeActionStatistics, ismcts_search,
-    ismcts_search_with_diagnostics,
+    IsmctsConfig, IsmctsError, IsmctsReport, IsmctsResult, IsmctsSession, TreeActionStatistics,
+    TreeReuseDiagnostics, ismcts_search, ismcts_search_with_diagnostics, parallel_ismcts_search,
+    parallel_ismcts_search_until,
 };
 pub use monte_carlo::{
     ActionEvaluation, MonteCarloConfig, MonteCarloReport, SearchError, evaluate_actions,

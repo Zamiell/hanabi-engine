@@ -1,7 +1,7 @@
 use core::fmt;
 use std::time::Instant;
 
-use hanabi_core::{Action, FullState, PlayerId, RuleError};
+use hanabi_core::{Action, FullState, ObservedEvent, ObservedHistoryEntry, PlayerId, RuleError};
 use rand::{Rng, RngExt, SeedableRng, rngs::StdRng};
 
 use crate::rollout::rollout_for_search;
@@ -70,6 +70,139 @@ pub struct IsmctsReport {
     pub diagnostics: SearchDiagnostics,
 }
 
+/// Persistent search tree for a single live game.
+#[derive(Default)]
+pub struct IsmctsSession {
+    root: Node,
+    history: Vec<ObservedHistoryEntry>,
+    initialized: bool,
+    reuse: TreeReuseDiagnostics,
+}
+
+/// Evidence that a live search successfully retained a previously explored
+/// subtree after observed actions were applied.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TreeReuseDiagnostics {
+    pub advanced_actions: u32,
+    pub reused_root_visits: u32,
+    pub reused_nodes: u32,
+}
+
+impl IsmctsSession {
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            root: Node {
+                visits: 0,
+                edges: Vec::new(),
+            },
+            history: Vec::new(),
+            initialized: false,
+            reuse: TreeReuseDiagnostics {
+                advanced_actions: 0,
+                reused_root_visits: 0,
+                reused_nodes: 0,
+            },
+        }
+    }
+
+    #[must_use]
+    pub const fn reuse_diagnostics(&self) -> TreeReuseDiagnostics {
+        self.reuse
+    }
+
+    /// Advances through the actions observed since the previous call, then
+    /// adds fresh search evidence to the retained subtree.
+    ///
+    /// A history mismatch or an unexplored action resets the tree safely.
+    ///
+    /// # Errors
+    ///
+    /// Returns the same errors as [`parallel_ismcts_search_until`].
+    pub fn search_until<P: ConventionFramework + Sync>(
+        &mut self,
+        information_set: &InformationSet,
+        rollout_policy: &P,
+        config: IsmctsConfig,
+        threads: usize,
+        deadline: Instant,
+    ) -> Result<IsmctsResult, IsmctsError> {
+        if threads == 0 {
+            return Err(IsmctsError::ZeroThreads);
+        }
+        self.advance_to(information_set.view().history.as_slice());
+        let result = run_batched_ismcts_with_root(
+            &mut self.root,
+            information_set,
+            rollout_policy,
+            config,
+            threads,
+            Some(deadline),
+        )?;
+        self.history.clone_from(&information_set.view().history);
+        self.initialized = true;
+        Ok(result)
+    }
+
+    fn advance_to(&mut self, history: &[ObservedHistoryEntry]) {
+        self.reuse = TreeReuseDiagnostics::default();
+        if !self.initialized {
+            return;
+        }
+        let Some(suffix) = history.strip_prefix(self.history.as_slice()) else {
+            self.reset_tree();
+            return;
+        };
+        let actions = suffix
+            .iter()
+            .filter_map(|entry| observed_action(&entry.event))
+            .collect::<Vec<_>>();
+        if actions.is_empty() {
+            return;
+        }
+        let mut advanced = 0_u32;
+        for action in actions {
+            let Some(index) = self
+                .root
+                .edges
+                .iter()
+                .position(|edge| edge.action == action)
+            else {
+                self.reset_tree();
+                return;
+            };
+            let Some(child) = self.root.edges[index].child.take() else {
+                self.reset_tree();
+                return;
+            };
+            self.root = *child;
+            advanced += 1;
+        }
+        self.reuse = TreeReuseDiagnostics {
+            advanced_actions: advanced,
+            reused_root_visits: self.root.visits,
+            reused_nodes: self.root.node_count(),
+        };
+    }
+
+    fn reset_tree(&mut self) {
+        self.root = Node::default();
+        self.reuse = TreeReuseDiagnostics::default();
+    }
+}
+
+fn observed_action(event: &ObservedEvent) -> Option<Action> {
+    match event {
+        ObservedEvent::Clued { target, clue, .. } => Some(Action::Clue {
+            target: *target,
+            clue: *clue,
+        }),
+        ObservedEvent::Played { card, .. } => Some(Action::Play(*card)),
+        ObservedEvent::Discarded { card, .. } => Some(Action::Discard(*card)),
+        ObservedEvent::Drew { .. } => None,
+    }
+}
+
 /// Runs cooperative single-observer information-set Monte Carlo tree search.
 ///
 /// Every iteration asks the selected [`ConventionFramework`] to sample a new
@@ -95,6 +228,61 @@ pub fn ismcts_search<P: ConventionFramework>(
     config: IsmctsConfig,
 ) -> Result<IsmctsResult, IsmctsError> {
     Ok(run_ismcts(information_set, rollout_policy, config, false)?.result)
+}
+
+/// Runs one shared ISMCTS tree while evaluating terminal rollouts in parallel.
+///
+/// The configured iteration budget remains exact. Each batch reserves leaves
+/// in the shared tree with a virtual visit, evaluates those independent movies
+/// concurrently, and then backpropagates their results before selecting the
+/// next batch.
+///
+/// # Errors
+///
+/// Returns [`IsmctsError`] for an invalid worker count, failed sampling or
+/// rollout, or a worker panic.
+pub fn parallel_ismcts_search<P: ConventionFramework + Sync>(
+    information_set: &InformationSet,
+    rollout_policy: &P,
+    config: IsmctsConfig,
+    threads: usize,
+) -> Result<IsmctsResult, IsmctsError> {
+    if threads == 0 {
+        return Err(IsmctsError::ZeroThreads);
+    }
+    if threads == 1 {
+        return ismcts_search(information_set, rollout_policy, config);
+    }
+    run_batched_ismcts(information_set, rollout_policy, config, threads, None)
+}
+
+/// Runs parallel ISMCTS until the iteration cap or wall-clock deadline.
+///
+/// At least one tree batch is completed after the paired-root prepass so a
+/// legal move is always returned. `IsmctsResult::iterations` reports the
+/// number of completed tree iterations, which can be lower than the configured
+/// cap when the deadline wins.
+///
+/// # Errors
+///
+/// Returns the same errors as [`parallel_ismcts_search`].
+pub fn parallel_ismcts_search_until<P: ConventionFramework + Sync>(
+    information_set: &InformationSet,
+    rollout_policy: &P,
+    config: IsmctsConfig,
+    threads: usize,
+    deadline: Instant,
+) -> Result<IsmctsResult, IsmctsError> {
+    if threads == 0 {
+        return Err(IsmctsError::ZeroThreads);
+    }
+    run_batched_ismcts(
+        information_set,
+        rollout_policy,
+        config,
+        threads,
+        Some(deadline),
+    )
 }
 
 /// Runs ISMCTS and records work and timing diagnostics.
@@ -175,6 +363,410 @@ fn run_ismcts<P: ConventionFramework>(
         result,
         diagnostics,
     })
+}
+
+fn run_batched_ismcts<P: ConventionFramework + Sync>(
+    information_set: &InformationSet,
+    rollout_policy: &P,
+    config: IsmctsConfig,
+    threads: usize,
+    deadline: Option<Instant>,
+) -> Result<IsmctsResult, IsmctsError> {
+    let mut root = Node::default();
+    run_batched_ismcts_with_root(
+        &mut root,
+        information_set,
+        rollout_policy,
+        config,
+        threads,
+        deadline,
+    )
+}
+
+fn run_batched_ismcts_with_root<P: ConventionFramework + Sync>(
+    root: &mut Node,
+    information_set: &InformationSet,
+    rollout_policy: &P,
+    config: IsmctsConfig,
+    threads: usize,
+    deadline: Option<Instant>,
+) -> Result<IsmctsResult, IsmctsError> {
+    validate_config(config)?;
+    let root_candidates = rollout_policy.candidate_actions(information_set);
+    if root_candidates.is_empty() {
+        return Err(IsmctsError::NoLegalActions);
+    }
+
+    let mut rng = StdRng::seed_from_u64(config.seed);
+    let mut diagnostics = SearchDiagnostics::default();
+    let mut legal_actions = Vec::with_capacity(MAX_LEGAL_ACTIONS);
+    if rollout_policy.uses_paired_root_evaluation() {
+        run_parallel_paired_root_evaluation(
+            information_set,
+            rollout_policy,
+            config,
+            root,
+            &mut rng,
+            &mut diagnostics,
+            threads,
+        )?;
+    }
+
+    let batch_capacity = threads.min(config.iterations as usize);
+    let mut completed = 0_u32;
+    while completed < config.iterations {
+        if completed > 0 && deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            break;
+        }
+        let batch_size = batch_capacity.min((config.iterations - completed) as usize);
+        let mut pending = Vec::with_capacity(batch_size);
+        for offset in 0..batch_size {
+            let iteration = completed
+                + u32::try_from(offset).expect("a batch is bounded by the u32 iteration budget");
+            let mut state = rollout_policy
+                .sample_root_world(information_set, &mut rng)
+                .map_err(|source| IsmctsError::Sample { iteration, source })?;
+            diagnostics.worlds_sampled += 1;
+            let mut context = SimulationContext {
+                rollout_policy,
+                exploration: config.exploration,
+                objective: config.objective,
+                rng: &mut rng,
+                diagnostics: &mut diagnostics,
+                legal_actions: &mut legal_actions,
+                measure_timing: false,
+            };
+            let mut path = Vec::new();
+            let requires_rollout =
+                reserve_simulation(root, &mut state, 0, &mut context, &mut path)?;
+            pending.push(ReservedSimulation {
+                state,
+                path,
+                requires_rollout,
+            });
+        }
+
+        let completed_batch = std::thread::scope(|scope| {
+            let workers = pending
+                .into_iter()
+                .map(|simulation| {
+                    scope.spawn(move || evaluate_reserved(simulation, rollout_policy, config))
+                })
+                .collect::<Vec<_>>();
+            workers
+                .into_iter()
+                .map(|worker| worker.join().map_err(|_| IsmctsError::WorkerPanicked)?)
+                .collect::<Result<Vec<_>, IsmctsError>>()
+        })?;
+        for completed_simulation in completed_batch {
+            if completed_simulation.was_rollout {
+                diagnostics.rollouts += 1;
+                diagnostics.rollout_turns += completed_simulation.rollout_turns;
+            }
+            let mut reward = completed_simulation.reward;
+            complete_reserved(
+                root,
+                &completed_simulation.path,
+                &mut reward,
+                config.objective,
+            );
+        }
+        completed +=
+            u32::try_from(batch_size).expect("a batch is bounded by the u32 iteration budget");
+    }
+
+    let root_actions = root
+        .edges
+        .iter()
+        .filter(|edge| root_candidates.contains(&edge.action))
+        .map(Edge::statistics)
+        .collect::<Vec<_>>();
+    let best_action = robust_child_for_actions(&root.edges, &root_candidates)
+        .ok_or(IsmctsError::NoVisitedActions)?;
+    Ok(IsmctsResult {
+        iterations: completed,
+        best_action,
+        root_actions,
+    })
+}
+
+fn run_parallel_paired_root_evaluation<P: ConventionFramework + Sync>(
+    information_set: &InformationSet,
+    policy: &P,
+    config: IsmctsConfig,
+    root: &mut Node,
+    rng: &mut StdRng,
+    diagnostics: &mut SearchDiagnostics,
+    threads: usize,
+) -> Result<(), IsmctsError> {
+    let paired_samples = (config.iterations / 100).clamp(1, 8);
+    let mut legal_actions = Vec::with_capacity(MAX_LEGAL_ACTIONS);
+    for sample in 0..paired_samples {
+        let world = policy
+            .sample_root_world(information_set, rng)
+            .map_err(|source| IsmctsError::Sample {
+                iteration: sample,
+                source,
+            })?;
+        diagnostics.worlds_sampled += 1;
+        let actor = world.current_player();
+        let view = world
+            .view_for(actor)
+            .ok_or(IsmctsError::InvalidCurrentPlayer(actor))?;
+        let deductions = LogicalDeductions::new(view)
+            .map_err(|source| IsmctsError::TreeInformationSet { depth: 0, source })?;
+        legal_actions.extend(policy.candidate_actions(&deductions));
+        let indices = register_available_actions(root, &legal_actions, &deductions, policy);
+        let candidates = indices
+            .as_slice()
+            .iter()
+            .copied()
+            .map(|index| (index, root.edges[index].action))
+            .collect::<Vec<_>>();
+        let clone_count = candidates.len().saturating_sub(1);
+        let mut states = (0..clone_count).map(|_| world.clone()).collect::<Vec<_>>();
+        states.push(world);
+        let mut jobs = candidates
+            .into_iter()
+            .zip(states)
+            .map(|((index, action), state)| (index, action, state))
+            .collect::<Vec<_>>();
+        diagnostics.candidate_state_clones +=
+            u64::try_from(clone_count).expect("a root action count fits in u64");
+
+        while !jobs.is_empty() {
+            let chunk_size = threads.min(jobs.len());
+            let chunk = jobs.drain(..chunk_size).collect::<Vec<_>>();
+            let completed = std::thread::scope(|scope| {
+                let workers = chunk
+                    .into_iter()
+                    .map(|(index, action, mut candidate)| {
+                        scope.spawn(move || {
+                            let mut metrics = StrategicMetrics::default();
+                            evaluation::observe_action(&candidate, action, &mut metrics);
+                            candidate
+                                .apply(action)
+                                .map_err(|source| IsmctsError::TreeAction {
+                                    depth: 0,
+                                    action,
+                                    source,
+                                })?;
+                            let report =
+                                rollout_for_search(candidate, policy, false).map_err(|source| {
+                                    IsmctsError::Rollout {
+                                        depth: 0,
+                                        action,
+                                        source,
+                                    }
+                                })?;
+                            let outcome = report.outcome;
+                            let turns = u64::try_from(outcome.turns())
+                                .expect("a rollout turn count fits in u64");
+                            let mut reward = Reward::new(
+                                outcome.score(),
+                                outcome.raw_score(),
+                                evaluation::is_strikeout(outcome.final_state()),
+                                outcome.strategic_metrics(),
+                                config.objective,
+                                outcome.actions().to_vec(),
+                            );
+                            reward.prepend_action(action, metrics, config.objective);
+                            Ok((index, reward, turns))
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                workers
+                    .into_iter()
+                    .map(|worker| worker.join().map_err(|_| IsmctsError::WorkerPanicked)?)
+                    .collect::<Result<Vec<_>, IsmctsError>>()
+            })?;
+            for (index, reward, turns) in completed {
+                diagnostics.search_actions_applied += 1;
+                diagnostics.rollouts += 1;
+                diagnostics.rollout_turns += turns;
+                root.edges[index].observe(&reward);
+                root.visits += 1;
+            }
+        }
+        legal_actions.clear();
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct ReservedStep {
+    edge: usize,
+    action: Action,
+    metrics: StrategicMetrics,
+}
+
+struct ReservedSimulation {
+    state: FullState,
+    path: Vec<ReservedStep>,
+    requires_rollout: bool,
+}
+
+struct CompletedSimulation {
+    reward: Reward,
+    path: Vec<ReservedStep>,
+    rollout_turns: u64,
+    was_rollout: bool,
+}
+
+fn reserve_simulation<P: ConventionFramework, R: Rng + ?Sized>(
+    node: &mut Node,
+    state: &mut FullState,
+    depth: u32,
+    context: &mut SimulationContext<'_, P, R>,
+    path: &mut Vec<ReservedStep>,
+) -> Result<bool, IsmctsError> {
+    context.diagnostics.observe_tree_depth(depth);
+    if state.is_terminal() {
+        node.visits += 1;
+        return Ok(false);
+    }
+    if depth >= MAX_TREE_DEPTH {
+        return Err(IsmctsError::TreeDepthExceeded);
+    }
+
+    let actor = state.current_player();
+    let view = state
+        .view_for(actor)
+        .ok_or(IsmctsError::InvalidCurrentPlayer(actor))?;
+    let deductions = LogicalDeductions::new(view)
+        .map_err(|source| IsmctsError::TreeInformationSet { depth, source })?;
+    context.legal_actions.clear();
+    context
+        .legal_actions
+        .extend(context.rollout_policy.candidate_actions(&deductions));
+    if context.legal_actions.is_empty() {
+        return Err(IsmctsError::NoLegalTreeActions { depth, actor });
+    }
+    let legal_edges = register_available_actions(
+        node,
+        context.legal_actions,
+        &deductions,
+        context.rollout_policy,
+    );
+    let selected = select_edge(
+        node,
+        legal_edges.as_slice(),
+        context.exploration,
+        context.objective,
+        context.rng,
+    );
+    let action = node.edges[selected].action;
+    let mut metrics = StrategicMetrics::default();
+    evaluation::observe_action(state, action, &mut metrics);
+    state
+        .apply(action)
+        .map_err(|source| IsmctsError::TreeAction {
+            depth,
+            action,
+            source,
+        })?;
+    context.diagnostics.search_actions_applied += 1;
+    context
+        .diagnostics
+        .observe_tree_depth(depth.saturating_add(1));
+    node.visits += 1;
+    node.edges[selected].reserve();
+    path.push(ReservedStep {
+        edge: selected,
+        action,
+        metrics,
+    });
+
+    if node.edges[selected].child.is_none() {
+        node.edges[selected].child = Some(Box::new(Node {
+            visits: 1,
+            edges: Vec::new(),
+        }));
+        context.diagnostics.tree_nodes_expanded += 1;
+        return Ok(true);
+    }
+    reserve_simulation(
+        node.edges[selected]
+            .child
+            .as_deref_mut()
+            .expect("the expanded child was checked as present"),
+        state,
+        depth + 1,
+        context,
+        path,
+    )
+}
+
+fn evaluate_reserved<P: ConventionFramework>(
+    simulation: ReservedSimulation,
+    rollout_policy: &P,
+    config: IsmctsConfig,
+) -> Result<CompletedSimulation, IsmctsError> {
+    let ReservedSimulation {
+        state,
+        path,
+        requires_rollout,
+    } = simulation;
+    if !requires_rollout {
+        return Ok(CompletedSimulation {
+            reward: terminal_reward(&state, config.objective)
+                .ok_or(IsmctsError::NonTerminalOutcome)?,
+            path,
+            rollout_turns: 0,
+            was_rollout: false,
+        });
+    }
+    let depth = u32::try_from(path.len().saturating_sub(1)).unwrap_or(u32::MAX);
+    let action = path
+        .last()
+        .expect("a reserved rollout follows at least one tree action")
+        .action;
+    let report = rollout_for_search(state, rollout_policy, false).map_err(|source| {
+        IsmctsError::Rollout {
+            depth,
+            action,
+            source,
+        }
+    })?;
+    let outcome = report.outcome;
+    let rollout_turns = u64::try_from(outcome.turns()).expect("a rollout turn count fits in u64");
+    Ok(CompletedSimulation {
+        reward: Reward::new(
+            outcome.score(),
+            outcome.raw_score(),
+            evaluation::is_strikeout(outcome.final_state()),
+            outcome.strategic_metrics(),
+            config.objective,
+            outcome.actions().to_vec(),
+        ),
+        path,
+        rollout_turns,
+        was_rollout: true,
+    })
+}
+
+fn complete_reserved(
+    node: &mut Node,
+    path: &[ReservedStep],
+    reward: &mut Reward,
+    objective: SearchObjective,
+) {
+    let Some((step, remaining)) = path.split_first() else {
+        return;
+    };
+    if !remaining.is_empty() {
+        complete_reserved(
+            node.edges[step.edge]
+                .child
+                .as_deref_mut()
+                .expect("a reserved path has expanded children"),
+            remaining,
+            reward,
+            objective,
+        );
+    }
+    reward.prepend_action(step.action, step.metrics, objective);
+    node.edges[step.edge].observe_reserved(reward);
 }
 
 /// Gives every root action several matched determinizations before ordinary
@@ -273,6 +865,17 @@ struct Node {
     edges: Vec<Edge>,
 }
 
+impl Node {
+    fn node_count(&self) -> u32 {
+        1 + self
+            .edges
+            .iter()
+            .filter_map(|edge| edge.child.as_deref())
+            .map(Self::node_count)
+            .sum::<u32>()
+    }
+}
+
 struct Edge {
     action: Action,
     availability: u32,
@@ -328,6 +931,14 @@ impl Edge {
 
     fn observe(&mut self, reward: &Reward) {
         self.visits += 1;
+        self.observe_reserved(reward);
+    }
+
+    fn reserve(&mut self) {
+        self.visits += 1;
+    }
+
+    fn observe_reserved(&mut self, reward: &Reward) {
         self.score_sum += f64::from(reward.score);
         self.raw_score_sum += f64::from(reward.raw_score);
         self.utility_sum += reward.utility;
@@ -669,8 +1280,16 @@ fn select_edge<R: Rng + ?Sized>(
 }
 
 fn robust_child(edges: &[Edge]) -> Option<Action> {
+    robust_child_matching(edges, |_| true)
+}
+
+fn robust_child_for_actions(edges: &[Edge], actions: &[Action]) -> Option<Action> {
+    robust_child_matching(edges, |edge| actions.contains(&edge.action))
+}
+
+fn robust_child_matching(edges: &[Edge], include: impl Fn(&Edge) -> bool) -> Option<Action> {
     let mut best: Option<&Edge> = None;
-    for edge in edges.iter().filter(|edge| edge.visits > 0) {
+    for edge in edges.iter().filter(|edge| edge.visits > 0 && include(edge)) {
         let replace = best.is_none_or(|current| {
             edge.visits > current.visits
                 || (edge.visits == current.visits && edge.mean_utility() > current.mean_utility())
@@ -698,6 +1317,8 @@ fn terminal_reward(state: &FullState, objective: SearchObjective) -> Option<Rewa
 #[derive(Debug, PartialEq)]
 pub enum IsmctsError {
     ZeroIterations,
+    ZeroThreads,
+    WorkerPanicked,
     InvalidExploration(f64),
     NoLegalActions,
     NoVisitedActions,
@@ -732,6 +1353,8 @@ impl fmt::Display for IsmctsError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::ZeroIterations => formatter.write_str("iterations must be positive"),
+            Self::ZeroThreads => formatter.write_str("search threads must be positive"),
+            Self::WorkerPanicked => formatter.write_str("a parallel search worker panicked"),
             Self::InvalidExploration(value) => {
                 write!(
                     formatter,
@@ -798,6 +1421,8 @@ impl std::error::Error for IsmctsError {
             Self::TreeAction { source, .. } => Some(source),
             Self::Rollout { source, .. } => Some(source),
             Self::ZeroIterations
+            | Self::ZeroThreads
+            | Self::WorkerPanicked
             | Self::InvalidExploration(_)
             | Self::NoLegalActions
             | Self::NoVisitedActions
@@ -837,6 +1462,104 @@ mod tests {
             SearchObjective::ExpectedScore,
             Vec::new(),
         )
+    }
+
+    #[test]
+    fn parallel_batches_preserve_the_exact_iteration_cap() {
+        let deductions = deductions();
+        let config = IsmctsConfig {
+            iterations: 17,
+            exploration: core::f64::consts::SQRT_2,
+            seed: 7,
+            objective: SearchObjective::ExpectedScore,
+        };
+        let first = parallel_ismcts_search(
+            &InformationSet::new(deductions.view().clone()).unwrap(),
+            &crate::ConventionAgnosticPolicy,
+            config,
+            2,
+        )
+        .unwrap();
+        let second = parallel_ismcts_search(
+            &InformationSet::new(deductions.view().clone()).unwrap(),
+            &crate::ConventionAgnosticPolicy,
+            config,
+            2,
+        )
+        .unwrap();
+        assert_eq!(first.iterations, 17);
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn deadline_returns_the_first_completed_batch() {
+        let deductions = deductions();
+        let result = parallel_ismcts_search_until(
+            &InformationSet::new(deductions.view().clone()).unwrap(),
+            &crate::ConventionAgnosticPolicy,
+            IsmctsConfig {
+                iterations: 100,
+                exploration: core::f64::consts::SQRT_2,
+                seed: 7,
+                objective: SearchObjective::ExpectedScore,
+            },
+            2,
+            Instant::now(),
+        )
+        .unwrap();
+        assert_eq!(result.iterations, 2);
+    }
+
+    #[test]
+    fn live_session_reroots_through_observed_actions() {
+        let mut state = FullState::new_standard(2, standard_deck()).unwrap();
+        let initial = state.view_for(PlayerId::new(0)).unwrap();
+        let first = state
+            .legal_actions()
+            .into_iter()
+            .find(|action| matches!(action, Action::Clue { .. }))
+            .unwrap();
+        state.apply(first).unwrap();
+        let second = state
+            .legal_actions()
+            .into_iter()
+            .find(|action| matches!(action, Action::Clue { .. }))
+            .unwrap();
+        state.apply(second).unwrap();
+
+        let retained = Node {
+            visits: 7,
+            edges: Vec::new(),
+        };
+        let mut second_edge = Edge::new(second);
+        second_edge.child = Some(Box::new(retained));
+        second_edge.visits = 7;
+        let middle = Node {
+            visits: 7,
+            edges: vec![second_edge],
+        };
+        let mut first_edge = Edge::new(first);
+        first_edge.child = Some(Box::new(middle));
+        first_edge.visits = 7;
+        let mut session = IsmctsSession {
+            root: Node {
+                visits: 7,
+                edges: vec![first_edge],
+            },
+            history: initial.history,
+            initialized: true,
+            reuse: TreeReuseDiagnostics::default(),
+        };
+        let current = state.view_for(PlayerId::new(0)).unwrap();
+        session.advance_to(&current.history);
+        assert_eq!(
+            session.reuse_diagnostics(),
+            TreeReuseDiagnostics {
+                advanced_actions: 2,
+                reused_root_visits: 7,
+                reused_nodes: 1,
+            }
+        );
     }
 
     #[test]
