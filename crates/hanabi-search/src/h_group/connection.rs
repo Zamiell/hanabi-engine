@@ -124,6 +124,16 @@ impl ConnectionManager {
         if self.active.contains(&obligation) {
             return;
         }
+        // One actor can have only one live interpretation for a particular
+        // step of a focus connection. More-specific rules run after the
+        // general connection scheduler, so a later interpretation replaces
+        // the earlier one atomically instead of leaving contradictory duties
+        // for action selection to reconcile.
+        self.cancel_where(turn, ConnectionTransitionReason::Superseded, |active| {
+            active.actor == obligation.actor
+                && active.focus == obligation.focus
+                && active.step == obligation.step
+        });
         self.record(
             turn,
             &obligation,
@@ -348,5 +358,26 @@ mod tests {
             manager.transitions().last().map(|transition| transition.to),
             Some(ConnectionStatus::Satisfied)
         );
+    }
+
+    #[test]
+    fn a_new_interpretation_supersedes_the_same_connection_step() {
+        let mut manager = ConnectionManager::default();
+        let original = obligation(vec![CardId::new(5), CardId::new(7)]);
+        manager.start(3, original.clone());
+        let replacement = ConnectionObligation {
+            cards: vec![CardId::new(8)],
+            expected: Card::new(Suit::Blue, Rank::One),
+            ..original
+        };
+
+        manager.start(3, replacement.clone());
+
+        assert_eq!(&*manager, &[replacement]);
+        assert!(manager.validate().is_ok());
+        assert!(manager.transitions().iter().any(|transition| {
+            transition.reason == ConnectionTransitionReason::Superseded
+                && transition.to == ConnectionStatus::Cancelled
+        }));
     }
 }

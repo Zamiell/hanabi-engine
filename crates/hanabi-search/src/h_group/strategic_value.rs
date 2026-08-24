@@ -5,6 +5,7 @@ use super::{
 };
 
 const TEAM_ACTION_COVERAGE_PENALTY: u16 = 80;
+const TEAM_ACTION_DELAY_PENALTY: u16 = 2;
 const INDIRECT_CONNECTION_PENALTY: u16 = 24;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -23,6 +24,21 @@ impl ClueLineValue {
         players.sort_unstable_by_key(|player| player.index());
         players.dedup();
         players.len()
+    }
+
+    fn first_action_distance(&self, current: PlayerId, player_count: usize) -> usize {
+        self.commitments
+            .iter()
+            .map(|(_, _, owner)| {
+                let distance = (owner.index() + player_count - current.index()) % player_count;
+                if distance == 0 {
+                    player_count
+                } else {
+                    distance
+                }
+            })
+            .min()
+            .unwrap_or(player_count)
     }
 
     fn outcome(&self) -> Vec<(CardId, Card)> {
@@ -70,6 +86,15 @@ pub(super) fn apply_strategic_clue_values(
         .filter_map(|value| value.as_ref().map(ClueLineValue::covered_players))
         .max()
         .unwrap_or(0);
+    let best_action_distance = values
+        .iter()
+        .filter_map(|value| {
+            value
+                .as_ref()
+                .map(|value| value.first_action_distance(source.current_player, source.hands.len()))
+        })
+        .min()
+        .unwrap_or(source.hands.len());
 
     for (index, candidate) in candidates.iter_mut().enumerate() {
         let Some(value) = &values[index] else {
@@ -79,6 +104,13 @@ pub(super) fn apply_strategic_clue_values(
         candidate.score = candidate.score.saturating_sub(
             TEAM_ACTION_COVERAGE_PENALTY
                 .saturating_mul(u16::try_from(uncovered_players).unwrap_or(u16::MAX)),
+        );
+        let action_delay = value
+            .first_action_distance(source.current_player, source.hands.len())
+            .saturating_sub(best_action_distance);
+        candidate.score = candidate.score.saturating_sub(
+            TEAM_ACTION_DELAY_PENALTY
+                .saturating_mul(u16::try_from(action_delay).unwrap_or(u16::MAX)),
         );
 
         let fewest_equivalent_connections = values
@@ -162,7 +194,9 @@ fn clue_line_value(
                 .iter()
                 .copied()
                 .filter(|commitment| !baseline.useful_commitments.contains(commitment))
-                .map(|(card, identity)| (card, identity, observer)),
+                .filter_map(|(card, identity)| {
+                    card_owner(source, card).map(|owner| (card, identity, owner))
+                }),
         );
         if let Some(connection) = after.connection.filter(|connection| {
             baseline
@@ -170,9 +204,10 @@ fn clue_line_value(
                 .is_none_or(|prior| prior.card != connection.card)
                 && identity_of(source, connection.card) == Some(connection.identity)
         }) {
-            value
-                .commitments
-                .push((connection.card, connection.identity, observer));
+            value.commitments.extend(
+                card_owner(source, connection.card)
+                    .map(|owner| (connection.card, connection.identity, owner)),
+            );
             value.new_connections += 1;
         }
     }
@@ -183,4 +218,13 @@ fn clue_line_value(
         });
     value.commitments.dedup();
     Some(value)
+}
+
+fn card_owner(source: &PlayerView, card: CardId) -> Option<PlayerId> {
+    source
+        .hands
+        .iter()
+        .position(|hand| hand.iter().any(|candidate| candidate.id == card))
+        .and_then(|index| u8::try_from(index).ok())
+        .map(PlayerId::new)
 }

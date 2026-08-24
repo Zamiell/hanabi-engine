@@ -1,15 +1,14 @@
 use super::{
     Action, Card, CardId, CardSet, Clue, ClueCandidate, ConstraintReason, ConventionConstraints,
-    HGroupActionKind, HGroupActionSet, HGroupAnalyzedAction, HGroupCardInference, HGroupClueKind,
-    HGroupConnection, HGroupConnectionKind, HGroupConnectionPromise, HGroupInferences, HGroupPhase,
-    HGroupProfile, HGroupRuleId, HGroupState, IdentitySet, LogicalDeductions, MAX_CLUE_TOKENS,
-    ObservedCard, OnceLock, PlayerId, PlayerView, Rank, chop, convention_card_inferences,
-    creates_false_anxiety, current_card_identity, focus, h_group_clue_candidates_from_replay,
-    h_group_phase, identity_of, infer_clue_to_self, is_convention_trash, is_critical,
-    is_playable_at, is_playable_now, next_player, pending_is_active,
-    prospective_clue_has_unsafe_connection, prospective_clue_marks_focus_saved,
-    prospective_play_has_unsafe_inference, replay_h_group, rule_enabled, save_clue_score,
-    subjective_convention_cards,
+    HGroupActionKind, HGroupActionSet, HGroupAnalyzedAction, HGroupClueKind, HGroupConnection,
+    HGroupConnectionKind, HGroupConnectionPromise, HGroupInferences, HGroupPhase, HGroupProfile,
+    HGroupRuleId, HGroupState, IdentitySet, LogicalDeductions, MAX_CLUE_TOKENS, ObservedCard,
+    OnceLock, PlayerId, PlayerView, Rank, chop, convention_card_inferences, creates_false_anxiety,
+    current_card_identity, focus, h_group_clue_candidates_from_replay, h_group_phase, identity_of,
+    infer_clue_to_self, is_convention_trash, is_critical, is_playable_at, is_playable_now,
+    next_player, pending_is_active, prospective_clue_has_unsafe_connection,
+    prospective_clue_marks_focus_saved, prospective_play_has_unsafe_inference, replay_h_group,
+    rule_enabled, save_clue_score,
 };
 
 #[derive(Clone, Debug)]
@@ -1229,20 +1228,11 @@ pub(super) fn ordered_playable_cards(
     let own_hand = &view.hands[view.observer.index()];
     let initial_hand_size = if view.hands.len() <= 3 { 5 } else { 4 };
     let initial_cards = initial_hand_size * view.hands.len();
-    let subjective_other_cards = (0..view.hands.len())
-        .map(|player| {
-            let observer = PlayerId::new(u8::try_from(player).expect("at most five players"));
-            (observer != view.observer)
-                .then(|| subjective_convention_cards(view, profile, observer))
-                .flatten()
-        })
-        .collect::<Vec<_>>();
     let ordering = PlayableOrderContext {
         view,
         inferred,
         profile,
         own_hand,
-        subjective_other_cards: &subjective_other_cards,
         initial_cards,
     };
     cards.sort_by_key(|card| playable_order_key(&ordering, *card));
@@ -1256,7 +1246,6 @@ struct PlayableOrderContext<'a> {
     inferred: &'a HGroupInferences,
     profile: HGroupProfile,
     own_hand: &'a [ObservedCard],
-    subjective_other_cards: &'a [Option<Vec<HGroupCardInference>>],
     initial_cards: usize,
 }
 
@@ -1331,24 +1320,9 @@ fn priority_playable_order_key(
                 .iter()
                 .enumerate()
                 .filter(|(player, _)| *player != context.view.observer.index())
-                .any(|(player, hand)| {
-                    hand.iter().any(|candidate| {
-                        !candidate.clues.is_empty()
-                            && (context.subjective_other_cards[player].as_ref().is_some_and(
-                                |cards| {
-                                    cards.iter().any(|note| {
-                                        note.card == candidate.id
-                                            && note.identities == IdentitySet::singleton(next)
-                                    })
-                                },
-                            ) || context.inferred.cards.iter().any(|note| {
-                                note.card == candidate.id
-                                    && note.identities == IdentitySet::singleton(next)
-                            }) || context.inferred.clues.iter().rev().any(|clue| {
-                                clue.focus == candidate.id
-                                    && clue.focus_identities == IdentitySet::singleton(next)
-                            }))
-                    })
+                .any(|(_, hand)| {
+                    hand.iter()
+                        .any(|candidate| candidate.identity == Some(next))
                 })
     });
     let leads_self = singleton.is_some_and(|identity| {

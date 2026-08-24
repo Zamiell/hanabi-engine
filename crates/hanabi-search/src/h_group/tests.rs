@@ -1,6 +1,7 @@
 use super::*;
 use hanabi_core::{
-    Action, FullState, GameStatus, ObservedCard, ObservedHistoryEntry, PlayerView, standard_deck,
+    Action, FullState, GameEvent, GameStatus, ObservedCard, ObservedHistoryEntry, PlayerView,
+    standard_deck,
 };
 use hanabi_protocol::HanabiLiveReplay;
 
@@ -13,6 +14,50 @@ fn expert_replay_194321() -> HanabiLiveReplay {
         "../../../hanabi-protocol/tests/fixtures/game-194321.json"
     ))
     .expect("expert replay fixture is valid")
+}
+
+fn replay_action_at_turn(replay: &HanabiLiveReplay, turn: u32) -> Action {
+    replay
+        .state_at_turn(turn + 1)
+        .expect("fixture action is legal")
+        .history()
+        .iter()
+        .find_map(|entry| {
+            (entry.turn == turn).then_some(match entry.event {
+                GameEvent::Clued { target, clue, .. } => Some(Action::Clue { target, clue }),
+                GameEvent::Played { card, .. } => Some(Action::Play(card)),
+                GameEvent::Discarded { card, .. } => Some(Action::Discard(card)),
+                GameEvent::Drew { .. } => None,
+            })?
+        })
+        .expect("turn contains one player action")
+}
+
+#[test]
+fn optimized_expert_replay_matches_engine_through_move_31() {
+    let replay = expert_replay_194321();
+    for turn in 0..31 {
+        let state = replay.state_at_turn(turn).expect("fixture prefix is legal");
+        let actor = state.current_player();
+        let view = state.view_for(actor).expect("current player has a view");
+        let analysis = crate::analyze_position(
+            &view,
+            crate::SupportedConvention::HGroup(HGroupProfile::Max),
+            crate::PlannerConfig {
+                objective: crate::PlanningObjective::PerfectScore,
+                ..crate::PlannerConfig::default()
+            },
+        )
+        .expect("fixture position is analyzable");
+        let expected = replay_action_at_turn(&replay, turn);
+        assert_eq!(
+            analysis.planner.best_action,
+            expected,
+            "engine disagrees at move {}; candidates: {:#?}",
+            turn + 1,
+            analysis.planner.root_actions,
+        );
+    }
 }
 
 #[test]
@@ -253,6 +298,15 @@ fn recognizes_expert_replay_priority_blue_three_line() {
         "the expert Priority clue must remain a valid candidate: {:#?}",
         h_group_clue_candidates(&deductions, HGroupProfile::Max),
     );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Clue {
+            target: PlayerId::new(3),
+            clue: Clue::Rank(Rank::Three),
+        }),
+        "the nearer unoccupied teammate should be loaded before a later play clue: {:#?}",
+        h_group_clue_candidates(&deductions, HGroupProfile::Max),
+    );
 
     let turn_eleven = replay.state_at_turn(11).expect("turn exists");
     let deductions = LogicalDeductions::new(
@@ -363,6 +417,35 @@ fn optimal_replay_move_26_compares_directness_and_team_tempo() {
         select_h_group_action(&deductions, HGroupProfile::Max),
         Some(yellow),
         "the direct yellow line should cover the team's next useful actions: {candidates:#?}"
+    );
+}
+
+#[test]
+fn optimal_replay_move_29_plays_into_the_visible_yellow_five() {
+    let state = expert_replay_194321()
+        .state_at_turn(28)
+        .expect("turn exists");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("current player exists"),
+    )
+    .expect("valid deductions");
+
+    assert_eq!(
+        ordered_playable_cards(
+            deductions.view(),
+            &infer_h_group(&deductions, HGroupProfile::Max),
+            HGroupProfile::Max,
+        )
+        .first()
+        .copied(),
+        Some(CardId::new(31)),
+        "yellow 4 has Priority because it leads into NoMercy's visible yellow 5",
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(31))),
     );
 }
 

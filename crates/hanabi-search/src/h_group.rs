@@ -4100,7 +4100,6 @@ fn has_higher_basic_priority(
     view: &PlayerView,
     hands: &[Vec<CardId>],
     facts: &[ClueFacts],
-    explicitly_clued: &CardSet,
     forced_playable: &CardSet,
     actor: PlayerId,
     hand: &[CardId],
@@ -4120,10 +4119,7 @@ fn has_higher_basic_priority(
                 .enumerate()
                 .filter(|(player, _)| *player != actor.index())
                 .flat_map(|(_, other_hand)| other_hand)
-                .any(|other| {
-                    explicitly_clued.contains(other)
-                        && current_card_identity(view, *other) == Some(next)
-                })
+                .any(|other| current_card_identity(view, *other) == Some(next))
         });
         let leads_self = next.is_some_and(|next| {
             hand.iter().copied().any(|other| {
@@ -6042,7 +6038,6 @@ fn apply_priority_effects(
                         view,
                         hands,
                         facts,
-                        explicitly_clued,
                         forced_playable,
                         *player,
                         actor_hand,
