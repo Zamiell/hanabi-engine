@@ -81,13 +81,18 @@ catalog and `H_GROUP_RULESET_REVISION` pins the implemented documentation.
 H-Group uses shared internal boundaries to keep these answers consistent:
 
 - `PerspectiveProjector` reconstructs what another player could know.
+- `HistoricalView` prevents future identity reveals from changing old moves.
 - `HGroupTurnContext` exposes explicit pre-event and post-event facts.
-- shared rule effects update signals, connections, invisible clues, chop
-  movement, and obligations.
+- `ConnectionManager` owns the auditable Prompt/Finesse lifecycle.
+- typed effects produce an explanation log, while `ConventionFacts` indexes
+  only current convention truth.
+- `ConventionConstraints` applies mandatory semantics before numeric strategy
+  priorities.
 - `HGroupActionSet` is the canonical action analysis used by selection,
   candidate generation, priorities, safety checks, and continuation detection.
 
-See [H-Group convention interpreter](h-group.md) for the level matrix.
+See [H-Group architecture](architecture.md) for invariants and extension rules,
+and [H-Group convention interpreter](h-group.md) for the level matrix.
 
 The convention-free fallback plays the oldest certainly playable card. If
 discarding is legal, it discards the oldest certainly useless card or otherwise

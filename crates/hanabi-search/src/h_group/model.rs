@@ -26,7 +26,22 @@ impl Hasher for CompactIdHasher {
 pub(super) type CardSet = HashSet<CardId, BuildHasherDefault<CompactIdHasher>>;
 pub(super) type PlayerSet = HashSet<PlayerId, BuildHasherDefault<CompactIdHasher>>;
 
-use super::HGroupMoveKind;
+use super::{ConnectionManager, ConventionFacts, HGroupMoveKind};
+
+/// How far observer projection may recurse while interpreting conventions.
+/// A named mode prevents call sites from silently disagreeing about the
+/// meaning of a bare boolean.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum PerspectiveDepth {
+    ObserverOnly,
+    NestedRecipients,
+}
+
+impl PerspectiveDepth {
+    pub(super) const fn models_other_players(self) -> bool {
+        matches!(self, Self::NestedRecipients)
+    }
+}
 
 /// One convention interpretation found while reducing public history.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -184,7 +199,7 @@ pub(super) struct HGroupState {
     pub(super) explicitly_clued: CardSet,
     pub(super) invisibly_clued: CardSet,
     pub(super) clues: Vec<HGroupClueInterpretation>,
-    pub(super) pending_connections: Vec<ConnectionObligation>,
+    pub(super) pending_connections: ConnectionManager,
     pub(super) already_playing: CardSet,
     pub(super) early_game: bool,
     pub(super) signals: Vec<HGroupSignal>,
@@ -197,6 +212,8 @@ pub(super) struct HGroupState {
     pub(super) invalidated_focuses: CardSet,
     pub(super) implicit_saves: Vec<(CardId, IdentitySet)>,
     pub(super) required_fix: Option<RequiredFix>,
+    /// Query index for live convention state; `signals` remain the audit log.
+    pub(super) facts: ConventionFacts,
 }
 
 impl HGroupState {
@@ -213,6 +230,24 @@ impl HGroupState {
         let mut gotten = promptable.clone();
         gotten.extend(self.chop_moved.iter().copied());
         gotten
+    }
+
+    pub(super) fn validate(&self) -> Result<(), String> {
+        self.pending_connections.validate()?;
+        for connection in self.pending_connections.iter() {
+            if let Some(card) = connection
+                .cards
+                .iter()
+                .find(|card| !self.hands[connection.actor.index()].contains(card))
+            {
+                return Err(format!(
+                    "connection candidate {card:?} is not in actor {:?}'s hand {:?}: {connection:?}",
+                    connection.actor,
+                    self.hands[connection.actor.index()]
+                ));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -234,16 +269,4 @@ pub(super) struct RequiredFix {
     pub(super) target: PlayerId,
     pub(super) focus: CardId,
     pub(super) identity: Card,
-}
-
-/// One active, typed step in a Prompt or Finesse chain.
-#[derive(Clone, Debug)]
-pub(super) struct ConnectionObligation {
-    pub(super) actor: PlayerId,
-    pub(super) cards: Vec<CardId>,
-    pub(super) expected: Card,
-    pub(super) kind: HGroupConnectionKind,
-    pub(super) focus: CardId,
-    /// Zero-based position in a multi-connection chain.
-    pub(super) step: u8,
 }

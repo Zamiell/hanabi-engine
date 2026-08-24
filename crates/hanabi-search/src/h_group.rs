@@ -16,7 +16,12 @@ use hanabi_core::{
 use crate::{HGroupLevel, HGroupProfile, IdentitySet, LogicalDeductions};
 
 mod action_analysis;
+mod connection;
+mod constraints;
 mod decision;
+mod effects;
+mod facts;
+mod identity;
 mod model;
 mod perspective;
 mod prospective;
@@ -24,6 +29,8 @@ mod rules;
 mod turn_context;
 
 use action_analysis::{HGroupActionKind, HGroupActionSet, HGroupAnalyzedAction};
+use connection::{ConnectionManager, ConnectionObligation, ConnectionTransitionReason};
+use constraints::{ConstraintReason, ConventionConstraints};
 pub(crate) use decision::analyze_h_group_convention;
 pub use decision::infer_h_group;
 #[cfg(test)]
@@ -35,7 +42,10 @@ use decision::{
     infer_h_group_from_replay, ordered_playable_cards, positional_discard_candidate,
     positional_discard_is_valid_snapshot,
 };
-use model::{CardSet, ConnectionObligation, HGroupState, PlayerSet, RequiredFix, protected_cards};
+use effects::{ConventionEffect, ConventionReducer, EffectBatch};
+use facts::ConventionFacts;
+use identity::identity_of;
+use model::{CardSet, HGroupState, PerspectiveDepth, PlayerSet, RequiredFix, protected_cards};
 pub use model::{
     HGroupCardInference, HGroupClueInterpretation, HGroupClueKind, HGroupConnection,
     HGroupConnectionKind, HGroupConnectionPromise, HGroupInferences, HGroupPhase, HGroupSaveKind,
@@ -51,7 +61,7 @@ use prospective::{
     subjective_convention_cards, with_prospective_analysis_cache,
 };
 use rules::{HGroupRuleId, rule_enabled};
-use turn_context::{HGroupTurnContext, HGroupTurnSnapshot, HGroupTurnView};
+use turn_context::{HGroupTurnContext, HGroupTurnSnapshot, HGroupTurnView, HistoricalView};
 
 /// Semantic families used by the cumulative H-Group interpreter.
 ///
@@ -95,6 +105,9 @@ pub enum HGroupMoveKind {
     UnnecessaryMove,
     Priority,
     Extra,
+    /// An earlier provisional signal was publicly disproved. This is audit
+    /// metadata, not a playable convention level.
+    Retraction,
 }
 
 /// Machine-readable coverage metadata for one cumulative learning-path level.
@@ -312,9 +325,19 @@ fn h_group_clue_candidates_from_replay_inner(
                     .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
                     .map(|card| card.id)
                     .collect::<Vec<_>>();
+                let unambiguously_stops_play = required_focus_card.is_some_and(|card| {
+                    let mut facts = card.clues;
+                    facts.add_positive_clue(clue);
+                    let possibilities = IdentitySet::from_mask(facts.identity_mask());
+                    !possibilities.is_empty()
+                        && possibilities
+                            .iter()
+                            .all(|identity| !is_playable_now(view, identity))
+                });
                 (target == required.target
                     && clue.matches(required.identity)
                     && touched.contains(&required.focus)
+                    && unambiguously_stops_play
                     && required_focus_card.is_some_and(|card| !card.clues.has_positive_clue(clue))
                     && !prospective_clue_has_unsafe_connection(
                         view,
@@ -339,13 +362,24 @@ fn h_group_clue_candidates_from_replay_inner(
         }
     }
     let promptable = replay.promptable();
-    let fixed_cards = currently_fixed_cards(&replay.signals);
+    let fixed_cards = replay.facts.fixed_cards();
     let gotten = replay.gotten_from(&promptable);
     let next_player = PlayerId::new(
         u8::try_from((view.current_player.index() + 1) % view.hands.len())
             .expect("standard Hanabi has at most five players"),
     );
     let convention_cards = convention_card_inferences(deductions, replay);
+    let next_player_has_multi_one = view.hands[next_player.index()]
+        .iter()
+        .filter(|card| {
+            !promptable.contains(&card.id)
+                && card.identity.is_some_and(|identity| {
+                    identity.rank == Rank::One && is_playable_now(view, identity)
+                })
+        })
+        .take(2)
+        .count()
+        >= 2;
     let mut candidates = Vec::new();
 
     for action in view.legal_actions() {
@@ -359,18 +393,18 @@ fn h_group_clue_candidates_from_replay_inner(
             .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
             .map(|card| card.id)
             .collect::<Vec<_>>();
-        let newly_touched = touched
-            .iter()
-            .copied()
-            .filter(|card| !gotten.contains(card))
-            .collect::<Vec<_>>();
         let newly_informed = touched
             .iter()
             .copied()
             .filter(|card| !promptable.contains(card))
             .collect::<Vec<_>>();
-        // Minimum Clue Value: Level 1 does not spend tempo clues.
-        if newly_touched.is_empty() {
+        // Minimum Clue Value rejects a literal reclue, not a clue that fills
+        // in a new suit/rank on an already gotten card. Fill-in/Fix clues are
+        // essential for repairing ambiguous connection notes.
+        let adds_objective_information = hand
+            .iter()
+            .any(|card| touched.contains(&card.id) && !card.clues.has_positive_clue(clue));
+        if !adds_objective_information {
             continue;
         }
         let old_chop = chop(layout, &gotten);
@@ -382,6 +416,26 @@ fn h_group_clue_candidates_from_replay_inner(
             .find(|card| card.id == focus)
             .and_then(|card| card.identity)
             .expect("another player's cards are visible");
+        if gotten.contains(&focus)
+            && (replay.clues.iter().rev().any(|prior| {
+                prior.focus == focus
+                    && prior.focus_identities == IdentitySet::singleton(focus_identity)
+            }) || replay
+                .pending_connections
+                .iter()
+                .any(|pending| pending.focus == focus && pending.focus_identity == focus_identity)
+                || subjective_convention_cards(view, profile, target).is_some_and(|cards| {
+                    cards.iter().any(|card| {
+                        card.card == focus
+                            && card.identities == IdentitySet::singleton(focus_identity)
+                    })
+                }))
+        {
+            // Adding a direct clue fact that merely repeats an identity the
+            // recipient already knows by convention is not Minimum Clue
+            // Value. A genuine Fix remains allowed when their note differs.
+            continue;
+        }
         let endangered_discard = positional_discard_candidate(deductions, target, &gotten);
         let save_score = if old_chop == Some(focus) || endangered_discard == Some(focus) {
             save_clue_score(
@@ -400,14 +454,16 @@ fn h_group_clue_candidates_from_replay_inner(
         };
         let play_score = play_clue_score(
             view,
+            profile,
             target,
             focus,
             focus_identity,
             clue,
             &newly_informed,
             &promptable,
-            &fixed_cards,
+            fixed_cards,
             &replay.already_playing,
+            &replay.pending_connections,
             &convention_cards,
         )
         .or_else(|| {
@@ -425,7 +481,43 @@ fn h_group_clue_candidates_from_replay_inner(
                 && distinct.len() < identities.len())
             .then(|| 410 + u16::try_from(distinct.len()).unwrap_or(0))
         });
+        let repairable_lie = !is_playable_now(view, focus_identity)
+            && rule_enabled(profile, HGroupRuleId::Extras)
+            && loaded_connection_plan(
+                view,
+                None,
+                None,
+                None,
+                view.current_player,
+                target,
+                focus,
+                focus_identity,
+                &promptable,
+                &replay.already_playing,
+                &replay.pending_connections,
+                std::array::from_fn(|suit| {
+                    u8::try_from(view.play_stacks[suit].len())
+                        .expect("a standard stack has at most five cards")
+                }),
+            )
+            .is_some_and(|fix| fix.is_some());
+        let retouches_older_delayed_focus = is_playable_now(view, focus_identity)
+            && touched.iter().copied().any(|card| {
+                card != focus
+                    && promptable.contains(&card)
+                    && current_card_identity(view, card).is_some_and(|identity| {
+                        identity.suit == focus_identity.suit
+                            && identity.rank.number() > focus_identity.rank.number() + 1
+                    })
+            });
+        if retouches_older_delayed_focus {
+            // Playing the direct focus would leave the older card as a fresh
+            // delayed focus. The recipient can then Prompt it using the new
+            // clue even though the giver intended only the direct play.
+            continue;
+        }
         if play_score.is_some()
+            && !repairable_lie
             && prospective_clue_has_unsafe_connection(
                 view, profile, target, focus, clue, &touched, true,
             )
@@ -433,10 +525,31 @@ fn h_group_clue_candidates_from_replay_inner(
             continue;
         }
         if let Some(mut score) = play_score {
+            let target_has_known_trash = target != next_player
+                && newly_informed.len() == 1
+                && layout.iter().copied().any(|card| {
+                    card != focus
+                        && gotten.contains(&card)
+                        && current_card_identity(view, card)
+                            .is_some_and(|identity| card_is_trash(view, identity))
+                });
+            if target_has_known_trash {
+                // Do not spend a clue on an off-turn one-for-one merely to
+                // occupy a player who already has a publicly demonstrated
+                // trash discard. Recovering a token first preserves both
+                // tempo and the later play clue.
+                score = score.saturating_sub(50);
+            }
             if old_chop == Some(focus)
-                && (focus_identity.rank != Rank::One || target == next_player)
                 && is_unique_visible(view, focus, focus_identity)
+                && (target == next_player
+                    || focus_identity.rank != Rank::One
+                    || !next_player_has_multi_one)
             {
+                // Occupying a player with their playable chop is valuable at
+                // every distance, including an off-turn 1. Otherwise an
+                // intervening teammate is forced to spend the next clue on
+                // that chop, losing the opportunity to find a stronger line.
                 score += 120;
             }
             if is_playable_now(view, focus_identity)
@@ -683,7 +796,7 @@ fn advanced_clue_candidates(
         .all(|card| gotten.contains(card) || replay.chop_moved.contains(card));
     let stalling = replay.early_game || actor_locked || view.clue_tokens == MAX_CLUE_TOKENS;
     let promptable = replay.promptable();
-    let previously_fixed = currently_fixed_cards(&replay.signals);
+    let previously_fixed = replay.facts.fixed_cards();
     let mut candidates = Vec::new();
     for action in view.legal_actions() {
         let Action::Clue { target, clue } = action else {
@@ -960,11 +1073,13 @@ fn advanced_clue_candidates(
                 usize::from(identity.rank.number()) == height + 1
                     || delayed_connection_score(
                         view,
+                        profile,
                         target,
                         focus,
                         identity,
                         &replay.explicitly_clued,
                         &replay.already_playing,
+                        &replay.pending_connections,
                     )
                     .is_some()
                         && !prospective_clue_has_unsafe_connection(
@@ -975,6 +1090,10 @@ fn advanced_clue_candidates(
             && touched.len() == 1
             && replay.explicitly_clued.contains(&touched[0])
             && fills_in
+            && !replay
+                .pending_connections
+                .iter()
+                .any(|connection| connection.focus == touched[0])
             && safe_generic_play;
         let delayed = identities.iter().find(|identity| {
             usize::from(identity.rank.number()) > view.play_stacks[identity.suit.index()].len() + 1
@@ -983,7 +1102,7 @@ fn advanced_clue_candidates(
             view,
             &newly_informed,
             &promptable,
-            &previously_fixed,
+            previously_fixed,
             convention_cards,
         );
         let out_of_order = clue_focus
@@ -1290,6 +1409,7 @@ fn has_false_two_save_prompt(
 #[allow(clippy::too_many_arguments)]
 fn play_clue_score(
     view: &PlayerView,
+    profile: HGroupProfile,
     target: PlayerId,
     focus: CardId,
     focus_identity: Card,
@@ -1298,6 +1418,7 @@ fn play_clue_score(
     explicitly_clued: &CardSet,
     fixed_cards: &CardSet,
     already_playing: &CardSet,
+    pending_connections: &[ConnectionObligation],
     convention_cards: &[HGroupCardInference],
 ) -> Option<u16> {
     if !good_touch(
@@ -1333,11 +1454,13 @@ fn play_clue_score(
     } else {
         delayed_connection_score(
             view,
+            profile,
             target,
             focus,
             focus_identity,
             explicitly_clued,
             already_playing,
+            pending_connections,
         )?
     };
     Some(
@@ -1443,13 +1566,16 @@ fn is_unique_visible(view: &PlayerView, excluded: CardId, identity: Card) -> boo
         .any(|card| card.id != excluded && card.identity == Some(identity))
 }
 
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn delayed_connection_score(
     view: &PlayerView,
+    profile: HGroupProfile,
     target: PlayerId,
     focus: CardId,
     focus_identity: Card,
     explicitly_clued: &CardSet,
     already_playing: &CardSet,
+    pending_connections: &[ConnectionObligation],
 ) -> Option<u16> {
     let stack_height = view.play_stacks[focus_identity.suit.index()].len();
     if usize::from(focus_identity.rank.number()) <= stack_height + 1
@@ -1458,40 +1584,86 @@ fn delayed_connection_score(
         return None;
     }
     let connector = Card::new(focus_identity.suit, Rank::ALL[stack_height]);
-    let next = (view.current_player.index() + 1) % view.hands.len();
-    let connection_hand = &view.hands[next];
-    let prompt_candidates = connection_hand
-        .iter()
-        .rev()
-        .filter(|card| {
-            card.id != focus
-                && explicitly_clued.contains(&card.id)
-                && !already_playing.contains(&card.id)
-                && card.clues.allows(connector)
-        })
-        .collect::<Vec<_>>();
-    let first_connection_valid = if prompt_candidates.is_empty() {
-        if target.index() == next {
-            false
-        } else {
-            connection_hand
-                .iter()
-                .rev()
-                .find(|card| !explicitly_clued.contains(&card.id))
-                .is_some_and(|card| card.identity == Some(connector))
-        }
+    let wholly_queued =
+        ((stack_height + 1)..usize::from(focus_identity.rank.number())).all(|needed_rank| {
+            let needed = Card::new(focus_identity.suit, Rank::ALL[needed_rank - 1]);
+            pending_identity_is_queued(pending_connections, needed)
+        });
+    if wholly_queued {
+        return Some(390);
+    }
+    if rule_enabled(profile, HGroupRuleId::Extras)
+        && loaded_connection_plan(
+            view,
+            None,
+            None,
+            None,
+            view.current_player,
+            target,
+            focus,
+            focus_identity,
+            explicitly_clued,
+            already_playing,
+            pending_connections,
+            std::array::from_fn(|suit| {
+                u8::try_from(view.play_stacks[suit].len())
+                    .expect("a standard stack has at most five cards")
+            }),
+        )
+        .is_some()
+    {
+        return Some(365);
+    }
+    let first = (view.current_player.index() + 1) % view.hands.len();
+    let search_len = if explicitly_clued.contains(&focus) {
+        // A fill-in clue on an already gotten delayed card cannot make its
+        // recipient play immediately. Its connection may therefore wrap
+        // beyond that recipient, as in a Green-4 reclue that finesses the
+        // following player's Green 2 and Green 3.
+        view.hands.len()
+    } else if rule_enabled(profile, HGroupRuleId::BasicMoves) {
+        (target.index() + view.hands.len() - first) % view.hands.len() + 1
     } else {
-        prompt_candidates
+        1
+    };
+    let player_order = (0..search_len)
+        .map(|distance| (first + distance) % view.hands.len())
+        .collect::<Vec<_>>();
+    let has_prompt = player_order.iter().copied().any(|player| {
+        let candidates = view.hands[player]
+            .iter()
+            .rev()
+            .filter(|card| {
+                card.id != focus
+                    && explicitly_clued.contains(&card.id)
+                    && !already_playing.contains(&card.id)
+                    && card.clues.allows(connector)
+            })
+            .collect::<Vec<_>>();
+        candidates
             .iter()
             .position(|card| card.identity == Some(connector))
             .is_some_and(|correct| {
-                prompt_candidates[..correct].iter().all(|card| {
+                candidates[..correct].iter().all(|card| {
                     card.identity
                         .is_some_and(|identity| is_playable_now(view, identity))
                 })
             })
-    };
-    if !first_connection_valid {
+    });
+    let has_finesse = !has_prompt
+        && player_order.iter().copied().any(|player| {
+            player != target.index()
+                && visible_finesse_connects(
+                    view,
+                    &view.hands[player],
+                    connector,
+                    focus,
+                    explicitly_clued,
+                    already_playing,
+                    rule_enabled(profile, HGroupRuleId::SpecialFinesses),
+                )
+        });
+    if !has_prompt && !has_finesse {
         return None;
     }
 
@@ -1513,20 +1685,232 @@ fn delayed_connection_score(
             // the correct connector is also visible elsewhere.
             return None;
         }
-        if !view
+        let explicitly_available = view
             .hands
             .iter()
             .flatten()
-            .any(|card| explicitly_clued.contains(&card.id) && card.identity == Some(needed))
-        {
+            .any(|card| explicitly_clued.contains(&card.id) && card.identity == Some(needed));
+        let layered_finesse_available = player_order.iter().copied().any(|player| {
+            player != target.index()
+                && visible_finesse_connects(
+                    view,
+                    &view.hands[player],
+                    needed,
+                    focus,
+                    explicitly_clued,
+                    already_playing,
+                    rule_enabled(profile, HGroupRuleId::SpecialFinesses),
+                )
+        });
+        if !explicitly_available && !layered_finesse_available {
             return None;
         }
     }
-    Some(if prompt_candidates.is_empty() {
-        370
+    Some(if has_prompt { 380 } else { 370 })
+}
+
+/// Validates a delayed line through a player who is already occupied. Max
+/// permits one repairable lie inside the finesse layer when the next player
+/// can fill in that bad card before its owner acts.
+#[allow(
+    clippy::option_option,
+    clippy::too_many_arguments,
+    clippy::too_many_lines
+)]
+fn loaded_connection_plan(
+    view: &PlayerView,
+    historical_hands: Option<&[Vec<CardId>]>,
+    historical_facts: Option<&[ClueFacts]>,
+    historical_view: Option<HistoricalView<'_>>,
+    giver: PlayerId,
+    target: PlayerId,
+    focus: CardId,
+    focus_identity: Card,
+    gotten: &CardSet,
+    already_playing: &CardSet,
+    pending: &[ConnectionObligation],
+    mut stack_heights: [u8; 5],
+) -> Option<Option<RequiredFix>> {
+    let visible_identity = |card| {
+        historical_view.map_or_else(|| identity_of(view, card), |history| history.identity(card))
+    };
+    let current_hands;
+    let hands = if let Some(hands) = historical_hands {
+        hands
     } else {
-        380
-    })
+        current_hands = view
+            .hands
+            .iter()
+            .map(|hand| hand.iter().map(|card| card.id).collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+        &current_hands
+    };
+    let target_loaded = pending
+        .iter()
+        .any(|connection| connection.actor == target && pending_is_active(connection, pending))
+        || (gotten.contains(&focus)
+            && historical_facts.is_some_and(|facts| {
+                IdentitySet::from_mask(facts[focus.index()].identity_mask())
+                    == IdentitySet::singleton(focus_identity)
+            }));
+    if !target_loaded {
+        return None;
+    }
+
+    let fixer = next_player(giver, hands.len());
+    let mut scheduled = CardSet::default();
+    let mut required_fix = None;
+    let height = stack_heights[focus_identity.suit.index()];
+    for rank in (height + 1)..focus_identity.rank.number() {
+        let expected = Card::new(focus_identity.suit, Rank::ALL[usize::from(rank - 1)]);
+        if pending_identity_is_queued(pending, expected) {
+            stack_heights[expected.suit.index()] = expected.rank.number();
+            continue;
+        }
+
+        let prompted = hands.iter().flatten().any(|card| {
+            *card != focus
+                && gotten.contains(card)
+                && !already_playing.contains(card)
+                && visible_identity(*card) == Some(expected)
+        });
+        if prompted {
+            stack_heights[expected.suit.index()] = expected.rank.number();
+            continue;
+        }
+
+        let mut found = false;
+        let mut observer_fallback = None;
+        for (actor_index, hand) in hands.iter().enumerate() {
+            if actor_index == target.index() {
+                continue;
+            }
+            let actor = PlayerId::new(
+                u8::try_from(actor_index).expect("standard Hanabi has at most five players"),
+            );
+            let candidates = hand
+                .iter()
+                .rev()
+                .filter(|card| {
+                    **card != focus
+                        && !gotten.contains(*card)
+                        && !already_playing.contains(*card)
+                        && !scheduled.contains(*card)
+                })
+                .collect::<Vec<_>>();
+            if actor == view.observer && giver != view.observer {
+                observer_fallback = observer_fallback.or_else(|| candidates.first().copied());
+                continue;
+            }
+            let Some(position) = candidates
+                .iter()
+                .position(|card| visible_identity(**card) == Some(expected))
+            else {
+                continue;
+            };
+            let mut simulated = stack_heights;
+            let mut candidate_fix = required_fix;
+            let mut valid = true;
+            for card in &candidates[..position] {
+                let Some(identity) = visible_identity(**card) else {
+                    valid = false;
+                    break;
+                };
+                if is_playable_at(simulated, identity) {
+                    simulated[identity.suit.index()] = identity.rank.number();
+                    continue;
+                }
+                let actor_distance = (actor.index() + hands.len() - giver.index()) % hands.len();
+                let clues = historical_facts.map_or_else(
+                    || {
+                        view.hands
+                            .iter()
+                            .flatten()
+                            .find(|candidate| candidate.id == **card)
+                            .map_or_else(ClueFacts::default, |candidate| candidate.clues)
+                    },
+                    |facts| facts[card.index()],
+                );
+                let repair_clue_available = [Clue::Suit(identity.suit), Clue::Rank(identity.rank)]
+                    .into_iter()
+                    .any(|clue| !clues.has_positive_clue(clue));
+                if candidate_fix.is_some()
+                    || fixer == actor
+                    || actor_distance <= 1
+                    || !repair_clue_available
+                {
+                    valid = false;
+                    break;
+                }
+                candidate_fix = Some(RequiredFix {
+                    actor: fixer,
+                    target: actor,
+                    focus: **card,
+                    identity,
+                });
+            }
+            if valid {
+                scheduled.extend(candidates[..=position].iter().map(|card| **card));
+                required_fix = candidate_fix;
+                stack_heights = simulated;
+                stack_heights[expected.suit.index()] = expected.rank.number();
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            if let Some(card) = observer_fallback {
+                scheduled.insert(*card);
+                stack_heights[expected.suit.index()] = expected.rank.number();
+                found = true;
+            }
+        }
+        if !found {
+            return None;
+        }
+    }
+    Some(required_fix)
+}
+
+/// Whether one visible hand supplies a valid Finesse or Layered Finesse up to
+/// `expected`. Cards before the connector must themselves play successfully in
+/// finesse order; otherwise the clue would create a known misplay.
+#[allow(clippy::too_many_arguments)]
+fn visible_finesse_connects(
+    view: &PlayerView,
+    hand: &[ObservedCard],
+    expected: Card,
+    focus: CardId,
+    gotten: &CardSet,
+    already_playing: &CardSet,
+    special_finesses: bool,
+) -> bool {
+    let mut stack_heights = std::array::from_fn(|suit| {
+        u8::try_from(view.play_stacks[suit].len()).expect("a Hanabi stack has at most five cards")
+    });
+    for (position, card) in hand
+        .iter()
+        .rev()
+        .filter(|card| {
+            card.id != focus && !gotten.contains(&card.id) && !already_playing.contains(&card.id)
+        })
+        .enumerate()
+    {
+        let Some(identity) = card.identity else {
+            return false;
+        };
+        if identity == expected {
+            return position == 0 || special_finesses;
+        }
+        if position > 0 && !special_finesses {
+            return false;
+        }
+        if !is_playable_at(stack_heights, identity) {
+            return false;
+        }
+        stack_heights[identity.suit.index()] = identity.rank.number();
+    }
+    false
 }
 
 fn tempo_clue_candidates(
@@ -1648,6 +2032,7 @@ fn infer_clue_to_self(
     }
     if inferred.signals.iter().any(|signal| {
         signal.kind == HGroupMoveKind::Bluff
+            && signal.cards.len() >= 2
             && signal.cards.last() == Some(&clue.focus)
             && signal.turn >= clue.turn
     }) {
@@ -1917,6 +2302,7 @@ fn convention_card_inferences(
             if let Some(card) = cards.iter_mut().find(|card| card.card == clue.focus) {
                 let resolved_bluff = replay.signals.iter().any(|signal| {
                     signal.kind == HGroupMoveKind::Bluff
+                        && signal.cards.len() >= 2
                         && signal.turn >= clue.turn
                         && signal.cards.last() == Some(&clue.focus)
                 });
@@ -1935,6 +2321,39 @@ fn convention_card_inferences(
                     // it does not silently migrate to the next still-live rank.
                     // Only an explicit Fix may reinterpret that promise.
                     let mut narrowed = card.identities.intersection(clue_time);
+                    if let Some(promised) = replay
+                        .pending_connections
+                        .iter()
+                        .find(|pending| pending.focus == clue.focus)
+                        .map(|pending| pending.focus_identity)
+                    {
+                        let demonstrated = narrowed.intersection(IdentitySet::singleton(promised));
+                        if !demonstrated.is_empty() {
+                            narrowed = demonstrated;
+                        }
+                    } else if !clue.play_identities.is_empty()
+                        && clue.save_identities.is_empty()
+                        && !replay.signals.iter().any(|signal| {
+                            signal.turn == clue.turn
+                                && matches!(
+                                    signal.kind,
+                                    HGroupMoveKind::Prompt
+                                        | HGroupMoveKind::Finesse
+                                        | HGroupMoveKind::LayeredFinesse
+                                )
+                                && !signal.cards.contains(&clue.focus)
+                        })
+                    {
+                        // Without an actual Prompt/Finesse obligation, an
+                        // immediately playable identity has precedence over a
+                        // merely possible delayed interpretation. This lets a
+                        // loaded recipient recognize a newly clued blue 3 on
+                        // a blue-2 stack instead of inventing another finesse.
+                        let direct = identities_at_distance_at(narrowed, clue.stack_heights, 0);
+                        if !direct.is_empty() {
+                            narrowed = direct;
+                        }
+                    }
                     if clue.play_identities.len() > 1 {
                         // An ambiguous delayed Play clue is conditional on its
                         // connector. Once the lower candidate has actually
@@ -2131,6 +2550,7 @@ fn is_playable_now(view: &PlayerView, identity: Card) -> bool {
 
 #[allow(clippy::too_many_arguments)]
 fn snapshot_play_identities(
+    profile: HGroupProfile,
     identities: IdentitySet,
     giver: PlayerId,
     target: PlayerId,
@@ -2140,12 +2560,15 @@ fn snapshot_play_identities(
     facts: &[ClueFacts],
     gotten: &CardSet,
     already_playing: &CardSet,
+    pending_connections: &[ConnectionObligation],
     stack_heights: [u8; 5],
+    historical_turn: u32,
 ) -> IdentitySet {
     let mask = identities
         .iter()
         .filter(|identity| {
             snapshot_playable(
+                profile,
                 *identity,
                 giver,
                 target,
@@ -2155,7 +2578,9 @@ fn snapshot_play_identities(
                 facts,
                 gotten,
                 already_playing,
+                pending_connections,
                 stack_heights,
+                Some(HistoricalView::new(view, historical_turn)),
             )
         })
         .fold(0, |mask, identity| mask | (1 << identity.index()));
@@ -2164,6 +2589,7 @@ fn snapshot_play_identities(
 
 #[allow(clippy::too_many_arguments)]
 fn snapshot_playable(
+    profile: HGroupProfile,
     identity: Card,
     giver: PlayerId,
     target: PlayerId,
@@ -2173,12 +2599,33 @@ fn snapshot_playable(
     facts: &[ClueFacts],
     gotten: &CardSet,
     already_playing: &CardSet,
+    pending_connections: &[ConnectionObligation],
     stack_heights: [u8; 5],
+    historical_view: Option<HistoricalView<'_>>,
 ) -> bool {
     let height = usize::from(stack_heights[identity.suit.index()]);
     let rank = usize::from(identity.rank.number());
     if rank <= height {
         return false;
+    }
+    if rule_enabled(profile, HGroupRuleId::Extras)
+        && loaded_connection_plan(
+            view,
+            Some(hands),
+            Some(facts),
+            historical_view,
+            giver,
+            target,
+            focus,
+            identity,
+            gotten,
+            already_playing,
+            pending_connections,
+            stack_heights,
+        )
+        .is_some()
+    {
+        return true;
     }
     let accounted_after_first = ((height + 2)..rank).all(|needed_rank| {
         let needed = Card::new(identity.suit, Rank::ALL[needed_rank - 1]);
@@ -2190,74 +2637,142 @@ fn snapshot_playable(
     if rank == height + 1 {
         return true;
     }
+    if ((height + 1)..rank).all(|needed_rank| {
+        let needed = Card::new(identity.suit, Rank::ALL[needed_rank - 1]);
+        pending_identity_is_queued(pending_connections, needed)
+    }) {
+        return true;
+    }
     let first = Card::new(identity.suit, Rank::ALL[height]);
     if snapshot_accounted(first, focus, view, hands, facts, gotten) {
         return true;
     }
 
-    let actor_index = (giver.index() + 1) % hands.len();
-    let prompt_candidates = hands[actor_index]
-        .iter()
-        .rev()
-        .copied()
-        .filter(|card| {
-            *card != focus
-                && gotten.contains(card)
-                && !already_playing.contains(card)
-                && facts[card.index()].allows(first)
-        })
-        .collect::<Vec<_>>();
-    if !prompt_candidates.is_empty() {
-        if actor_index == view.observer.index() {
-            if giver != view.observer {
-                return true;
-            }
-            return prompt_candidates
-                .iter()
-                .position(|card| {
-                    IdentitySet::from_mask(facts[card.index()].identity_mask())
-                        == IdentitySet::singleton(first)
-                })
-                .is_some_and(|correct| {
-                    prompt_candidates[..correct].iter().all(|card| {
-                        let possibilities =
-                            IdentitySet::from_mask(facts[card.index()].identity_mask());
-                        !possibilities.is_empty()
-                            && possibilities
-                                .iter()
-                                .all(|identity| is_playable_at(stack_heights, identity))
-                    })
-                });
-        }
-        return prompt_candidates
+    snapshot_connection_exists(
+        profile,
+        first,
+        giver,
+        target,
+        focus,
+        view,
+        hands,
+        facts,
+        gotten,
+        already_playing,
+        stack_heights,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn snapshot_connection_exists(
+    profile: HGroupProfile,
+    expected: Card,
+    giver: PlayerId,
+    target: PlayerId,
+    focus: CardId,
+    view: &PlayerView,
+    hands: &[Vec<CardId>],
+    facts: &[ClueFacts],
+    gotten: &CardSet,
+    already_playing: &CardSet,
+    stack_heights: [u8; 5],
+) -> bool {
+    let first_actor = (giver.index() + 1) % hands.len();
+    let search_len = if rule_enabled(profile, HGroupRuleId::BasicMoves) {
+        (target.index() + hands.len() - first_actor) % hands.len() + 1
+    } else {
+        1
+    };
+    let player_order = (0..search_len).map(|distance| (first_actor + distance) % hands.len());
+
+    // Prompts take precedence over Finesses even when the prompted player is
+    // later in turn order. This is the same ordering used when the connection
+    // obligations are materialized by `schedule_connection` below.
+    let mut unknown_observer_prompt = false;
+    for actor_index in player_order.clone() {
+        let candidates = hands[actor_index]
             .iter()
-            .position(|card| identity_of(view, *card) == Some(first))
-            .is_some_and(|correct| {
-                prompt_candidates[..correct].iter().all(|card| {
-                    identity_of(view, *card).is_some_and(|candidate| {
-                        candidate.rank.number() == stack_heights[candidate.suit.index()] + 1
-                    })
-                })
-            });
-    }
-    if target.index() == actor_index {
-        return false;
-    }
-    let finesse = hands[actor_index]
-        .iter()
-        .rev()
-        .copied()
-        .find(|card| !gotten.contains(card));
-    finesse.is_some_and(|card| {
-        if actor_index != view.observer.index() {
-            identity_of(view, card) == Some(first)
-        } else if giver != view.observer {
-            true
-        } else {
-            IdentitySet::from_mask(facts[card.index()].identity_mask())
-                == IdentitySet::singleton(first)
+            .rev()
+            .copied()
+            .filter(|card| {
+                *card != focus
+                    && gotten.contains(card)
+                    && !already_playing.contains(card)
+                    && facts[card.index()].allows(expected)
+            })
+            .collect::<Vec<_>>();
+        if candidates.is_empty() {
+            continue;
         }
-    })
+        if actor_index == view.observer.index() && giver != view.observer {
+            unknown_observer_prompt = true;
+            continue;
+        }
+        if candidates
+            .iter()
+            .position(|card| identity_of(view, *card) == Some(expected))
+            .is_some_and(|correct| {
+                candidates[..correct].iter().all(|card| {
+                    identity_of(view, *card).map_or_else(
+                        || {
+                            let possibilities =
+                                IdentitySet::from_mask(facts[card.index()].identity_mask());
+                            !possibilities.is_empty()
+                                && possibilities
+                                    .iter()
+                                    .all(|identity| is_playable_at(stack_heights, identity))
+                        },
+                        |identity| is_playable_at(stack_heights, identity),
+                    )
+                })
+            })
+        {
+            return true;
+        }
+    }
+    if unknown_observer_prompt {
+        return true;
+    }
+
+    let layered = rule_enabled(profile, HGroupRuleId::SpecialFinesses);
+    let mut unknown_observer_finesse = false;
+    for actor_index in player_order {
+        if actor_index == target.index() {
+            continue;
+        }
+        let unclued = hands[actor_index]
+            .iter()
+            .rev()
+            .copied()
+            .filter(|card| {
+                *card != focus && !gotten.contains(card) && !already_playing.contains(card)
+            })
+            .collect::<Vec<_>>();
+        if unclued.is_empty() {
+            continue;
+        }
+        if actor_index == view.observer.index() && giver != view.observer {
+            unknown_observer_finesse = true;
+            continue;
+        }
+        let mut simulated = stack_heights;
+        for (position, card) in unclued.iter().enumerate() {
+            let Some(identity) = identity_of(view, *card) else {
+                break;
+            };
+            if identity == expected {
+                if position == 0 || layered {
+                    return true;
+                }
+                break;
+            }
+            if position > 0 && !layered || !is_playable_at(simulated, identity) {
+                break;
+            }
+            simulated[identity.suit.index()] = identity.rank.number();
+        }
+    }
+    unknown_observer_finesse
 }
 
 fn snapshot_accounted(
@@ -2394,7 +2909,7 @@ struct HGroupRuleEffects<'a> {
     invisibly_clued: &'a mut CardSet,
     clues: &'a [HGroupClueInterpretation],
     already_playing: &'a mut CardSet,
-    pending: &'a mut Vec<ConnectionObligation>,
+    pending: &'a mut ConnectionManager,
     chop_moved: &'a mut CardSet,
     must_clue: &'a mut PlayerSet,
     forced_playable: &'a mut CardSet,
@@ -2405,14 +2920,14 @@ struct HGroupRuleEffects<'a> {
 
 #[allow(clippy::too_many_lines)]
 fn replay_h_group(deductions: &LogicalDeductions, profile: HGroupProfile) -> HGroupState {
-    replay_h_group_inner(deductions, profile, true)
+    replay_h_group_inner(deductions, profile, PerspectiveDepth::NestedRecipients)
 }
 
 #[allow(clippy::too_many_lines)]
 fn replay_h_group_inner(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
-    model_other_players: bool,
+    perspective_depth: PerspectiveDepth,
 ) -> HGroupState {
     debug_assert!(rule_enabled(profile, HGroupRuleId::Basic));
     let view = deductions.view();
@@ -2435,7 +2950,7 @@ fn replay_h_group_inner(
             .iter()
             .filter(|entry| matches!(entry.event, ObservedEvent::Drew { .. }))
             .count();
-    let mut pending_connections = Vec::<ConnectionObligation>::new();
+    let mut pending_connections = ConnectionManager::default();
     let mut already_playing = CardSet::default();
     let mut early_game = true;
     let mut signals = Vec::new();
@@ -2449,6 +2964,7 @@ fn replay_h_group_inner(
     let mut historical_clue_tokens = MAX_CLUE_TOKENS;
 
     for (entry_index, entry) in view.history.iter().enumerate() {
+        let historical = HistoricalView::new(view, entry.turn);
         let mut actor_saw_normal_discard = false;
         let before = HGroupTurnSnapshot::new(
             &hands,
@@ -2483,13 +2999,47 @@ fn replay_h_group_inner(
                 touched,
                 untouched,
             } => {
-                let is_required_fix = required_fix.is_some_and(|required: RequiredFix| {
-                    required.actor == *giver
-                        && required.target == *target
-                        && touched.contains(&required.focus)
-                        && clue.matches(required.identity)
-                        && !was_clued_before_with(view, entry.turn, required.focus, *clue)
+                let promised_card_fix = pending_connections.iter().any(|connection| {
+                    connection.actor == *target
+                        && !clue.matches(connection.expected)
+                        && touched.iter().any(|card| connection.cards.contains(card))
                 });
+                let is_required_fix = promised_card_fix
+                    || required_fix.is_some_and(|required: RequiredFix| {
+                        required.actor == *giver
+                            && required.target == *target
+                            && touched.contains(&required.focus)
+                            && clue.matches(required.identity)
+                            && !was_clued_before_with(view, entry.turn, required.focus, *clue)
+                    });
+                if is_required_fix {
+                    let fixed_cards = touched.iter().copied().collect::<CardSet>();
+                    let mut occupied =
+                        protected_cards(&explicitly_clued, &invisibly_clued, &chop_moved);
+                    occupied.extend(
+                        pending_connections
+                            .iter()
+                            .flat_map(|connection| connection.cards.iter().copied()),
+                    );
+                    pending_connections.repair_actor(
+                        entry.turn,
+                        *target,
+                        |card| fixed_cards.contains(&card),
+                        |_| {
+                            let next = hands[target.index()].iter().rev().copied().find(|card| {
+                                !fixed_cards.contains(card) && !occupied.contains(card)
+                            });
+                            if let Some(next) = next {
+                                occupied.insert(next);
+                                invisibly_clued.insert(next);
+                            }
+                            next
+                        },
+                    );
+                    for fixed in fixed_cards {
+                        invisibly_clued.remove(&fixed);
+                    }
+                }
                 let gotten = protected_cards(&explicitly_clued, &invisibly_clued, &chop_moved);
                 let hand = &hands[target.index()];
                 let old_chop = chop(hand, &gotten);
@@ -2508,17 +3058,21 @@ fn replay_h_group_inner(
                     .filter(|connection| {
                         touched
                             .iter()
-                            .any(|card| identity_of(view, *card) == Some(connection.expected))
+                            .any(|card| historical.identity(*card) == Some(connection.expected))
                     })
                     .flat_map(|connection| connection.cards.iter().copied())
                     .collect::<CardSet>();
                 if !displaced_connections.is_empty() {
-                    pending_connections.retain(|connection| {
-                        connection.actor != *giver
-                            || !touched
-                                .iter()
-                                .any(|card| identity_of(view, *card) == Some(connection.expected))
-                    });
+                    pending_connections.cancel_where(
+                        entry.turn,
+                        ConnectionTransitionReason::DisplacedByClue,
+                        |connection| {
+                            connection.actor == *giver
+                                && touched.iter().any(|card| {
+                                    historical.identity(*card) == Some(connection.expected)
+                                })
+                        },
+                    );
                     for displaced in displaced_connections {
                         already_playing.remove(&displaced);
                         if !explicitly_clued.contains(&displaced)
@@ -2531,7 +3085,7 @@ fn replay_h_group_inner(
                     }
                 }
                 if let Some(focus) = focus(hand, touched, old_chop, &gotten) {
-                    let focus_identity = identity_of(view, focus);
+                    let focus_identity = historical.identity(focus);
                     let focus_was_chop = old_chop == Some(focus)
                         || positional_discard_is_valid_snapshot(
                             view,
@@ -2559,7 +3113,8 @@ fn replay_h_group_inner(
                         // Save possibilities: a newly touched 2 beside an
                         // existing saved Red 2 cannot itself be Red 2.
                         let live_cards = hands.iter().flatten().copied().collect::<CardSet>();
-                        let fixed_cards = currently_fixed_cards(&signals);
+                        let fixed_cards = ConventionFacts::from_signals(&signals);
+                        let fixed_cards = fixed_cards.fixed_cards();
                         let claimed = gotten
                             .iter()
                             .copied()
@@ -2571,7 +3126,7 @@ fn replay_h_group_inner(
                             .fold(IdentitySet::default(), |claimed, card| {
                                 let giver_holds_card = hands[giver.index()].contains(&card);
                                 let identity = (!giver_holds_card)
-                                    .then(|| identity_of(view, card))
+                                    .then(|| historical.identity(card))
                                     .flatten()
                                     .or_else(|| {
                                         let logical = IdentitySet::from_mask(
@@ -2595,6 +3150,7 @@ fn replay_h_group_inner(
                         focus_identities = focus_identities.without(claimed);
                     }
                     let mut play_identities = snapshot_play_identities(
+                        profile,
                         focus_identities,
                         *giver,
                         *target,
@@ -2604,7 +3160,9 @@ fn replay_h_group_inner(
                         &facts,
                         &gotten,
                         &already_playing,
+                        &pending_connections,
                         stack_heights,
+                        entry.turn,
                     );
                     let eight_clue_save = rule_enabled(profile, HGroupRuleId::Stalling)
                         && !early_game
@@ -2683,11 +3241,100 @@ fn replay_h_group_inner(
                         // Stall to become an exact prompted 5 much later.
                         play_identities = IdentitySet::default();
                     }
-                    let connection_identity = focus_identity.or_else(|| {
-                        (play_identities.len() == 1)
-                            .then(|| play_identities.iter().next())
-                            .flatten()
+                    let target_already_loaded = pending_connections.iter().any(|connection| {
+                        connection.actor == *target
+                            && pending_is_active(connection, &pending_connections)
                     });
+                    let direct_play = IdentitySet::from_mask(
+                        play_identities
+                            .iter()
+                            .filter(|identity| is_playable_at(stack_heights, *identity))
+                            .fold(0, |mask, identity| mask | (1 << identity.index())),
+                    );
+                    let inferred_connection_identity = focus_identity
+                        .or_else(|| {
+                            (play_identities.len() == 1)
+                                .then(|| play_identities.iter().next())
+                                .flatten()
+                        })
+                        .or_else(|| {
+                            // The recipient can initially have both a direct
+                            // and a delayed identity in their note. Preserve a
+                            // unique delayed interpretation so intervening
+                            // blind plays can demonstrate and resolve it.
+                            let delayed = IdentitySet::from_mask(
+                                play_identities
+                                    .iter()
+                                    .filter(|identity| {
+                                        identity.rank.number()
+                                            > stack_heights[identity.suit.index()] + 1
+                                    })
+                                    .fold(0, |mask, identity| mask | (1 << identity.index())),
+                            );
+                            (delayed.len() == 1)
+                                .then(|| delayed.iter().next())
+                                .flatten()
+                        })
+                        .or_else(|| {
+                            // A max-level finesse with a repairable lie can
+                            // leave the recipient with several color-matching
+                            // delayed identities. The longest fully accounted
+                            // chain is the promise; choosing a shorter prefix
+                            // would leave visible connecting cards needlessly
+                            // duplicated.
+                            rule_enabled(profile, HGroupRuleId::Extras)
+                                .then(|| {
+                                    play_identities
+                                        .iter()
+                                        .filter(|identity| {
+                                            loaded_connection_plan(
+                                                view,
+                                                Some(&hands),
+                                                Some(&facts),
+                                                Some(HistoricalView::new(view, entry.turn)),
+                                                *giver,
+                                                *target,
+                                                focus,
+                                                *identity,
+                                                &gotten,
+                                                &already_playing,
+                                                &pending_connections,
+                                                stack_heights,
+                                            )
+                                            .is_some_and(|fix| fix.is_some())
+                                        })
+                                        .max_by_key(|identity| identity.rank.number())
+                                })
+                                .flatten()
+                        });
+                    let connection_identity = if focus_identity.is_none()
+                        && target_already_loaded
+                        && !direct_play.is_empty()
+                        && !inferred_connection_identity.is_some_and(|identity| {
+                            loaded_connection_plan(
+                                view,
+                                Some(&hands),
+                                Some(&facts),
+                                Some(HistoricalView::new(view, entry.turn)),
+                                *giver,
+                                *target,
+                                focus,
+                                identity,
+                                &gotten,
+                                &already_playing,
+                                &pending_connections,
+                                stack_heights,
+                            )
+                            .is_some_and(|fix| fix.is_some())
+                        }) {
+                        // A new direct Play Clue to a loaded player gives them
+                        // another explicit play. It does not manufacture a
+                        // second speculative finesse from delayed identities
+                        // that happen to match the same rank/color clue.
+                        None
+                    } else {
+                        inferred_connection_identity
+                    };
                     let focus_identities = if focus_was_chop {
                         play_identities.union(save_identities)
                     } else {
@@ -2702,7 +3349,7 @@ fn replay_h_group_inner(
                         .iter()
                         .copied()
                         .map(|card| {
-                            let direct = identity_of(view, card).map_or_else(
+                            let direct = historical.identity(card).map_or_else(
                                 || IdentitySet::from_mask(facts[card.index()].identity_mask()),
                                 IdentitySet::singleton,
                             );
@@ -2747,14 +3394,15 @@ fn replay_h_group_inner(
                         HGroupClueKind::Unrecognized => None,
                     };
                     if let Some(signal_kind) = signal_kind {
-                        signals.push(HGroupSignal {
-                            turn: entry.turn,
-                            actor: *giver,
-                            target: Some(*target),
-                            kind: signal_kind,
-                            cards: vec![focus],
-                            identity: focus_identity,
-                        });
+                        push_signal(
+                            &mut signals,
+                            entry,
+                            *giver,
+                            Some(*target),
+                            signal_kind,
+                            vec![focus],
+                            focus_identity,
+                        );
                     }
                     if matches!(kind, HGroupClueKind::Play) && !low_score_number_five {
                         let previous_pending = pending_connections.len();
@@ -2774,6 +3422,7 @@ fn replay_h_group_inner(
                             &mut invisibly_clued,
                             stack_heights,
                             &mut pending_connections,
+                            &mut required_fix,
                         );
                         for connection in &pending_connections[previous_pending..] {
                             push_signal(
@@ -2817,17 +3466,28 @@ fn replay_h_group_inner(
                 identity,
                 successful,
             } => {
-                let failed_connections = advance_pending_connections(
-                    &mut pending_connections,
+                let advance = pending_connections.advance_play(
+                    entry.turn,
                     *player,
                     *card,
                     *identity,
                     *successful,
                 );
+                let failed_connections = advance.failed_focuses;
+                let released_candidates = advance.released_candidates;
                 for focus in failed_connections {
                     already_playing.remove(&focus);
                     forced_playable.remove(&focus);
                     invalidated_focuses.insert(focus);
+                }
+                for released in released_candidates {
+                    if !explicitly_clued.contains(&released)
+                        && !pending_connections
+                            .iter()
+                            .any(|connection| connection.cards.contains(&released))
+                    {
+                        invisibly_clued.remove(&released);
+                    }
                 }
                 remove_card(&mut hands[player.index()], *card);
                 invisibly_clued.remove(card);
@@ -2844,7 +3504,11 @@ fn replay_h_group_inner(
                         .filter(|connection| connection.expected == *identity)
                         .flat_map(|connection| connection.cards.iter().copied())
                         .collect::<CardSet>();
-                    pending_connections.retain(|connection| connection.expected != *identity);
+                    pending_connections.cancel_where(
+                        entry.turn,
+                        ConnectionTransitionReason::IdentitySatisfiedElsewhere,
+                        |connection| connection.expected == *identity,
+                    );
                     for satisfied in satisfied_elsewhere {
                         already_playing.remove(&satisfied);
                         forced_playable.remove(&satisfied);
@@ -2868,7 +3532,7 @@ fn replay_h_group_inner(
             } => {
                 let gotten = protected_cards(&explicitly_clued, &invisibly_clued, &chop_moved);
                 actor_saw_normal_discard = chop(&hands[player.index()], &gotten) == Some(*card)
-                    || (model_other_players
+                    || (perspective_depth.models_other_players()
                         && *player != view.observer
                         && subjective_chop_before_action(
                             view,
@@ -2882,18 +3546,7 @@ fn replay_h_group_inner(
                 if chop(&hands[player.index()], &gotten) == Some(*card) {
                     early_game = false;
                 }
-                for pending in pending_connections
-                    .iter_mut()
-                    .filter(|pending| pending.actor == *player)
-                {
-                    if pending.cards.first() == Some(card) {
-                        pending.cards.clear();
-                    } else {
-                        pending.cards.retain(|candidate| candidate != card);
-                    }
-                }
-                pending_connections
-                    .retain(|pending| !pending.cards.is_empty() && pending.focus != *card);
+                pending_connections.discard(entry.turn, *player, *card);
                 remove_card(&mut hands[player.index()], *card);
                 invisibly_clued.remove(card);
                 already_playing.remove(card);
@@ -2911,6 +3564,7 @@ fn replay_h_group_inner(
 
         let context = HGroupTurnContext {
             entry,
+            historical,
             before,
             after: HGroupTurnView {
                 hands: &hands,
@@ -3049,6 +3703,8 @@ fn replay_h_group_inner(
                 context.entry,
                 view,
                 context.after.hands,
+                context.after.stack_heights,
+                effects.pending,
                 effects.signals,
             );
         }
@@ -3191,7 +3847,8 @@ fn replay_h_group_inner(
             }
         }
     }
-    HGroupState {
+    let convention_facts = ConventionFacts::from_signals(&signals);
+    let state = HGroupState {
         hands,
         explicitly_clued,
         invisibly_clued,
@@ -3207,7 +3864,14 @@ fn replay_h_group_inner(
         invalidated_focuses,
         implicit_saves,
         required_fix,
-    }
+        facts: convention_facts,
+    };
+    debug_assert!(
+        state.validate().is_ok(),
+        "invalid H-Group replay state: {:?}",
+        state.validate()
+    );
+    state
 }
 
 fn h_group_phase(view: &PlayerView, early_game: bool) -> HGroupPhase {
@@ -3251,22 +3915,17 @@ fn push_signal(
     cards: Vec<CardId>,
     identity: Option<Card>,
 ) {
-    if signals.iter().any(|signal| {
-        signal.turn == entry.turn
-            && signal.actor == actor
-            && signal.kind == kind
-            && signal.cards == cards
-    }) {
-        return;
-    }
-    signals.push(HGroupSignal {
-        turn: entry.turn,
-        actor,
-        target,
-        kind,
-        cards,
-        identity,
-    });
+    ConventionReducer::apply(
+        EffectBatch::one(ConventionEffect::RecordSignal(HGroupSignal {
+            turn: entry.turn,
+            actor,
+            target,
+            kind,
+            cards,
+            identity,
+        })),
+        signals,
+    );
 }
 
 fn next_player(player: PlayerId, player_count: usize) -> PlayerId {
@@ -3536,9 +4195,11 @@ fn apply_repeated_one_fix(
         .flat_map(|connection| connection.cards.iter().copied())
         .collect::<CardSet>();
     effects.already_playing.remove(&fixed);
-    effects
-        .pending
-        .retain(|connection| connection.focus != fixed);
+    effects.pending.cancel_where(
+        entry.turn,
+        ConnectionTransitionReason::Fixed,
+        |connection| connection.focus == fixed,
+    );
     for card in canceled_cards {
         if !explicitly_clued.contains(&card)
             && !effects
@@ -3631,9 +4292,11 @@ fn apply_fill_in_fix(
     effects
         .already_playing
         .retain(|card| !touched.contains(card));
-    effects
-        .pending
-        .retain(|connection| !touched.contains(&connection.focus));
+    effects.pending.cancel_where(
+        entry.turn,
+        ConnectionTransitionReason::Fixed,
+        |connection| touched.contains(&connection.focus),
+    );
     for card in canceled_cards {
         if !effects.explicitly_clued.contains(&card)
             && !effects
@@ -3780,6 +4443,7 @@ fn apply_tempo_effects(
     let ObservedEvent::Clued {
         giver,
         target,
+        clue,
         touched,
         ..
     } = &entry.event
@@ -3787,6 +4451,9 @@ fn apply_tempo_effects(
         return;
     };
     if touched.is_empty()
+        || touched
+            .iter()
+            .any(|card| !was_clued_before_with(view, entry.turn, *card, *clue))
         || !touched
             .iter()
             .all(|card| was_clued_before(view, entry.turn, *card) || chop_moved.contains(card))
@@ -3986,14 +4653,18 @@ fn apply_positional_effects(
     };
     forced_playable.insert(indicated);
     if let Some(identity) = current_card_identity(view, indicated) {
-        pending.push(ConnectionObligation {
-            actor: target,
-            cards: vec![indicated],
-            expected: identity,
-            kind: HGroupConnectionKind::Finesse,
-            focus: indicated,
-            step: 0,
-        });
+        pending.start(
+            entry.turn,
+            ConnectionObligation {
+                actor: target,
+                cards: vec![indicated],
+                expected: identity,
+                focus_identity: identity,
+                kind: HGroupConnectionKind::Finesse,
+                focus: indicated,
+                step: 0,
+            },
+        );
     }
     push_signal(
         signals,
@@ -4091,6 +4762,8 @@ fn apply_intermediate_bluff_effects(
     entry: &ObservedHistoryEntry,
     view: &PlayerView,
     hands: &[Vec<CardId>],
+    stack_heights: [u8; 5],
+    pending: &[ConnectionObligation],
     signals: &mut Vec<HGroupSignal>,
 ) {
     let ObservedEvent::Clued {
@@ -4108,6 +4781,25 @@ fn apply_intermediate_bluff_effects(
     // clue given to somebody later in turn order. A clue given directly to
     // that next player is an ordinary Play Clue, never a Bluff.
     if actor == *target {
+        return;
+    }
+    if touched
+        .last()
+        .and_then(|card| current_card_identity(view, *card))
+        .is_some_and(|identity| is_playable_at(stack_heights, identity))
+    {
+        // A directly playable focus is an ordinary Play Clue. The special
+        // 3-Bluff allowance applies to a useful future 3, not one that can
+        // already be played from the current stacks.
+        return;
+    }
+    if pending
+        .iter()
+        .any(|connection| connection.actor == actor && pending_is_active(connection, pending))
+    {
+        // A loaded player must perform the play already promised to them.
+        // The same guard is used by the ordinary Bluff rule; omitting it here
+        // made a direct clue to a later player look like an Intermediate Bluff.
         return;
     }
     let specialized = *clue == Clue::Rank(Rank::Three)
@@ -4218,7 +4910,7 @@ fn apply_transfer_effects(
     explicitly_clued: &CardSet,
     invisibly_clued: &mut CardSet,
     already_playing: &mut CardSet,
-    pending: &mut Vec<ConnectionObligation>,
+    pending: &mut ConnectionManager,
     signals: &mut Vec<HGroupSignal>,
 ) {
     let ObservedEvent::Discarded {
@@ -4265,14 +4957,18 @@ fn apply_transfer_effects(
     invisibly_clued.insert(target_card);
     if is_playable_now(view, *identity) {
         already_playing.insert(target_card);
-        pending.push(ConnectionObligation {
-            actor: target,
-            cards: vec![target_card],
-            expected: *identity,
-            kind: HGroupConnectionKind::Finesse,
-            focus: target_card,
-            step: 0,
-        });
+        pending.start(
+            entry.turn,
+            ConnectionObligation {
+                actor: target,
+                cards: vec![target_card],
+                expected: *identity,
+                focus_identity: *identity,
+                kind: HGroupConnectionKind::Finesse,
+                focus: target_card,
+                step: 0,
+            },
+        );
     }
     push_signal(
         signals,
@@ -4291,7 +4987,7 @@ fn apply_bluff_effects(
     hands: &[Vec<CardId>],
     stack_heights: [u8; 5],
     explicitly_clued: &CardSet,
-    pending: &mut Vec<ConnectionObligation>,
+    pending: &mut ConnectionManager,
     signals: &mut Vec<HGroupSignal>,
 ) {
     let ObservedEvent::Clued {
@@ -4351,14 +5047,18 @@ fn apply_bluff_effects(
     if bluff_identity == expected_connector {
         return;
     }
-    pending.push(ConnectionObligation {
-        actor,
-        cards: vec![bluff_card],
-        expected: bluff_identity,
-        kind: HGroupConnectionKind::Finesse,
-        focus,
-        step: 0,
-    });
+    pending.start(
+        entry.turn,
+        ConnectionObligation {
+            actor,
+            cards: vec![bluff_card],
+            expected: bluff_identity,
+            focus_identity,
+            kind: HGroupConnectionKind::Finesse,
+            focus,
+            step: 0,
+        },
+    );
     push_signal(
         signals,
         entry,
@@ -4414,7 +5114,11 @@ fn apply_resolved_bluff_effects(
         return;
     }
 
-    pending.retain(|connection| connection.focus != clue.focus);
+    pending.cancel_where(
+        entry.turn,
+        ConnectionTransitionReason::FocusInvalidated,
+        |connection| connection.focus == clue.focus,
+    );
     already_playing.remove(&clue.focus);
     push_signal(
         signals,
@@ -4433,7 +5137,7 @@ fn apply_trash_effects(
     hands: &[Vec<CardId>],
     stack_heights: [u8; 5],
     chop_moved: &mut CardSet,
-    pending: &mut Vec<ConnectionObligation>,
+    pending: &mut ConnectionManager,
     signals: &mut Vec<HGroupSignal>,
 ) {
     match &entry.event {
@@ -4489,14 +5193,18 @@ fn apply_trash_effects(
                     .map(|expected| (finesse, expected))
             });
             if let Some((finesse, expected)) = playable_finesse {
-                pending.push(ConnectionObligation {
-                    actor: target,
-                    cards: vec![finesse],
-                    expected,
-                    kind: HGroupConnectionKind::Finesse,
-                    focus: finesse,
-                    step: 0,
-                });
+                pending.start(
+                    entry.turn,
+                    ConnectionObligation {
+                        actor: target,
+                        cards: vec![finesse],
+                        expected,
+                        focus_identity: expected,
+                        kind: HGroupConnectionKind::Finesse,
+                        focus: finesse,
+                        step: 0,
+                    },
+                );
                 push_signal(
                     signals,
                     entry,
@@ -4523,7 +5231,7 @@ fn apply_ejection_discharge_effects(
     explicitly_clued: &CardSet,
     _invisibly_clued: &CardSet,
     _chop_moved: &CardSet,
-    pending: &mut Vec<ConnectionObligation>,
+    pending: &mut ConnectionManager,
     forced_playable: &mut CardSet,
     signals: &mut Vec<HGroupSignal>,
 ) {
@@ -4596,7 +5304,11 @@ fn apply_ejection_discharge_effects(
             // when the requested ungotten position does not exist.
             return;
         };
-        pending.retain(|connection| connection.actor != actor);
+        pending.cancel_where(
+            entry.turn,
+            ConnectionTransitionReason::Superseded,
+            |connection| connection.actor == actor,
+        );
         forced_playable.insert(card);
         push_signal(
             signals,
@@ -4685,7 +5397,7 @@ fn apply_five_tech_effects(
     explicitly_clued: &CardSet,
     invisibly_clued: &CardSet,
     chop_moved: &mut CardSet,
-    pending: &mut Vec<ConnectionObligation>,
+    pending: &mut ConnectionManager,
     forced_playable: &mut CardSet,
     implicit_saves: &mut Vec<(CardId, IdentitySet)>,
     signals: &mut Vec<HGroupSignal>,
@@ -4796,23 +5508,35 @@ fn apply_five_tech_effects(
         else {
             return;
         };
-        pending.retain(|connection| connection.actor != actor && connection.actor != *target);
-        pending.push(ConnectionObligation {
-            actor,
-            cards: vec![card],
-            expected: connector,
-            kind: HGroupConnectionKind::Finesse,
-            focus: pulled,
-            step: 0,
-        });
-        pending.push(ConnectionObligation {
-            actor: *target,
-            cards: vec![pulled],
-            expected: identity,
-            kind: HGroupConnectionKind::Finesse,
-            focus: pulled,
-            step: 1,
-        });
+        pending.cancel_where(
+            entry.turn,
+            ConnectionTransitionReason::Superseded,
+            |connection| connection.actor == actor || connection.actor == *target,
+        );
+        pending.start(
+            entry.turn,
+            ConnectionObligation {
+                actor,
+                cards: vec![card],
+                expected: connector,
+                focus_identity: identity,
+                kind: HGroupConnectionKind::Finesse,
+                focus: pulled,
+                step: 0,
+            },
+        );
+        pending.start(
+            entry.turn,
+            ConnectionObligation {
+                actor: *target,
+                cards: vec![pulled],
+                expected: identity,
+                focus_identity: identity,
+                kind: HGroupConnectionKind::Finesse,
+                focus: pulled,
+                step: 1,
+            },
+        );
         (HGroupMoveKind::FivePull, None)
     } else {
         let Some(card) = finesse_position_id(&hands[actor.index()], &gotten, 1).filter(|card| {
@@ -4825,7 +5549,11 @@ fn apply_five_tech_effects(
         (HGroupMoveKind::Ejection, Some(card))
     };
     if let Some(forced) = forced {
-        pending.retain(|connection| connection.actor != actor);
+        pending.cancel_where(
+            entry.turn,
+            ConnectionTransitionReason::Superseded,
+            |connection| connection.actor == actor,
+        );
         forced_playable.insert(forced);
     }
     push_signal(
@@ -4848,7 +5576,7 @@ fn apply_out_of_order_effects(
     _hands: &[Vec<CardId>],
     clues: &[HGroupClueInterpretation],
     stack_heights: [u8; 5],
-    _pending: &mut Vec<ConnectionObligation>,
+    _pending: &mut ConnectionManager,
     _forced_playable: &mut CardSet,
     required_fix: &mut Option<RequiredFix>,
     signals: &mut Vec<HGroupSignal>,
@@ -4862,20 +5590,21 @@ fn apply_out_of_order_effects(
     else {
         return;
     };
-    let clue_focus = clues
+    let interpretation = clues
         .iter()
         .rev()
         .find(|clue| clue.turn == entry.turn)
         .filter(|clue| {
             matches!(clue.kind, HGroupClueKind::Play)
                 || (clue.kind == HGroupClueKind::Unrecognized && clue.save_identities.is_empty())
-        })
-        .map(|clue| clue.focus);
-    if let Some(card) = clue_focus.filter(|card| {
+        });
+    if let Some(card) = interpretation.map(|clue| clue.focus).filter(|card| {
         current_card_identity(view, *card).is_some_and(|identity| {
             identity.rank.number() > stack_heights[identity.suit.index()] + 1
                 && touched.iter().any(|candidate| {
                     candidate != card
+                        && interpretation
+                            .is_some_and(|clue| !clue.previously_gotten.contains(candidate))
                         && current_card_identity(view, *candidate).is_some_and(|lower| {
                             lower.suit == identity.suit
                                 && lower.rank.number() < identity.rank.number()
@@ -4984,7 +5713,7 @@ fn apply_charm_effects(
     explicitly_clued: &CardSet,
     invisibly_clued: &CardSet,
     chop_moved: &CardSet,
-    pending: &mut Vec<ConnectionObligation>,
+    pending: &mut ConnectionManager,
     forced_playable: &mut CardSet,
     signals: &mut Vec<HGroupSignal>,
 ) {
@@ -5007,7 +5736,11 @@ fn apply_charm_effects(
                 // Once a rank-4 clue would require three ordinary blind plays,
                 // it is either a valid 4 Charm or an invalid clue. Do not leave
                 // the generic layered-Finesse interpretation active.
-                pending.retain(|connection| connection.focus != interpretation.focus);
+                pending.cancel_where(
+                    entry.turn,
+                    ConnectionTransitionReason::FocusInvalidated,
+                    |connection| connection.focus == interpretation.focus,
+                );
                 let actor = next_player(*giver, hands.len());
                 let gotten = explicitly_clued
                     .union(invisibly_clued)
@@ -5022,7 +5755,11 @@ fn apply_charm_effects(
                             .is_some_and(|identity| is_playable_at(stack_heights, identity))
                     });
                 if let Some(charmed) = charmed {
-                    pending.retain(|connection| connection.actor != actor);
+                    pending.cancel_where(
+                        entry.turn,
+                        ConnectionTransitionReason::Superseded,
+                        |connection| connection.actor == actor,
+                    );
                     forced_playable.insert(charmed);
                     push_signal(
                         signals,
@@ -5093,7 +5830,7 @@ fn apply_unnecessary_move_effects(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn apply_priority_effects(
     context: &HGroupTurnContext<'_>,
     view: &PlayerView,
@@ -5105,6 +5842,49 @@ fn apply_priority_effects(
     let hands = &context.before.hands;
     let facts = &context.before.facts;
     let stack_heights = context.before.stack_heights;
+    if let ObservedEvent::Clued {
+        target,
+        clue,
+        touched,
+        ..
+    } = &entry.event
+    {
+        // A clue matching a pending Priority connector but touching a
+        // different card is the Load Clue that disproves the provisional
+        // Finesse-Position interpretation.
+        let convention_facts = ConventionFacts::from_signals(signals);
+        let canceled = signals
+            .iter()
+            .filter(|signal| {
+                signal.kind == HGroupMoveKind::Priority
+                    && signal
+                        .cards
+                        .iter()
+                        .any(|card| convention_facts.active_priority().contains(card))
+                    && signal.target == Some(*target)
+                    && signal
+                        .identity
+                        .is_some_and(|identity| clue.matches(identity))
+                    && signal.cards.iter().all(|card| !touched.contains(card))
+            })
+            .flat_map(|signal| signal.cards.iter().copied())
+            .collect::<CardSet>();
+        for card in &canceled {
+            forced_playable.remove(card);
+        }
+        if !canceled.is_empty() {
+            push_signal(
+                signals,
+                entry,
+                *target,
+                Some(*target),
+                HGroupMoveKind::Retraction,
+                canceled.iter().copied().collect(),
+                None,
+            );
+        }
+        return;
+    }
     let ObservedEvent::Played {
         player,
         card,
@@ -5120,17 +5900,23 @@ fn apply_priority_effects(
     // cards. Trust Finesses from unknown cards need substantially stronger
     // evidence and must not be inferred merely from hidden simulator truth.
     let played_possibilities = IdentitySet::from_mask(facts[card.index()].identity_mask());
-    if played_possibilities != IdentitySet::singleton(*identity) {
+    let convention_facts = ConventionFacts::from_signals(signals);
+    let fixed_cards = convention_facts.fixed_cards();
+    let played_is_known = played_possibilities == IdentitySet::singleton(*identity)
+        || convention_facts.known_identity(*card) == Some(*identity);
+    if !played_is_known || fixed_cards.contains(card) {
         return;
     }
 
     let actor_hand = &hands[player.index()];
-    let fixed_cards = currently_fixed_cards(signals);
     let declined_priority = actor_hand.iter().copied().find(|candidate| {
         if *candidate == *card || fixed_cards.contains(candidate) {
             return false;
         }
-        let possibilities = IdentitySet::from_mask(facts[candidate.index()].identity_mask());
+        let clue_possibilities = IdentitySet::from_mask(facts[candidate.index()].identity_mask());
+        let possibilities = convention_facts
+            .demonstrated_layer(*candidate)
+            .map_or(clue_possibilities, IdentitySet::singleton);
         !possibilities.is_empty()
             && possibilities.iter().all(|candidate_identity| {
                 is_playable_at(stack_heights, candidate_identity)
@@ -5151,39 +5937,87 @@ fn apply_priority_effects(
     });
 
     if declined_priority.is_some() {
-        let target = next_player(*player, hands.len());
+        let mut priority_connection = None;
         if identity.rank != Rank::Five {
             let connector = Card::new(identity.suit, Rank::ALL[identity.rank.index() + 1]);
-            let prompt = hands[target.index()]
-                .iter()
-                .rev()
-                .copied()
-                .find(|candidate| {
-                    explicitly_clued.contains(candidate)
-                        && current_card_identity(view, *candidate) == Some(connector)
-                });
-            let finesse = hands[target.index()]
-                .iter()
-                .rev()
-                .copied()
-                .find(|candidate| {
-                    !explicitly_clued.contains(candidate)
-                        && (target == view.observer
-                            || current_card_identity(view, *candidate) == Some(connector))
-                });
-            if let Some(connection) = prompt.or(finesse) {
+            let players = (1..hands.len())
+                .map(|offset| {
+                    PlayerId::new(
+                        u8::try_from((player.index() + offset) % hands.len())
+                            .expect("standard Hanabi has at most five players"),
+                    )
+                })
+                .collect::<Vec<_>>();
+
+            // A Priority Prompt can land in any later hand, and a Priority
+            // Finesse can deliberately skip the next player. First locate a
+            // visible connector. If it is unclued, it is only a finesse when
+            // it occupies that player's current Finesse Position; otherwise
+            // the move commits the team to a Load Clue instead.
+            let prompt = players.iter().find_map(|target| {
+                hands[target.index()]
+                    .iter()
+                    .rev()
+                    .copied()
+                    .find(|candidate| {
+                        explicitly_clued.contains(candidate)
+                            && context.historical.identity(*candidate) == Some(connector)
+                    })
+                    .map(|candidate| (*target, candidate))
+            });
+            let visible_connector = players.iter().find_map(|target| {
+                hands[target.index()]
+                    .iter()
+                    .copied()
+                    .find(|candidate| context.historical.identity(*candidate) == Some(connector))
+                    .map(|candidate| (*target, candidate))
+            });
+            let visible_finesse = visible_connector.and_then(|(target, connector_card)| {
+                hands[target.index()]
+                    .iter()
+                    .rev()
+                    .copied()
+                    .find(|candidate| !explicitly_clued.contains(candidate))
+                    .filter(|finesse_position| *finesse_position == connector_card)
+                    .map(|candidate| (target, candidate))
+            });
+            let subjective_finesse = (visible_connector.is_none() && view.observer != *player)
+                .then(|| {
+                    hands[view.observer.index()]
+                        .iter()
+                        .rev()
+                        .copied()
+                        .find(|candidate| !explicitly_clued.contains(candidate))
+                        .map(|candidate| (view.observer, candidate))
+                })
+                .flatten();
+            priority_connection = prompt.or(visible_finesse).or(subjective_finesse);
+            if let Some((_, connection)) = priority_connection {
                 forced_playable.insert(connection);
             }
         }
-        push_signal(
-            signals,
-            entry,
-            *player,
-            None,
-            HGroupMoveKind::Priority,
-            vec![*card],
-            current_card_identity(view, *card),
-        );
+        if let Some((target, connection)) = priority_connection {
+            let connector = Card::new(identity.suit, Rank::ALL[identity.rank.index() + 1]);
+            push_signal(
+                signals,
+                entry,
+                *player,
+                Some(target),
+                HGroupMoveKind::Priority,
+                vec![connection],
+                Some(connector),
+            );
+        } else {
+            push_signal(
+                signals,
+                entry,
+                *player,
+                None,
+                HGroupMoveKind::Priority,
+                vec![*card],
+                context.historical.identity(*card),
+            );
+        }
     }
 }
 
@@ -5193,7 +6027,7 @@ fn apply_extra_effects(
     view: &PlayerView,
     hands: &[Vec<CardId>],
     explicitly_clued: &CardSet,
-    pending: &mut Vec<ConnectionObligation>,
+    pending: &mut ConnectionManager,
     chop_moved: &mut CardSet,
     must_clue: &mut PlayerSet,
     forced_playable: &mut CardSet,
@@ -5226,7 +6060,11 @@ fn apply_extra_effects(
                     })
                     .map(|connection| connection.focus)
                     .collect::<CardSet>();
-                pending.retain(|connection| !invalidated.contains(&connection.focus));
+                pending.cancel_where(
+                    entry.turn,
+                    ConnectionTransitionReason::FocusInvalidated,
+                    |connection| invalidated.contains(&connection.focus),
+                );
             }
         }
         ObservedEvent::Played {
@@ -5258,7 +6096,13 @@ fn apply_extra_effects(
     // exact composition without a parallel hierarchy of bespoke state types.
     let same_turn = signals
         .iter()
-        .filter(|signal| signal.turn == entry.turn && signal.kind != HGroupMoveKind::Extra)
+        .filter(|signal| {
+            signal.turn == entry.turn
+                && !matches!(
+                    signal.kind,
+                    HGroupMoveKind::Extra | HGroupMoveKind::Retraction
+                )
+        })
         .count();
     if same_turn >= 2 {
         let actor = match &entry.event {
@@ -5301,7 +6145,8 @@ fn schedule_connection(
     already_playing: &CardSet,
     invisibly_clued: &mut CardSet,
     stack_heights: [u8; 5],
-    pending: &mut Vec<ConnectionObligation>,
+    pending: &mut ConnectionManager,
+    required_fix: &mut Option<RequiredFix>,
 ) {
     let Some(focus_identity) = focus_identity else {
         return;
@@ -5310,6 +6155,31 @@ fn schedule_connection(
     if focus_identity.rank.number() <= height + 1 {
         return;
     }
+    let loaded_plan = rule_enabled(profile, HGroupRuleId::Extras).then(|| {
+        loaded_connection_plan(
+            view,
+            Some(hands),
+            Some(facts),
+            Some(HistoricalView::new(
+                view,
+                clues.last().map_or(view.turn, |clue| clue.turn),
+            )),
+            giver,
+            target,
+            focus,
+            focus_identity,
+            promptable_before_clue,
+            already_playing,
+            pending,
+            stack_heights,
+        )
+    });
+    if let Some(Some(Some(fix))) = loaded_plan {
+        *required_fix = Some(fix);
+    }
+    let target_loaded = loaded_plan.is_some_and(|plan| plan.is_some())
+        || (promptable_before_clue.contains(&focus)
+            && IdentitySet::from_mask(facts[focus.index()].identity_mask()).len() == 1);
     let connection_count = if rule_enabled(profile, HGroupRuleId::BasicMoves) {
         focus_identity.rank.number().saturating_sub(height + 1)
     } else {
@@ -5320,8 +6190,13 @@ fn schedule_connection(
     for offset in 0..connection_count {
         let expected_rank = usize::from(height + offset);
         let expected = Card::new(focus_identity.suit, Rank::ALL[expected_rank]);
+        if pending_identity_is_queued(pending, expected) {
+            continue;
+        }
         let mut found = None;
-        let search_len = if rule_enabled(profile, HGroupRuleId::BasicMoves) {
+        let search_len = if target_loaded {
+            hands.len()
+        } else if rule_enabled(profile, HGroupRuleId::BasicMoves) {
             (target.index() + hands.len() - actor_index) % hands.len() + 1
         } else {
             1
@@ -5375,6 +6250,7 @@ fn schedule_connection(
                 break;
             }
         }
+        let mut unknown_observer_fallback = None;
         if found.is_none() {
             for distance in 0..search_len {
                 let candidate_index = (actor_index + distance) % hands.len();
@@ -5437,7 +6313,17 @@ fn schedule_connection(
                                 })
                                 .map_or_else(Vec::new, |position| unclued[..=position].to_vec())
                         } else {
-                            unclued
+                            // In a multi-rank sequence, each rank begins at
+                            // one finesse position. If that position is a lie,
+                            // the intervening Fix advances this obligation to
+                            // the next position. The final rank may still be a
+                            // normal layered finesse with several candidates.
+                            let current_len = if offset.saturating_add(1) < connection_count {
+                                1
+                            } else {
+                                unclued.len()
+                            };
+                            unclued[..current_len.min(unclued.len())].to_vec()
                         }
                     } else {
                         unclued
@@ -5459,9 +6345,28 @@ fn schedule_connection(
                     unclued.first().copied().into_iter().collect()
                 };
                 if !cards.is_empty() {
+                    if actor == view.observer && giver != view.observer {
+                        // From the possible blind player's perspective their
+                        // own identities are unknown. Prefer a later, visible
+                        // connector when one exists: under Ambiguous Finesse,
+                        // the earlier player trusts that the clue is directed
+                        // at the teammate whose connection they can see.
+                        unknown_observer_fallback.get_or_insert((
+                            actor,
+                            cards,
+                            HGroupConnectionKind::Finesse,
+                        ));
+                        continue;
+                    }
                     found = Some((actor, cards, HGroupConnectionKind::Finesse));
                     actor_index = candidate_index;
                     break;
+                }
+            }
+            if found.is_none() {
+                if let Some((actor, cards, kind)) = unknown_observer_fallback {
+                    actor_index = actor.index();
+                    found = Some((actor, cards, kind));
                 }
             }
         }
@@ -5472,14 +6377,18 @@ fn schedule_connection(
             invisibly_clued.extend(cards.iter().copied());
         }
         scheduled_cards.extend(cards.iter().copied());
-        pending.push(ConnectionObligation {
-            actor,
-            cards,
-            expected,
-            kind,
-            focus,
-            step: offset,
-        });
+        pending.start(
+            clues.last().map_or(view.turn, |clue| clue.turn),
+            ConnectionObligation {
+                actor,
+                cards,
+                expected,
+                focus_identity,
+                kind,
+                focus,
+                step: offset,
+            },
+        );
         actor_index = (actor_index + 1) % hands.len();
     }
 }
@@ -5533,39 +6442,10 @@ fn pending_is_active(candidate: &ConnectionObligation, pending: &[ConnectionObli
     })
 }
 
-fn advance_pending_connections(
-    pending: &mut Vec<ConnectionObligation>,
-    player: PlayerId,
-    card: CardId,
-    identity: Card,
-    successful: bool,
-) -> Vec<CardId> {
-    let mut failed_focuses = Vec::new();
-    let active = pending
+fn pending_identity_is_queued(pending: &[ConnectionObligation], identity: Card) -> bool {
+    pending
         .iter()
-        .enumerate()
-        .filter(|(_, item)| item.actor == player && pending_is_active(item, pending))
-        .map(|(index, _)| index)
-        .collect::<Vec<_>>();
-    for index in active {
-        let connection = &mut pending[index];
-        if connection.cards.first() != Some(&card) {
-            connection.cards.retain(|candidate| *candidate != card);
-            continue;
-        }
-        connection.cards.remove(0);
-        if identity == connection.expected || !successful {
-            connection.cards.clear();
-        } else if connection.cards.is_empty() {
-            failed_focuses.push(connection.focus);
-        }
-    }
-    pending.retain(|connection| {
-        !connection.cards.is_empty()
-            && connection.focus != card
-            && !failed_focuses.contains(&connection.focus)
-    });
-    failed_focuses
+        .any(|connection| connection.expected == identity || connection.focus_identity == identity)
 }
 
 fn identity_set(identities: impl IntoIterator<Item = Card>) -> IdentitySet {
@@ -5580,22 +6460,6 @@ fn chop(hand: &[CardId], explicitly_clued: &CardSet) -> Option<CardId> {
     hand.iter()
         .copied()
         .find(|card| !explicitly_clued.contains(card))
-}
-
-fn currently_fixed_cards(signals: &[HGroupSignal]) -> CardSet {
-    let mut fixed = CardSet::default();
-    for signal in signals {
-        match signal.kind {
-            HGroupMoveKind::FixClue => fixed.extend(signal.cards.iter().copied()),
-            HGroupMoveKind::PlayClue => {
-                for card in &signal.cards {
-                    fixed.remove(card);
-                }
-            }
-            _ => {}
-        }
-    }
-    fixed
 }
 
 fn finesse_position<'a>(
@@ -5661,41 +6525,6 @@ fn focus(
             .copied()
             .find(|card| newly_touched.contains(card)),
     }
-}
-
-fn identity_of(view: &PlayerView, card: CardId) -> Option<Card> {
-    view.hands
-        .iter()
-        .flatten()
-        .find(|candidate| candidate.id == card)
-        .and_then(|candidate| candidate.identity)
-        .or_else(|| {
-            view.play_stacks
-                .iter()
-                .flatten()
-                .chain(view.discard_pile.iter())
-                .find_map(|(candidate, identity)| (*candidate == card).then_some(*identity))
-        })
-        .or_else(|| {
-            view.history.iter().find_map(|entry| match entry.event {
-                ObservedEvent::Played {
-                    card: candidate,
-                    identity,
-                    ..
-                }
-                | ObservedEvent::Discarded {
-                    card: candidate,
-                    identity,
-                    ..
-                } if candidate == card => Some(identity),
-                ObservedEvent::Drew {
-                    card: candidate,
-                    identity: Some(identity),
-                    ..
-                } if candidate == card => Some(identity),
-                _ => None,
-            })
-        })
 }
 
 fn is_critical(view: &PlayerView, identity: Card) -> bool {

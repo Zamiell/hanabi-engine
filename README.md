@@ -91,5 +91,7 @@ written to `logs/hanabi-live/` by default.
 
 - [Technical overview](docs/technical-overview.md): architecture, planning,
   conventions, APIs, bridge internals, diagnostics, and CI.
+- [H-Group architecture](docs/architecture.md): reducer boundaries,
+  connection lifecycle, invariants, and extension guidance.
 - [H-Group convention interpreter](docs/h-group.md): level matrix and
   convention algorithm.

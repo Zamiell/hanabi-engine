@@ -9,7 +9,8 @@ use hanabi_core::{
 use crate::{HGroupProfile, LogicalDeductions, information_set::HandAssignmentVisit};
 
 use super::{
-    HGroupState, convention_card_inferences, identity_of, next_player, replay_h_group_inner,
+    HGroupState, PerspectiveDepth, convention_card_inferences, identity_of, next_player,
+    replay_h_group_inner,
 };
 
 /// Central observer projection used by all giver/recipient convention checks.
@@ -35,12 +36,12 @@ impl<'a> PerspectiveProjector<'a> {
     pub(super) fn project(
         &self,
         observer: PlayerId,
-        model_other_players: bool,
+        depth: PerspectiveDepth,
     ) -> Option<(LogicalDeductions, HGroupState)> {
         let source_hand_is_resolved = self.source.hands[self.source.observer.index()]
             .iter()
             .all(|card| card.identity.is_some());
-        let source_known_cards = if model_other_players
+        let source_known_cards = if depth.models_other_players()
             && observer != self.source.observer
             && !source_hand_is_resolved
         {
@@ -56,7 +57,11 @@ impl<'a> PerspectiveProjector<'a> {
                 else {
                     return HashMap::new();
                 };
-                let source_replay = replay_h_group_inner(&source_deductions, self.profile, false);
+                let source_replay = replay_h_group_inner(
+                    &source_deductions,
+                    self.profile,
+                    PerspectiveDepth::ObserverOnly,
+                );
                 convention_card_inferences(&source_deductions, &source_replay)
                     .into_iter()
                     .filter_map(|note| {
@@ -100,7 +105,7 @@ impl<'a> PerspectiveProjector<'a> {
             }
         }
         let deductions = LogicalDeductions::new(view).ok()?;
-        let replay = replay_h_group_inner(&deductions, self.profile, model_other_players);
+        let replay = replay_h_group_inner(&deductions, self.profile, depth);
         Some((deductions, replay))
     }
 
@@ -141,7 +146,7 @@ impl<'a> PerspectiveProjector<'a> {
             }
         }
         let deductions = LogicalDeductions::new(view).ok()?;
-        let replay = replay_h_group_inner(&deductions, profile, true);
+        let replay = replay_h_group_inner(&deductions, profile, PerspectiveDepth::NestedRecipients);
         Some((deductions, replay))
     }
 
@@ -262,9 +267,10 @@ impl ProspectiveTransition {
 
 #[cfg(test)]
 mod tests {
-    use hanabi_core::{FullState, PlayerId, standard_deck};
+    use hanabi_core::{Action, FullState, PlayerId, Rank, standard_deck};
 
     use super::*;
+    use crate::{HGroupLevel, HGroupProfile};
 
     #[test]
     fn successful_play_projects_the_public_draw_shape() {
@@ -288,5 +294,55 @@ mod tests {
                 identity: None,
             }) if *player == PlayerId::new(0) && *card == CardId::new(15)
         ));
+    }
+
+    #[test]
+    fn hypothetical_clue_matches_the_recipients_actual_projection() {
+        let mut state = FullState::new_standard(3, standard_deck()).unwrap();
+        let giver = PlayerId::new(0);
+        let target = PlayerId::new(1);
+        let source = state.view_for(giver).unwrap();
+        let rank = source.hands[target.index()]
+            .iter()
+            .filter_map(|card| card.identity)
+            .map(|card| card.rank)
+            .find(|rank| *rank == Rank::One)
+            .unwrap_or_else(|| source.hands[target.index()][0].identity.unwrap().rank);
+        let clue = Clue::Rank(rank);
+        let touched = source.hands[target.index()]
+            .iter()
+            .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
+            .map(|card| card.id)
+            .collect::<Vec<_>>();
+        let profile = HGroupProfile::Level(HGroupLevel::Level1);
+
+        let hypothetical = ProspectiveTransition::clue(&source, target, clue, &touched);
+        let (hypothetical_deductions, hypothetical_replay) =
+            PerspectiveProjector::new(&hypothetical, profile)
+                .project(target, PerspectiveDepth::NestedRecipients)
+                .expect("hypothetical recipient projection succeeds");
+        let hypothetical_inferences = super::super::infer_h_group_from_replay(
+            &hypothetical_deductions,
+            hypothetical_replay,
+            profile,
+        );
+
+        state.apply(Action::Clue { target, clue }).unwrap();
+        let actual_deductions = LogicalDeductions::new(state.view_for(target).unwrap()).unwrap();
+        let actual_replay =
+            replay_h_group_inner(&actual_deductions, profile, PerspectiveDepth::ObserverOnly);
+        let actual_inferences =
+            super::super::infer_h_group_from_replay(&actual_deductions, actual_replay, profile);
+
+        assert_eq!(hypothetical_inferences.clues, actual_inferences.clues);
+        assert_eq!(
+            hypothetical_inferences.playable_now,
+            actual_inferences.playable_now
+        );
+        assert_eq!(hypothetical_inferences.saved, actual_inferences.saved);
+        assert_eq!(
+            hypothetical_inferences.connection,
+            actual_inferences.connection
+        );
     }
 }

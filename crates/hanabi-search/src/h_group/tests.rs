@@ -2,8 +2,478 @@ use super::*;
 use hanabi_core::{
     Action, FullState, GameStatus, ObservedCard, ObservedHistoryEntry, PlayerView, standard_deck,
 };
+use hanabi_protocol::HanabiLiveReplay;
 
 const MAX_TEST_CONTINUATION_TURNS: usize = 512;
+
+mod architecture;
+
+fn expert_replay_194321() -> HanabiLiveReplay {
+    HanabiLiveReplay::from_json(include_str!(
+        "../../../hanabi-protocol/tests/fixtures/game-194321.json"
+    ))
+    .expect("expert replay fixture is valid")
+}
+
+#[test]
+fn recognizes_expert_replay_opening_playable_chop() {
+    let state = expert_replay_194321()
+        .state_at_turn(0)
+        .expect("turn exists");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("current player exists"),
+    )
+    .expect("valid deductions");
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Green),
+        })
+    );
+}
+
+#[test]
+fn recognizes_expert_replay_layered_reverse_finesse() {
+    let state = expert_replay_194321()
+        .state_at_turn(1)
+        .expect("turn exists");
+    let view = state
+        .view_for(state.current_player())
+        .expect("current player exists");
+    let hazard = prospective_clue_hazard(
+        &view,
+        HGroupProfile::Max,
+        PlayerId::new(0),
+        CardId::new(2),
+        Clue::Suit(Suit::Yellow),
+        &[CardId::new(2)],
+        true,
+    );
+    assert_eq!(hazard, None);
+
+    let deductions = LogicalDeductions::new(view).expect("valid deductions");
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Yellow),
+        })
+    );
+}
+
+#[test]
+fn recognizes_expert_replay_queued_yellow_three() {
+    let state = expert_replay_194321()
+        .state_at_turn(4)
+        .expect("turn exists");
+    let view = state
+        .view_for(state.current_player())
+        .expect("current player exists");
+    let hazard = prospective_clue_hazard(
+        &view,
+        HGroupProfile::Max,
+        PlayerId::new(2),
+        CardId::new(16),
+        Clue::Suit(Suit::Yellow),
+        &[CardId::new(10), CardId::new(16)],
+        true,
+    );
+    assert_eq!(hazard, None);
+
+    let deductions = LogicalDeductions::new(view).expect("valid deductions");
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Yellow),
+        })
+    );
+}
+
+#[test]
+fn recognizes_expert_replay_out_of_order_fix() {
+    let state = expert_replay_194321()
+        .state_at_turn(6)
+        .expect("turn exists");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("current player exists"),
+    )
+    .expect("valid deductions");
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Four),
+        })
+    );
+}
+
+#[test]
+fn recognizes_expert_replay_play_after_out_of_order_fix() {
+    let before_fix = expert_replay_194321()
+        .state_at_turn(6)
+        .expect("turn exists");
+    let before_fix = LogicalDeductions::new(
+        before_fix
+            .view_for(PlayerId::new(0))
+            .expect("connection actor exists"),
+    )
+    .expect("valid deductions");
+    let before_fix = replay_h_group_inner(
+        &before_fix,
+        HGroupProfile::Max,
+        PerspectiveDepth::ObserverOnly,
+    );
+    assert!(
+        before_fix.pending_connections.iter().any(|connection| {
+            connection.actor == PlayerId::new(0)
+                && connection.cards == [CardId::new(3)]
+                && connection.expected == Card::new(Suit::Red, Rank::One)
+        }),
+        "{before_fix:#?}"
+    );
+
+    let state = expert_replay_194321()
+        .state_at_turn(8)
+        .expect("turn exists");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("current player exists"),
+    )
+    .expect("valid deductions");
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(1)))
+    );
+}
+
+#[test]
+fn recognizes_expert_replay_priority_blue_three_line() {
+    let replay = expert_replay_194321();
+    let turn_nine = replay.state_at_turn(9).expect("turn exists");
+    let deductions = LogicalDeductions::new(
+        turn_nine
+            .view_for(turn_nine.current_player())
+            .expect("current player exists"),
+    )
+    .expect("valid deductions");
+    let after = prospective_clue_view(
+        deductions.view(),
+        PlayerId::new(3),
+        Clue::Rank(Rank::Three),
+        &[CardId::new(18)],
+    );
+    let (projected, replay_state) =
+        projected_h_group_replay(&after, HGroupProfile::Max, PlayerId::new(3)).unwrap();
+    let recipient = infer_h_group_from_replay(&projected, replay_state, HGroupProfile::Max);
+    assert!(
+        recipient.playable_now.contains(&CardId::new(18)),
+        "{recipient:#?}"
+    );
+    assert_eq!(
+        prospective_clue_hazard(
+            deductions.view(),
+            HGroupProfile::Max,
+            PlayerId::new(3),
+            CardId::new(18),
+            Clue::Rank(Rank::Three),
+            &[CardId::new(18)],
+            true,
+        ),
+        None,
+        "{recipient:#?}"
+    );
+    assert!(
+        h_group_clue_candidates(&deductions, HGroupProfile::Max)
+            .iter()
+            .any(|candidate| candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(3),
+                    clue: Clue::Rank(Rank::Three),
+                }),
+        "the expert Priority clue must remain a valid candidate: {:#?}",
+        h_group_clue_candidates(&deductions, HGroupProfile::Max),
+    );
+
+    let turn_eleven = replay.state_at_turn(11).expect("turn exists");
+    let deductions = LogicalDeductions::new(
+        turn_eleven
+            .view_for(turn_eleven.current_player())
+            .expect("current player exists"),
+    )
+    .expect("valid deductions");
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(18)))
+    );
+
+    let turn_thirteen = replay.state_at_turn(13).expect("turn exists");
+    let deductions = LogicalDeductions::new(
+        turn_thirteen
+            .view_for(turn_thirteen.current_player())
+            .expect("current player exists"),
+    )
+    .expect("valid deductions");
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(4))),
+        "a Load Clue must cancel the provisional Priority Finesse: {:#?}",
+        infer_h_group(&deductions, HGroupProfile::Max),
+    );
+}
+
+#[test]
+fn recognizes_expert_replay_red_three_continuation() {
+    let state = expert_replay_194321()
+        .state_at_turn(14)
+        .expect("turn exists");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("current player exists"),
+    )
+    .expect("valid deductions");
+    let replay = replay_h_group_inner(
+        &deductions,
+        HGroupProfile::Max,
+        PerspectiveDepth::ObserverOnly,
+    );
+    assert!(
+        replay.pending_connections.iter().any(|connection| {
+            connection.actor == PlayerId::new(2)
+                && connection.cards.contains(&CardId::new(9))
+                && connection.expected == Card::new(Suit::Red, Rank::Three)
+        }),
+        "{replay:#?}"
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(9)))
+    );
+}
+
+#[test]
+fn recognizes_expert_replay_deferred_layer_for_green_finesse() {
+    let state = expert_replay_194321()
+        .state_at_turn(15)
+        .expect("turn exists");
+    let recipient_baseline = LogicalDeductions::new(
+        state
+            .view_for(PlayerId::new(0))
+            .expect("clue recipient exists"),
+    )
+    .expect("valid recipient deductions");
+    let recipient_baseline = replay_h_group_inner(
+        &recipient_baseline,
+        HGroupProfile::Max,
+        PerspectiveDepth::ObserverOnly,
+    );
+    assert!(
+        recipient_baseline
+            .pending_connections
+            .iter()
+            .any(|connection| {
+                connection.actor == PlayerId::new(3)
+                    && connection.expected == Card::new(Suit::Yellow, Rank::One)
+                    && connection.focus == CardId::new(2)
+            }),
+        "{recipient_baseline:#?}"
+    );
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("current player exists"),
+    )
+    .expect("valid deductions");
+    let expected = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Suit(Suit::Green),
+    };
+    let after = prospective_clue_view(
+        deductions.view(),
+        PlayerId::new(0),
+        Clue::Suit(Suit::Green),
+        &[CardId::new(3)],
+    );
+    let (projected, projected_replay) =
+        projected_h_group_replay(&after, HGroupProfile::Max, PlayerId::new(0)).unwrap();
+    let recipient =
+        infer_h_group_from_replay(&projected, projected_replay.clone(), HGroupProfile::Max);
+    assert_eq!(
+        prospective_clue_hazard(
+            deductions.view(),
+            HGroupProfile::Max,
+            PlayerId::new(0),
+            CardId::new(3),
+            Clue::Suit(Suit::Green),
+            &[CardId::new(3)],
+            true,
+        ),
+        None,
+        "recipient={recipient:#?}; replay={projected_replay:#?}"
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(expected),
+        "candidates={:#?}; inferred={:#?}",
+        h_group_clue_candidates(&deductions, HGroupProfile::Max),
+        infer_h_group(&deductions, HGroupProfile::Max),
+    );
+}
+
+#[test]
+fn recognizes_expert_replay_releases_unused_layer_candidate() {
+    let state = expert_replay_194321()
+        .state_at_turn(16)
+        .expect("turn exists");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("current player exists"),
+    )
+    .expect("valid deductions");
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    assert!(
+        !inferred.gotten().contains(&CardId::new(0)),
+        "{inferred:#?}"
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Discard(CardId::new(0)))
+    );
+}
+
+#[test]
+fn recognizes_expert_replay_green_layer_receiver() {
+    let state = expert_replay_194321()
+        .state_at_turn(17)
+        .expect("turn exists");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("current player exists"),
+    )
+    .expect("valid deductions");
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(22))),
+        "ordered={:#?}; inferred={:#?}",
+        ordered_h_group_actions(&deductions, HGroupProfile::Max),
+        infer_h_group(&deductions, HGroupProfile::Max),
+    );
+}
+
+#[test]
+fn recognizes_expert_replay_delayed_focus_after_connectors() {
+    let state = expert_replay_194321()
+        .state_at_turn(19)
+        .expect("turn exists");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("current player exists"),
+    )
+    .expect("valid deductions");
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(17))),
+        "{:#?}",
+        infer_h_group(&deductions, HGroupProfile::Max),
+    );
+}
+
+#[test]
+fn recognizes_expert_replay_second_green_layer_card() {
+    let state = expert_replay_194321()
+        .state_at_turn(21)
+        .expect("turn exists");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("current player exists"),
+    )
+    .expect("valid deductions");
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(7))),
+        "{:#?}",
+        infer_h_group(&deductions, HGroupProfile::Max),
+    );
+}
+
+#[test]
+fn recognizes_expert_replay_priority_finesse_on_later_player() {
+    let state = expert_replay_194321()
+        .state_at_turn(22)
+        .expect("turn exists");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("current player exists"),
+    )
+    .expect("valid deductions");
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(23))),
+        "{:#?}",
+        infer_h_group(&deductions, HGroupProfile::Max),
+    );
+}
+
+#[test]
+fn recognizes_expert_replay_yellow_two_priority() {
+    let state = expert_replay_194321()
+        .state_at_turn(24)
+        .expect("turn exists");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("current player exists"),
+    )
+    .expect("valid deductions");
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    assert_eq!(
+        ordered_playable_cards(deductions.view(), &inferred, HGroupProfile::Max),
+        vec![CardId::new(2), CardId::new(3)],
+        "yellow 2 leads into the clued yellow 3: {inferred:#?}",
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(2))),
+    );
+}
+
+#[test]
+fn recipient_understands_expert_red_four_lie() {
+    let state = expert_replay_194321()
+        .state_at_turn(6)
+        .expect("turn exists");
+    let deductions =
+        LogicalDeductions::new(state.view_for(PlayerId::new(3)).expect("recipient exists"))
+            .expect("valid deductions");
+    let replay = replay_h_group_inner(
+        &deductions,
+        HGroupProfile::Max,
+        PerspectiveDepth::ObserverOnly,
+    );
+    let clue = replay
+        .clues
+        .iter()
+        .find(|clue| clue.turn == 5)
+        .expect("red clue interpreted");
+    assert!(
+        clue.play_identities
+            .contains(Card::new(Suit::Red, Rank::Four)),
+        "{clue:#?}"
+    );
+    assert!(replay.required_fix.is_some(), "{replay:#?}");
+}
 
 struct TestOutcome {
     actions: Vec<Action>,
@@ -4725,7 +5195,8 @@ fn paired_sample_four_discards_instead_of_recluing_a_trash_blue_one() {
     assert_eq!(
         select_h_group_action(&deductions, HGroupProfile::Max),
         Some(Action::Discard(CardId::new(1))),
-        "the policy burned a clue retouching a trash Blue 1 instead of recovering a token from chop: {inferred:#?}"
+        "the policy burned a clue retouching a trash Blue 1 instead of recovering a token from chop: {inferred:#?}; candidates={:#?}",
+        h_group_clue_candidates(&deductions, HGroupProfile::Max),
     );
 }
 

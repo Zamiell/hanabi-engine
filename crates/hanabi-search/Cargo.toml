@@ -9,5 +9,8 @@ rust-version.workspace = true
 [dependencies]
 hanabi-core = { path = "../hanabi-core" }
 
+[dev-dependencies]
+hanabi-protocol = { path = "../hanabi-protocol" }
+
 [lints]
 workspace = true

@@ -2,7 +2,7 @@
 
 The engine implements the pinned H-Group learning path as a cumulative public-history interpreter. `h-group:N` enables Levels 1 through N; `h-group:max` is treated internally as the effective 26th cumulative level. The source revision is exposed as `H_GROUP_RULESET_REVISION`.
 
-Named H-Group moves are compositions of a smaller set of state effects. The interpreter records those effects as `HGroupSignal` values and applies them to card notes, chop status, play/discard/clue obligations, candidate actions, and root-world constraints. For example, a Trash Push Finesse combines `TrashPush` and `Finesse`; it does not need a second implementation of finesse resolution.
+Named H-Group moves are compositions of a smaller set of typed state effects. The interpreter records an append-only `HGroupSignal` explanation log, maintains separate indexed `ConventionFacts` for current truth, and routes Prompt/Finesse changes through one lifecycle manager. For example, a Trash Push Finesse combines `TrashPush` and `Finesse`; it does not need a second implementation of finesse resolution.
 
 | Level | Documentation topic | Engine effect |
 | ---: | --- | --- |
@@ -33,16 +33,16 @@ Named H-Group moves are compositions of a smaller set of state effects. The inte
 | 25 | Priority | blind/connection/5/rank/position play order and follow-on connections |
 | max (26) | Rare strategies | the uncommon extensions collected in the H-Group extras chapters |
 
-`H_GROUP_LEVELS` is the machine-readable version of this single 26-entry sequence. There is no parallel extras catalog.
+`H_GROUP_LEVELS` is the machine-readable version of this single 26-entry sequence.
 
 ## Algorithm
 
 1. Reconstruct each historical hand in oldest-to-newest storage order while replaying public events.
 2. Derive direct clue facts and Level 1 focus at clue time, then run only the semantic passes enabled by the selected cumulative profile.
-3. Persist invisible clues, chop movement, queued connections, forced plays/discards, and must-clue obligations across turns.
+3. Persist invisible clues, chop movement, queued connections, forced plays/discards, and must-clue obligations across turns. Connection starts, advancement, invalidation, repair, and cancellation are audited by one state machine.
 4. Keep ambiguous Prompt and layered-Finesse candidates as exact disjunctions: every earlier candidate must be a wrong but immediately playable card, and one candidate must have the promised identity.
 5. Intersect those promises with the observer's logical identity sets. The planner keeps the resulting constraints symbolic until exhaustive endgame enumeration is feasible.
-6. Generate only rule-legal convention candidates, resolve urgent obligations first, and order otherwise-equivalent plays with the enabled strategy rules (including Level 25 Priority).
+6. Generate only rule-legal convention candidates, apply hard convention constraints first, and only then order otherwise-equivalent actions with strategy priorities (including Level 25 Priority).
 7. Use the same selected framework for belief constraints, action availability, priorities, and predictable continuations.
 
 The current simulator is standard five-suit Hanabi. Rules whose only observable trigger exists in a non-standard variant remain unreachable until that variant is represented by `hanabi-core`; they are not guessed from a standard-game state.

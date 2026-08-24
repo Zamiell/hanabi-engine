@@ -1,9 +1,10 @@
 use super::{
     Arc, Card, CardId, Clue, ClueFacts, ConnectionObligation, GameStatus, HGroupCardInference,
     HGroupInferences, HGroupProfile, HGroupState, LogicalDeductions, MAX_CLUE_TOKENS, ObservedCard,
-    ObservedEvent, ObservedHistoryEntry, PerspectiveProjector, PlayerId, PlayerView,
-    ProspectiveTransition, Rank, RefCell, chop, convention_card_inferences, identity_of,
-    infer_h_group, infer_h_group_from_replay, is_playable_now, next_player, replay_h_group_inner,
+    ObservedEvent, ObservedHistoryEntry, PerspectiveDepth, PerspectiveProjector, PlayerId,
+    PlayerView, ProspectiveTransition, Rank, RefCell, chop, convention_card_inferences,
+    identity_of, infer_h_group, infer_h_group_from_replay, is_playable_now, next_player,
+    replay_h_group_inner,
 };
 
 pub(super) fn subjective_convention_cards(
@@ -20,7 +21,7 @@ fn subjective_h_group_replay(
     profile: HGroupProfile,
     observer: PlayerId,
 ) -> Option<(LogicalDeductions, HGroupState)> {
-    projected_h_group_replay_inner(source, profile, observer, false)
+    projected_h_group_replay_inner(source, profile, observer, PerspectiveDepth::ObserverOnly)
 }
 
 pub(super) fn projected_h_group_replay(
@@ -28,7 +29,12 @@ pub(super) fn projected_h_group_replay(
     profile: HGroupProfile,
     observer: PlayerId,
 ) -> Option<(LogicalDeductions, HGroupState)> {
-    projected_h_group_replay_inner(source, profile, observer, true)
+    projected_h_group_replay_inner(
+        source,
+        profile,
+        observer,
+        PerspectiveDepth::NestedRecipients,
+    )
 }
 
 #[derive(Clone)]
@@ -158,9 +164,9 @@ fn projected_h_group_replay_inner(
     source: &PlayerView,
     profile: HGroupProfile,
     observer: PlayerId,
-    model_other_players: bool,
+    depth: PerspectiveDepth,
 ) -> Option<(LogicalDeductions, HGroupState)> {
-    PerspectiveProjector::new(source, profile).project(observer, model_other_players)
+    PerspectiveProjector::new(source, profile).project(observer, depth)
 }
 
 pub(super) fn prospective_play_has_unsafe_inference(
@@ -301,7 +307,9 @@ pub(super) fn prospective_clue_hazard(
     let after_clue = prospective_clue_view(source, target, clue, touched);
 
     let after_projector = PerspectiveProjector::new(&after_clue, profile);
-    let Some((deductions, replay)) = after_projector.project(target, true) else {
+    let Some((deductions, replay)) =
+        after_projector.project(target, PerspectiveDepth::NestedRecipients)
+    else {
         return Some(ProspectiveClueHazard::ProjectionFailed);
     };
     let inferred = infer_h_group_from_replay(&deductions, replay.clone(), profile);
@@ -315,8 +323,15 @@ pub(super) fn prospective_clue_hazard(
         &replay,
         &inferred,
         &baseline.replay,
+        &baseline.inferred,
     ) {
         return Some(hazard);
+    }
+    if expect_immediate_focus
+        && identity_of(source, focus).is_some_and(|identity| is_playable_now(source, identity))
+        && recipient_follow_up_is_unsafe(source, &after_clue, profile, target, focus)
+    {
+        return Some(ProspectiveClueHazard::RecipientWrongConnection);
     }
     if other_player_projection_is_unsafe(source, &after_clue, profile, target, &after_projector) {
         return Some(ProspectiveClueHazard::OtherPlayerWrongPromise);
@@ -339,6 +354,35 @@ pub(super) fn prospective_clue_hazard(
         .then_some(ProspectiveClueHazard::FalseConnectionIdentity)
 }
 
+/// Checks the deterministic continuation immediately implied by a direct Play
+/// clue. Some false Prompts remain dormant until the focus is played, so a
+/// snapshot taken only on the clue event cannot observe them.
+fn recipient_follow_up_is_unsafe(
+    source: &PlayerView,
+    after_clue: &PlayerView,
+    profile: HGroupProfile,
+    target: PlayerId,
+    focus: CardId,
+) -> bool {
+    let Some(identity) = identity_of(source, focus) else {
+        return true;
+    };
+    let after_play = ProspectiveTransition::successful_play(after_clue, target, focus, identity);
+    let Some((deductions, replay)) = PerspectiveProjector::new(&after_play, profile)
+        .project(target, PerspectiveDepth::NestedRecipients)
+    else {
+        return true;
+    };
+    let inferred = infer_h_group_from_replay(&deductions, replay, profile);
+    inferred.playable_now.iter().copied().any(|card| {
+        identity_of(source, card).is_some_and(|actual| !is_playable_now(&after_play, actual))
+    }) || inferred.connection.is_some_and(|connection| {
+        identity_of(source, connection.card).is_some_and(|actual| {
+            actual != connection.identity && !is_playable_now(&after_play, actual)
+        })
+    })
+}
+
 fn recipient_projection_hazard(
     source: &PlayerView,
     focus: CardId,
@@ -346,10 +390,27 @@ fn recipient_projection_hazard(
     replay: &HGroupState,
     inferred: &HGroupInferences,
     baseline: &HGroupState,
+    baseline_inferred: &HGroupInferences,
 ) -> Option<ProspectiveClueHazard> {
     let missing_focus = expect_immediate_focus
         && identity_of(source, focus).is_some_and(|actual| is_playable_now(source, actual))
         && !inferred.playable_now.contains(&focus);
+    let competing_connection = expect_immediate_focus
+        && identity_of(source, focus).is_some_and(|actual| is_playable_now(source, actual))
+        && replay.signals.iter().any(|signal| {
+            !baseline.signals.contains(signal)
+                && matches!(
+                    signal.kind,
+                    super::HGroupMoveKind::Prompt
+                        | super::HGroupMoveKind::Finesse
+                        | super::HGroupMoveKind::ReverseFinesse
+                        | super::HGroupMoveKind::SelfFinesse
+                        | super::HGroupMoveKind::LayeredFinesse
+                        | super::HGroupMoveKind::Bluff
+                        | super::HGroupMoveKind::DoubleBluff
+                )
+                && signal.cards.iter().any(|card| *card != focus)
+        });
     let wrong_save = replay
         .implicit_saves
         .iter()
@@ -364,15 +425,32 @@ fn recipient_projection_hazard(
         .any(|(card, identities)| {
             identity_of(source, *card).is_some_and(|actual| !identities.contains(actual))
         });
-    let wrong_play = inferred.playable_now.iter().copied().any(|card| {
-        identity_of(source, card).is_some_and(|actual| !is_playable_now(source, actual))
-    });
+    let wrong_play = inferred
+        .playable_now
+        .iter()
+        .copied()
+        .filter(|card| {
+            if !baseline_inferred.playable_now.contains(card) {
+                return true;
+            }
+            let after_note = inferred.cards.iter().find(|note| note.card == *card);
+            let before_note = baseline_inferred
+                .cards
+                .iter()
+                .find(|note| note.card == *card);
+            after_note.map(|note| note.identities) != before_note.map(|note| note.identities)
+        })
+        .any(|card| {
+            identity_of(source, card).is_some_and(|actual| !is_playable_now(source, actual))
+        });
     let wrong_connection = inferred.connection.is_some_and(|connection| {
         identity_of(source, connection.card)
             .is_some_and(|actual| actual != connection.identity && !is_playable_now(source, actual))
     });
     if missing_focus {
         Some(ProspectiveClueHazard::RecipientMissingFocusPlay)
+    } else if competing_connection {
+        Some(ProspectiveClueHazard::RecipientWrongConnection)
     } else if wrong_save {
         Some(ProspectiveClueHazard::RecipientWrongSave)
     } else if wrong_play {
@@ -402,7 +480,7 @@ fn other_player_projection_is_unsafe(
             return true;
         };
         let Some((other_after_deductions, other_after_replay)) =
-            after_projector.project(observer, true)
+            after_projector.project(observer, PerspectiveDepth::NestedRecipients)
         else {
             return true;
         };
@@ -442,6 +520,7 @@ fn replay_contains_connection(replay: &HGroupState, connection: &ConnectionOblig
         prior.actor == connection.actor
             && prior.cards == connection.cards
             && prior.expected == connection.expected
+            && prior.focus_identity == connection.focus_identity
             && prior.kind == connection.kind
             && prior.focus == connection.focus
             && prior.step == connection.step
@@ -558,7 +637,7 @@ pub(super) fn subjective_chop_before_action(
         history: projected_history,
     };
     let deductions = LogicalDeductions::new(view).ok()?;
-    let replay = replay_h_group_inner(&deductions, profile, false);
+    let replay = replay_h_group_inner(&deductions, profile, PerspectiveDepth::ObserverOnly);
     let promptable = replay.promptable();
     let gotten = replay.gotten_from(&promptable);
     chop(&replay.hands[observer.index()], &gotten)
