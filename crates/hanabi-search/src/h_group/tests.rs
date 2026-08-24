@@ -34,9 +34,9 @@ fn replay_action_at_turn(replay: &HanabiLiveReplay, turn: u32) -> Action {
 }
 
 #[test]
-fn optimized_expert_replay_matches_engine_through_move_31() {
+fn optimized_expert_replay_matches_engine_through_move_35() {
     let replay = expert_replay_194321();
-    for turn in 0..31 {
+    for turn in 0..35 {
         let state = replay.state_at_turn(turn).expect("fixture prefix is legal");
         let actor = state.current_player();
         let view = state.view_for(actor).expect("current player has a view");
@@ -58,6 +58,108 @@ fn optimized_expert_replay_matches_engine_through_move_31() {
             analysis.planner.root_actions,
         );
     }
+}
+
+#[test]
+fn move_33_does_not_treat_an_ungotten_card_as_a_green_five() {
+    let state = expert_replay_194321()
+        .state_at_turn(32)
+        .expect("fixture prefix is legal");
+    let actor = state.current_player();
+    let view = state.view_for(actor).expect("current player has a view");
+    let deductions = LogicalDeductions::new(view.clone()).expect("valid deductions");
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+
+    assert_eq!(
+        ordered_playable_cards(&view, &inferred, HGroupProfile::Max),
+        vec![CardId::new(27), CardId::new(3)]
+    );
+}
+
+#[test]
+fn move_35_uses_the_oldest_matching_elimination_note() {
+    let replay_fixture = expert_replay_194321();
+    let state = replay_fixture
+        .state_at_turn(34)
+        .expect("fixture prefix is legal");
+    let actor = state.current_player();
+    let view = state.view_for(actor).expect("current player has a view");
+    let deductions = LogicalDeductions::new(view.clone()).expect("valid deductions");
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
+    let purple_two = Card::new(Suit::Purple, Rank::Two);
+    let notes = replay
+        .signals
+        .iter()
+        .rev()
+        .find(|signal| {
+            signal.kind == HGroupMoveKind::Elimination
+                && signal.target == Some(PlayerId::new(1))
+                && signal.identity == Some(purple_two)
+        })
+        .expect("discarded purple 2 creates elimination notes");
+    assert_eq!(
+        notes.cards,
+        [CardId::new(6), CardId::new(25), CardId::new(28)]
+    );
+    assert!(!notes.cards.contains(&CardId::new(38)));
+
+    let clue = Action::Clue {
+        target: PlayerId::new(3),
+        clue: Clue::Rank(Rank::Three),
+    };
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    assert!(
+        candidates.iter().any(|candidate| candidate.action == clue),
+        "rank 3 must use James's oldest purple-2 elimination note: {candidates:#?}"
+    );
+
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig {
+            objective: crate::PlanningObjective::PerfectScore,
+            ..crate::PlannerConfig::default()
+        },
+    )
+    .expect("fixture position is analyzable");
+    assert_eq!(
+        analysis.planner.best_action, clue,
+        "candidates={candidates:#?}; roots={:#?}",
+        analysis.planner.root_actions
+    );
+
+    let after_clue = replay_fixture
+        .state_at_turn(35)
+        .expect("fixture clue is legal");
+    let james_view = after_clue
+        .view_for(PlayerId::new(1))
+        .expect("James has a view");
+    let james_deductions = LogicalDeductions::new(james_view).expect("valid deductions");
+    let james_inferences = infer_h_group(&james_deductions, HGroupProfile::Max);
+    assert_eq!(
+        james_inferences.connection,
+        Some(HGroupConnection {
+            card: CardId::new(6),
+            identity: purple_two,
+            kind: HGroupConnectionKind::Finesse,
+            focus: CardId::new(33),
+        })
+    );
+    assert!(james_inferences.signals.iter().any(|signal| {
+        signal.kind == HGroupMoveKind::EliminationFinesse
+            && signal.cards == [CardId::new(6)]
+            && signal.identity == Some(purple_two)
+    }));
+
+    let after_connector = replay_fixture
+        .state_at_turn(38)
+        .expect("fixture connector play is legal");
+    let libster_view = after_connector
+        .view_for(PlayerId::new(3))
+        .expect("Libster has a view");
+    let libster_deductions = LogicalDeductions::new(libster_view).expect("valid deductions");
+    let libster_inferences = infer_h_group(&libster_deductions, HGroupProfile::Max);
+    assert!(libster_inferences.playable_now.contains(&CardId::new(33)));
 }
 
 #[test]
@@ -476,7 +578,7 @@ fn optimal_replay_move_29_plays_into_the_visible_yellow_five() {
         .first()
         .copied(),
         Some(CardId::new(31)),
-        "yellow 4 has Priority because it leads into NoMercy's visible yellow 5",
+        "yellow 4 has Priority because it leads into the visible yellow 5",
     );
     assert_eq!(
         select_h_group_action(&deductions, HGroupProfile::Max),

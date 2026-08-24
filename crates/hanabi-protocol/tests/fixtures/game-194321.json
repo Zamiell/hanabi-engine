@@ -1,5 +1,5 @@
 {
-  "players": ["florrat2", "James", "NoMercy", "Libster"],
+  "players": ["Alice", "Bob", "Cathy", "Donald"],
   "deck": [
     {"suitIndex": 3, "rank": 1},
     {"suitIndex": 0, "rank": 1},

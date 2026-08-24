@@ -1228,12 +1228,14 @@ pub(super) fn ordered_playable_cards(
     let own_hand = &view.hands[view.observer.index()];
     let initial_hand_size = if view.hands.len() <= 3 { 5 } else { 4 };
     let initial_cards = initial_hand_size * view.hands.len();
+    let gotten = inferred.gotten();
     let ordering = PlayableOrderContext {
         view,
         inferred,
         profile,
         own_hand,
         initial_cards,
+        gotten: &gotten,
     };
     cards.sort_by_key(|card| playable_order_key(&ordering, *card));
     cards
@@ -1247,6 +1249,7 @@ struct PlayableOrderContext<'a> {
     profile: HGroupProfile,
     own_hand: &'a [ObservedCard],
     initial_cards: usize,
+    gotten: &'a CardSet,
 }
 
 fn playable_order_key(context: &PlayableOrderContext<'_>, card: CardId) -> PlayableOrderKey {
@@ -1330,11 +1333,11 @@ fn priority_playable_order_key(
             return false;
         }
         let next = Card::new(identity.suit, Rank::ALL[identity.rank.index() + 1]);
-        context
-            .inferred
-            .cards
-            .iter()
-            .any(|candidate| candidate.card != card && candidate.identities.contains(next))
+        context.inferred.cards.iter().any(|candidate| {
+            candidate.card != card
+                && context.gotten.contains(&candidate.card)
+                && candidate.identities.contains(next)
+        })
     });
     (
         !blind,

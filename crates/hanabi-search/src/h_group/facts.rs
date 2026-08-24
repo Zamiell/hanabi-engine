@@ -51,7 +51,15 @@ impl ConventionFacts {
                 }
                 _ => {}
             }
-            if let Some(identity) = signal.identity {
+            if let Some(identity) = signal.identity
+                && !matches!(
+                    signal.kind,
+                    HGroupMoveKind::Elimination | HGroupMoveKind::EliminationFinesse
+                )
+            {
+                // Elimination notes are a disjunction over several cards.
+                // The identity is attached to the note group, not established
+                // independently on every candidate card.
                 for card in &signal.cards {
                     merge_identity(
                         &mut facts.known_identities[card.index()],

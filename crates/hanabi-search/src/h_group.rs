@@ -102,6 +102,7 @@ pub enum HGroupMoveKind {
     Discharge,
     Duplication,
     Elimination,
+    EliminationFinesse,
     FivePull,
     OccupiedPlay,
     Ignition,
@@ -222,7 +223,10 @@ pub const H_GROUP_LEVELS: [HGroupLevelDescriptor; 26] = [
     HGroupLevelDescriptor {
         profile: HGroupProfile::Level(HGroupLevel::Level18),
         title: "Elimination",
-        effects: &[HGroupMoveKind::Elimination],
+        effects: &[
+            HGroupMoveKind::Elimination,
+            HGroupMoveKind::EliminationFinesse,
+        ],
     },
     HGroupLevelDescriptor {
         profile: HGroupProfile::Level(HGroupLevel::Level19),
@@ -550,6 +554,31 @@ fn h_group_clue_candidates_from_replay_inner(
                 && distinct.len() >= 2
                 && distinct.len() < identities.len())
             .then(|| 410 + u16::try_from(distinct.len()).unwrap_or(0))
+        })
+        .or_else(|| {
+            rule_enabled(profile, HGroupRuleId::Elimination)
+                .then(|| {
+                    elimination_finesse_connection(
+                        view,
+                        &replay.hands,
+                        None,
+                        None,
+                        &replay.signals,
+                        &replay.chop_moved,
+                        std::array::from_fn(|suit| {
+                            u8::try_from(view.play_stacks[suit].len())
+                                .expect("a standard stack has at most five cards")
+                        }),
+                        focus,
+                        focus_identity,
+                    )
+                })
+                .flatten()
+                // The clue both secures the immediately playable elimination
+                // card and promises its delayed focus. Treat it as an urgent
+                // play line; strategic coverage can then distinguish it from
+                // a direct clue that concentrates both plays in one hand.
+                .map(|_| 500)
         });
         if play_score.is_some()
             && newly_informed.is_empty()
@@ -1649,6 +1678,70 @@ fn is_unique_visible(view: &PlayerView, excluded: CardId, identity: Card) -> boo
         .any(|card| card.id != excluded && card.identity == Some(identity))
 }
 
+/// Finds the card promised by an Elimination Finesse for `focus_identity`.
+///
+/// Elimination notes are disjunctive: the noted identity is somewhere among
+/// the cards recorded by the original signal. A Finesse on the next card in
+/// that suit promises the oldest still-possible noted card, skipping
+/// Chop-Moved cards unless every remaining candidate is Chop-Moved.
+#[allow(clippy::too_many_arguments)]
+fn elimination_finesse_connection(
+    view: &PlayerView,
+    hands: &[Vec<CardId>],
+    clue_facts: Option<&[ClueFacts]>,
+    historical: Option<HistoricalView<'_>>,
+    signals: &[HGroupSignal],
+    chop_moved: &CardSet,
+    stack_heights: [u8; 5],
+    focus: CardId,
+    focus_identity: Card,
+) -> Option<(PlayerId, CardId, Card)> {
+    let stack_height = stack_heights[focus_identity.suit.index()];
+    if focus_identity.rank.number() != stack_height + 2 {
+        return None;
+    }
+    let expected = Card::new(focus_identity.suit, Rank::ALL[usize::from(stack_height)]);
+    let direct_facts = |card: CardId| {
+        clue_facts.map_or_else(
+            || {
+                view.hands
+                    .iter()
+                    .flatten()
+                    .find(|candidate| candidate.id == card)
+                    .map_or_else(ClueFacts::default, |candidate| candidate.clues)
+            },
+            |facts| facts[card.index()],
+        )
+    };
+    let visible_identity = |card: CardId| {
+        historical.map_or_else(|| identity_of(view, card), |history| history.identity(card))
+    };
+
+    signals.iter().rev().find_map(|signal| {
+        if signal.kind != HGroupMoveKind::Elimination || signal.identity != Some(expected) {
+            return None;
+        }
+        let player = signal.target?;
+        let hand = hands.get(player.index())?;
+        let candidates = hand
+            .iter()
+            .copied()
+            .filter(|card| {
+                *card != focus
+                    && signal.cards.contains(card)
+                    && direct_facts(*card).allows(expected)
+            })
+            .collect::<Vec<_>>();
+        let promised = candidates
+            .iter()
+            .copied()
+            .find(|card| !chop_moved.contains(card))
+            .or_else(|| candidates.first().copied())?;
+        (player == view.observer || visible_identity(promised) == Some(expected))
+            .then_some((player, promised, expected))
+    })
+}
+
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 fn delayed_connection_score(
     view: &PlayerView,
@@ -2688,6 +2781,8 @@ fn snapshot_play_identities(
     gotten: &CardSet,
     already_playing: &CardSet,
     pending_connections: &[ConnectionObligation],
+    signals: &[HGroupSignal],
+    chop_moved: &CardSet,
     stack_heights: [u8; 5],
     historical_turn: u32,
 ) -> IdentitySet {
@@ -2706,6 +2801,8 @@ fn snapshot_play_identities(
                 gotten,
                 already_playing,
                 pending_connections,
+                signals,
+                chop_moved,
                 stack_heights,
                 Some(HistoricalView::new(view, historical_turn)),
             )
@@ -2727,6 +2824,8 @@ fn snapshot_playable(
     gotten: &CardSet,
     already_playing: &CardSet,
     pending_connections: &[ConnectionObligation],
+    signals: &[HGroupSignal],
+    chop_moved: &CardSet,
     stack_heights: [u8; 5],
     historical_view: Option<HistoricalView<'_>>,
 ) -> bool {
@@ -2787,7 +2886,19 @@ fn snapshot_playable(
         gotten,
         already_playing,
         stack_heights,
-    )
+    ) || (rule_enabled(profile, HGroupRuleId::Elimination)
+        && elimination_finesse_connection(
+            view,
+            hands,
+            Some(facts),
+            historical_view,
+            signals,
+            chop_moved,
+            stack_heights,
+            focus,
+            identity,
+        )
+        .is_some())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3288,6 +3399,8 @@ fn replay_h_group_inner(
                         &gotten,
                         &already_playing,
                         &pending_connections,
+                        &signals,
+                        &chop_moved,
                         stack_heights,
                         entry.turn,
                     );
@@ -3546,18 +3659,31 @@ fn replay_h_group_inner(
                             &clues,
                             &previously_promptable,
                             &already_playing,
+                            &signals,
+                            &chop_moved,
                             &mut invisibly_clued,
                             stack_heights,
                             &mut pending_connections,
                             &mut required_fix,
                         );
                         for connection in &pending_connections[previous_pending..] {
+                            let elimination_finesse = signals.iter().any(|signal| {
+                                signal.kind == HGroupMoveKind::Elimination
+                                    && signal.target == Some(connection.actor)
+                                    && signal.identity == Some(connection.expected)
+                                    && connection
+                                        .cards
+                                        .first()
+                                        .is_some_and(|card| signal.cards.contains(card))
+                            });
                             push_signal(
                                 &mut signals,
                                 entry,
                                 *giver,
                                 Some(connection.actor),
-                                if connection.kind == HGroupConnectionKind::Finesse
+                                if elimination_finesse {
+                                    HGroupMoveKind::EliminationFinesse
+                                } else if connection.kind == HGroupConnectionKind::Finesse
                                     && connection.cards.len() > 1
                                 {
                                     HGroupMoveKind::LayeredFinesse
@@ -6265,6 +6391,8 @@ fn schedule_connection(
     clues: &[HGroupClueInterpretation],
     promptable_before_clue: &CardSet,
     already_playing: &CardSet,
+    signals: &[HGroupSignal],
+    chop_moved: &CardSet,
     invisibly_clued: &mut CardSet,
     stack_heights: [u8; 5],
     pending: &mut ConnectionManager,
@@ -6500,6 +6628,28 @@ fn schedule_connection(
                     found = Some((actor, cards, kind));
                 }
             }
+        }
+        if found.is_none()
+            && rule_enabled(profile, HGroupRuleId::Elimination)
+            && let Some((actor, card, elimination_identity)) = elimination_finesse_connection(
+                view,
+                hands,
+                Some(facts),
+                Some(HistoricalView::new(
+                    view,
+                    clues.last().map_or(view.turn, |clue| clue.turn),
+                )),
+                signals,
+                chop_moved,
+                stack_heights,
+                focus,
+                focus_identity,
+            )
+            && elimination_identity == expected
+            && !scheduled_cards.contains(&card)
+        {
+            actor_index = actor.index();
+            found = Some((actor, vec![card], HGroupConnectionKind::Finesse));
         }
         let Some((actor, cards, kind)) = found else {
             break;
