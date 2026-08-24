@@ -8,7 +8,7 @@ use crate::{
 ///
 /// Keeping the source revision next to the convention implementation makes
 /// analyses reproducible as the living convention framework changes.
-pub const H_GROUP_RULESET_REVISION: &str = "1ef83242d71c62f2db6422f09e83abddba9611dd";
+pub const H_GROUP_RULESET_REVISION: &str = "2db23dc5bc8bba067fec6c79b3323bef21ed6e1c";
 
 /// One numbered level in the cumulative H-Group learning path.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]

@@ -4,7 +4,7 @@ use super::{
     ObservedEvent, ObservedHistoryEntry, PerspectiveDepth, PerspectiveProjector, PlayerId,
     PlayerView, ProspectiveTransition, Rank, RefCell, chop, convention_card_inferences,
     identity_of, infer_h_group, infer_h_group_from_replay, is_playable_now, next_player,
-    replay_h_group_inner,
+    replay_h_group_inner, replay_identity_is_queued,
 };
 
 pub(super) fn subjective_convention_cards(
@@ -485,26 +485,36 @@ fn other_player_projection_is_unsafe(
             return true;
         };
         let other_after =
-            infer_h_group_from_replay(&other_after_deductions, other_after_replay, profile);
-        let newly_promised = other_after
+            infer_h_group_from_replay(&other_after_deductions, other_after_replay.clone(), profile);
+        let wrong_new_play = other_after
             .playable_now
             .iter()
             .copied()
             .filter(|card| !other_baseline.inferred.playable_now.contains(card))
-            .chain(
-                other_after
-                    .connection
-                    .map(|connection| connection.card)
-                    .filter(|card| {
-                        other_baseline
-                            .inferred
-                            .connection
-                            .is_none_or(|prior| prior.card != *card)
-                    }),
-            );
-        if newly_promised.into_iter().any(|card| {
-            identity_of(source, card).is_some_and(|actual| !is_playable_now(after_clue, actual))
-        }) {
+            .any(|card| {
+                identity_of(source, card).is_some_and(|actual| !is_playable_now(after_clue, actual))
+            });
+        let wrong_new_connection = other_after.connection.is_some_and(|connection| {
+            let height =
+                other_after_deductions.view().play_stacks[connection.identity.suit.index()].len();
+            let connection_is_reachable =
+                (height + 1..usize::from(connection.identity.rank.number())).all(|rank| {
+                    replay_identity_is_queued(
+                        other_after_deductions.view(),
+                        &other_after_replay,
+                        Card::new(connection.identity.suit, Rank::ALL[rank - 1]),
+                    )
+                });
+            other_baseline
+                .inferred
+                .connection
+                .is_none_or(|prior| prior.card != connection.card)
+                && identity_of(source, connection.card).is_some_and(|actual| {
+                    (actual != connection.identity || !connection_is_reachable)
+                        && !is_playable_now(after_clue, actual)
+                })
+        });
+        if wrong_new_play || wrong_new_connection {
             return true;
         }
     }

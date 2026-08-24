@@ -27,6 +27,7 @@ mod model;
 mod perspective;
 mod prospective;
 mod rules;
+mod strategic_value;
 mod turn_context;
 
 use action_analysis::{HGroupActionKind, HGroupActionSet, HGroupAnalyzedAction};
@@ -63,6 +64,7 @@ use prospective::{
     subjective_convention_cards, with_prospective_analysis_cache,
 };
 use rules::{HGroupRuleId, rule_enabled};
+use strategic_value::apply_strategic_clue_values;
 use turn_context::{HGroupTurnContext, HGroupTurnSnapshot, HGroupTurnView, HistoricalView};
 
 /// Semantic families used by the cumulative H-Group interpreter.
@@ -90,6 +92,7 @@ pub enum HGroupMoveKind {
     PositionalDiscard,
     Stall,
     TransferDiscard,
+    Directness,
     Bluff,
     DoubleBluff,
     SelfishClue,
@@ -179,7 +182,7 @@ pub const H_GROUP_LEVELS: [HGroupLevelDescriptor; 26] = [
     HGroupLevelDescriptor {
         profile: HGroupProfile::Level(HGroupLevel::Level10),
         title: "Special discards",
-        effects: &[HGroupMoveKind::TransferDiscard],
+        effects: &[HGroupMoveKind::TransferDiscard, HGroupMoveKind::Directness],
     },
     HGroupLevelDescriptor {
         profile: HGroupProfile::Level(HGroupLevel::Level11),
@@ -526,6 +529,7 @@ fn h_group_clue_candidates_from_replay_inner(
             focus_identity,
             clue,
             &newly_informed,
+            touched.len(),
             &promptable,
             fixed_cards,
             &replay.already_playing,
@@ -720,6 +724,7 @@ fn h_group_clue_candidates_from_replay_inner(
                 && !creates_false_anxiety_after_forced_play(view, profile, candidate)
         });
     }
+    apply_strategic_clue_values(deductions, profile, &mut candidates);
     candidates
 }
 
@@ -1143,6 +1148,7 @@ fn advanced_clue_candidates(
                         target,
                         focus,
                         identity,
+                        touched.len() == 1,
                         &replay.explicitly_clued,
                         &replay.already_playing,
                         &replay.pending_connections,
@@ -1481,6 +1487,7 @@ fn play_clue_score(
     focus_identity: Card,
     clue: Clue,
     newly_touched: &[CardId],
+    clue_touch_count: usize,
     explicitly_clued: &CardSet,
     fixed_cards: &CardSet,
     already_playing: &CardSet,
@@ -1524,6 +1531,7 @@ fn play_clue_score(
             target,
             focus,
             focus_identity,
+            clue_touch_count == 1,
             explicitly_clued,
             already_playing,
             pending_connections,
@@ -1639,6 +1647,7 @@ fn delayed_connection_score(
     target: PlayerId,
     focus: CardId,
     focus_identity: Card,
+    allow_queued_prefix: bool,
     explicitly_clued: &CardSet,
     already_playing: &CardSet,
     pending_connections: &[ConnectionObligation],
@@ -1649,15 +1658,54 @@ fn delayed_connection_score(
     {
         return None;
     }
-    let connector = Card::new(focus_identity.suit, Rank::ALL[stack_height]);
-    let wholly_queued =
-        ((stack_height + 1)..usize::from(focus_identity.rank.number())).all(|needed_rank| {
-            let needed = Card::new(focus_identity.suit, Rank::ALL[needed_rank - 1]);
-            pending_identity_is_queued(pending_connections, needed)
+    let pending_wholly_queued = ((stack_height + 1)..usize::from(focus_identity.rank.number()))
+        .all(|needed_rank| {
+            pending_identity_is_queued(
+                pending_connections,
+                Card::new(focus_identity.suit, Rank::ALL[needed_rank - 1]),
+            )
         });
-    if wholly_queued {
+    if pending_wholly_queued {
         return Some(390);
     }
+    let first_unqueued_rank = if allow_queued_prefix {
+        ((stack_height + 1)..usize::from(focus_identity.rank.number())).find(|needed_rank| {
+            let needed = Card::new(focus_identity.suit, Rank::ALL[*needed_rank - 1]);
+            !identity_is_queued_before_target(
+                view,
+                view.current_player,
+                target,
+                already_playing,
+                pending_connections,
+                needed,
+            )
+        })
+    } else {
+        Some(stack_height + 1)
+    };
+    let Some(first_unqueued_rank) = first_unqueued_rank else {
+        let first_required = Card::new(focus_identity.suit, Rank::ALL[stack_height]);
+        let target_owes_first_required = pending_connections.iter().any(|connection| {
+            connection.actor == target
+                && connection.expected == first_required
+                && pending_is_active(connection, pending_connections)
+        }) || view.hands[target.index()].iter().any(|card| {
+            already_playing.contains(&card.id) && card.identity == Some(first_required)
+        });
+        if target == next_player(view.current_player, view.hands.len())
+            && target_owes_first_required
+        {
+            // A clue that merely loads the next play behind the recipient's
+            // existing obligation does not improve their immediate action.
+            // Preserve the token and let that promised connector resolve.
+            return None;
+        }
+        return Some(390);
+    };
+    // Already-promised plays advance the delayed line. Search for the first
+    // genuinely missing connector instead of trying to create a duplicate
+    // Prompt/Finesse for an identity the team is already committed to play.
+    let connector = Card::new(focus_identity.suit, Rank::ALL[first_unqueued_rank - 1]);
     if rule_enabled(profile, HGroupRuleId::Extras)
         && loaded_connection_plan(
             view,
@@ -1733,7 +1781,7 @@ fn delayed_connection_score(
         return None;
     }
 
-    for needed_rank in (stack_height + 2)..usize::from(focus_identity.rank.number()) {
+    for needed_rank in (first_unqueued_rank + 1)..usize::from(focus_identity.rank.number()) {
         let needed = Card::new(focus_identity.suit, Rank::ALL[needed_rank - 1]);
         let false_prompt = view.hands.iter().flatten().any(|card| {
             card.id != focus
@@ -1829,7 +1877,11 @@ fn loaded_connection_plan(
     let height = stack_heights[focus_identity.suit.index()];
     for rank in (height + 1)..focus_identity.rank.number() {
         let expected = Card::new(focus_identity.suit, Rank::ALL[usize::from(rank - 1)]);
-        if pending_identity_is_queued(pending, expected) {
+        if pending_identity_is_queued(pending, expected)
+            || already_playing
+                .iter()
+                .any(|card| visible_identity(*card) == Some(expected))
+        {
             stack_heights[expected.suit.index()] = expected.rank.number();
             continue;
         }
@@ -6256,7 +6308,16 @@ fn schedule_connection(
     for offset in 0..connection_count {
         let expected_rank = usize::from(height + offset);
         let expected = Card::new(focus_identity.suit, Rank::ALL[expected_rank]);
-        if pending_identity_is_queued(pending, expected) {
+        let expected_is_already_playing = same_clue_touched.len() == 1
+            && already_playing.iter().any(|card| {
+                hands[actor_index].contains(card)
+                    && (identity_of(view, *card) == Some(expected)
+                        || clues.iter().rev().any(|clue| {
+                            clue.focus == *card
+                                && clue.focus_identities == IdentitySet::singleton(expected)
+                        }))
+            });
+        if pending_identity_is_queued(pending, expected) || expected_is_already_playing {
             continue;
         }
         let mut found = None;
@@ -6512,6 +6573,49 @@ fn pending_identity_is_queued(pending: &[ConnectionObligation], identity: Card) 
     pending
         .iter()
         .any(|connection| connection.expected == identity || connection.focus_identity == identity)
+}
+
+fn identity_is_queued_before_target(
+    view: &PlayerView,
+    giver: PlayerId,
+    target: PlayerId,
+    already_playing: &CardSet,
+    pending: &[ConnectionObligation],
+    identity: Card,
+) -> bool {
+    let player_count = view.hands.len();
+    let target_distance = (target.index() + player_count - giver.index()) % player_count;
+    let acts_before_target = |player: PlayerId| {
+        let distance = (player.index() + player_count - giver.index()) % player_count;
+        distance != 0 && distance <= target_distance
+    };
+    let owner = |card: CardId| {
+        view.hands
+            .iter()
+            .position(|hand| hand.iter().any(|candidate| candidate.id == card))
+            .map(|player| {
+                PlayerId::new(
+                    u8::try_from(player).expect("standard Hanabi has at most five players"),
+                )
+            })
+    };
+    pending.iter().any(|connection| {
+        (connection.expected == identity && acts_before_target(connection.actor))
+            || (connection.focus_identity == identity
+                && owner(connection.focus).is_some_and(acts_before_target))
+    }) || already_playing.iter().any(|card| {
+        identity_of(view, *card) == Some(identity) && owner(*card).is_some_and(acts_before_target)
+    })
+}
+
+fn replay_identity_is_queued(view: &PlayerView, replay: &HGroupState, identity: Card) -> bool {
+    pending_identity_is_queued(&replay.pending_connections, identity)
+        || replay.already_playing.iter().any(|card| {
+            identity_of(view, *card) == Some(identity)
+                || replay.clues.iter().rev().any(|clue| {
+                    clue.focus == *card && clue.focus_identities == IdentitySet::singleton(identity)
+                })
+        })
 }
 
 fn identity_set(identities: impl IntoIterator<Item = Card>) -> IdentitySet {

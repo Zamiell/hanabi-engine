@@ -312,6 +312,61 @@ fn recognizes_expert_replay_red_three_continuation() {
 }
 
 #[test]
+fn optimal_replay_move_26_compares_directness_and_team_tempo() {
+    let state = expert_replay_194321()
+        .state_at_turn(25)
+        .expect("turn exists");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("current player exists"),
+    )
+    .expect("valid deductions");
+    let yellow = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Suit(Suit::Yellow),
+    };
+    let blue = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Suit(Suit::Blue),
+    };
+    let five = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Rank(Rank::Five),
+    };
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    for action in [yellow, blue, five] {
+        assert!(
+            candidates
+                .iter()
+                .any(|candidate| candidate.action == action),
+            "expected move-26 candidate {action:?}: {candidates:#?}"
+        );
+    }
+    let score = |action| {
+        candidates
+            .iter()
+            .find(|candidate| candidate.action == action)
+            .expect("candidate exists")
+            .score
+    };
+    assert!(
+        score(yellow) > score(five),
+        "Directness must prefer the direct route to the same Y4/Y5 outcome: {candidates:#?}"
+    );
+    assert!(
+        score(yellow) > score(blue),
+        "team action coverage must beat an unneeded clue refund: {candidates:#?}"
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(yellow),
+        "the direct yellow line should cover the team's next useful actions: {candidates:#?}"
+    );
+}
+
+#[test]
 fn recognizes_expert_replay_rank_four_fill_in_after_green_fix() {
     let state = expert_replay_194321()
         .state_at_turn(15)
@@ -1190,6 +1245,11 @@ fn learning_path_metadata_covers_every_cumulative_level() {
         assert!(!descriptor.title.is_empty());
         assert!(!descriptor.effects.is_empty());
     }
+    assert!(
+        H_GROUP_LEVELS[9]
+            .effects
+            .contains(&HGroupMoveKind::Directness)
+    );
     assert_eq!(HGroupProfile::Max.effective_level(), 26);
 }
 

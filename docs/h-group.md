@@ -15,7 +15,7 @@ Named H-Group moves are compositions of a smaller set of typed state effects. Th
 | 7 | Emergency discards | Scream/Shout chop movement and must-clue obligations |
 | 8 | End-game | pace phase, no chop moves, positional play signals |
 | 9 | Stalling | severity-gated stalls, fill-ins, locked-hand saves, Anxiety Play |
-| 10 | Special discards | sarcastic/gentleman/baton transfer and Certain Discard |
+| 10 | Special discards | sarcastic/gentleman/baton transfer, Certain Discard, and Directness |
 | 11 | Bluffs | immediate unrelated blind-play and clue-target reinterpretation |
 | 12 | Context | asymmetric/selfish connections and contextual interpretation |
 | 13 | Intermediate bluffs | 3, critical-color, hard, known, and Good Touch forms |
@@ -42,7 +42,7 @@ Named H-Group moves are compositions of a smaller set of typed state effects. Th
 3. Persist invisible clues, chop movement, queued connections, forced plays/discards, and must-clue obligations across turns. Connection starts, advancement, invalidation, repair, and cancellation are audited by one state machine.
 4. Keep ambiguous Prompt and layered-Finesse candidates as exact disjunctions: every earlier candidate must be a wrong but immediately playable card, and one candidate must have the promised identity.
 5. Intersect those promises with the observer's logical identity sets. The planner keeps the resulting constraints symbolic until exhaustive endgame enumeration is feasible.
-6. Generate only rule-legal convention candidates, apply hard convention constraints first, and only then order otherwise-equivalent actions with strategy priorities (including Level 25 Priority).
+6. Generate only rule-legal convention candidates, apply hard convention constraints first, and then project each clue from every player's perspective. Equivalent outcomes pay a Directness penalty for unnecessary connections, while lines that leave fewer teammates with useful promised actions pay a team-action-coverage penalty.
 7. Use the same selected framework for belief constraints, action availability, priorities, and predictable continuations.
 
 The current simulator is standard five-suit Hanabi. Rules whose only observable trigger exists in a non-standard variant remain unreachable until that variant is represented by `hanabi-core`; they are not guessed from a standard-game state.
