@@ -61,6 +61,41 @@ fn optimized_expert_replay_matches_engine_through_move_31() {
 }
 
 #[test]
+fn rejects_no_value_five_fill_in_before_move_32() {
+    let state = expert_replay_194321()
+        .state_at_turn(31)
+        .expect("fixture prefix is legal");
+    let actor = state.current_player();
+    let view = state.view_for(actor).expect("current player has a view");
+    let deductions = LogicalDeductions::new(view.clone()).expect("valid deductions");
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    assert!(
+        candidates.iter().all(|candidate| {
+            candidate.action
+                != (Action::Clue {
+                    target: PlayerId::new(0),
+                    clue: Clue::Rank(Rank::Five),
+                })
+        }),
+        "an already-playing blue 5 plus a non-playable purple 5 has no clue value: {candidates:#?}"
+    );
+
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig {
+            objective: crate::PlanningObjective::PerfectScore,
+            ..crate::PlannerConfig::default()
+        },
+    )
+    .expect("fixture position is analyzable");
+    assert_eq!(
+        analysis.planner.best_action,
+        Action::Discard(CardId::new(21))
+    );
+}
+
+#[test]
 fn recognizes_expert_replay_opening_playable_chop() {
     let state = expert_replay_194321()
         .state_at_turn(0)

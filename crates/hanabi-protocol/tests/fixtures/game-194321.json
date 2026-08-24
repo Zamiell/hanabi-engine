@@ -84,24 +84,21 @@
     {"type": 0, "target": 31, "value": 0},
     {"type": 2, "target": 0, "value": 3},
     {"type": 0, "target": 10, "value": 0},
-    {"type": 2, "target": 1, "value": 4},
+    {"type": 1, "target": 21, "value": 0},
     {"type": 0, "target": 27, "value": 0},
+    {"type": 1, "target": 5, "value": 0},
+    {"type": 3, "target": 3, "value": 3},
+    {"type": 2, "target": 0, "value": 4},
+    {"type": 0, "target": 3, "value": 0},
     {"type": 0, "target": 6, "value": 0},
-    {"type": 3, "target": 0, "value": 4},
+    {"type": 1, "target": 20, "value": 0},
     {"type": 0, "target": 33, "value": 0},
     {"type": 0, "target": 34, "value": 0},
-    {"type": 1, "target": 5, "value": 0},
-    {"type": 1, "target": 20, "value": 0},
-    {"type": 1, "target": 21, "value": 0},
-    {"type": 0, "target": 24, "value": 0},
     {"type": 1, "target": 25, "value": 0},
     {"type": 2, "target": 1, "value": 2},
     {"type": 3, "target": 1, "value": 5},
-    {"type": 0, "target": 3, "value": 0},
+    {"type": 0, "target": 24, "value": 0},
     {"type": 0, "target": 44, "value": 0}
   ],
-  "options": {
-    "deckPlays": true
-  },
   "seed": "p4v0s415"
 }

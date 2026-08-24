@@ -521,7 +521,7 @@ fn h_group_clue_candidates_from_replay_inner(
         } else {
             None
         };
-        let play_score = play_clue_score(
+        let mut play_score = play_clue_score(
             view,
             profile,
             target,
@@ -551,6 +551,18 @@ fn h_group_clue_candidates_from_replay_inner(
                 && distinct.len() < identities.len())
             .then(|| 410 + u16::try_from(distinct.len()).unwrap_or(0))
         });
+        if play_score.is_some()
+            && newly_informed.is_empty()
+            && replay.already_playing.contains(&focus)
+        {
+            // A fill-in on a card that is already promised to play creates no
+            // new action. Retouching other gotten cards does not rescue the
+            // clue: if none of them is newly introduced, the clue is merely
+            // extra identity information and fails Minimum Clue Value outside
+            // an explicitly permitted stalling situation. Required Fixes are
+            // handled before ordinary candidate generation above.
+            play_score = None;
+        }
         let repairable_lie = !is_playable_now(view, focus_identity)
             && rule_enabled(profile, HGroupRuleId::Extras)
             && loaded_connection_plan(
@@ -993,17 +1005,14 @@ fn advanced_clue_candidates(
             // not use the clue as a generic stall when the promise is false.
             continue;
         }
-        let stops_existing_play = touched.iter().any(|card| {
-            replay.already_playing.contains(card)
-                || replay.forced_playable.contains(card)
-                || replay
-                    .pending_connections
-                    .iter()
-                    .any(|connection| connection.actor == target && connection.cards.contains(card))
-        });
-        let stops_bad_existing_play = stops_existing_play
-            && touched.iter().copied().any(|card| {
-                current_card_identity(view, card).is_some_and(|identity| {
+        let stops_bad_existing_play = touched.iter().copied().any(|card| {
+            let has_existing_play = replay.already_playing.contains(&card)
+                || replay.forced_playable.contains(&card)
+                || replay.pending_connections.iter().any(|connection| {
+                    connection.actor == target && connection.cards.contains(&card)
+                });
+            has_existing_play
+                && current_card_identity(view, card).is_some_and(|identity| {
                     !is_playable_now(view, identity)
                         && !convention_playable(view, gotten, card, identity)
                         && !replay.pending_connections.iter().any(|connection| {
@@ -1011,7 +1020,7 @@ fn advanced_clue_candidates(
                                 && pending_is_active(connection, &replay.pending_connections)
                         })
                 })
-            });
+        });
         let duplicate_touch = identities.len() != identity_set(identities.iter().copied()).len();
         let ejection_actor = next_player(view.current_player, view.hands.len());
         let clue_focus = focus(layout, &touched, chop(layout, gotten), gotten);
