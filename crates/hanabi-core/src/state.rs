@@ -13,7 +13,7 @@ const MAX_PLAYERS: u8 = 5;
 const STANDARD_DECK_SIZE: usize = 50;
 
 /// Why a game ended.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum EndReason {
     PerfectScore,
     TooManyStrikes,
@@ -21,7 +21,7 @@ pub enum EndReason {
 }
 
 /// Whether actions may still be applied to a game.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum GameStatus {
     InProgress,
     Finished(EndReason),
@@ -71,7 +71,7 @@ pub struct TurnResult {
 
 /// Complete simulator truth for a standard game.
 ///
-/// Policies and search algorithms should use [`crate::PlayerView`] rather than
+/// Policies and planning algorithms should use [`crate::PlayerView`] rather than
 /// this type. A `FullState` contains every hidden identity and the exact deck
 /// order.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -91,14 +91,14 @@ pub struct FullState {
     clue_facts: Vec<ClueFacts>,
 }
 
-/// Reusable public-state structure for constructing multiple determinizations
+/// Reusable public-state structure for constructing multiple worlds
 /// of the same [`PlayerView`].
 ///
 /// Building a template validates card locations and reconstructs authoritative
 /// history and clue facts once. Each instantiation still validates the supplied
 /// standard deck and every visible identity and direct clue constraint.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DeterminizationTemplate {
+pub struct WorldTemplate {
     hands: Vec<Vec<CardId>>,
     play_stacks: [Vec<CardId>; 5],
     discard_pile: Vec<CardId>,
@@ -170,25 +170,6 @@ impl FullState {
         Ok(state)
     }
 
-    /// Reconstructs one complete world consistent with a player's observation.
-    /// Card identities are indexed by stable [`CardId`] draw order.
-    ///
-    /// This is an explicit hidden-information boundary intended for
-    /// information-set sampling. Action-selection code must not inspect the
-    /// returned state directly.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`DeterminizationError`] if identities do not form a standard
-    /// deck, conflict with visible information or clues, duplicate a card
-    /// location, or produce an invalid rules state.
-    pub fn from_determinization(
-        view: &PlayerView,
-        cards: Vec<Card>,
-    ) -> Result<Self, DeterminizationError> {
-        DeterminizationTemplate::new(view)?.instantiate(cards)
-    }
-
     #[must_use]
     /// # Panics
     ///
@@ -238,15 +219,6 @@ impl FullState {
     #[must_use]
     pub fn deck_size(&self) -> usize {
         self.draw_pile.len()
-    }
-
-    /// Card identifiers in draw order, with the next draw first.
-    ///
-    /// This is simulator truth and must only be used by search evaluation and
-    /// determinization code, never by a player policy when selecting an action.
-    #[must_use]
-    pub fn draw_pile(&self) -> impl ExactSizeIterator<Item = CardId> + '_ {
-        self.draw_pile.iter().copied()
     }
 
     #[must_use]
@@ -316,7 +288,7 @@ impl FullState {
     }
 
     /// Replaces `actions` with the legal actions in deterministic order while
-    /// retaining its allocation for reuse by search traversals.
+    /// retaining its allocation for reuse by planner traversals.
     ///
     /// # Panics
     ///
@@ -661,15 +633,15 @@ impl FullState {
     }
 }
 
-impl DeterminizationTemplate {
+impl WorldTemplate {
     /// Validates and compiles the public structure shared by all hidden worlds
     /// represented by `view`.
     ///
     /// # Errors
     ///
-    /// Returns [`DeterminizationError`] for invalid or duplicate card
+    /// Returns [`WorldConstructionError`] for invalid or duplicate card
     /// locations, a mismatched deck size, or an invalid public rules state.
-    pub fn new(view: &PlayerView) -> Result<Self, DeterminizationError> {
+    pub fn new(view: &PlayerView) -> Result<Self, WorldConstructionError> {
         let mut used = [false; STANDARD_DECK_SIZE];
         let mut observed_cards = Vec::new();
         let mut hands = Vec::with_capacity(view.hands.len());
@@ -705,7 +677,7 @@ impl DeterminizationTemplate {
             .filter_map(|(index, occupied)| (!occupied).then_some(CardId::new(index)))
             .collect::<VecDeque<_>>();
         if draw_pile.len() != view.deck_size {
-            return Err(DeterminizationError::DeckSizeMismatch {
+            return Err(WorldConstructionError::DeckSizeMismatch {
                 observed: view.deck_size,
                 reconstructed: draw_pile.len(),
             });
@@ -743,7 +715,7 @@ impl DeterminizationTemplate {
         template
             .build_state(placeholder_cards)
             .validate()
-            .map_err(DeterminizationError::InvalidState)?;
+            .map_err(WorldConstructionError::InvalidState)?;
         Ok(template)
     }
 
@@ -752,16 +724,16 @@ impl DeterminizationTemplate {
     ///
     /// # Errors
     ///
-    /// Returns [`DeterminizationError`] if `cards` is not a standard deck or
+    /// Returns [`WorldConstructionError`] if `cards` is not a standard deck or
     /// conflicts with a visible identity, direct clue, or observed history.
-    pub fn instantiate(&self, cards: Vec<Card>) -> Result<FullState, DeterminizationError> {
-        validate_standard_deck(&cards).map_err(DeterminizationError::InvalidDeck)?;
+    pub fn instantiate(&self, cards: Vec<Card>) -> Result<FullState, WorldConstructionError> {
+        validate_standard_deck(&cards).map_err(WorldConstructionError::InvalidDeck)?;
         for (id, identity, clues) in &self.observed_cards {
             let supplied = identity_at(&cards, *id)?;
             if let Some(identity) = identity {
                 require_identity(*id, *identity, supplied)?;
             } else if !clues.allows(supplied) {
-                return Err(DeterminizationError::ViolatesClues {
+                return Err(WorldConstructionError::ViolatesClues {
                     card: *id,
                     supplied,
                 });
@@ -822,12 +794,12 @@ fn validate_standard_deck(deck: &[Card]) -> Result<(), SetupError> {
     Ok(())
 }
 
-fn occupy(used: &mut [bool], card: CardId) -> Result<(), DeterminizationError> {
+fn occupy(used: &mut [bool], card: CardId) -> Result<(), WorldConstructionError> {
     let Some(occupied) = used.get_mut(card.index()) else {
-        return Err(DeterminizationError::InvalidCardId(card));
+        return Err(WorldConstructionError::InvalidCardId(card));
     };
     if *occupied {
-        return Err(DeterminizationError::DuplicateLocation(card));
+        return Err(WorldConstructionError::DuplicateLocation(card));
     }
     *occupied = true;
     Ok(())
@@ -837,11 +809,11 @@ fn require_identity(
     card: CardId,
     observed: Card,
     supplied: Card,
-) -> Result<(), DeterminizationError> {
+) -> Result<(), WorldConstructionError> {
     if observed == supplied {
         Ok(())
     } else {
-        Err(DeterminizationError::ConflictingIdentity {
+        Err(WorldConstructionError::ConflictingIdentity {
             card,
             observed,
             supplied,
@@ -849,17 +821,17 @@ fn require_identity(
     }
 }
 
-fn identity_at(cards: &[Card], card: CardId) -> Result<Card, DeterminizationError> {
+fn identity_at(cards: &[Card], card: CardId) -> Result<Card, WorldConstructionError> {
     cards
         .get(card.index())
         .copied()
-        .ok_or(DeterminizationError::InvalidCardId(card))
+        .ok_or(WorldConstructionError::InvalidCardId(card))
 }
 
 fn validate_history_identities(
     history: &[ObservedHistoryEntry],
     cards: &[Card],
-) -> Result<(), DeterminizationError> {
+) -> Result<(), WorldConstructionError> {
     for entry in history {
         match &entry.event {
             ObservedEvent::Played { card, identity, .. }
@@ -880,7 +852,7 @@ fn validate_history_identities(
 fn validate_history_card_ids(
     history: &[ObservedHistoryEntry],
     card_count: usize,
-) -> Result<(), DeterminizationError> {
+) -> Result<(), WorldConstructionError> {
     for entry in history {
         match &entry.event {
             ObservedEvent::Clued {
@@ -888,7 +860,7 @@ fn validate_history_card_ids(
             } => {
                 for card in touched.iter().chain(untouched) {
                     if card.index() >= card_count {
-                        return Err(DeterminizationError::InvalidCardId(*card));
+                        return Err(WorldConstructionError::InvalidCardId(*card));
                     }
                 }
             }
@@ -896,7 +868,7 @@ fn validate_history_card_ids(
             | ObservedEvent::Discarded { card, .. }
             | ObservedEvent::Drew { card, .. } => {
                 if card.index() >= card_count {
-                    return Err(DeterminizationError::InvalidCardId(*card));
+                    return Err(WorldConstructionError::InvalidCardId(*card));
                 }
             }
         }
@@ -1009,7 +981,7 @@ impl fmt::Display for SetupError {
 impl std::error::Error for SetupError {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DeterminizationError {
+pub enum WorldConstructionError {
     InvalidDeck(SetupError),
     InvalidCardId(CardId),
     DuplicateLocation(CardId),
@@ -1029,7 +1001,7 @@ pub enum DeterminizationError {
     InvalidState(InvariantViolation),
 }
 
-impl fmt::Display for DeterminizationError {
+impl fmt::Display for WorldConstructionError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidDeck(error) => write!(formatter, "invalid sampled deck: {error}"),
@@ -1063,7 +1035,7 @@ impl fmt::Display for DeterminizationError {
     }
 }
 
-impl std::error::Error for DeterminizationError {}
+impl std::error::Error for WorldConstructionError {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RuleError {

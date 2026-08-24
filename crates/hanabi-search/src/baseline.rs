@@ -1,10 +1,8 @@
 use core::fmt;
 
-use hanabi_core::{
-    Action, CardId, GameStatus, MAX_CLUE_TOKENS, ObservedCard, PlayerId, PolicyObservation, Rank,
-};
+use hanabi_core::{Action, CardId, GameStatus, MAX_CLUE_TOKENS, ObservedCard, PlayerId, Rank};
 
-use crate::{IdentitySet, LogicalDeductions, PolicyDeductions};
+use crate::{IdentitySet, LogicalDeductions};
 
 /// What direct clues, public cards, and card-count elimination prove about one
 /// card. No meaning is assigned to why any clue was given.
@@ -46,10 +44,6 @@ impl AssessmentContext {
         Self::from_counts(stack_heights, discarded_counts)
     }
 
-    fn from_observation(observation: &PolicyObservation) -> Self {
-        Self::from_counts(observation.stack_heights, observation.discarded_counts)
-    }
-
     fn from_counts(stack_heights: [u8; 5], discarded_counts: [u8; 25]) -> Self {
         let maximum_reachable_ranks = std::array::from_fn(|suit| {
             let stack_height = stack_heights[suit];
@@ -83,76 +77,7 @@ impl AssessmentContext {
     }
 }
 
-/// Selects an action using only a player's legal observation and its logical
-/// information set.
-pub trait RolloutPolicy {
-    /// Whether rollout observations must include a copy of public event history.
-    /// Convention-aware policies will normally retain the default.
-    #[must_use]
-    fn uses_history(&self) -> bool {
-        true
-    }
-
-    /// Chooses one legal action for the current player.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`PolicyError`] when the information set is not an actionable
-    /// current-player position or does not contain its own hidden hand.
-    fn select_action(&self, deductions: &LogicalDeductions) -> Result<Action, PolicyError>;
-
-    /// Chooses an action for a leaf rollout inside search.
-    ///
-    /// Frameworks may use a more conservative value-estimation policy than
-    /// their explicit tree policy. The default preserves ordinary rollout
-    /// behavior.
-    ///
-    /// # Errors
-    ///
-    /// Returns the same policy-specific errors as [`Self::select_action`].
-    fn select_search_action(&self, deductions: &LogicalDeductions) -> Result<Action, PolicyError> {
-        self.select_action(deductions)
-    }
-
-    /// Returns a convention-forced continuation, when the current position
-    /// has one. Search uses this to distinguish a predictable line from a
-    /// heuristic rollout without exposing simulator truth to the policy.
-    #[must_use]
-    fn predictable_action(&self, _deductions: &LogicalDeductions) -> Option<Action> {
-        None
-    }
-
-    /// Chooses from the compact convention-free rollout representation.
-    ///
-    /// Policies returning `false` from [`Self::uses_history`] must implement
-    /// this method.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`PolicyError::CompactObservationUnsupported`] unless the
-    /// policy implements compact observation support.
-    fn select_policy_action(
-        &self,
-        _deductions: &PolicyDeductions<'_>,
-    ) -> Result<Action, PolicyError> {
-        Err(PolicyError::CompactObservationUnsupported)
-    }
-
-    /// Compact-observation counterpart to [`Self::select_search_action`].
-    ///
-    /// # Errors
-    ///
-    /// Returns the same policy-specific errors as
-    /// [`Self::select_policy_action`].
-    fn select_search_policy_action(
-        &self,
-        deductions: &PolicyDeductions<'_>,
-    ) -> Result<Action, PolicyError> {
-        self.select_policy_action(deductions)
-    }
-}
-
-/// A deliberately convention-agnostic rollout policy.
+/// A deliberately convention-agnostic action policy.
 ///
 /// It never gives a clue or interprets why a clue was given. In order, it:
 ///
@@ -163,12 +88,13 @@ pub trait RolloutPolicy {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ConventionAgnosticPolicy;
 
-impl RolloutPolicy for ConventionAgnosticPolicy {
-    fn uses_history(&self) -> bool {
-        false
-    }
-
-    fn select_action(&self, deductions: &LogicalDeductions) -> Result<Action, PolicyError> {
+impl ConventionAgnosticPolicy {
+    /// Chooses one action using only direct clues and logical card counts.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PolicyError`] when the observation is not actionable.
+    pub fn select_action(self, deductions: &LogicalDeductions) -> Result<Action, PolicyError> {
         let view = deductions.view();
         let hand = view
             .hands
@@ -181,23 +107,6 @@ impl RolloutPolicy for ConventionAgnosticPolicy {
             view.status,
             view.clue_tokens,
             hand,
-            &context,
-            |card| deductions.possible_identities(card),
-        )
-    }
-
-    fn select_policy_action(
-        &self,
-        deductions: &PolicyDeductions<'_>,
-    ) -> Result<Action, PolicyError> {
-        let observation = deductions.observation();
-        let context = AssessmentContext::from_observation(observation);
-        select_action_from_knowledge(
-            observation.observer,
-            observation.current_player,
-            observation.status,
-            observation.clue_tokens,
-            &observation.own_hand,
             &context,
             |card| deductions.possible_identities(card),
         )
@@ -242,14 +151,13 @@ fn select_action_from_knowledge(
     ))
 }
 
-/// Why a rollout policy could not choose an action.
+/// Why an action policy could not choose an action.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PolicyError {
     NotCurrentPlayer,
     MissingOwnHand,
     EmptyOwnHand,
     MissingPossibilities(CardId),
-    CompactObservationUnsupported,
     NoConventionAction,
 }
 
@@ -266,9 +174,6 @@ impl fmt::Display for PolicyError {
                     formatter,
                     "the information set has no possibilities for {card}"
                 )
-            }
-            Self::CompactObservationUnsupported => {
-                formatter.write_str("policy does not support compact rollout observations")
             }
             Self::NoConventionAction => {
                 formatter.write_str("the convention admits no action in this position")

@@ -1,10 +1,5 @@
 use hanabi_core::{Action, Card, Clue, FullState, PlayerId, Rank, Suit, standard_deck};
-use hanabi_search::{
-    ConventionAgnosticPolicy, InformationSet, LogicalDeductions, MAX_TERMINAL_UTILITY,
-    PolicyDeductions, RolloutPolicy, assess_card, rollout_to_terminal,
-    rollout_to_terminal_with_diagnostics, terminal_utility,
-};
-use rand::{RngExt, SeedableRng, rngs::StdRng, seq::SliceRandom};
+use hanabi_search::{ConventionAgnosticPolicy, InformationSet, assess_card};
 
 fn card(suit: Suit, rank: Rank) -> Card {
     Card::new(suit, rank)
@@ -26,9 +21,9 @@ fn deck_with_prefix(prefix: &[Card]) -> Vec<Card> {
 fn select(state: &FullState) -> Action {
     let actor = state.current_player();
     let view = state.view_for(actor).unwrap();
-    let information_set = InformationSet::new(view).unwrap();
+    let information_set = InformationSet::new(&view).unwrap();
     ConventionAgnosticPolicy
-        .select_action(&information_set)
+        .select_action(information_set.deductions())
         .unwrap()
 }
 
@@ -97,16 +92,16 @@ fn discards_a_card_that_direct_information_proves_is_useless() {
         .unwrap()
         .clues
         .add_positive_clue(Clue::Suit(Suit::Red));
-    let information_set = InformationSet::new(view).unwrap();
+    let information_set = InformationSet::new(&view).unwrap();
 
     assert!(
-        assess_card(&information_set, useless)
+        assess_card(information_set.deductions(), useless)
             .unwrap()
             .certainly_useless
     );
     assert_eq!(
         ConventionAgnosticPolicy
-            .select_action(&information_set)
+            .select_action(information_set.deductions())
             .unwrap(),
         Action::Discard(useless)
     );
@@ -135,62 +130,15 @@ fn blind_plays_the_newest_card_when_clues_are_full() {
 }
 
 #[test]
-fn complete_rollout_never_selects_a_clue() {
-    let state = FullState::new_standard(2, standard_deck()).unwrap();
-    let outcome = rollout_to_terminal(state.clone(), &ConventionAgnosticPolicy).unwrap();
-    assert_eq!(
-        rollout_to_terminal_with_diagnostics(state, &ConventionAgnosticPolicy)
-            .unwrap()
-            .outcome,
-        outcome
-    );
-
-    assert!(outcome.final_state().is_terminal());
-    assert!(outcome.turns() > 0);
-    assert!(
-        outcome
-            .actions()
-            .iter()
-            .all(|action| !matches!(action, Action::Clue { .. }))
-    );
-    assert_eq!(outcome.score(), 0);
-}
-
-#[test]
-fn terminal_utility_preserves_official_score_and_breaks_strikeout_ties() {
-    assert!(terminal_utility(1, 0) > terminal_utility(0, 25));
-    assert!(terminal_utility(0, 12) > terminal_utility(0, 2));
-    assert_eq!(terminal_utility(25, 25), MAX_TERMINAL_UTILITY);
-}
-
-#[test]
-fn compact_rollout_deductions_match_full_logical_deductions() {
-    for seed in 0..32 {
-        let mut rng = StdRng::seed_from_u64(seed);
-        let mut deck = standard_deck();
-        deck.shuffle(&mut rng);
-        let players = rng.random_range(2..=5);
-        let mut state = FullState::new_standard(players, deck).unwrap();
-
-        for turn in 0..100 {
-            if state.is_terminal() {
-                break;
-            }
-            let actor = state.current_player();
-            let logical = LogicalDeductions::new(state.view_for(actor).unwrap()).unwrap();
-            let observation = state.policy_observation_for(actor).unwrap();
-            let compact = PolicyDeductions::new(&observation).unwrap();
-            assert_eq!(
-                ConventionAgnosticPolicy.select_action(&logical).unwrap(),
-                ConventionAgnosticPolicy
-                    .select_policy_action(&compact)
-                    .unwrap(),
-                "seed {seed}, turn {turn}"
-            );
-
-            let actions = state.legal_actions();
-            let action = actions[rng.random_range(0..actions.len())];
-            state.apply(action).unwrap();
-        }
+fn policy_can_advance_a_game_without_selecting_clues() {
+    let mut state = FullState::new_standard(2, standard_deck()).unwrap();
+    let mut turns = 0;
+    while !state.is_terminal() && turns < 512 {
+        let action = select(&state);
+        assert!(!matches!(action, Action::Clue { .. }));
+        state.apply(action).unwrap();
+        turns += 1;
     }
+    assert!(state.is_terminal());
+    assert!(turns > 0);
 }

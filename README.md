@@ -1,242 +1,61 @@
 # Hanabi Engine
 
-A Hanabi engine written in Rust. The workspace includes a deterministic
-standard-game simulator, player-safe observations, Hanabi Live replay parsing,
-hidden-world sampling, flat Monte Carlo and ISMCTS search, a deliberately
-convention-free baseline, and cumulative H-Group convention profiles.
+A Rust engine for standard five-suit Hanabi. It analyzes legal player
+observations under a selected convention and can connect a bot to
+[hanab.live](https://hanab.live).
 
-The current rules implementation targets standard five-suit Hanabi. The replay
-adapter accepts Hanabi Live no-variant games; variant-specific rules are not yet
-modeled.
+The engine includes:
 
-## Architecture
+- deterministic game logic and player-safe observations;
+- a deterministic symbolic planner with exhaustive late-game solving;
+- a deliberately convention-agnostic baseline;
+- cumulative H-Group profiles from Level 1 through Level 25, plus `max` as the
+  effective Level 26;
+- Hanabi Live replay analysis and a persistent online bot.
 
-- `FullState`: authoritative simulator truth, including hidden identities and
-  deck order.
-- `PlayerView`: the legal observation projected for one player.
-- `LogicalDeductions`: convention-free certainties derived from direct clues,
-  visible cards, and exact card-count elimination.
-- `InformationSet`: search-layer identity constraints and card-copy-weighted
-  sampling of worlds consistent with a `PlayerView`.
-- `ConventionInferences`: a closed, typed registry of framework-specific
-  interpretations kept separate from logical truth.
+Only Hanabi Live `No Variant` games are currently supported.
 
-Policy decisions consume `PlayerView`, `LogicalDeductions`, or the equivalent
-compact rollout observation. Search uses sampled `FullState` values to play
-hypothetical games forward, but hidden simulator truth is never exposed to a
-player's decision policy.
+## Build and test
 
-The workspace contains:
-
-- `hanabi-cli`: the `hanabi-engine` executable for analyzing actionable turns
-  from Hanabi Live replay JSON, producing live-game actions, and benchmarking
-  both search modes.
-- `hanabi-core`: deterministic rules, complete state, event history, legal
-  player observations, and world determinization.
-- `hanabi-protocol`: Hanabi Live compact replay parsing plus player-safe live
-  action-stream reconstruction for standard no-variant games.
-- `hanabi-search`: logical deduction, information sets, convention
-  interpretation, rollout policies, flat Monte Carlo, ISMCTS, diagnostics, and
-  the high-level `best_move` API.
-
-The convention-free baseline plays the oldest certainly playable card.
-Otherwise, when discarding is legal, it discards the oldest certainly useless
-card or falls back to the oldest card. At full clue tokens, when discarding is
-illegal, it blind-plays the newest card. It never gives or interprets a clue.
-
-Logical feasibility uses compact 25-bit identity sets and exact Hall-capacity
-matching. Assignment counts and card-copy sampling weights are initialized
-lazily, with packed memoization keys and a reusable validated determinization
-template. Convention-free rollouts use a compact history-free observation;
-H-Group rollouts retain public history and convention state. H-Group history is
-replayed once per logical information set; candidate generation, action priors,
-and rollout selection share the resulting inference and clue analysis instead
-of reconstructing it for every query. Convention-forced
-plays, Prompts, Finesses, must-clue turns, and forced discards are resolved as
-predictable continuations. Search records the complete resulting principal
-variation, so an obvious convention line can extend for many turns rather than
-being cut off at a fixed two- or three-ply horizon. At two strikes, the leaf
-policy plays only when ordinary logical information proves the card safe.
-
-Flat Monte Carlo compares every legal root action on the same stream of sampled
-worlds. H-Group ISMCTS also gives every root candidate several matched sampled
-worlds before normal tree growth. Tree selection uses convention scores as
-soft PUCT priors instead of excluding every lower-priority alternative;
-genuinely forced convention obligations may still narrow a node. Both modes
-report official and raw score, perfect-game rate, reachable score ceiling,
-clue cost, clue debt, critical discards, bottom-deck risk, predictable turns,
-strikeouts, and a representative principal variation.
-
-`--objective expected-score` keeps official score primary.
-`--objective perfect-score` first maximizes the chance of 25, then uses score,
-ceiling, clue efficiency, and card-risk terms to distinguish imperfect lines.
-Analyze and benchmark default to expected score; live play defaults to perfect
-score.
-
-## Convention support
-
-`SupportedConvention` is the closed registry used by the CLI and high-level
-API. `none` selects the convention-agnostic baseline. `h-group` requires a
-cumulative profile: levels 1 through 25 include all preceding levels, and
-`max` is the effective 26th level. The single machine-readable
-`H_GROUP_LEVELS` catalog contains all 26 entries.
-
-Every convention framework supplies rollout behavior,
-convention-permitted search actions, and root-world sampling. This prevents a
-clue from being interpreted under one belief model while search samples worlds
-under another. H-Group is pinned to the documentation revision exposed as
-`H_GROUP_RULESET_REVISION`. Its event-history interpreter records typed signals
-for play/save clues, connections, chop movement, tempo and stalls, special
-discards, bluffs, ejections and discharges, elimination, 5 tech, ignition,
-charms, and Priority. Ambiguous Prompt and layered-Finesse promises are sampled
-as exact mutually exclusive branches. Convention-inconsistent arbitrary inputs
-fall back to logical world sampling and safe default card behavior.
-
-See [the H-Group interpreter design](docs/h-group.md) for the complete level
-matrix and algorithm.
-
-## Development
-
-The workspace uses Rust 2024 and supports Rust 1.85 or newer. Development from
-WSL works normally as long as the Rust toolchain is installed inside the WSL
-distribution.
-
-The checks below match the GitHub Actions workflow:
+Rust 1.85 or newer is required. From WSL or another Linux environment:
 
 ```sh
+cargo build --release --locked
 cargo fmt --all -- --check
-cargo build --workspace --all-targets --all-features --locked
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-targets --all-features --locked
-RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked
-cargo +1.85.0 check --workspace --all-targets --all-features --locked
-
-python3 -m venv .venv
-.venv/bin/python -m pip install --requirement scripts/requirements.txt
-.venv/bin/python -m py_compile scripts/hanabi_live_bot.py scripts/tests/test_hanabi_live_bot.py
-.venv/bin/python -W error::ResourceWarning -m unittest discover -s scripts/tests -v
-.venv/bin/python scripts/hanabi_live_bot.py --help
 ```
 
-The Hanabi Live compatibility tests use the sibling `hanabi-live` repository
-when it is available and skip only those cross-repository assertions when it is
-absent.
+## Example usage
 
-## Analyze a Hanabi Live position
-
-Turn `N` means the position after `N` completed game actions; turn zero is the
-initial deal. Run searches in release mode for representative throughput.
+Analyze turn 17 of a Hanabi Live replay with H-Group max. The default planner
+keeps unknown identities symbolic and automatically switches to exact endgame
+search when the complete belief is small enough:
 
 ```sh
 cargo run --release -p hanabi-cli --bin hanabi-engine -- \
-  analyze /path/to/replay.json --turn 17 --convention none \
-  --iterations 10000 --seed 42
-
-cargo run --release -p hanabi-cli --bin hanabi-engine -- \
-  analyze /path/to/replay.json --turn 17 --convention none \
-  --mode flat --samples 100 --seed 42
-
-cargo run --release -p hanabi-cli --bin hanabi-engine -- \
-  analyze /path/to/replay.json --turn 17 --convention h-group \
-  --h-group-level 5 --iterations 10000 --seed 42
-
-cargo run --release -p hanabi-cli --bin hanabi-engine -- \
-  analyze /path/to/replay.json --turn 17 --convention h-group \
-  --h-group-level max --iterations 10000 --seed 42
-
-# Optimize perfect-game probability explicitly.
-cargo run --release -p hanabi-cli --bin hanabi-engine -- \
-  analyze /path/to/replay.json --turn 17 --convention h-group \
-  --h-group-level max --objective perfect-score --iterations 10000
+  analyze /path/to/replay.json --turn 17 \
+  --convention h-group --h-group-level max \
+  --objective perfect-score
 ```
 
-`--h-group-level` accepts `1` through `25`, or `max`. Level 5 means levels 1-5
-cumulatively; `max` is the effective cumulative level 26. H-Group analysis
-output records the source documentation revision implemented by the engine.
-Game variants remain game-state metadata rather than convention-selection
-metadata, so the convention interpreter cannot be configured for a different
-variant than the simulator.
+Run `cargo run -p hanabi-cli --bin hanabi-engine -- --help` for all CLI options.
 
-The report marks the selected action with `*`, uses slot 1 for the newest card,
-and includes the score/risk metrics and principal variation used to compare
-the root actions, plus visit, action-availability, and throughput data.
+## Try the bot on Hanabi Live
 
-Applications with an arbitrary legal `PlayerView` can use the library facade:
-
-```rust
-let result = hanabi_search::best_move(
-    view,
-    hanabi_search::SupportedConvention::None,
-    hanabi_search::SearchConfig::Ismcts(hanabi_search::IsmctsConfig {
-        iterations: 10_000,
-        exploration: core::f64::consts::SQRT_2,
-        seed: 42,
-        objective: hanabi_search::SearchObjective::PerfectScore,
-    }),
-)?;
-```
-
-The same entry point accepts `SearchConfig::Flat`. Lower-level search APIs also
-accept any Rust type implementing `ConventionFramework`, while user-facing
-configuration remains the closed `SupportedConvention` enum.
-
-## Play on Hanabi Live
-
-The online adapter has two deliberately separate pieces:
-
-1. `scripts/hanabi_live_bot.py` handles login, the authenticated WebSocket,
-   lobby invitations, and the server's scrubbed action stream.
-2. A persistent `hanabi-engine live-session` process per table reconstructs a
-   player-safe `PlayerView` once, incrementally applies new actions, searches
-   it, and emits Hanabi Live actions as newline-delimited JSON. The
-   `live-action` command remains available for one-shot analysis and testing.
-
-This keeps credentials and the changing network protocol outside the search
-engine, while the Rust boundary prevents the bot from filling its own hidden
-cards with simulator truth. The live command defaults to ISMCTS with a total
-cap of 1,000 iterations, two parallel rollout workers, a 30-second search
-deadline, and H-Group `max`. Independent terminal movies and the matched-root
-prepass run concurrently while selection and backpropagation share one tree.
-The persistent session reroots that tree through observed actions between the
-bot's turns and resets safely when the actual line was not explored. Detailed
-responses report reused actions, visits, and nodes under `search.treeReuse`.
-Searches run on background workers, independently per table, so the WebSocket
-receive loop remains responsive. A failed engine
-session is restarted from the complete scrubbed snapshot, and a dropped server
-connection is reauthenticated with bounded exponential backoff. On either an
-in-process reconnect or a complete launcher restart, the bot reattends its
-ongoing table from the server's `playingAtTables` welcome field and rebuilds
-its incremental engine session from the authoritative action list. `Ctrl+C`
-and `SIGTERM` take the clean shutdown path and do not trigger reconnection.
-
-Every launcher invocation writes a player-safe diagnostic bundle by default to
-`logs/hanabi-live/<UTC-start-time>-<process-id>/`. `bot.log` mirrors console
-messages, `run.json` records the non-secret engine configuration, and
-`events.jsonl` indexes every decision. Each table subdirectory contains the
-complete scrubbed snapshot seen by the bot, the exact request and response for
-each engine attempt, and the final sent/stale/failed result. Detailed responses
-include direct-clue/card-count identity possibilities, convention inferences,
-all root candidates, and their ISMCTS or flat Monte Carlo statistics. These
-snapshots and diagnostics do not reveal the bot's hidden card identities or
-contain its password or session cookie. A `*.snapshot.json` file can be passed
-directly to `hanabi-engine live-action` with the options recorded in `run.json`
-to reproduce and diagnose the position.
-
-Use a dedicated Hanabi Live bot account, then build the release binary and set
-up the one Python dependency:
+Use a dedicated bot account. Build the engine, create a Python environment, and
+install the bridge dependency:
 
 ```sh
 cargo build --release --locked
 
-# On Ubuntu/WSL, install this first if the venv module is unavailable:
-# sudo apt install python3-venv  # or the versioned package, e.g. python3.14-venv
+# Install python3-venv first if your distribution does not include it.
 python3 -m venv .venv
 . .venv/bin/activate
 python -m pip install -r scripts/requirements.txt
 ```
 
-Pass credentials through the environment rather than storing them in the
-repository:
+Provide the bot credentials without saving them in the repository:
 
 ```sh
 export HANABI_USERNAME="your-bot-account"
@@ -247,65 +66,30 @@ echo
 python scripts/hanabi_live_bot.py
 ```
 
-In a browser, create a public `No Variant` table with room for the bot, then
-privately message it:
+The bot defaults to H-Group `max` and deterministic planning.
+
+Create a public `No Variant` table on Hanabi Live, then privately invite the
+bot:
 
 ```text
 /msg your-bot-account /join
 ```
 
-Any player seated at the bot's table can select the cumulative H-Group profile
-for that game with a private message:
+Any player at the table can select or inspect its convention level:
 
 ```text
 /msg your-bot-account /level 3
+/msg your-bot-account /level
 ```
 
-Levels `1` through `25` and `max` are accepted. The bot confirms the change,
-restarts only that table's persistent engine session, and reconstructs it from
-the player-safe action history. The selection survives a WebSocket reconnect
-for the same table and is cleared when the game finishes. Invalid levels,
-non-players, and `/level` requests while running `--convention none` are
-rejected with a private explanation. Send `/level` without an argument to
-query the table's current profile without restarting its engine.
+Levels `1` through `25` and `max` are accepted. The bot reconnects to an
+ongoing game after a network interruption or launcher restart. `Ctrl+C` and
+`SIGTERM` shut it down cleanly. Player-safe snapshots and decision logs are
+written to `logs/hanabi-live/` by default.
 
-The launcher supports `--iterations`, `--threads`, `--time-limit-ms`, `--mode`, `--seed`,
-`--h-group-level 1` through `--h-group-level 25`, and
-`--h-group-level max`. Use `--convention none` to exercise the
-convention-agnostic baseline. The Rust live command also accepts
-`--objective expected-score` or `--objective perfect-score`.
-`--time-limit-ms` is the engine's cooperative deadline; search details report
-the number of iterations actually completed if it expires before the cap.
-`--engine-timeout` is the bridge's larger process-response timeout.
-`--base-url` can point at a local Hanabi Live server for integration testing;
-the default is `https://hanab.live`.
+## Documentation
 
-## Benchmark search
-
-The benchmark command runs both ISMCTS and flat Monte Carlo over one or more
-fixed replay positions. Each trial uses the next consecutive seed, making
-selected actions and search statistics reproducible while still sampling
-multiple hidden worlds.
-
-```sh
-cargo run --release -p hanabi-cli --bin hanabi-engine -- \
-  benchmark /path/to/replay.json \
-  --turn 0 --turn 17 \
-  --convention none --trials 5 \
-  --iterations 10000 --samples 100 --seed 42 \
-  > benchmark.json
-```
-
-The schema-version-5 JSON report records the selected convention and objective and contains
-every trial's selected action, mean official score, raw stack score, terminal
-utility, strikeout rate, work count, elapsed time, and throughput. An H-Group
-profile is recorded as one effective `level` value, including `26` for `max`.
-The report also aggregates selection frequencies and reports
-`action_stability`, the fraction of trials choosing the most common action.
-Per-trial diagnostics break work down into sampled worlds, explicit
-candidate-state clones, expanded tree nodes, search actions, rollouts, rollout
-turns, maximum tree depth, and time spent sampling, traversing the tree, and
-rolling out. Rollout time is further separated into observation, logical
-deduction, policy selection, action application, and remaining loop overhead.
-Wall-clock fields are diagnostic; seeded actions and score statistics are the
-appropriate fields for behavioral regression checks.
+- [Technical overview](docs/technical-overview.md): architecture, planning,
+  conventions, APIs, bridge internals, diagnostics, and CI.
+- [H-Group convention interpreter](docs/h-group.md): level matrix and
+  convention algorithm.

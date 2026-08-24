@@ -4,12 +4,6 @@ use std::{
     process::{Command, Stdio},
 };
 
-use hanabi_core::{Action, Clue, PlayerId, Rank};
-use hanabi_protocol::HanabiLiveSnapshot;
-use hanabi_search::{
-    HGroupProfile, InformationSet, IsmctsConfig, SupportedConvention, ismcts_search,
-};
-
 fn live_snapshot() -> serde_json::Value {
     serde_json::json!({
         "tableID": 17,
@@ -76,43 +70,31 @@ fn traced_opening_snapshot() -> serde_json::Value {
 }
 
 #[test]
-fn traced_opening_clues_do_not_predict_certain_strikeouts() {
-    let snapshot = HanabiLiveSnapshot::from_json(&traced_opening_snapshot().to_string()).unwrap();
-    let information_set = InformationSet::new(snapshot.player_view().unwrap()).unwrap();
-    let convention = SupportedConvention::HGroup(HGroupProfile::Max);
-    let result = ismcts_search(
-        &information_set,
-        &convention,
-        IsmctsConfig {
-            iterations: 32,
-            exploration: std::f64::consts::SQRT_2,
-            seed: 0,
-            objective: hanabi_search::SearchObjective::PerfectScore,
-        },
-    )
-    .unwrap();
-
-    for rank in [Rank::One, Rank::Two] {
-        let action = Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Rank(rank),
-        };
-        let statistics = result
-            .root_actions
-            .iter()
-            .find(|statistics| statistics.action == action)
-            .unwrap_or_else(|| panic!("missing root statistics for {action:?}"));
-        assert!(
-            statistics
-                .strikeout_rate
-                .is_some_and(|strikeouts| strikeouts < 1.0),
-            "{action:?} was incorrectly evaluated as a certain strikeout: {statistics:?}"
-        );
-    }
+fn deterministic_planner_selects_the_rank_two_opening() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
+        .args(["live-action", "--include-planning-details"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    write!(child.stdin.take().unwrap(), "{}", traced_opening_snapshot()).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(response["action"]["type"], 3);
+    assert_eq!(response["action"]["target"], 1);
+    assert_eq!(response["action"]["value"], 1);
+    assert_eq!(response["planning"]["phase"], "symbolic");
+    assert_eq!(response["planning"]["worldCountExact"], false);
 }
 
 #[test]
-fn help_describes_turn_semantics_and_search_modes() {
+fn help_describes_turn_semantics_and_planner_options() {
     let output = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
         .arg("--help")
         .output()
@@ -121,22 +103,19 @@ fn help_describes_turn_semantics_and_search_modes() {
     assert!(output.status.success());
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("turn 0 is the initial deal"));
-    assert!(stdout.contains("--mode <ismcts|flat>"));
     assert!(stdout.contains("--convention <none|h-group>"));
     assert!(stdout.contains("--h-group-level <1-25|max>"));
-    assert!(stdout.contains("hanabi-engine benchmark"));
     assert!(stdout.contains("hanabi-engine live-action"));
     assert!(stdout.contains("hanabi-engine live-session"));
     assert!(stdout.contains("Convention framework (default: h-group)"));
     assert!(stdout.contains("H-Group profile (default: max)"));
-    assert!(stdout.contains("versioned JSON report"));
 }
 
 #[test]
 fn live_action_defaults_to_h_group_max_and_emits_server_json() {
     let snapshot = live_snapshot().to_string();
     let mut child = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
-        .args(["live-action", "--iterations", "1", "--seed", "42"])
+        .arg("live-action")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -173,7 +152,7 @@ fn live_session_serves_multiple_requests_from_one_process() {
         "actions": [],
     });
     let mut child = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
-        .args(["live-session", "--iterations", "1", "--seed", "42"])
+        .arg("live-session")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -206,20 +185,13 @@ fn live_session_serves_multiple_requests_from_one_process() {
 }
 
 #[test]
-fn live_session_can_emit_player_safe_search_details() {
+fn live_session_can_emit_player_safe_planning_details() {
     let initialize = serde_json::json!({
         "kind": "initialize",
         "snapshot": live_snapshot(),
     });
     let mut child = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
-        .args([
-            "live-session",
-            "--iterations",
-            "1",
-            "--seed",
-            "42",
-            "--include-search-details",
-        ])
+        .args(["live-session", "--include-planning-details"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -235,8 +207,8 @@ fn live_session_can_emit_player_safe_search_details() {
     );
     let response: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(response["action"]["tableID"], 17);
-    assert_eq!(response["search"]["mode"], "ismcts");
-    assert!(response["search"]["rootActions"].is_array());
+    assert_eq!(response["planning"]["phase"], "symbolic");
+    assert!(response["planning"]["rootActions"].is_array());
     assert!(response["logicalDeductions"]["ownCards"].is_array());
     assert_eq!(response["conventionInferences"]["framework"], "h-group");
 }
@@ -328,16 +300,7 @@ fn analyzes_a_real_hanabi_live_prefix() {
     }
 
     let output = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
-        .args([
-            "analyze",
-            fixture.to_str().unwrap(),
-            "--turn",
-            "17",
-            "--iterations",
-            "8",
-            "--seed",
-            "42",
-        ])
+        .args(["analyze", fixture.to_str().unwrap(), "--turn", "17"])
         .output()
         .unwrap();
 
@@ -349,41 +312,9 @@ fn analyzes_a_real_hanabi_live_prefix() {
     let stdout = String::from_utf8(output.stdout).unwrap();
     assert!(stdout.contains("Turn: 17  Actor: Cathy (P2)"));
     assert!(stdout.contains("Convention: none"));
-    assert!(stdout.contains("Search: ISMCTS, 8 iterations, seed 42"));
-    assert!(stdout.contains("Visits"));
-    assert!(stdout.contains("Official"));
-    assert!(stdout.contains("Raw"));
-    assert!(stdout.contains("Utility"));
+    assert!(stdout.contains("Planning: deterministic"));
+    assert!(stdout.contains("consistent worlds"));
     assert!(stdout.contains("slot 1 is newest"));
-
-    let flat = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
-        .args([
-            "analyze",
-            fixture.to_str().unwrap(),
-            "--turn",
-            "17",
-            "--mode",
-            "flat",
-            "--samples",
-            "2",
-            "--convention",
-            "none",
-            "--seed",
-            "42",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        flat.status.success(),
-        "{}",
-        String::from_utf8_lossy(&flat.stderr)
-    );
-    let stdout = String::from_utf8(flat.stdout).unwrap();
-    assert!(stdout.contains("Search: flat Monte Carlo, 2 samples/action"));
-    assert!(stdout.contains("Official"));
-    assert!(stdout.contains("Raw"));
-    assert!(stdout.contains("Utility"));
-    assert!(stdout.contains("Variance"));
 
     let h_group = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
         .args([
@@ -391,8 +322,6 @@ fn analyzes_a_real_hanabi_live_prefix() {
             fixture.to_str().unwrap(),
             "--turn",
             "17",
-            "--iterations",
-            "1",
             "--convention",
             "h-group",
             "--h-group-level",
@@ -409,163 +338,5 @@ fn analyzes_a_real_hanabi_live_prefix() {
     assert!(stdout.contains("Convention: h-group (level 5)"));
     assert!(
         stdout.contains("Convention ruleset revision: 1ef83242d71c62f2db6422f09e83abddba9611dd")
-    );
-}
-
-#[test]
-#[allow(clippy::too_many_lines)]
-fn benchmarks_both_search_modes_with_reproducible_trials() {
-    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../hanabi-live/packages/client/test_data/no_variant.json");
-    if !fixture.exists() {
-        return;
-    }
-
-    let output = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
-        .args([
-            "benchmark",
-            fixture.to_str().unwrap(),
-            "--turn",
-            "17",
-            "--trials",
-            "2",
-            "--convention",
-            "none",
-            "--iterations",
-            "8",
-            "--samples",
-            "2",
-            "--seed",
-            "42",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["schema_version"], 5);
-    assert_eq!(report["policy"], "convention_agnostic");
-    assert_eq!(report["convention"], "none");
-    assert!(report["convention_profile"].is_null());
-    assert!(report["convention_ruleset_revision"].is_null());
-    assert_eq!(report["base_seed"], 42);
-    let position = &report["positions"][0];
-    assert_eq!(position["turn"], 17);
-    assert_eq!(position["actor"], "Cathy");
-    assert_eq!(position["starting_score"], 7);
-
-    let searches = position["searches"].as_array().unwrap();
-    assert_eq!(searches.len(), 2);
-    for (search, mode, work_units, actions, raw_scores, expected_diagnostics) in [
-        (
-            &searches[0],
-            "ismcts",
-            8,
-            ["play:24", "discard:22"],
-            [9.0, 12.0],
-            [8, 0, 8, 8, 8, 1],
-        ),
-        (
-            &searches[1],
-            "flat",
-            16,
-            ["play:22", "play:24"],
-            [10.5, 8.5],
-            [2, 16, 0, 16, 16, 1],
-        ),
-    ] {
-        assert_eq!(search["mode"], mode);
-        assert_eq!(search["trial_count"], 2);
-        assert_eq!(search["action_stability"], 0.5);
-        assert!(
-            search["aggregate_throughput_per_second"]
-                .as_f64()
-                .is_some_and(|value| value > 0.0)
-        );
-        let trials = search["trials"].as_array().unwrap();
-        assert_eq!(trials[0]["seed"], 42);
-        assert_eq!(trials[1]["seed"], 43);
-        for ((trial, action), raw_score) in trials.iter().zip(actions).zip(raw_scores) {
-            assert_eq!(trial["selected_action"]["key"], action);
-            assert_eq!(trial["mean_official_score"], 0.0);
-            assert_eq!(trial["mean_raw_score"], raw_score);
-            assert!(trial["mean_utility"].as_f64().unwrap() > raw_score);
-            assert_eq!(trial["strikeout_rate"], 1.0);
-            assert_eq!(trial["work_units"], work_units);
-            let diagnostics = &trial["diagnostics"];
-            for (field, expected) in [
-                ("worlds_sampled", expected_diagnostics[0]),
-                ("candidate_state_clones", expected_diagnostics[1]),
-                ("tree_nodes_expanded", expected_diagnostics[2]),
-                ("search_actions_applied", expected_diagnostics[3]),
-                ("rollouts", expected_diagnostics[4]),
-                ("max_tree_depth", expected_diagnostics[5]),
-            ] {
-                assert_eq!(diagnostics[field], expected);
-            }
-            assert!(
-                diagnostics["rollout_turns"].as_u64().unwrap()
-                    > diagnostics["rollouts"].as_u64().unwrap()
-            );
-            let timing = &diagnostics["timing_seconds"];
-            let accounted = timing["sampling"].as_f64().unwrap()
-                + timing["tree"].as_f64().unwrap()
-                + timing["rollout"].as_f64().unwrap();
-            assert!((timing["total"].as_f64().unwrap() - accounted).abs() < 1e-9);
-            let rollout_accounted = timing["rollout_observation"].as_f64().unwrap()
-                + timing["rollout_deduction"].as_f64().unwrap()
-                + timing["rollout_policy"].as_f64().unwrap()
-                + timing["rollout_apply"].as_f64().unwrap()
-                + timing["rollout_other"].as_f64().unwrap();
-            assert!((timing["rollout"].as_f64().unwrap() - rollout_accounted).abs() < 1e-9);
-        }
-    }
-}
-
-#[test]
-fn benchmark_reports_structured_h_group_profile_and_revision() {
-    let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../hanabi-live/packages/client/test_data/no_variant.json");
-    if !fixture.exists() {
-        return;
-    }
-
-    let output = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
-        .args([
-            "benchmark",
-            fixture.to_str().unwrap(),
-            "--turn",
-            "17",
-            "--trials",
-            "1",
-            "--iterations",
-            "1",
-            "--samples",
-            "1",
-            "--convention",
-            "h-group",
-            "--h-group-level",
-            "max",
-        ])
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-
-    let report: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(report["policy"], "h_group");
-    assert_eq!(report["convention"], "h-group");
-    assert_eq!(report["schema_version"], 5);
-    assert_eq!(report["convention_profile"]["level"], 26);
-    assert_eq!(
-        report["convention_ruleset_revision"],
-        "1ef83242d71c62f2db6422f09e83abddba9611dd"
     );
 }

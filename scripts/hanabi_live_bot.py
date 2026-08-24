@@ -3,24 +3,23 @@
 from __future__ import annotations
 
 import argparse
-import atexit
 import concurrent.futures
-import datetime
 import http.cookies
 import json
 import os
-import queue
 import signal
-import subprocess
 import sys
 import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections import deque
 from pathlib import Path
 from typing import Any, Callable
+
+from hanabi_live_engine import EngineProcessError, PersistentEngine, validate_engine_binary
+from hanabi_live_game import LiveGame
+from hanabi_live_trace import TraceRecorder, configure_log_file, log
 
 try:
     import websocket
@@ -29,248 +28,12 @@ except ImportError:
 
 
 DEFAULT_BASE_URL = "https://hanab.live"
-DEFAULT_ITERATIONS = 1_000
-DEFAULT_THREADS = 2
-DEFAULT_TIME_LIMIT_MS = 30_000
-DEFAULT_SEED = 0
+DEFAULT_EXACT_WORLD_LIMIT = 4_096
+DEFAULT_EXACT_NODE_LIMIT = 50_000
 DEFAULT_ENGINE_TIMEOUT = 180.0
 INITIAL_RECONNECT_DELAY = 1.0
 MAX_RECONNECT_DELAY = 30.0
 STABLE_CONNECTION_SECONDS = 30.0
-TRACE_SCHEMA_VERSION = 1
-
-_LOG_LOCK = threading.Lock()
-_LOG_STREAM: Any = None
-
-
-def configure_log_file(path: Path) -> None:
-    global _LOG_STREAM
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with _LOG_LOCK:
-        if _LOG_STREAM is not None:
-            _LOG_STREAM.close()
-        _LOG_STREAM = path.open("a", encoding="utf-8", buffering=1)
-
-
-def close_log_file() -> None:
-    global _LOG_STREAM
-    with _LOG_LOCK:
-        stream = _LOG_STREAM
-        _LOG_STREAM = None
-        if stream is not None:
-            stream.close()
-
-
-atexit.register(close_log_file)
-
-
-def log(message: str) -> None:
-    with _LOG_LOCK:
-        print(message, flush=True)
-        if _LOG_STREAM is not None:
-            timestamp = datetime.datetime.now(datetime.timezone.utc).isoformat()
-            try:
-                _LOG_STREAM.write(f"{timestamp} {message}\n")
-            except OSError:
-                # Console logging must remain usable if the trace volume disappears.
-                pass
-
-
-class TraceRecorder:
-    """Writes player-safe, replayable diagnostics for one bridge invocation."""
-
-    def __init__(self, root: Path, metadata: dict[str, Any]) -> None:
-        root.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.datetime.now(datetime.timezone.utc).strftime(
-            "%Y%m%dT%H%M%S.%fZ"
-        )
-        candidate = root / f"{timestamp}-{os.getpid()}"
-        suffix = 1
-        while candidate.exists():
-            candidate = root / f"{timestamp}-{os.getpid()}-{suffix}"
-            suffix += 1
-        candidate.mkdir()
-        self.run_directory = candidate
-        self.events_path = candidate / "events.jsonl"
-        self.lock = threading.RLock()
-        self.next_decision_id = 1
-        manifest = {
-            "schemaVersion": TRACE_SCHEMA_VERSION,
-            "startedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            **metadata,
-        }
-        self._write_json(candidate / "run.json", manifest)
-
-    def begin_decision(
-        self,
-        table_id: int,
-        turn: int,
-        action_count: int,
-        generation: int,
-        snapshot: dict[str, Any],
-    ) -> dict[str, Any]:
-        with self.lock:
-            decision_id = self.next_decision_id
-            self.next_decision_id += 1
-            stem = f"decision-{decision_id:06d}-turn-{turn:06d}"
-            table_directory = self.run_directory / "tables" / str(table_id)
-            table_directory.mkdir(parents=True, exist_ok=True)
-            snapshot_path = table_directory / f"{stem}.snapshot.json"
-            self._write_json(snapshot_path, snapshot)
-            context = {
-                "decisionId": decision_id,
-                "tableID": table_id,
-                "turn": turn,
-                "actionCount": action_count,
-                "generation": generation,
-                "stem": stem,
-                "tableDirectory": table_directory,
-            }
-            self._record_event(
-                "decisionStarted",
-                context,
-                {"snapshot": self._relative(snapshot_path)},
-            )
-            return context
-
-    def record_request(
-        self,
-        context: dict[str, Any],
-        attempt: int,
-        payload: dict[str, Any],
-    ) -> None:
-        path = self._decision_path(context, f"attempt-{attempt:02d}.request.json")
-        self._write_json(path, payload)
-        self._record_event(
-            "engineRequest",
-            context,
-            {"attempt": attempt, "request": self._relative(path)},
-        )
-
-    def record_response(
-        self,
-        context: dict[str, Any],
-        attempt: int,
-        response: dict[str, Any],
-    ) -> None:
-        path = self._decision_path(context, f"attempt-{attempt:02d}.response.json")
-        self._write_json(path, response)
-        self._record_event(
-            "engineResponse",
-            context,
-            {"attempt": attempt, "response": self._relative(path)},
-        )
-
-    def record_engine_error(
-        self,
-        context: dict[str, Any],
-        attempt: int,
-        error: Exception,
-    ) -> None:
-        path = self._decision_path(context, f"attempt-{attempt:02d}.error.json")
-        self._write_json(path, {"error": str(error)})
-        self._record_event(
-            "engineError",
-            context,
-            {"attempt": attempt, "error": str(error), "details": self._relative(path)},
-        )
-
-    def finish_decision(
-        self,
-        context: dict[str, Any],
-        status: str,
-        *,
-        action: dict[str, Any] | None = None,
-        error: Exception | None = None,
-    ) -> None:
-        result: dict[str, Any] = {"status": status}
-        if action is not None:
-            result["action"] = action
-        if error is not None:
-            result["error"] = str(error)
-        path = self._decision_path(context, "result.json")
-        self._write_json(path, result)
-        self._record_event(
-            "decisionFinished",
-            context,
-            {**result, "result": self._relative(path)},
-        )
-
-    def _decision_path(self, context: dict[str, Any], suffix: str) -> Path:
-        return context["tableDirectory"] / f"{context['stem']}.{suffix}"
-
-    def _relative(self, path: Path) -> str:
-        return path.relative_to(self.run_directory).as_posix()
-
-    def _record_event(
-        self,
-        kind: str,
-        context: dict[str, Any],
-        details: dict[str, Any],
-    ) -> None:
-        event = {
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "kind": kind,
-            "decisionId": context["decisionId"],
-            "tableID": context["tableID"],
-            "turn": context["turn"],
-            **details,
-        }
-        with self.lock:
-            with self.events_path.open("a", encoding="utf-8") as stream:
-                stream.write(json.dumps(event, separators=(",", ":")) + "\n")
-
-    @staticmethod
-    def _write_json(path: Path, value: Any) -> None:
-        temporary = path.with_name(
-            f".{path.name}.{os.getpid()}.{threading.get_ident()}.tmp"
-        )
-        try:
-            with temporary.open("w", encoding="utf-8") as stream:
-                json.dump(value, stream, indent=2, ensure_ascii=False)
-                stream.write("\n")
-            os.replace(temporary, path)
-        finally:
-            try:
-                temporary.unlink()
-            except FileNotFoundError:
-                pass
-
-
-def engine_environment() -> dict[str, str]:
-    return {
-        key: value
-        for key, value in os.environ.items()
-        if key not in {"HANABI_USERNAME", "HANABI_PASSWORD"}
-    }
-
-
-def validate_engine_binary(engine: Path) -> None:
-    try:
-        result = subprocess.run(
-            [str(engine), "--help"],
-            text=True,
-            capture_output=True,
-            timeout=10,
-            check=False,
-            env=engine_environment(),
-        )
-    except (OSError, subprocess.TimeoutExpired) as error:
-        raise EngineProcessError(f"could not inspect engine binary: {error}") from error
-    help_text = result.stdout + result.stderr
-    if result.returncode != 0:
-        detail = help_text.strip() or f"exit status {result.returncode}"
-        raise EngineProcessError(f"engine self-check failed: {detail}")
-    if (
-        "hanabi-engine live-session" not in help_text
-        or "--include-search-details" not in help_text
-    ):
-        raise EngineProcessError(
-            "engine binary is older than the live bridge and does not support "
-            "the detailed live-session protocol; rebuild it with "
-            "'cargo build --release --locked'"
-        )
-
 
 def authenticate(base_url: str, username: str, password: str) -> tuple[str, str]:
     parsed = urllib.parse.urlsplit(base_url)
@@ -315,154 +78,6 @@ def authenticate(base_url: str, username: str, password: str) -> tuple[str, str]
     return ws_url, "; ".join(cookies)
 
 
-class EngineProcessError(RuntimeError):
-    pass
-
-
-class PersistentEngine:
-    """One newline-delimited Rust engine session for one live table."""
-
-    def __init__(self, command: list[str], timeout: float) -> None:
-        self.command = command
-        self.timeout = timeout
-        self.process: subprocess.Popen[str] | None = None
-        self.responses: queue.Queue[str | None] = queue.Queue()
-        self.stderr: deque[str] = deque(maxlen=20)
-        self.reader_threads: list[threading.Thread] = []
-        self.request_lock = threading.Lock()
-        self.process_lock = threading.Lock()
-        self.closed = threading.Event()
-
-    def request(self, payload: dict[str, Any]) -> dict[str, Any]:
-        with self.request_lock:
-            self._ensure_started()
-            assert self.process is not None
-            assert self.process.stdin is not None
-            process = self.process
-            responses = self.responses
-            try:
-                process.stdin.write(
-                    json.dumps(payload, separators=(",", ":")) + "\n"
-                )
-                process.stdin.flush()
-            except (BrokenPipeError, OSError) as error:
-                detail = self._failure_detail()
-                self._stop()
-                raise EngineProcessError(f"engine input failed: {detail}") from error
-
-            try:
-                line = responses.get(timeout=self.timeout)
-            except queue.Empty as error:
-                self._stop()
-                raise EngineProcessError(
-                    f"engine did not respond within {self.timeout:g} seconds"
-                ) from error
-            if line is None:
-                detail = self._failure_detail()
-                self._stop()
-                raise EngineProcessError(f"engine exited without a response: {detail}")
-            try:
-                response = json.loads(line)
-            except json.JSONDecodeError as error:
-                self._stop()
-                raise EngineProcessError(f"engine returned invalid JSON: {error}") from error
-            if not isinstance(response, dict):
-                self._stop()
-                raise EngineProcessError("engine response is not a JSON object")
-            if "error" in response:
-                message = str(response["error"])
-                self._stop()
-                raise EngineProcessError(message)
-            return response
-
-    def close(self) -> None:
-        self.closed.set()
-        self._stop()
-
-    def _ensure_started(self) -> None:
-        with self.process_lock:
-            if self.closed.is_set():
-                raise EngineProcessError("engine session is closed")
-            if self.process is not None and self.process.poll() is None:
-                return
-            try:
-                self.process = subprocess.Popen(
-                    self.command,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    bufsize=1,
-                    env=engine_environment(),
-                )
-            except OSError as error:
-                raise EngineProcessError(f"could not start engine: {error}") from error
-            self.responses = queue.Queue()
-            self.stderr.clear()
-            assert self.process.stdout is not None
-            assert self.process.stderr is not None
-            stdout_thread = threading.Thread(
-                target=self._read_stdout,
-                args=(self.process.stdout, self.responses),
-                name="hanabi-engine-stdout",
-                daemon=True,
-            )
-            stderr_thread = threading.Thread(
-                target=self._read_stderr,
-                args=(self.process.stderr,),
-                name="hanabi-engine-stderr",
-                daemon=True,
-            )
-            self.reader_threads = [stdout_thread, stderr_thread]
-            stdout_thread.start()
-            stderr_thread.start()
-
-    @staticmethod
-    def _read_stdout(stream: Any, responses: queue.Queue[str | None]) -> None:
-        try:
-            for line in stream:
-                responses.put(line)
-        finally:
-            responses.put(None)
-
-    def _read_stderr(self, stream: Any) -> None:
-        for line in stream:
-            self.stderr.append(line.rstrip())
-
-    def _failure_detail(self) -> str:
-        if self.stderr:
-            return self.stderr[-1]
-        if self.process is not None and self.process.poll() is not None:
-            return f"exit status {self.process.returncode}"
-        return "no diagnostic output"
-
-    def _stop(self) -> None:
-        with self.process_lock:
-            process = self.process
-            self.process = None
-            reader_threads = self.reader_threads
-            self.reader_threads = []
-        if process is None:
-            return
-        if process.stdin is not None:
-            try:
-                process.stdin.close()
-            except OSError:
-                pass
-        if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
-        for thread in reader_threads:
-            thread.join(timeout=0.2)
-        for stream in (process.stdout, process.stderr):
-            if stream is not None:
-                stream.close()
-
-
 def next_reconnect_delay(previous: float, connected_seconds: float) -> float:
     if connected_seconds >= STABLE_CONNECTION_SECONDS:
         return INITIAL_RECONNECT_DELAY
@@ -497,7 +112,7 @@ class HanabiEngineBot:
         )
         self.game_levels: dict[int, str] = {}
         self.tables: dict[int, dict[str, Any]] = {}
-        self.games: dict[int, dict[str, Any]] = {}
+        self.games: dict[int, LiveGame] = {}
         self.ws: Any = None
         self.connection_generation = 0
         self.game_generation = 0
@@ -708,7 +323,7 @@ class HanabiEngineBot:
             active_table, game = target
 
             current_level = (
-                game.get("hGroupLevel")
+                game.h_group_level
                 if game is not None
                 else self.game_levels.get(active_table, self.default_h_group_level)
             )
@@ -719,15 +334,12 @@ class HanabiEngineBot:
 
             assert level is not None
             self.game_levels[active_table] = level
-            if game is not None and game.get("hGroupLevel") != level:
-                old_engine = game.get("engine")
+            if game is not None and game.h_group_level != level:
                 self.game_generation += 1
-                game["generation"] = self.game_generation
-                game["hGroupLevel"] = level
-                game["engine"] = None
-                game["engineInitialized"] = False
-                game["syncedActions"] = 0
-                game["inFlight"] = False
+                game.generation = self.game_generation
+                game.h_group_level = level
+                old_engine = game.reset_engine()
+                game.in_flight = False
 
         if old_engine is not None:
             old_engine.close()
@@ -739,12 +351,12 @@ class HanabiEngineBot:
     def _level_target(
         self,
         requester: str,
-    ) -> tuple[int, dict[str, Any] | None] | None:
+    ) -> tuple[int, LiveGame | None] | None:
         active = next(
             (
                 (table_id, game)
                 for table_id, game in self.games.items()
-                if requester in game.get("playerNames", [])
+                if requester in game.player_names
             ),
             None,
         )
@@ -789,29 +401,19 @@ class HanabiEngineBot:
         with self.lock:
             old = self.games.pop(table_id, None)
             self.game_generation += 1
-            self.games[table_id] = {
-                "tableID": table_id,
-                "playerNames": data["playerNames"],
-                "ourPlayerIndex": data["ourPlayerIndex"],
-                "spectating": data.get("spectating", False),
-                "replay": data.get("replay", False),
-                "options": data["options"],
-                "actions": [],
-                "actionListLoaded": False,
-                "turn": 0,
-                "currentPlayer": 0,
-                "terminal": False,
-                "inFlight": False,
-                "lastDecidedTurn": None,
-                "syncedActions": 0,
-                "engineInitialized": False,
-                "engine": None,
-                "hGroupLevel": self.game_levels.get(
+            self.games[table_id] = LiveGame(
+                table_id=table_id,
+                player_names=list(data["playerNames"]),
+                our_player_index=int(data["ourPlayerIndex"]),
+                spectating=bool(data.get("spectating", False)),
+                replay=bool(data.get("replay", False)),
+                options=data["options"],
+                h_group_level=self.game_levels.get(
                     table_id,
                     self.default_h_group_level,
                 ),
-                "generation": self.game_generation,
-            }
+                generation=self.game_generation,
+            )
         self._close_game_engine(old)
         self.send("getGameInfo2", {"tableID": table_id})
 
@@ -819,21 +421,9 @@ class HanabiEngineBot:
         table_id = int(data["tableID"])
         with self.lock:
             game = self.games[table_id]
-            old_engine = game["engine"]
             self.game_generation += 1
-            game["generation"] = self.game_generation
-            game["engine"] = None
-            game["engineInitialized"] = False
-            game["syncedActions"] = 0
-            game["actions"] = list(data["list"])
-            game["actionListLoaded"] = True
-            game["turn"] = 0
-            game["currentPlayer"] = 0
-            game["terminal"] = False
-            game["inFlight"] = False
-            game["lastDecidedTurn"] = None
-            for action in game["actions"]:
-                self._update_progress(game, action)
+            old_engine = game.engine
+            game.load_actions(list(data["list"]), self.game_generation)
         if old_engine is not None:
             old_engine.close()
         self.send("loaded", {"tableID": table_id})
@@ -846,8 +436,8 @@ class HanabiEngineBot:
             if game is None:
                 return
             action = data["action"]
-            game["actions"].append(action)
-            self._update_progress(game, action)
+            game.actions.append(action)
+            game.update_progress(action)
         self.maybe_move(table_id)
 
     def handle_game_finished(self, data: dict[str, Any]) -> None:
@@ -865,20 +455,20 @@ class HanabiEngineBot:
             if game is None:
                 return
             if (
-                game.get("spectating")
-                or game.get("replay")
-                or not game.get("actionListLoaded", False)
-                or game["terminal"]
-                or game["currentPlayer"] != int(game["ourPlayerIndex"])
-                or game["lastDecidedTurn"] == game["turn"]
-                or game["inFlight"]
+                game.spectating
+                or game.replay
+                or not game.action_list_loaded
+                or game.terminal
+                or game.current_player != int(game.our_player_index)
+                or game.last_decided_turn == game.turn
+                or game.in_flight
             ):
                 return
-            game["inFlight"] = True
-            turn = int(game["turn"])
-            action_count = len(game["actions"])
-            generation = int(game["generation"])
-            snapshot = self._snapshot(game, action_count)
+            game.in_flight = True
+            turn = int(game.turn)
+            action_count = len(game.actions)
+            generation = int(game.generation)
+            snapshot = game.snapshot(action_count)
         try:
             self.executor.submit(
                 self._decide,
@@ -892,7 +482,7 @@ class HanabiEngineBot:
             with self.lock:
                 game = self.games.get(table_id)
                 if game is not None:
-                    game["inFlight"] = False
+                    game.in_flight = False
 
     def _decide(
         self,
@@ -926,10 +516,10 @@ class HanabiEngineBot:
                 game = self.games.get(table_id)
                 current = (
                     game is not None
-                    and game["generation"] == generation
-                    and game["turn"] == turn
-                    and game["currentPlayer"] == int(game["ourPlayerIndex"])
-                    and not game["terminal"]
+                    and game.generation == generation
+                    and game.turn == turn
+                    and game.current_player == int(game.our_player_index)
+                    and not game.terminal
                 )
             if not current:
                 log(f"Discarding stale engine result for table {table_id}, turn {turn}.")
@@ -954,8 +544,8 @@ class HanabiEngineBot:
                 )
             with self.lock:
                 game = self.games.get(table_id)
-                if game is not None and game["generation"] == generation:
-                    game["lastDecidedTurn"] = turn
+                if game is not None and game.generation == generation:
+                    game.last_decided_turn = turn
         except (EngineProcessError, OSError, TypeError, ValueError) as error:
             log(f"Engine failed on table {table_id}, turn {turn}: {error}")
             if trace_context is not None:
@@ -968,8 +558,8 @@ class HanabiEngineBot:
         finally:
             with self.lock:
                 game = self.games.get(table_id)
-                if game is not None and game["generation"] == generation:
-                    game["inFlight"] = False
+                if game is not None and game.generation == generation:
+                    game.in_flight = False
 
     def _request_action(
         self,
@@ -982,27 +572,27 @@ class HanabiEngineBot:
         for attempt in range(1, 3):
             with self.lock:
                 game = self.games.get(table_id)
-                if game is None or game["generation"] != generation:
+                if game is None or game.generation != generation:
                     raise EngineProcessError("game session is no longer current")
-                engine = game["engine"]
+                engine = game.engine
                 if engine is None:
                     engine = self.engine_factory(
                         self._engine_command_for_game(game),
                         self.engine_timeout,
                     )
-                    game["engine"] = engine
-                    game["engineInitialized"] = False
-                    game["syncedActions"] = 0
-                initialized = bool(game["engineInitialized"])
-                synced = int(game["syncedActions"])
+                    game.engine = engine
+                    game.engine_initialized = False
+                    game.synced_actions = 0
+                initialized = bool(game.engine_initialized)
+                synced = int(game.synced_actions)
                 if initialized and synced <= action_count:
                     payload = {
                         "kind": "append",
                         "tableID": table_id,
-                        "actions": game["actions"][synced:action_count],
+                        "actions": game.actions[synced:action_count],
                     }
                 else:
-                    snapshot = self._snapshot(game, action_count)
+                    snapshot = game.snapshot(action_count)
                     payload = {"kind": "initialize", "snapshot": snapshot}
             if trace_context is not None:
                 self._trace("record_request", trace_context, attempt, payload)
@@ -1019,10 +609,8 @@ class HanabiEngineBot:
                     )
                 with self.lock:
                     game = self.games.get(table_id)
-                    if game is not None and game.get("engine") is engine:
-                        game["engine"] = None
-                        game["engineInitialized"] = False
-                        game["syncedActions"] = 0
+                    if game is not None and game.engine is engine:
+                        game.reset_engine()
                 engine.close()
                 continue
             if trace_context is not None:
@@ -1034,29 +622,13 @@ class HanabiEngineBot:
                 )
             with self.lock:
                 game = self.games.get(table_id)
-                if game is None or game["generation"] != generation:
-                    raise EngineProcessError("game session changed during search")
-                game["engineInitialized"] = True
-                game["syncedActions"] = action_count
+                if game is None or game.generation != generation:
+                    raise EngineProcessError("game session changed during planning")
+                game.engine_initialized = True
+                game.synced_actions = action_count
             return response
         assert last_error is not None
         raise last_error
-
-    @staticmethod
-    def _snapshot(game: dict[str, Any], action_count: int) -> dict[str, Any]:
-        snapshot = {
-            key: game[key]
-            for key in (
-                "tableID",
-                "playerNames",
-                "ourPlayerIndex",
-                "spectating",
-                "replay",
-                "options",
-            )
-        }
-        snapshot["actions"] = game["actions"][:action_count]
-        return snapshot
 
     def _trace(self, method: str, *args: Any, **kwargs: Any) -> Any:
         if self.trace_recorder is None:
@@ -1068,18 +640,9 @@ class HanabiEngineBot:
             return None
 
     @staticmethod
-    def _update_progress(game: dict[str, Any], action: dict[str, Any]) -> None:
-        action_type = action.get("type")
-        if action_type == "turn":
-            game["turn"] = int(action["num"])
-            game["currentPlayer"] = int(action["currentPlayerIndex"])
-        elif action_type == "gameOver":
-            game["terminal"] = True
-
-    @staticmethod
-    def _close_game_engine(game: dict[str, Any] | None) -> None:
-        if game is not None and game.get("engine") is not None:
-            game["engine"].close()
+    def _close_game_engine(game: LiveGame | None) -> None:
+        if game is not None:
+            game.close_engine()
 
     @staticmethod
     def _command_option(command: list[str], option: str) -> str | None:
@@ -1091,9 +654,9 @@ class HanabiEngineBot:
             return None
         return command[index + 1]
 
-    def _engine_command_for_game(self, game: dict[str, Any]) -> list[str]:
+    def _engine_command_for_game(self, game: LiveGame) -> list[str]:
         command = self.engine_command.copy()
-        level = game.get("hGroupLevel")
+        level = game.h_group_level
         if level is None:
             return command
         try:
@@ -1148,33 +711,27 @@ def parse_arguments() -> argparse.Namespace:
         default=Path(os.getenv("HANABI_ENGINE_BIN", default_engine)),
         help="path to the prebuilt hanabi-engine binary",
     )
-    parser.add_argument("--mode", choices=("ismcts", "flat"), default="ismcts")
     parser.add_argument(
-        "--iterations",
+        "--exact-world-limit",
         type=int,
-        default=int(os.getenv("HANABI_ENGINE_ITERATIONS", DEFAULT_ITERATIONS)),
-        help=f"ISMCTS iterations per move (default: {DEFAULT_ITERATIONS})",
+        default=int(
+            os.getenv("HANABI_ENGINE_EXACT_WORLD_LIMIT", DEFAULT_EXACT_WORLD_LIMIT)
+        ),
+        help=f"worlds allowed in exact endgame planning (default: {DEFAULT_EXACT_WORLD_LIMIT})",
     )
     parser.add_argument(
-        "--threads",
+        "--exact-node-limit",
         type=int,
-        default=int(os.getenv("HANABI_ENGINE_THREADS", DEFAULT_THREADS)),
-        help=f"parallel ISMCTS workers (default: {DEFAULT_THREADS})",
+        default=int(
+            os.getenv("HANABI_ENGINE_EXACT_NODE_LIMIT", DEFAULT_EXACT_NODE_LIMIT)
+        ),
+        help=f"nodes allowed in exact endgame planning (default: {DEFAULT_EXACT_NODE_LIMIT})",
     )
-    parser.add_argument(
-        "--time-limit-ms",
-        type=int,
-        default=int(os.getenv("HANABI_ENGINE_TIME_LIMIT_MS", DEFAULT_TIME_LIMIT_MS)),
-        help=f"live search deadline in milliseconds (default: {DEFAULT_TIME_LIMIT_MS})",
-    )
-    parser.add_argument("--samples", type=int, default=100)
-    parser.add_argument("--seed", type=int, default=DEFAULT_SEED)
-    parser.add_argument("--exploration", type=float)
     parser.add_argument(
         "--objective",
         choices=("expected-score", "perfect-score"),
         default="perfect-score",
-        help="search objective (default: perfect-score)",
+        help="planning objective (default: perfect-score)",
     )
     parser.add_argument(
         "--engine-timeout",
@@ -1248,46 +805,27 @@ def main() -> int:
         log(f"error: {error}")
         return 2
     if (
-        arguments.iterations <= 0
-        or arguments.samples <= 0
-        or arguments.threads <= 0
-        or arguments.time_limit_ms <= 0
+        arguments.exact_world_limit <= 0
+        or arguments.exact_node_limit <= 0
     ):
-        log("error: search budgets must be positive")
+        log("error: planning budgets must be positive")
         return 2
     if arguments.engine_timeout <= 0:
         log("error: the engine timeout must be positive")
         return 2
-    if arguments.seed < 0:
-        log("error: the search seed must be nonnegative")
-        return 2
-    if arguments.exploration is not None and arguments.exploration <= 0:
-        log("error: the exploration coefficient must be positive")
-        return 2
-
     engine_command = [
         str(engine),
         "live-session",
-        "--mode",
-        arguments.mode,
-        "--iterations",
-        str(arguments.iterations),
-        "--threads",
-        str(arguments.threads),
-        "--time-limit-ms",
-        str(arguments.time_limit_ms),
-        "--samples",
-        str(arguments.samples),
-        "--seed",
-        str(arguments.seed),
+        "--exact-world-limit",
+        str(arguments.exact_world_limit),
+        "--exact-node-limit",
+        str(arguments.exact_node_limit),
         "--convention",
         arguments.convention,
         "--objective",
         arguments.objective,
-        "--include-search-details",
+        "--include-planning-details",
     ]
-    if arguments.exploration is not None:
-        engine_command.extend(["--exploration", str(arguments.exploration)])
     if arguments.convention == "h-group":
         engine_command.extend(["--h-group-level", arguments.h_group_level])
 

@@ -103,7 +103,7 @@ enum HanabiLiveSessionRequest {
 ///
 /// The first request initializes the session from the server's complete,
 /// scrubbed action list. Later requests append only newly received actions,
-/// avoiding replaying the full game history before every search.
+/// avoiding replaying the full game history before every planning request.
 #[derive(Clone, Debug, Default)]
 pub struct HanabiLiveSessionState {
     session: Option<HanabiLiveSession>,
@@ -142,11 +142,6 @@ impl HanabiLiveSnapshot {
     #[must_use]
     pub const fn table_id(&self) -> u64 {
         self.table_id
-    }
-
-    #[must_use]
-    pub fn player_names(&self) -> &[String] {
-        &self.player_names
     }
 
     /// Reconstructs the exact observation legally available to the bot.

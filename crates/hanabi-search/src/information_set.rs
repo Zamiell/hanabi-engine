@@ -1,56 +1,70 @@
 use core::fmt;
-use core::ops::Deref;
-use std::collections::HashMap;
-use std::sync::OnceLock;
 
 use hanabi_core::{
-    Card, CardId, ClueFacts, DeterminizationError, DeterminizationTemplate, FullState, PlayerView,
-    PolicyObservation, Rank, Suit,
+    Card, CardId, ClueFacts, FullState, PlayerView, Rank, Suit, WorldConstructionError,
+    WorldTemplate,
 };
-use rand::{Rng, RngExt, SeedableRng, rngs::StdRng, seq::SliceRandom};
 
 const CARD_IDENTITY_COUNT: usize = 25;
 const STANDARD_CARD_COUNT: usize = 50;
 type Counts = [u8; CARD_IDENTITY_COUNT];
-type CompletionMemo = HashMap<u64, u64>;
 
 /// The hidden worlds logically consistent with one [`PlayerView`].
 ///
-/// This first model uses public card counts and direct positive/negative clues.
-/// Convention-dependent weighting will be layered on top rather than changing
-/// which worlds are logically possible.
+/// Direct clues and public card counts define the logical base; optional
+/// convention constraints can further restrict the worlds visited by a plan.
 #[derive(Debug)]
 pub struct InformationSet {
     deductions: LogicalDeductions,
     known_identities: [Option<Card>; STANDARD_CARD_COUNT],
     constraint_masks: Vec<u32>,
     deck_cards: Vec<CardId>,
-    remaining_counts: Counts,
-    determinization_template: DeterminizationTemplate,
-    completion_cache: OnceLock<CompletionCache>,
+    world_template: WorldTemplate,
 }
 
 /// Certainties derived from current public state, direct clues, and card counts.
 ///
-/// This contains no convention interpretation and no determinization-only deck
+/// This contains no convention interpretation and no world construction-only deck
 /// reconstruction data, making it suitable for the policy hot path.
 #[derive(Debug)]
 pub struct LogicalDeductions {
     view: PlayerView,
     unknown_hand_cards: Vec<CardId>,
     possibilities: Vec<(CardId, IdentitySet)>,
-    pub(crate) h_group_analysis: OnceLock<crate::h_group::HGroupAnalysis>,
+    remaining_counts: Counts,
 }
 
 /// Compact set of the 25 standard card identities.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct IdentitySet(u32);
 
-/// Logical possibilities derived from a compact rollout observation.
-#[derive(Debug)]
-pub struct PolicyDeductions<'a> {
-    observation: &'a PolicyObservation,
-    possibilities: [IdentitySet; 5],
+/// Result of deterministically visiting complete, card-count-consistent own
+/// hand assignments for nested perspective analysis.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct HandAssignmentVisit {
+    pub(crate) examined: usize,
+    pub(crate) complete: bool,
+    pub(crate) stopped: bool,
+}
+
+/// Result of counting complete identity assignments up to a caller-supplied
+/// limit. `exact` is false when traversal stopped after proving that more than
+/// `limit` worlds exist.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WorldCount {
+    pub worlds: u64,
+    pub exact: bool,
+}
+
+/// Convention-derived restrictions on the root belief state.
+///
+/// `constraints` always apply. Each entry in `branches` is an additional,
+/// mutually-exclusive conjunction; an empty branch list means that only the
+/// common constraints apply.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct BeliefConstraints {
+    pub constraints: Vec<(CardId, IdentitySet)>,
+    pub branches: Vec<Vec<(CardId, IdentitySet)>>,
 }
 
 impl IdentitySet {
@@ -105,49 +119,6 @@ impl IdentitySet {
     }
 }
 
-impl<'a> PolicyDeductions<'a> {
-    /// Derives exact card-count possibilities for a rollout observation.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`InformationSetError::NoConsistentWorld`] when the observation's
-    /// direct clues admit no complete own-hand assignment.
-    pub fn new(observation: &'a PolicyObservation) -> Result<Self, InformationSetError> {
-        let mut constraints = [ClueFacts::default(); 5];
-        for (slot, card) in observation.own_hand.iter().enumerate() {
-            constraints[slot] = card.clues;
-        }
-        let possibilities = feasible_identity_array(
-            &constraints[..observation.own_hand.len()],
-            observation.remaining_counts,
-        );
-        if possibilities[..observation.own_hand.len()]
-            .iter()
-            .any(|identities| identities.is_empty())
-        {
-            return Err(InformationSetError::NoConsistentWorld);
-        }
-        Ok(Self {
-            observation,
-            possibilities,
-        })
-    }
-
-    #[must_use]
-    pub const fn observation(&self) -> &PolicyObservation {
-        self.observation
-    }
-
-    #[must_use]
-    pub fn possible_identities(&self, card: CardId) -> Option<IdentitySet> {
-        self.observation
-            .own_hand
-            .iter()
-            .position(|candidate| candidate.id == card)
-            .map(|slot| self.possibilities[slot])
-    }
-}
-
 struct IdentitySetIter(u32);
 
 impl Iterator for IdentitySetIter {
@@ -163,12 +134,6 @@ impl Iterator for IdentitySetIter {
     }
 }
 
-#[derive(Clone, Debug)]
-struct CompletionCache {
-    hand_assignment_count: u64,
-    completion_memo: CompletionMemo,
-}
-
 impl Clone for InformationSet {
     fn clone(&self) -> Self {
         Self {
@@ -176,9 +141,7 @@ impl Clone for InformationSet {
             known_identities: self.known_identities,
             constraint_masks: self.constraint_masks.clone(),
             deck_cards: self.deck_cards.clone(),
-            remaining_counts: self.remaining_counts,
-            determinization_template: self.determinization_template.clone(),
-            completion_cache: OnceLock::new(),
+            world_template: self.world_template.clone(),
         }
     }
 }
@@ -189,22 +152,13 @@ impl PartialEq for InformationSet {
             && self.known_identities == other.known_identities
             && self.constraint_masks == other.constraint_masks
             && self.deck_cards == other.deck_cards
-            && self.remaining_counts == other.remaining_counts
     }
 }
 
 impl Eq for InformationSet {}
 
-impl Deref for InformationSet {
-    type Target = LogicalDeductions;
-
-    fn deref(&self) -> &Self::Target {
-        &self.deductions
-    }
-}
-
 impl LogicalDeductions {
-    /// Derives exact possible identities without constructing sampling state.
+    /// Derives exact possible identities without constructing complete worlds.
     ///
     /// # Errors
     ///
@@ -253,7 +207,7 @@ impl LogicalDeductions {
             view,
             unknown_hand_cards,
             possibilities,
-            h_group_analysis: OnceLock::new(),
+            remaining_counts,
         })
     }
 
@@ -273,6 +227,86 @@ impl LogicalDeductions {
             .iter()
             .find_map(|(candidate, identities)| (*candidate == card).then_some(*identities))
     }
+
+    /// Visits complete own-hand assignments without inventing impossible card
+    /// combinations. Returning `true` from `visitor` stops traversal.
+    pub(crate) fn visit_hand_assignments(
+        &self,
+        limit: usize,
+        mut visitor: impl FnMut(&[(CardId, Card)]) -> bool,
+    ) -> HandAssignmentVisit {
+        let mut remaining = self.remaining_counts;
+        let mut assignment = Vec::with_capacity(self.unknown_hand_cards.len());
+        let mut result = HandAssignmentVisit {
+            examined: 0,
+            complete: true,
+            stopped: false,
+        };
+        visit_assignments(
+            &self.unknown_hand_cards,
+            &self.possibilities,
+            0,
+            &mut remaining,
+            &mut assignment,
+            limit,
+            &mut visitor,
+            &mut result,
+        );
+        result
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn visit_assignments(
+    cards: &[CardId],
+    possibilities: &[(CardId, IdentitySet)],
+    slot: usize,
+    remaining: &mut Counts,
+    assignment: &mut Vec<(CardId, Card)>,
+    limit: usize,
+    visitor: &mut impl FnMut(&[(CardId, Card)]) -> bool,
+    result: &mut HandAssignmentVisit,
+) {
+    if result.stopped || !result.complete {
+        return;
+    }
+    if slot == cards.len() {
+        if result.examined == limit {
+            result.complete = false;
+            return;
+        }
+        result.examined += 1;
+        result.stopped = visitor(assignment);
+        return;
+    }
+    let card = cards[slot];
+    let identities = possibilities
+        .iter()
+        .find_map(|(candidate, identities)| (*candidate == card).then_some(*identities))
+        .unwrap_or_default();
+    for identity in identities.iter() {
+        let count = &mut remaining[identity_index(identity)];
+        if *count == 0 {
+            continue;
+        }
+        *count -= 1;
+        assignment.push((card, identity));
+        visit_assignments(
+            cards,
+            possibilities,
+            slot + 1,
+            remaining,
+            assignment,
+            limit,
+            visitor,
+            result,
+        );
+        assignment.pop();
+        remaining[identity_index(identity)] += 1;
+        if result.stopped || !result.complete {
+            return;
+        }
+    }
 }
 
 impl Clone for LogicalDeductions {
@@ -281,7 +315,7 @@ impl Clone for LogicalDeductions {
             view: self.view.clone(),
             unknown_hand_cards: self.unknown_hand_cards.clone(),
             possibilities: self.possibilities.clone(),
-            h_group_analysis: OnceLock::new(),
+            remaining_counts: self.remaining_counts,
         }
     }
 }
@@ -291,6 +325,7 @@ impl PartialEq for LogicalDeductions {
         self.view == other.view
             && self.unknown_hand_cards == other.unknown_hand_cards
             && self.possibilities == other.possibilities
+            && self.remaining_counts == other.remaining_counts
     }
 }
 
@@ -304,14 +339,11 @@ impl InformationSet {
     /// Returns [`InformationSetError`] when card locations or visible
     /// identities are inconsistent, or when no hidden world satisfies all
     /// direct clues.
-    pub fn new(view: PlayerView) -> Result<Self, InformationSetError> {
-        if view.observer.index() >= view.hands.len() {
-            return Err(InformationSetError::InvalidObserver);
-        }
+    pub fn new(view: &PlayerView) -> Result<Self, InformationSetError> {
+        let deductions = LogicalDeductions::new(view.clone())?;
 
         let mut occupied = [false; STANDARD_CARD_COUNT];
         let mut known_identities = [None; STANDARD_CARD_COUNT];
-        let mut unknown_hand_cards = Vec::new();
         let mut constraint_masks = Vec::new();
 
         for hand in &view.hands {
@@ -320,7 +352,6 @@ impl InformationSet {
                 if let Some(identity) = observed.identity {
                     set_known_identity(&mut known_identities, observed.id, identity)?;
                 } else {
-                    unknown_hand_cards.push(observed.id);
                     constraint_masks.push(observed.clues.identity_mask());
                 }
             }
@@ -348,20 +379,13 @@ impl InformationSet {
             });
         }
 
-        let mut remaining_counts = standard_counts();
-        for identity in known_identities.iter().flatten().copied() {
-            let count = &mut remaining_counts[identity_index(identity)];
-            if *count == 0 {
-                return Err(InformationSetError::TooManyVisibleCopies(identity));
-            }
-            *count -= 1;
-        }
+        let remaining_counts = deductions.remaining_counts;
 
         let remaining_total: usize = remaining_counts
             .iter()
             .map(|count| usize::from(*count))
             .sum();
-        let hidden_total = unknown_hand_cards.len() + deck_cards.len();
+        let hidden_total = deductions.unknown_hand_cards.len() + deck_cards.len();
         if remaining_total != hidden_total {
             return Err(InformationSetError::HiddenCardCountMismatch {
                 identities: remaining_total,
@@ -369,36 +393,15 @@ impl InformationSet {
             });
         }
 
-        let feasible_by_slot = feasible_identity_masks(&constraint_masks, remaining_counts)
-            [..constraint_masks.len()]
-            .to_vec();
-        if feasible_by_slot
-            .iter()
-            .any(|identities| identities.is_empty())
-        {
-            return Err(InformationSetError::NoConsistentWorld);
-        }
-        let possibilities = unknown_hand_cards
-            .iter()
-            .copied()
-            .zip(feasible_by_slot)
-            .collect();
-        let determinization_template = DeterminizationTemplate::new(&view)
-            .map_err(InformationSetError::InvalidDeterminizationTemplate)?;
+        let world_template =
+            WorldTemplate::new(view).map_err(InformationSetError::InvalidWorldTemplate)?;
 
         Ok(Self {
-            deductions: LogicalDeductions {
-                view,
-                unknown_hand_cards,
-                possibilities,
-                h_group_analysis: OnceLock::new(),
-            },
+            deductions,
             known_identities,
             constraint_masks,
             deck_cards,
-            remaining_counts,
-            determinization_template,
-            completion_cache: OnceLock::new(),
+            world_template,
         })
     }
 
@@ -407,18 +410,10 @@ impl InformationSet {
         self.deductions.view()
     }
 
+    /// Convention-agnostic logical analysis shared with symbolic planning.
     #[must_use]
-    pub fn unknown_hand_cards(&self) -> &[CardId] {
-        self.deductions.unknown_hand_cards()
-    }
-
-    /// Exact number of labeled card assignments satisfying all hidden-hand
-    /// clue constraints, before the remaining deck is permuted. The exact
-    /// counting table is built lazily because rollout policies need logical
-    /// possibilities but do not need sampling weights.
-    #[must_use]
-    pub fn hand_assignment_count(&self) -> u64 {
-        self.completion_cache().hand_assignment_count
+    pub const fn deductions(&self) -> &LogicalDeductions {
+        &self.deductions
     }
 
     #[must_use]
@@ -426,81 +421,135 @@ impl InformationSet {
         self.deductions.possible_identities(card)
     }
 
-    /// Samples an exact card-copy-weighted hidden hand, then uniformly shuffles
-    /// the remaining identities into the deck's stable draw-order slots.
+    /// Counts complete, identity-distinct hidden worlds admitted by direct
+    /// clues and optional convention constraints.
+    ///
+    /// Counting stops as soon as `limit + 1` worlds have been found. This is
+    /// the inexpensive gate used by exact endgame planning; it avoids trying
+    /// to represent the astronomical opening belief space.
+    #[must_use]
+    pub fn world_count_up_to(&self, belief: &BeliefConstraints, limit: u64) -> WorldCount {
+        let stop_after = limit.saturating_add(1);
+        let mut worlds = 0_u64;
+        self.visit_belief_masks(belief, |masks| {
+            let mut counts = self.deductions.remaining_counts;
+            count_identity_worlds(
+                masks,
+                self.deck_cards.len(),
+                0,
+                &mut counts,
+                stop_after,
+                &mut worlds,
+            );
+            worlds < stop_after
+        });
+        WorldCount {
+            worlds: worlds.min(stop_after),
+            exact: worlds <= limit,
+        }
+    }
+
+    /// Visits every complete hidden world admitted by direct clues and
+    /// convention constraints, provided the set contains at most `limit`
+    /// worlds.
     ///
     /// # Errors
     ///
-    /// Returns [`SampleError`] if reconstruction unexpectedly violates the
-    /// source observation. A successfully constructed information set always
-    /// has at least one assignment.
-    pub fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Result<FullState, SampleError> {
-        self.sample_with_masks(&self.constraint_masks, self.completion_cache(), rng)
+    /// Returns [`EnumerateWorldsError::LimitExceeded`] before invoking the
+    /// visitor when the exact-planning gate is too large, or wraps an invalid
+    /// world construction if an internal invariant is violated.
+    pub fn visit_worlds(
+        &self,
+        belief: &BeliefConstraints,
+        limit: u64,
+        visitor: impl FnMut(FullState),
+    ) -> Result<u64, EnumerateWorldsError> {
+        let count = self.world_count_up_to(belief, limit);
+        if !count.exact {
+            return Err(EnumerateWorldsError::LimitExceeded {
+                limit,
+                at_least: count.worlds,
+            });
+        }
+
+        self.visit_worlds_after_count(belief, visitor)
     }
 
-    /// Samples a world satisfying additional convention identity constraints.
-    ///
-    /// Sampling remains exact and card-copy weighted over the worlds admitted
-    /// by the intersection of direct clues and `constraints`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SampleError::NoConsistentWorld`] when the additional
-    /// constraints contradict direct clues or public card counts.
-    pub fn sample_constrained<R: Rng + ?Sized>(
+    /// Materializes worlds after the caller has already completed the bounded
+    /// count used by the exact-planning gate.
+    pub(crate) fn collect_worlds_after_count(
         &self,
-        constraints: &[(CardId, IdentitySet)],
-        rng: &mut R,
-    ) -> Result<FullState, SampleError> {
-        let masks = self.constrained_masks(constraints);
-        if masks.contains(&0) {
-            return Err(SampleError::NoConsistentWorld);
-        }
-        let cache = self.cache_for_masks(&masks);
-        if cache.hand_assignment_count == 0 {
-            return Err(SampleError::NoConsistentWorld);
-        }
-        self.sample_with_masks(&masks, &cache, rng)
+        belief: &BeliefConstraints,
+        capacity: usize,
+    ) -> Result<Vec<FullState>, EnumerateWorldsError> {
+        let mut worlds = Vec::with_capacity(capacity);
+        self.visit_worlds_after_count(belief, |world| worlds.push(world))?;
+        Ok(worlds)
     }
 
-    /// Samples exactly from a union of mutually-exclusive convention branches.
-    /// Every branch is intersected with `constraints` and direct clue facts.
-    pub(crate) fn sample_constrained_branches<R: Rng + ?Sized>(
+    fn visit_worlds_after_count(
         &self,
-        constraints: &[(CardId, IdentitySet)],
-        branches: &[Vec<(CardId, IdentitySet)>],
-        rng: &mut R,
-    ) -> Result<FullState, SampleError> {
-        if branches.is_empty() {
-            return self.sample_constrained(constraints, rng);
+        belief: &BeliefConstraints,
+        mut visitor: impl FnMut(FullState),
+    ) -> Result<u64, EnumerateWorldsError> {
+        let placeholder = Card::new(Suit::Red, Rank::One);
+        let base_cards = self
+            .known_identities
+            .map(|identity| identity.unwrap_or(placeholder))
+            .to_vec();
+        let mut visited = 0_u64;
+        let mut error = None;
+        self.visit_belief_masks(belief, |masks| {
+            let mut locations = self.deductions.unknown_hand_cards.clone();
+            locations.extend(self.deck_cards.iter().copied());
+            let mut cards = base_cards.clone();
+            let mut counts = self.deductions.remaining_counts;
+            visit_identity_worlds(
+                &locations,
+                masks,
+                0,
+                &mut counts,
+                &mut cards,
+                &mut |cards| match self.world_template.instantiate(cards.to_vec()) {
+                    Ok(state) => {
+                        visited += 1;
+                        visitor(state);
+                        true
+                    }
+                    Err(source) => {
+                        error = Some(source);
+                        false
+                    }
+                },
+            );
+            error.is_none()
+        });
+        if let Some(source) = error {
+            return Err(EnumerateWorldsError::WorldConstruction(source));
         }
-        let base_masks = self.constrained_masks(constraints);
-        let mut admitted = Vec::new();
-        let mut total = 0_u64;
-        for branch in branches {
+        Ok(visited)
+    }
+
+    fn visit_belief_masks(
+        &self,
+        belief: &BeliefConstraints,
+        mut visitor: impl FnMut(&[u32]) -> bool,
+    ) {
+        let base_masks = self.constrained_masks(&belief.constraints);
+        if base_masks.contains(&0) {
+            return;
+        }
+        if belief.branches.is_empty() {
+            let _ = visitor(&base_masks);
+            return;
+        }
+        for branch in &belief.branches {
             let mut masks = base_masks.clone();
             self.intersect_masks(&mut masks, branch);
-            if masks.contains(&0) {
-                continue;
+            if !masks.contains(&0) && !visitor(&masks) {
+                return;
             }
-            let cache = self.cache_for_masks(&masks);
-            if cache.hand_assignment_count == 0 {
-                continue;
-            }
-            total += cache.hand_assignment_count;
-            admitted.push((masks, cache));
         }
-        if total == 0 {
-            return Err(SampleError::NoConsistentWorld);
-        }
-        let mut draw = rng.random_range(0..total);
-        for (masks, cache) in &admitted {
-            if draw < cache.hand_assignment_count {
-                return self.sample_with_masks(masks, cache, rng);
-            }
-            draw -= cache.hand_assignment_count;
-        }
-        Err(SampleError::NoConsistentWorld)
     }
 
     fn constrained_masks(&self, constraints: &[(CardId, IdentitySet)]) -> Vec<u32> {
@@ -522,126 +571,69 @@ impl InformationSet {
             masks[slot] &= identities.0;
         }
     }
+}
 
-    fn cache_for_masks(&self, masks: &[u32]) -> CompletionCache {
-        let mut counts = self.remaining_counts;
-        let mut completion_memo = HashMap::new();
-        let hand_assignment_count = count_completions(masks, 0, &mut counts, &mut completion_memo);
-        CompletionCache {
-            hand_assignment_count,
-            completion_memo,
+fn count_identity_worlds(
+    hand_masks: &[u32],
+    deck_len: usize,
+    slot: usize,
+    counts: &mut Counts,
+    stop_after: u64,
+    worlds: &mut u64,
+) {
+    if *worlds >= stop_after {
+        return;
+    }
+    let location_count = hand_masks.len() + deck_len;
+    if slot == location_count {
+        *worlds += 1;
+        return;
+    }
+    let allowed = hand_masks
+        .get(slot)
+        .copied()
+        .unwrap_or(IdentitySet::ALL_MASK);
+    for identity in 0..CARD_IDENTITY_COUNT {
+        if counts[identity] == 0 || allowed & (1 << identity) == 0 {
+            continue;
+        }
+        counts[identity] -= 1;
+        count_identity_worlds(hand_masks, deck_len, slot + 1, counts, stop_after, worlds);
+        counts[identity] += 1;
+        if *worlds >= stop_after {
+            return;
         }
     }
+}
 
-    fn sample_with_masks<R: Rng + ?Sized>(
-        &self,
-        masks: &[u32],
-        completion_cache: &CompletionCache,
-        rng: &mut R,
-    ) -> Result<FullState, SampleError> {
-        let mut counts = self.remaining_counts;
-        let placeholder = Card::new(Suit::Red, Rank::One);
-        let mut cards = self
-            .known_identities
-            .map(|identity| identity.unwrap_or(placeholder))
-            .to_vec();
-
-        for (slot, card_id) in self
-            .deductions
-            .unknown_hand_cards
-            .iter()
-            .copied()
-            .enumerate()
-        {
-            let mut candidate_identities = [0_usize; CARD_IDENTITY_COUNT];
-            let mut candidate_weights = [0_u64; CARD_IDENTITY_COUNT];
-            let mut candidate_count = 0;
-            let mut total_weight = 0_u64;
-            for index in 0..CARD_IDENTITY_COUNT {
-                let copies = counts[index];
-                if copies == 0 || masks[slot] & (1 << index) == 0 {
-                    continue;
-                }
-                counts[index] -= 1;
-                let completions = cached_completions(
-                    slot + 1,
-                    masks.len(),
-                    counts,
-                    &completion_cache.completion_memo,
-                );
-                counts[index] += 1;
-                let weight = u64::from(copies) * completions;
-                if weight > 0 {
-                    candidate_identities[candidate_count] = index;
-                    candidate_weights[candidate_count] = weight;
-                    candidate_count += 1;
-                    total_weight += weight;
-                }
-            }
-
-            if total_weight == 0 {
-                return Err(SampleError::NoConsistentWorld);
-            }
-            let mut draw = rng.random_range(0..total_weight);
-            let Some(selected_index) = (0..candidate_count).find_map(|candidate| {
-                let weight = candidate_weights[candidate];
-                if draw < weight {
-                    Some(candidate_identities[candidate])
-                } else {
-                    draw -= weight;
-                    None
-                }
-            }) else {
-                return Err(SampleError::NoConsistentWorld);
-            };
-            counts[selected_index] -= 1;
-            cards[card_id.index()] = identity_from_index(selected_index);
-        }
-
-        let mut deck_identities = [placeholder; STANDARD_CARD_COUNT];
-        let mut deck_identity_count = 0;
-        for identity in all_identities() {
-            for _ in 0..counts[identity_index(identity)] {
-                deck_identities[deck_identity_count] = identity;
-                deck_identity_count += 1;
-            }
-        }
-        debug_assert_eq!(deck_identity_count, self.deck_cards.len());
-        deck_identities[..deck_identity_count].shuffle(rng);
-        for (card_id, identity) in self
-            .deck_cards
-            .iter()
-            .zip(deck_identities[..deck_identity_count].iter().copied())
-        {
-            cards[card_id.index()] = identity;
-        }
-
-        self.determinization_template
-            .instantiate(cards)
-            .map_err(SampleError::Determinization)
+fn visit_identity_worlds(
+    locations: &[CardId],
+    hand_masks: &[u32],
+    slot: usize,
+    counts: &mut Counts,
+    cards: &mut [Card],
+    visitor: &mut impl FnMut(&[Card]) -> bool,
+) -> bool {
+    if slot == locations.len() {
+        return visitor(cards);
     }
-
-    /// Convenience wrapper for a reproducible sample.
-    ///
-    /// # Errors
-    ///
-    /// Returns the same errors as [`Self::sample`].
-    pub fn sample_seeded(&self, seed: u64) -> Result<FullState, SampleError> {
-        self.sample(&mut StdRng::seed_from_u64(seed))
+    let allowed = hand_masks
+        .get(slot)
+        .copied()
+        .unwrap_or(IdentitySet::ALL_MASK);
+    for identity in 0..CARD_IDENTITY_COUNT {
+        if counts[identity] == 0 || allowed & (1 << identity) == 0 {
+            continue;
+        }
+        counts[identity] -= 1;
+        cards[locations[slot].index()] = identity_from_index(identity);
+        if !visit_identity_worlds(locations, hand_masks, slot + 1, counts, cards, visitor) {
+            counts[identity] += 1;
+            return false;
+        }
+        counts[identity] += 1;
     }
-
-    fn completion_cache(&self) -> &CompletionCache {
-        self.completion_cache.get_or_init(|| {
-            let mut counts = self.remaining_counts;
-            let mut completion_memo = HashMap::new();
-            let hand_assignment_count =
-                count_completions(&self.constraint_masks, 0, &mut counts, &mut completion_memo);
-            CompletionCache {
-                hand_assignment_count,
-                completion_memo,
-            }
-        })
-    }
+    true
 }
 
 fn mark_location(
@@ -700,62 +692,6 @@ fn identity_index(card: Card) -> usize {
 
 fn identity_from_index(index: usize) -> Card {
     Card::new(Suit::ALL[index / 5], Rank::ALL[index % 5])
-}
-
-fn count_completions(
-    constraint_masks: &[u32],
-    slot: usize,
-    counts: &mut Counts,
-    memo: &mut CompletionMemo,
-) -> u64 {
-    if slot == constraint_masks.len() {
-        return 1;
-    }
-    let key = completion_key(slot, *counts);
-    if let Some(value) = memo.get(&key) {
-        return *value;
-    }
-
-    let mut total = 0_u64;
-    for identity in all_identities() {
-        let index = identity_index(identity);
-        let copies = counts[index];
-        if copies == 0 || constraint_masks[slot] & (1 << index) == 0 {
-            continue;
-        }
-        counts[index] -= 1;
-        total += u64::from(copies) * count_completions(constraint_masks, slot + 1, counts, memo);
-        counts[index] += 1;
-    }
-    memo.insert(key, total);
-    total
-}
-
-fn cached_completions(
-    slot: usize,
-    constraint_count: usize,
-    counts: Counts,
-    memo: &CompletionMemo,
-) -> u64 {
-    if slot == constraint_count {
-        1
-    } else {
-        *memo
-            .get(&completion_key(slot, counts))
-            .expect("the exact completion pass memoizes every reachable state")
-    }
-}
-
-fn completion_key(slot: usize, counts: Counts) -> u64 {
-    debug_assert!(slot <= 5);
-    let packed_counts = counts
-        .iter()
-        .enumerate()
-        .fold(0_u64, |packed, (identity, count)| {
-            debug_assert!(*count <= 3);
-            packed | (u64::from(*count) << (identity * 2))
-        });
-    packed_counts | ((slot as u64) << (CARD_IDENTITY_COUNT * 2))
 }
 
 fn feasible_identities(constraints: &[ClueFacts], counts: Counts) -> Vec<IdentitySet> {
@@ -842,7 +778,7 @@ pub enum InformationSetError {
         identities: usize,
         locations: usize,
     },
-    InvalidDeterminizationTemplate(DeterminizationError),
+    InvalidWorldTemplate(WorldConstructionError),
     NoConsistentWorld,
 }
 
@@ -876,8 +812,11 @@ impl fmt::Display for InformationSetError {
                 formatter,
                 "{identities} hidden identities remain for {locations} hidden locations"
             ),
-            Self::InvalidDeterminizationTemplate(error) => {
-                write!(formatter, "invalid public state for sampling: {error}")
+            Self::InvalidWorldTemplate(error) => {
+                write!(
+                    formatter,
+                    "invalid public state for exact planning: {error}"
+                )
             }
             Self::NoConsistentWorld => {
                 formatter.write_str("no hidden world satisfies all direct clues")
@@ -888,26 +827,32 @@ impl fmt::Display for InformationSetError {
 
 impl std::error::Error for InformationSetError {}
 
+/// Failure while exhaustively materializing a bounded belief state.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SampleError {
-    NoConsistentWorld,
-    Determinization(DeterminizationError),
+pub enum EnumerateWorldsError {
+    LimitExceeded { limit: u64, at_least: u64 },
+    WorldConstruction(WorldConstructionError),
 }
 
-impl fmt::Display for SampleError {
+impl fmt::Display for EnumerateWorldsError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NoConsistentWorld => formatter.write_str("no consistent world can be sampled"),
-            Self::Determinization(error) => write!(formatter, "invalid sampled world: {error}"),
+            Self::LimitExceeded { limit, at_least } => write!(
+                formatter,
+                "belief contains at least {at_least} worlds, exceeding exact limit {limit}"
+            ),
+            Self::WorldConstruction(error) => {
+                write!(formatter, "invalid enumerated world: {error}")
+            }
         }
     }
 }
 
-impl std::error::Error for SampleError {
+impl std::error::Error for EnumerateWorldsError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::NoConsistentWorld => None,
-            Self::Determinization(error) => Some(error),
+            Self::LimitExceeded { .. } => None,
+            Self::WorldConstruction(error) => Some(error),
         }
     }
 }
@@ -915,136 +860,72 @@ impl std::error::Error for SampleError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hanabi_core::{Clue, FullState, PlayerId, standard_deck};
-    use rand::{RngExt, SeedableRng, rngs::StdRng};
+    use std::collections::HashSet;
 
-    fn clue_facts(positive: &[Clue], negative: &[Clue]) -> ClueFacts {
-        let mut facts = ClueFacts::default();
-        for clue in positive {
-            facts.add_positive_clue(*clue);
-        }
-        for clue in negative {
-            facts.add_negative_clue(*clue);
-        }
-        facts
-    }
+    use hanabi_core::{FullState, PlayerId, standard_deck};
 
     #[test]
-    fn exact_counting_is_lazy_and_does_not_affect_equality() {
+    fn bounded_world_count_short_circuits_openings() {
         let state = FullState::new_standard(2, standard_deck()).unwrap();
-        let view = state.view_for(PlayerId::new(0)).unwrap();
-        let information_set = InformationSet::new(view).unwrap();
-
-        assert!(information_set.completion_cache.get().is_none());
+        let information = InformationSet::new(&state.view_for(PlayerId::new(0)).unwrap()).unwrap();
         assert_eq!(
-            information_set
-                .possible_identities(information_set.unknown_hand_cards()[0])
+            information.world_count_up_to(&BeliefConstraints::default(), 32),
+            WorldCount {
+                worlds: 33,
+                exact: false,
+            }
+        );
+    }
+
+    #[test]
+    fn exact_world_enumeration_is_complete_unique_and_observation_safe() {
+        let mut state = FullState::new_standard(2, standard_deck()).unwrap();
+        while state.deck_size() > 0 && !state.is_terminal() {
+            let playable = state
+                .hand(state.current_player())
                 .unwrap()
-                .len(),
-            22
-        );
-        assert!(information_set.completion_cache.get().is_none());
-
-        assert_eq!(information_set.hand_assignment_count(), 146_611_080);
-        assert!(information_set.completion_cache.get().is_some());
-
-        let cloned = information_set.clone();
-        assert!(cloned.completion_cache.get().is_none());
-        assert_eq!(cloned, information_set);
-    }
-
-    #[test]
-    fn short_circuit_feasibility_matches_exact_completion_counts() {
-        let constraints = vec![
-            clue_facts(&[Clue::Rank(Rank::One)], &[]),
-            clue_facts(&[Clue::Suit(Suit::Red)], &[]),
-            clue_facts(
-                &[Clue::Rank(Rank::Two)],
-                &[Clue::Suit(Suit::Red), Clue::Suit(Suit::Purple)],
-            ),
-            clue_facts(&[Clue::Suit(Suit::Blue)], &[Clue::Rank(Rank::One)]),
-        ];
-        let mut counts = standard_counts();
-        counts[identity_index(Card::new(Suit::Red, Rank::One))] = 1;
-        counts[identity_index(Card::new(Suit::Blue, Rank::Two))] = 1;
-
-        assert_eq!(
-            feasible_identities(&constraints, counts),
-            exact_feasible_identities(&constraints, counts)
-        );
-    }
-
-    #[test]
-    fn hall_feasibility_matches_exact_counting_across_random_constraints() {
-        let mut rng = StdRng::seed_from_u64(0x4841_4e41_4249);
-        for case in 0..256 {
-            let mut counts = [0; CARD_IDENTITY_COUNT];
-            for _ in 0..8 {
-                counts[rng.random_range(0..CARD_IDENTITY_COUNT)] = rng.random_range(1..=2);
-            }
-            if counts
                 .iter()
-                .map(|count| usize::from(*count))
-                .sum::<usize>()
-                < 4
-            {
-                counts[0..4].fill(1);
-            }
-
-            let constraints = (0..4)
-                .map(|_| {
-                    let suit = Suit::ALL[rng.random_range(0..Suit::ALL.len())];
-                    let rank = Rank::ALL[rng.random_range(0..Rank::ALL.len())];
-                    match rng.random_range(0..6) {
-                        0 => clue_facts(&[], &[]),
-                        1 => clue_facts(&[Clue::Suit(suit)], &[]),
-                        2 => clue_facts(&[Clue::Rank(rank)], &[]),
-                        3 => clue_facts(&[], &[Clue::Suit(suit)]),
-                        4 => clue_facts(&[], &[Clue::Rank(rank)]),
-                        _ => clue_facts(&[Clue::Suit(suit)], &[Clue::Rank(rank)]),
-                    }
-                })
-                .collect::<Vec<_>>();
-
-            assert_eq!(
-                feasible_identities(&constraints, counts),
-                exact_feasible_identities(&constraints, counts),
-                "random constraint case {case}"
+                .find(|card| {
+                    let identity = state.card(**card).unwrap();
+                    identity.rank.number()
+                        == u8::try_from(state.play_stacks()[identity.suit.index()].len()).unwrap()
+                            + 1
+                });
+            let action = playable.map_or_else(
+                || {
+                    state
+                        .legal_actions()
+                        .into_iter()
+                        .find(|action| matches!(action, hanabi_core::Action::Discard(_)))
+                        .unwrap_or_else(|| {
+                            state
+                                .legal_actions()
+                                .into_iter()
+                                .find(|action| matches!(action, hanabi_core::Action::Clue { .. }))
+                                .unwrap()
+                        })
+                },
+                |card| hanabi_core::Action::Play(*card),
             );
+            state.apply(action).unwrap();
         }
-    }
+        assert!(!state.is_terminal());
+        let observer = state.current_player();
+        let view = state.view_for(observer).unwrap();
+        let information = InformationSet::new(&view.clone()).unwrap();
+        let belief = BeliefConstraints::default();
+        let count = information.world_count_up_to(&belief, 100_000);
+        assert!(count.exact);
+        assert!(count.worlds > 1);
 
-    fn exact_feasible_identities(constraints: &[ClueFacts], counts: Counts) -> Vec<IdentitySet> {
-        constraints
-            .iter()
-            .enumerate()
-            .map(|(slot, constraint)| {
-                let other_constraints = constraints
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, other)| (index != slot).then_some(other.identity_mask()))
-                    .collect::<Vec<_>>();
-
-                all_identities()
-                    .enumerate()
-                    .filter(|(_, identity)| {
-                        let index = identity_index(*identity);
-                        if counts[index] == 0 || !constraint.allows(*identity) {
-                            return false;
-                        }
-                        let mut remaining = counts;
-                        remaining[index] -= 1;
-                        count_completions(
-                            &other_constraints,
-                            0,
-                            &mut remaining,
-                            &mut HashMap::new(),
-                        ) > 0
-                    })
-                    .fold(IdentitySet::default(), |identities, (index, _)| {
-                        IdentitySet::from_mask(identities.0 | (1 << index))
-                    })
+        let mut unique = HashSet::new();
+        let visited = information
+            .visit_worlds(&belief, 100_000, |world| {
+                assert_eq!(world.view_for(observer), Some(view.clone()));
+                assert!(unique.insert(format!("{world:?}")));
             })
-            .collect()
+            .unwrap();
+        assert_eq!(visited, count.worlds);
+        assert_eq!(u64::try_from(unique.len()).unwrap(), count.worlds);
     }
 }

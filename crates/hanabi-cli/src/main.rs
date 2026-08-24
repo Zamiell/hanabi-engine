@@ -10,20 +10,14 @@ use std::{
 use hanabi_core::{Action, CardId, Clue, FullState, PlayerView};
 use hanabi_protocol::{HanabiLiveReplay, ReplayError};
 use hanabi_search::{
-    BestMoveError, HGroupProfile, InformationSet, InformationSetError, IsmctsConfig, IsmctsError,
-    MonteCarloConfig, SearchError as FlatSearchError, SearchObjective, SupportedConvention,
-    TreeActionStatistics, evaluate_actions, parallel_ismcts_search, select_best_action,
+    AnalyzePositionError, HGroupProfile, PlannerConfig, PlanningObjective, SupportedConvention,
+    analyze_position,
 };
 
-mod benchmark;
 mod live_action;
 
-const DEFAULT_ITERATIONS: u32 = 1_000;
-const DEFAULT_THREADS: usize = 2;
-const DEFAULT_TIME_LIMIT_MS: u64 = 30_000;
-const DEFAULT_SAMPLES: u32 = 100;
-const DEFAULT_SEED: u64 = 0;
-const DEFAULT_TRIALS: u32 = 5;
+const DEFAULT_EXACT_WORLD_LIMIT: u64 = 4_096;
+const DEFAULT_EXACT_NODE_LIMIT: u64 = 50_000;
 
 fn main() -> ExitCode {
     match run() {
@@ -47,7 +41,6 @@ fn run() -> Result<(), CliError> {
 
     match command {
         Command::Analyze(arguments) => run_analyze(&arguments),
-        Command::Benchmark(arguments) => benchmark::run(&arguments),
         Command::LiveAction(arguments) => live_action::run(&arguments),
         Command::LiveSession(arguments) => live_action::run_session(&arguments),
     }
@@ -66,18 +59,70 @@ fn run_analyze(arguments: &AnalyzeArguments) -> Result<(), CliError> {
     let view = state
         .view_for(actor)
         .ok_or(CliError::InvalidCurrentPlayer)?;
-    let information_set = InformationSet::new(view.clone()).map_err(CliError::InformationSet)?;
-
     print_position(&replay, &state, &view);
     println!("Convention: {}", arguments.convention);
     println!("Objective: {}", arguments.objective);
     if let Some(revision) = arguments.convention.ruleset_revision() {
         println!("Convention ruleset revision: {revision}");
     }
-    match arguments.mode {
-        SearchMode::Ismcts => analyze_ismcts(arguments, &view, &replay.players, &information_set),
-        SearchMode::Flat => analyze_flat(arguments, &view, &replay.players, &information_set),
+    analyze_planner(arguments, &view, &replay.players)
+}
+
+fn analyze_planner(
+    arguments: &AnalyzeArguments,
+    view: &PlayerView,
+    players: &[String],
+) -> Result<(), CliError> {
+    let started = Instant::now();
+    let analysis = analyze_position(
+        view,
+        arguments.convention,
+        PlannerConfig {
+            objective: arguments.objective,
+            exact_world_limit: arguments.exact_world_limit,
+            exact_node_limit: arguments.exact_node_limit,
+        },
+    )
+    .map_err(CliError::AnalyzePosition)?;
+    let result = analysis.planner;
+    println!(
+        "Planning: deterministic {:?} planner, {}{} consistent worlds",
+        result.phase,
+        if result.world_count_exact { "" } else { ">=" },
+        result.considered_worlds,
+    );
+    println!(
+        "Elapsed: {:.3}s; exact nodes: {}",
+        started.elapsed().as_secs_f64(),
+        result.exact_nodes
+    );
+    println!();
+    for evaluation in result.root_actions {
+        let marker = if evaluation.action == result.best_action {
+            '*'
+        } else {
+            ' '
+        };
+        if let Some(exact) = evaluation.exact {
+            println!(
+                "{marker}  {:<42} perfect {:>6.2}%  score {:>6.3}  strikeout {:>6.2}%",
+                action_label(view, players, evaluation.action),
+                exact.perfect_rate() * 100.0,
+                exact.expected_score(),
+                exact.strikeout_rate() * 100.0,
+            );
+        } else {
+            println!(
+                "{marker}  {:<42} priority {:>6.2}  playable {}  critical {}  new {}",
+                action_label(view, players, evaluation.action),
+                evaluation.convention_priority,
+                evaluation.immediately_playable_touched,
+                evaluation.critical_touched,
+                evaluation.newly_touched,
+            );
+        }
     }
+    Ok(())
 }
 
 fn read_replay(path: &Path) -> Result<HanabiLiveReplay, CliError> {
@@ -86,145 +131,6 @@ fn read_replay(path: &Path) -> Result<HanabiLiveReplay, CliError> {
         source,
     })?;
     HanabiLiveReplay::from_json(&json).map_err(CliError::Replay)
-}
-
-fn analyze_ismcts(
-    arguments: &AnalyzeArguments,
-    view: &PlayerView,
-    players: &[String],
-    information_set: &InformationSet,
-) -> Result<(), CliError> {
-    let started = Instant::now();
-    let result = parallel_ismcts_search(
-        information_set,
-        &arguments.convention,
-        IsmctsConfig {
-            iterations: arguments.iterations,
-            exploration: arguments.exploration,
-            seed: arguments.seed,
-            objective: arguments.objective,
-        },
-        arguments.threads,
-    )
-    .map_err(CliError::Ismcts)?;
-    let elapsed = started.elapsed();
-
-    println!(
-        "Search: ISMCTS, {} iterations, seed {}, exploration {:.4}",
-        result.iterations, arguments.seed, arguments.exploration
-    );
-    println!(
-        "Elapsed: {:.3}s ({:.0} iterations/s)",
-        elapsed.as_secs_f64(),
-        f64::from(result.iterations) / elapsed.as_secs_f64()
-    );
-    println!();
-    println!(
-        "   {:<42} {:>7} {:>7} {:>8} {:>7} {:>8} {:>10} {:>7}",
-        "Action", "Visits", "Avail", "Official", "Raw", "Utility", "Strikeout", "Range"
-    );
-
-    let mut statistics = result.root_actions;
-    statistics.sort_by(|left, right| {
-        right.visits.cmp(&left.visits).then_with(|| {
-            right
-                .mean_utility
-                .unwrap_or(f64::NEG_INFINITY)
-                .total_cmp(&left.mean_utility.unwrap_or(f64::NEG_INFINITY))
-        })
-    });
-    for entry in statistics {
-        let marker = if entry.action == result.best_action {
-            '*'
-        } else {
-            ' '
-        };
-        print_tree_row(marker, &action_label(view, players, entry.action), &entry);
-        if marker == '*' {
-            println!(
-                "      perfect {:.1}%  ceiling {:.2}  clues {:.2}  efficiency {:.2}  tempo clues {:.2}  clue debt {:.3}  BDR {:.3}  predictable {:.2}",
-                entry.perfect_rate.unwrap_or(0.0) * 100.0,
-                entry.mean_score_ceiling.unwrap_or(0.0),
-                entry.mean_clue_actions.unwrap_or(0.0),
-                entry.mean_clue_efficiency.unwrap_or(0.0),
-                entry.mean_tempo_clues.unwrap_or(0.0),
-                entry.mean_clue_debt.unwrap_or(0.0),
-                entry.mean_bottom_deck_risk.unwrap_or(0.0),
-                entry.mean_predictable_turns.unwrap_or(0.0),
-            );
-            println!("      principal variation: {:?}", entry.principal_variation);
-        }
-    }
-    Ok(())
-}
-
-fn analyze_flat(
-    arguments: &AnalyzeArguments,
-    view: &PlayerView,
-    players: &[String],
-    information_set: &InformationSet,
-) -> Result<(), CliError> {
-    let started = Instant::now();
-    let mut evaluations = evaluate_actions(
-        information_set,
-        &arguments.convention,
-        MonteCarloConfig {
-            samples_per_action: arguments.samples,
-            seed: arguments.seed,
-            objective: arguments.objective,
-        },
-    )
-    .map_err(CliError::Flat)?;
-    let elapsed = started.elapsed();
-    let best = select_best_action(&evaluations).ok_or(CliError::NoBestAction)?;
-    let action_count =
-        u32::try_from(evaluations.len()).expect("a standard position has fewer than u32 actions");
-    let simulations = u64::from(arguments.samples) * u64::from(action_count);
-
-    println!(
-        "Search: flat Monte Carlo, {} samples/action, seed {} ({simulations} rollouts)",
-        arguments.samples, arguments.seed,
-    );
-    println!(
-        "Elapsed: {:.3}s ({:.0} rollouts/s)",
-        elapsed.as_secs_f64(),
-        f64::from(arguments.samples) * f64::from(action_count) / elapsed.as_secs_f64()
-    );
-    println!();
-    println!(
-        "   {:<42} {:>8} {:>7} {:>8} {:>10} {:>10} {:>7}",
-        "Action", "Official", "Raw", "Utility", "Variance", "Strikeout", "Range"
-    );
-
-    evaluations.sort_by(|left, right| right.mean_utility.total_cmp(&left.mean_utility));
-    for entry in evaluations {
-        let marker = if entry.action == best { '*' } else { ' ' };
-        let range = format!("{}-{}", entry.min_score, entry.max_score);
-        println!(
-            "{marker}  {:<42} {:>8.3} {:>7.3} {:>8.3} {:>10.3} {:>9.1}% {range:>7}",
-            action_label(view, players, entry.action),
-            entry.mean_score,
-            entry.mean_raw_score,
-            entry.mean_utility,
-            entry.score_variance,
-            entry.strikeout_rate * 100.0,
-        );
-        if marker == '*' {
-            println!(
-                "      perfect {:.1}%  ceiling {:.2}  clues {:.2}  efficiency {:.2}  tempo clues {:.2}  clue debt {:.3}  BDR {:.3}  predictable {:.2}",
-                entry.perfect_rate * 100.0,
-                entry.mean_score_ceiling,
-                entry.mean_clue_actions,
-                entry.mean_clue_efficiency,
-                entry.mean_tempo_clues,
-                entry.mean_clue_debt,
-                entry.mean_bottom_deck_risk,
-                entry.mean_predictable_turns,
-            );
-            println!("      principal variation: {:?}", entry.principal_variation);
-        }
-    }
-    Ok(())
 }
 
 fn print_position(replay: &HanabiLiveReplay, state: &FullState, view: &PlayerView) {
@@ -249,29 +155,6 @@ fn print_position(replay: &HanabiLiveReplay, state: &FullState, view: &PlayerVie
         view.hands[view.observer.index()].len()
     );
     println!();
-}
-
-fn print_tree_row(marker: char, label: &str, entry: &TreeActionStatistics) {
-    let official = entry
-        .mean_score
-        .map_or_else(|| "-".to_owned(), |value| format!("{value:.3}"));
-    let raw = entry
-        .mean_raw_score
-        .map_or_else(|| "-".to_owned(), |value| format!("{value:.3}"));
-    let utility = entry
-        .mean_utility
-        .map_or_else(|| "-".to_owned(), |value| format!("{value:.3}"));
-    let strikeout = entry
-        .strikeout_rate
-        .map_or_else(|| "-".to_owned(), |value| format!("{:.1}%", value * 100.0));
-    let range = match (entry.min_score, entry.max_score) {
-        (Some(minimum), Some(maximum)) => format!("{minimum}-{maximum}"),
-        _ => "-".to_owned(),
-    };
-    println!(
-        "{marker}  {label:<42} {:>7} {:>7} {official:>8} {raw:>7} {utility:>8} {strikeout:>10} {range:>7}",
-        entry.visits, entry.availability
-    );
 }
 
 fn action_label(view: &PlayerView, players: &[String], action: Action) -> String {
@@ -307,26 +190,6 @@ fn format_card_action(verb: &str, view: &PlayerView, card: CardId) -> String {
         format!("age {}/{}", index + 1, hand.len())
     };
     format!("{verb} slot {slot} ({age}, {card})")
-}
-
-#[derive(Clone, Copy)]
-enum SearchMode {
-    Ismcts,
-    Flat,
-}
-
-impl FromStr for SearchMode {
-    type Err = CliError;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "ismcts" => Ok(Self::Ismcts),
-            "flat" => Ok(Self::Flat),
-            _ => Err(CliError::Usage(format!(
-                "unknown search mode {value:?}; expected ismcts or flat"
-            ))),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -369,44 +232,22 @@ fn select_convention(
 struct AnalyzeArguments {
     replay: PathBuf,
     turn: u32,
-    mode: SearchMode,
-    iterations: u32,
-    threads: usize,
-    samples: u32,
-    seed: u64,
-    exploration: f64,
+    exact_world_limit: u64,
+    exact_node_limit: u64,
     convention: SupportedConvention,
-    objective: SearchObjective,
-}
-
-struct BenchmarkArguments {
-    replay: PathBuf,
-    turns: Vec<u32>,
-    trials: u32,
-    iterations: u32,
-    samples: u32,
-    seed: u64,
-    exploration: f64,
-    convention: SupportedConvention,
-    objective: SearchObjective,
+    objective: PlanningObjective,
 }
 
 struct LiveActionArguments {
-    mode: SearchMode,
-    iterations: u32,
-    threads: usize,
-    time_limit_ms: u64,
-    samples: u32,
-    seed: u64,
-    exploration: f64,
+    exact_world_limit: u64,
+    exact_node_limit: u64,
     convention: SupportedConvention,
-    objective: SearchObjective,
-    include_search_details: bool,
+    objective: PlanningObjective,
+    include_planning_details: bool,
 }
 
 enum Command {
     Analyze(AnalyzeArguments),
-    Benchmark(BenchmarkArguments),
     LiveAction(LiveActionArguments),
     LiveSession(LiveActionArguments),
 }
@@ -422,9 +263,6 @@ fn parse_arguments() -> Result<Option<Command>, CliError> {
     match command.as_str() {
         "analyze" => {
             parse_analyze_arguments(&mut arguments).map(|value| value.map(Command::Analyze))
-        }
-        "benchmark" => {
-            parse_benchmark_arguments(&mut arguments).map(|value| value.map(Command::Benchmark))
         }
         "live-action" => {
             parse_live_action_arguments(&mut arguments).map(|value| value.map(Command::LiveAction))
@@ -447,140 +285,42 @@ fn parse_analyze_arguments(
     }
 
     let mut turn = None;
-    let mut mode = SearchMode::Ismcts;
-    let mut iterations = DEFAULT_ITERATIONS;
-    let mut threads = DEFAULT_THREADS;
-    let mut samples = DEFAULT_SAMPLES;
-    let mut seed = DEFAULT_SEED;
-    let mut exploration = core::f64::consts::SQRT_2;
-    let mut convention = ConventionChoice::default();
+    let mut exact_world_limit = DEFAULT_EXACT_WORLD_LIMIT;
+    let mut exact_node_limit = DEFAULT_EXACT_NODE_LIMIT;
+    let mut convention = Some(ConventionChoice::default());
     let mut h_group_profile = None;
-    let mut objective = SearchObjective::ExpectedScore;
+    let mut objective = PlanningObjective::ExpectedScore;
 
     while let Some(flag) = arguments.next() {
+        if parse_planning_option(
+            &flag,
+            arguments,
+            &mut exact_world_limit,
+            &mut exact_node_limit,
+            &mut convention,
+            &mut h_group_profile,
+            &mut objective,
+        )? {
+            continue;
+        }
         match flag.as_str() {
             "--turn" => {
                 turn = Some(parse_value("--turn", &next_value(arguments, "--turn")?)?);
             }
-            "--mode" => mode = next_value(arguments, "--mode")?.parse()?,
-            "--iterations" => {
-                iterations = parse_value("--iterations", &next_value(arguments, "--iterations")?)?;
-            }
-            "--threads" => {
-                threads = parse_value("--threads", &next_value(arguments, "--threads")?)?;
-            }
-            "--samples" => {
-                samples = parse_value("--samples", &next_value(arguments, "--samples")?)?;
-            }
-            "--seed" => seed = parse_value("--seed", &next_value(arguments, "--seed")?)?,
-            "--exploration" => {
-                exploration =
-                    parse_value("--exploration", &next_value(arguments, "--exploration")?)?;
-            }
-            "--convention" => {
-                convention = parse_value("--convention", &next_value(arguments, "--convention")?)?;
-            }
-            "--h-group-level" => {
-                h_group_profile = Some(parse_value(
-                    "--h-group-level",
-                    &next_value(arguments, "--h-group-level")?,
-                )?);
-            }
-            "--objective" => {
-                objective = parse_value("--objective", &next_value(arguments, "--objective")?)?;
-            }
             "--help" | "-h" => return Ok(None),
             _ => return Err(CliError::Usage(format!("unknown option {flag:?}"))),
         }
     }
 
-    let convention = select_convention(convention, h_group_profile)?;
+    let convention = select_convention(
+        convention.expect("analyze convention has a default"),
+        h_group_profile,
+    )?;
     Ok(Some(AnalyzeArguments {
         replay: replay.into(),
         turn: turn.ok_or_else(|| CliError::Usage("missing required --turn".to_owned()))?,
-        mode,
-        iterations,
-        threads,
-        samples,
-        seed,
-        exploration,
-        convention,
-        objective,
-    }))
-}
-
-fn parse_benchmark_arguments(
-    arguments: &mut impl Iterator<Item = String>,
-) -> Result<Option<BenchmarkArguments>, CliError> {
-    let Some(replay) = arguments.next() else {
-        return Err(CliError::Usage("missing replay JSON path".to_owned()));
-    };
-    if replay == "--help" || replay == "-h" {
-        return Ok(None);
-    }
-
-    let mut turns = Vec::new();
-    let mut trials = DEFAULT_TRIALS;
-    let mut iterations = DEFAULT_ITERATIONS;
-    let mut samples = DEFAULT_SAMPLES;
-    let mut seed = DEFAULT_SEED;
-    let mut exploration = core::f64::consts::SQRT_2;
-    let mut convention = ConventionChoice::default();
-    let mut h_group_profile = None;
-    let mut objective = SearchObjective::ExpectedScore;
-
-    while let Some(flag) = arguments.next() {
-        match flag.as_str() {
-            "--turn" => turns.push(parse_value("--turn", &next_value(arguments, "--turn")?)?),
-            "--trials" => {
-                trials = parse_value("--trials", &next_value(arguments, "--trials")?)?;
-            }
-            "--iterations" => {
-                iterations = parse_value("--iterations", &next_value(arguments, "--iterations")?)?;
-            }
-            "--samples" => {
-                samples = parse_value("--samples", &next_value(arguments, "--samples")?)?;
-            }
-            "--seed" => seed = parse_value("--seed", &next_value(arguments, "--seed")?)?,
-            "--exploration" => {
-                exploration =
-                    parse_value("--exploration", &next_value(arguments, "--exploration")?)?;
-            }
-            "--convention" => {
-                convention = parse_value("--convention", &next_value(arguments, "--convention")?)?;
-            }
-            "--h-group-level" => {
-                h_group_profile = Some(parse_value(
-                    "--h-group-level",
-                    &next_value(arguments, "--h-group-level")?,
-                )?);
-            }
-            "--objective" => {
-                objective = parse_value("--objective", &next_value(arguments, "--objective")?)?;
-            }
-            "--help" | "-h" => return Ok(None),
-            _ => return Err(CliError::Usage(format!("unknown option {flag:?}"))),
-        }
-    }
-
-    if turns.is_empty() {
-        return Err(CliError::Usage(
-            "missing required --turn; repeat it to benchmark multiple positions".to_owned(),
-        ));
-    }
-    if trials == 0 {
-        return Err(CliError::Usage("--trials must be positive".to_owned()));
-    }
-
-    let convention = select_convention(convention, h_group_profile)?;
-    Ok(Some(BenchmarkArguments {
-        replay: replay.into(),
-        turns,
-        trials,
-        iterations,
-        samples,
-        seed,
-        exploration,
+        exact_world_limit,
+        exact_node_limit,
         convention,
         objective,
     }))
@@ -589,64 +329,34 @@ fn parse_benchmark_arguments(
 fn parse_live_action_arguments(
     arguments: &mut impl Iterator<Item = String>,
 ) -> Result<Option<LiveActionArguments>, CliError> {
-    let mut mode = SearchMode::Ismcts;
-    let mut iterations = DEFAULT_ITERATIONS;
-    let mut threads = DEFAULT_THREADS;
-    let mut time_limit_ms = DEFAULT_TIME_LIMIT_MS;
-    let mut samples = DEFAULT_SAMPLES;
-    let mut seed = DEFAULT_SEED;
-    let mut exploration = core::f64::consts::SQRT_2;
-    let mut convention = None;
+    let mut exact_world_limit = DEFAULT_EXACT_WORLD_LIMIT;
+    let mut exact_node_limit = DEFAULT_EXACT_NODE_LIMIT;
+    let mut convention = Some(ConventionChoice::HGroup);
     let mut h_group_profile = None;
-    let mut include_search_details = false;
-    let mut objective = SearchObjective::PerfectScore;
+    let mut include_planning_details = false;
+    let mut objective = PlanningObjective::PerfectScore;
 
     while let Some(flag) = arguments.next() {
+        if parse_planning_option(
+            &flag,
+            arguments,
+            &mut exact_world_limit,
+            &mut exact_node_limit,
+            &mut convention,
+            &mut h_group_profile,
+            &mut objective,
+        )? {
+            continue;
+        }
         match flag.as_str() {
-            "--mode" => mode = next_value(arguments, "--mode")?.parse()?,
-            "--iterations" => {
-                iterations = parse_value("--iterations", &next_value(arguments, "--iterations")?)?;
-            }
-            "--threads" => {
-                threads = parse_value("--threads", &next_value(arguments, "--threads")?)?;
-            }
-            "--time-limit-ms" => {
-                time_limit_ms = parse_value(
-                    "--time-limit-ms",
-                    &next_value(arguments, "--time-limit-ms")?,
-                )?;
-            }
-            "--samples" => {
-                samples = parse_value("--samples", &next_value(arguments, "--samples")?)?;
-            }
-            "--seed" => seed = parse_value("--seed", &next_value(arguments, "--seed")?)?,
-            "--exploration" => {
-                exploration =
-                    parse_value("--exploration", &next_value(arguments, "--exploration")?)?;
-            }
-            "--convention" => {
-                convention = Some(parse_value(
-                    "--convention",
-                    &next_value(arguments, "--convention")?,
-                )?);
-            }
-            "--h-group-level" => {
-                h_group_profile = Some(parse_value(
-                    "--h-group-level",
-                    &next_value(arguments, "--h-group-level")?,
-                )?);
-            }
-            "--include-search-details" => include_search_details = true,
-            "--objective" => {
-                objective = parse_value("--objective", &next_value(arguments, "--objective")?)?;
-            }
+            "--include-planning-details" => include_planning_details = true,
             "--help" | "-h" => return Ok(None),
             _ => return Err(CliError::Usage(format!("unknown option {flag:?}"))),
         }
     }
 
     let convention = match (
-        convention.unwrap_or(ConventionChoice::HGroup),
+        convention.expect("live convention has a default"),
         h_group_profile,
     ) {
         (ConventionChoice::None, None) => SupportedConvention::None,
@@ -660,17 +370,43 @@ fn parse_live_action_arguments(
         }
     };
     Ok(Some(LiveActionArguments {
-        mode,
-        iterations,
-        threads,
-        time_limit_ms,
-        samples,
-        seed,
-        exploration,
+        exact_world_limit,
+        exact_node_limit,
         convention,
         objective,
-        include_search_details,
+        include_planning_details,
     }))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn parse_planning_option(
+    flag: &str,
+    arguments: &mut impl Iterator<Item = String>,
+    exact_world_limit: &mut u64,
+    exact_node_limit: &mut u64,
+    convention: &mut Option<ConventionChoice>,
+    h_group_profile: &mut Option<HGroupProfile>,
+    objective: &mut PlanningObjective,
+) -> Result<bool, CliError> {
+    match flag {
+        "--exact-world-limit" => {
+            *exact_world_limit = parse_value(flag, &next_value(arguments, flag)?)?;
+        }
+        "--exact-node-limit" => {
+            *exact_node_limit = parse_value(flag, &next_value(arguments, flag)?)?;
+        }
+        "--convention" => {
+            *convention = Some(parse_value(flag, &next_value(arguments, flag)?)?);
+        }
+        "--h-group-level" => {
+            *h_group_profile = Some(parse_value(flag, &next_value(arguments, flag)?)?);
+        }
+        "--objective" => {
+            *objective = parse_value(flag, &next_value(arguments, flag)?)?;
+        }
+        _ => return Ok(false),
+    }
+    Ok(true)
 }
 
 fn next_value(
@@ -702,42 +438,22 @@ fn print_usage_to_stderr() {
 
 fn usage() -> &'static str {
     "Usage:\n  hanabi-engine analyze <replay.json> --turn <N> [options]\n  \
-     hanabi-engine benchmark <replay.json> --turn <N> [--turn <N> ...] [options]\n\n\
      hanabi-engine live-action [options] < live-snapshot.json\n\n\
      hanabi-engine live-session [options] < session-requests.ndjson\n\n\
      Turn N is the position after N completed game actions; turn 0 is the initial deal.\n\n\
-     Analyze options:\n  --mode <ismcts|flat>   Search mode (default: ismcts)\n  \
-     --iterations <N>       ISMCTS iterations (default: 1000)\n  \
-     --threads <N>          Parallel ISMCTS workers (default: 2)\n  \
-     --samples <N>          Flat Monte Carlo samples/action (default: 100)\n  \
-     --seed <N>             Reproducible random seed (default: 0)\n  \
-     --exploration <X>      ISMCTS UCB coefficient (default: sqrt(2))\n  \
-     --objective <expected-score|perfect-score>  Search objective (default: expected-score)\n  \
+     Analyze options:\n  --exact-world-limit <N>  Worlds allowed in exact endgame (default: 4096)\n  \
+     --exact-node-limit <N>   Nodes allowed in exact endgame (default: 50000)\n  \
+     --objective <expected-score|perfect-score>  Exact-planning objective (default: expected-score)\n  \
      --convention <none|h-group>  Convention framework (default: none)\n  \
      --h-group-level <1-25|max>   Required H-Group cumulative profile\n\n\
-     Benchmark options:\n  --turn <N>             Position to benchmark; may be repeated\n  \
-     --trials <N>           Consecutive seeds per mode (default: 5)\n  \
-     --iterations <N>       ISMCTS iterations/trial (default: 1000)\n  \
-     --samples <N>          Flat Monte Carlo samples/action/trial (default: 100)\n  \
-     --seed <N>             Base seed; trial N uses seed + N (default: 0)\n  \
-     --exploration <X>      ISMCTS UCB coefficient (default: sqrt(2))\n  \
-     --objective <expected-score|perfect-score>  Search objective (default: expected-score)\n  \
-     --convention <none|h-group>  Convention framework (default: none)\n  \
-     --h-group-level <1-25|max>   Required H-Group cumulative profile\n\n\
-     Live-action options:\n  --mode <ismcts|flat>   Search mode (default: ismcts)\n  \
-     --iterations <N>       ISMCTS iterations (default: 1000)\n  \
-     --threads <N>          Parallel ISMCTS workers (default: 2)\n  \
-     --time-limit-ms <N>    Live search deadline in milliseconds (default: 30000)\n  \
-     --samples <N>          Flat Monte Carlo samples/action (default: 100)\n  \
-     --seed <N>             Reproducible random seed (default: 0)\n  \
-     --exploration <X>      ISMCTS UCB coefficient (default: sqrt(2))\n  \
-     --objective <expected-score|perfect-score>  Search objective (default: perfect-score)\n  \
+     Live-action options:\n  --exact-world-limit <N>  Worlds allowed in exact endgame (default: 4096)\n  \
+     --exact-node-limit <N>   Nodes allowed in exact endgame (default: 50000)\n  \
+     --objective <expected-score|perfect-score>  Exact-planning objective (default: perfect-score)\n  \
      --convention <none|h-group>  Convention framework (default: h-group)\n  \
      --h-group-level <1-25|max>   H-Group profile (default: max)\n\n\
-     --include-search-details     Emit an action envelope with diagnostic evidence\n\n\
+     --include-planning-details     Emit an action envelope with diagnostic evidence\n\n\
      Live-session accepts one initialize request followed by append requests as NDJSON.\n\
-     It emits one action or error JSON object per input line.\n\n\
-     Benchmark writes a versioned JSON report to standard output."
+     It emits one action or error JSON object per input line."
 }
 
 #[derive(Debug)]
@@ -747,14 +463,10 @@ enum CliError {
     Replay(ReplayError),
     TerminalPosition(u32),
     InvalidCurrentPlayer,
-    InformationSet(InformationSetError),
     ReadLiveSnapshot(io::Error),
     WriteLiveSession(io::Error),
     LiveSnapshot(hanabi_protocol::LiveSnapshotError),
-    BestMove(BestMoveError),
-    Flat(FlatSearchError),
-    Ismcts(IsmctsError),
-    NoBestAction,
+    AnalyzePosition(AnalyzePositionError),
     SerializeReport(serde_json::Error),
 }
 
@@ -773,7 +485,6 @@ impl fmt::Display for CliError {
                 )
             }
             Self::InvalidCurrentPlayer => formatter.write_str("current player is invalid"),
-            Self::InformationSet(error) => write!(formatter, "invalid information set: {error}"),
             Self::ReadLiveSnapshot(error) => {
                 write!(
                     formatter,
@@ -784,10 +495,7 @@ impl fmt::Display for CliError {
                 write!(formatter, "could not write live session response: {error}")
             }
             Self::LiveSnapshot(error) => write!(formatter, "invalid live snapshot: {error}"),
-            Self::BestMove(error) => write!(formatter, "live search failed: {error}"),
-            Self::Flat(error) => write!(formatter, "flat Monte Carlo search failed: {error}"),
-            Self::Ismcts(error) => write!(formatter, "ISMCTS failed: {error}"),
-            Self::NoBestAction => formatter.write_str("search returned no best action"),
+            Self::AnalyzePosition(error) => write!(formatter, "analysis failed: {error}"),
             Self::SerializeReport(error) => {
                 write!(formatter, "could not serialize report: {error}")
             }
@@ -800,17 +508,11 @@ impl std::error::Error for CliError {
         match self {
             Self::ReadReplay { source, .. } => Some(source),
             Self::Replay(error) => Some(error),
-            Self::InformationSet(error) => Some(error),
             Self::ReadLiveSnapshot(error) | Self::WriteLiveSession(error) => Some(error),
             Self::LiveSnapshot(error) => Some(error),
-            Self::BestMove(error) => Some(error),
-            Self::Flat(error) => Some(error),
-            Self::Ismcts(error) => Some(error),
+            Self::AnalyzePosition(error) => Some(error),
             Self::SerializeReport(error) => Some(error),
-            Self::Usage(_)
-            | Self::TerminalPosition(_)
-            | Self::InvalidCurrentPlayer
-            | Self::NoBestAction => None,
+            Self::Usage(_) | Self::TerminalPosition(_) | Self::InvalidCurrentPlayer => None,
         }
     }
 }

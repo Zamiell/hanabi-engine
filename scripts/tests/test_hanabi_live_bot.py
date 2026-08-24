@@ -19,6 +19,7 @@ SCRIPTS = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(SCRIPTS))
 
 import hanabi_live_bot as bridge  # noqa: E402
+import hanabi_live_engine as engine_process  # noqa: E402
 
 
 class FakeWebSocket:
@@ -77,7 +78,7 @@ class DetailedRecordingEngine(RecordingEngine):
             "action": response,
             "logicalDeductions": {"ownCards": []},
             "conventionInferences": {"framework": "h-group"},
-            "search": {"mode": "ismcts", "rootActions": []},
+            "planning": {"phase": "symbolic", "rootActions": []},
         }
 
 
@@ -158,7 +159,7 @@ class PersistentEngineTests(unittest.TestCase):
         stale.stdout = "hanabi-engine live-action [options] < live-snapshot.json\n"
         stale.stderr = ""
         with (
-            mock.patch.object(bridge.subprocess, "run", return_value=stale) as run,
+            mock.patch.object(engine_process.subprocess, "run", return_value=stale) as run,
             mock.patch.dict(
                 bridge.os.environ,
                 {"HANABI_USERNAME": "Bot", "HANABI_PASSWORD": "secret"},
@@ -374,7 +375,7 @@ class BotConcurrencyTests(unittest.TestCase):
             bot.handle_chat(
                 {"recipient": "Bot", "who": "Alice", "msg": "/level 3"}
             )
-            self.assertEqual(bot.games[7]["hGroupLevel"], "3")
+            self.assertEqual(bot.games[7].h_group_level, "3")
             self.assertEqual(
                 socket.private_messages()[-1]["msg"],
                 "H-Group level 3 selected for this game.",
@@ -583,7 +584,7 @@ class BotConcurrencyTests(unittest.TestCase):
                 self.assertEqual(snapshot["actions"][0]["suitIndex"], -1)
                 self.assertEqual(request["kind"], "initialize")
                 self.assertEqual(response["action"]["tableID"], 7)
-                self.assertEqual(response["search"]["mode"], "ismcts")
+                self.assertEqual(response["planning"]["phase"], "symbolic")
                 self.assertEqual(result["status"], "sent")
                 self.assertEqual(
                     [event["kind"] for event in events],
@@ -603,7 +604,7 @@ class BotConcurrencyTests(unittest.TestCase):
             finally:
                 bot.shutdown()
 
-    def test_searches_on_two_tables_without_blocking_callbacks(self) -> None:
+    def test_plans_on_two_tables_without_blocking_callbacks(self) -> None:
         BlockingEngine.instances = []
         BlockingEngine.started = threading.Barrier(3)
         BlockingEngine.release = threading.Event()

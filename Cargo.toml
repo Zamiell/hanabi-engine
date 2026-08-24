@@ -13,13 +13,18 @@ license = "MIT"
 rust-version = "1.85"
 
 [workspace.dependencies]
-rand = "0.10.2"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
 
 [workspace.lints.rust]
+dead_code = "warn"
+unreachable_pub = "warn"
 unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = "warn"
 pedantic = "warn"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"

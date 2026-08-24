@@ -1,19 +1,15 @@
-use std::{
-    io::{self, BufRead, Read, Write},
-    time::{Duration, Instant},
-};
+use std::io::{self, BufRead, Read, Write};
 
 use hanabi_core::{Card, PlayerView};
 use hanabi_protocol::{HanabiLiveActionCommand, HanabiLiveSessionState, HanabiLiveSnapshot};
 use hanabi_search::{
-    BestMove, BestMoveError, ConventionFramework, ConventionInferences, HGroupInferences,
-    IdentitySet, IsmctsSession, LogicalDeductions, SearchConfig, SearchDetails,
-    TreeReuseDiagnostics, best_move, parallel_ismcts_search_until,
+    ConventionInferences, HGroupInferences, IdentitySet, LogicalDeductions, PlannerConfig,
+    PositionAnalysis, analyze_position,
 };
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::{CliError, LiveActionArguments, SearchMode};
+use crate::{CliError, LiveActionArguments};
 
 pub(super) fn run(arguments: &LiveActionArguments) -> Result<(), CliError> {
     let mut json = String::new();
@@ -22,8 +18,8 @@ pub(super) fn run(arguments: &LiveActionArguments) -> Result<(), CliError> {
         .map_err(CliError::ReadLiveSnapshot)?;
     let snapshot = HanabiLiveSnapshot::from_json(&json).map_err(CliError::LiveSnapshot)?;
     let view = snapshot.player_view().map_err(CliError::LiveSnapshot)?;
-    let decision = decide(snapshot.table_id(), view, arguments)?;
-    let output = if arguments.include_search_details {
+    let decision = decide(snapshot.table_id(), &view, arguments)?;
+    let output = if arguments.include_planning_details {
         serde_json::to_string(&decision)
     } else {
         serde_json::to_string(&decision.action)
@@ -38,7 +34,6 @@ pub(super) fn run_session(arguments: &LiveActionArguments) -> Result<(), CliErro
     let stdout = io::stdout();
     let mut output = stdout.lock();
     let mut session = HanabiLiveSessionState::new();
-    let mut search_session = IsmctsSession::new();
 
     for line in stdin.lock().lines() {
         let line = line.map_err(CliError::ReadLiveSnapshot)?;
@@ -46,14 +41,12 @@ pub(super) fn run_session(arguments: &LiveActionArguments) -> Result<(), CliErro
             continue;
         }
         let response = match session.apply_json(&line).map_err(CliError::LiveSnapshot) {
-            Ok((table_id, view)) => {
-                decide_with_session(table_id, view, arguments, &mut search_session)
-            }
+            Ok((table_id, view)) => decide(table_id, &view, arguments),
             Err(error) => Err(error),
         };
         match response {
             Ok(decision) => {
-                if arguments.include_search_details {
+                if arguments.include_planning_details {
                     serde_json::to_writer(&mut output, &decision)
                         .map_err(CliError::SerializeReport)?;
                 } else {
@@ -79,86 +72,26 @@ pub(super) fn run_session(arguments: &LiveActionArguments) -> Result<(), CliErro
 
 fn decide(
     table_id: u64,
-    view: PlayerView,
+    view: &PlayerView,
     arguments: &LiveActionArguments,
 ) -> Result<LiveDecisionResponse, CliError> {
-    decide_inner(table_id, view, arguments, None)
-}
-
-fn decide_with_session(
-    table_id: u64,
-    view: PlayerView,
-    arguments: &LiveActionArguments,
-    session: &mut IsmctsSession,
-) -> Result<LiveDecisionResponse, CliError> {
-    decide_inner(table_id, view, arguments, Some(session))
-}
-
-fn decide_inner(
-    table_id: u64,
-    view: PlayerView,
-    arguments: &LiveActionArguments,
-    mut session: Option<&mut IsmctsSession>,
-) -> Result<LiveDecisionResponse, CliError> {
-    let deductions = LogicalDeductions::new(view.clone())
-        .map_err(|error| CliError::BestMove(BestMoveError::InformationSet(error)))?;
-    let convention_inferences = arguments.convention.infer(&deductions);
-    let best = match arguments.mode {
-        SearchMode::Ismcts => {
-            let config = hanabi_search::IsmctsConfig {
-                iterations: arguments.iterations,
-                exploration: arguments.exploration,
-                seed: arguments.seed,
-                objective: arguments.objective,
-            };
-            let information_set = hanabi_search::InformationSet::new(view.clone())
-                .map_err(|error| CliError::BestMove(BestMoveError::InformationSet(error)))?;
-            let deadline = Instant::now() + Duration::from_millis(arguments.time_limit_ms);
-            let result = if let Some(search_session) = session.as_deref_mut() {
-                search_session.search_until(
-                    &information_set,
-                    &arguments.convention,
-                    config,
-                    arguments.threads,
-                    deadline,
-                )
-            } else {
-                parallel_ismcts_search_until(
-                    &information_set,
-                    &arguments.convention,
-                    config,
-                    arguments.threads,
-                    deadline,
-                )
-            }
-            .map_err(|error| CliError::BestMove(BestMoveError::Ismcts(error)))?;
-            BestMove {
-                convention: arguments.convention,
-                objective: arguments.objective,
-                action: result.best_action,
-                details: SearchDetails::Ismcts(result),
-            }
-        }
-        SearchMode::Flat => best_move(
-            view,
-            arguments.convention,
-            SearchConfig::Flat(hanabi_search::MonteCarloConfig {
-                samples_per_action: arguments.samples,
-                seed: arguments.seed,
-                objective: arguments.objective,
-            }),
-        )
-        .map_err(CliError::BestMove)?,
-    };
+    let analysis = analyze_position(
+        view,
+        arguments.convention,
+        PlannerConfig {
+            objective: arguments.objective,
+            exact_world_limit: arguments.exact_world_limit,
+            exact_node_limit: arguments.exact_node_limit,
+        },
+    )
+    .map_err(CliError::AnalyzePosition)?;
     Ok(LiveDecisionResponse {
-        action: HanabiLiveActionCommand::from_engine_action(table_id, best.action),
-        logical_deductions: logical_deductions_json(&deductions),
-        convention_inferences: convention_inferences_json(convention_inferences),
-        search: search_json(
-            table_id,
-            &best,
-            session.as_deref().map(IsmctsSession::reuse_diagnostics),
+        action: HanabiLiveActionCommand::from_engine_action(table_id, analysis.planner.best_action),
+        logical_deductions: logical_deductions_json(analysis.information.deductions()),
+        convention_inferences: convention_inferences_json(
+            analysis.convention_analysis.inferences.clone(),
         ),
+        planning: planning_json(table_id, &analysis, arguments.objective),
     })
 }
 
@@ -168,7 +101,7 @@ struct LiveDecisionResponse {
     action: HanabiLiveActionCommand,
     logical_deductions: Value,
     convention_inferences: Value,
-    search: Value,
+    planning: Value,
 }
 
 fn logical_deductions_json(deductions: &LogicalDeductions) -> Value {
@@ -286,87 +219,65 @@ fn h_group_inferences_json(inferences: &HGroupInferences) -> Value {
     })
 }
 
-fn search_json(table_id: u64, best: &BestMove, reuse: Option<TreeReuseDiagnostics>) -> Value {
-    let common = json!({
-        "convention": best.convention.id(),
-        "profile": best.convention.profile().map(|profile| profile.to_string()),
-        "rulesetRevision": best.convention.ruleset_revision(),
-        "objective": best.objective.to_string(),
-        "treeReuse": reuse.map(|reuse| json!({
-            "advancedActions": reuse.advanced_actions,
-            "reusedRootVisits": reuse.reused_root_visits,
-            "reusedNodes": reuse.reused_nodes,
-        })),
+fn planning_json(
+    table_id: u64,
+    analysis: &PositionAnalysis,
+    objective: hanabi_search::PlanningObjective,
+) -> Value {
+    let mut planning = json!({
+        "convention": analysis.convention.id(),
+        "profile": analysis.convention.profile().map(|profile| profile.to_string()),
+        "rulesetRevision": analysis.convention.ruleset_revision(),
+        "objective": objective.to_string(),
     });
-    let details = match &best.details {
-        SearchDetails::Ismcts(result) => json!({
-            "mode": "ismcts",
-            "iterations": result.iterations,
-            "rootActions": result.root_actions.iter().map(|statistics| json!({
-                "action": HanabiLiveActionCommand::from_engine_action(table_id, statistics.action),
-                "selected": statistics.action == best.action,
-                "visits": statistics.visits,
-                "availability": statistics.availability,
-                "meanScore": statistics.mean_score,
-                "meanRawScore": statistics.mean_raw_score,
-                "meanUtility": statistics.mean_utility,
-                "perfectRate": statistics.perfect_rate,
-                "meanScoreCeiling": statistics.mean_score_ceiling,
-                "meanClueActions": statistics.mean_clue_actions,
-                "meanClueEfficiency": statistics.mean_clue_efficiency,
-                "meanTempoClues": statistics.mean_tempo_clues,
-                "meanCriticalDiscards": statistics.mean_critical_discards,
-                "meanBottomDeckRisk": statistics.mean_bottom_deck_risk,
-                "meanClueDebt": statistics.mean_clue_debt,
-                "meanPredictableTurns": statistics.mean_predictable_turns,
-                "prior": statistics.prior,
-                "principalVariation": statistics.principal_variation.iter().map(|action| {
-                    HanabiLiveActionCommand::from_engine_action(table_id, *action)
-                }).collect::<Vec<_>>(),
-                "strikeoutRate": statistics.strikeout_rate,
-                "minScore": statistics.min_score,
-                "maxScore": statistics.max_score,
-            })).collect::<Vec<_>>(),
-        }),
-        SearchDetails::Flat(evaluations) => json!({
-            "mode": "flat",
-            "rootActions": evaluations.iter().map(|evaluation| json!({
-                "action": HanabiLiveActionCommand::from_engine_action(table_id, evaluation.action),
-                "selected": evaluation.action == best.action,
-                "samples": evaluation.samples,
-                "meanScore": evaluation.mean_score,
-                "meanRawScore": evaluation.mean_raw_score,
-                "meanUtility": evaluation.mean_utility,
-                "perfectRate": evaluation.perfect_rate,
-                "meanScoreCeiling": evaluation.mean_score_ceiling,
-                "meanClueActions": evaluation.mean_clue_actions,
-                "meanClueEfficiency": evaluation.mean_clue_efficiency,
-                "meanTempoClues": evaluation.mean_tempo_clues,
-                "meanCriticalDiscards": evaluation.mean_critical_discards,
-                "meanBottomDeckRisk": evaluation.mean_bottom_deck_risk,
-                "meanClueDebt": evaluation.mean_clue_debt,
-                "meanPredictableTurns": evaluation.mean_predictable_turns,
-                "principalVariation": evaluation.principal_variation.iter().map(|action| {
-                    HanabiLiveActionCommand::from_engine_action(table_id, *action)
-                }).collect::<Vec<_>>(),
-                "scoreVariance": evaluation.score_variance,
-                "strikeoutRate": evaluation.strikeout_rate,
-                "minScore": evaluation.min_score,
-                "maxScore": evaluation.max_score,
-            })).collect::<Vec<_>>(),
-        }),
-    };
-    let mut combined = common;
-    combined
+    planning
         .as_object_mut()
-        .expect("search metadata is an object")
+        .expect("planning metadata is an object")
         .extend(
-            details
+            planner_details_json(table_id, analysis.planner.best_action, &analysis.planner)
                 .as_object()
-                .expect("search details are an object")
+                .expect("planning details are an object")
                 .clone(),
         );
-    combined
+    planning
+}
+
+fn planner_details_json(
+    table_id: u64,
+    best_action: hanabi_core::Action,
+    result: &hanabi_search::PlannerResult,
+) -> Value {
+    json!({
+        "phase": match result.phase {
+            hanabi_search::PlannerPhase::Symbolic => "symbolic",
+            hanabi_search::PlannerPhase::Exact => "exact",
+        },
+        "consideredWorlds": result.considered_worlds,
+        "worldCountExact": result.world_count_exact,
+        "exactNodes": result.exact_nodes,
+        "rootActions": result.root_actions.iter().map(|evaluation| json!({
+            "action": HanabiLiveActionCommand::from_engine_action(table_id, evaluation.action),
+            "selected": evaluation.action == best_action,
+            "conventionPriority": evaluation.convention_priority,
+            "certainlyPlayable": evaluation.certainly_playable,
+            "certainlyUseless": evaluation.certainly_useless,
+            "newlyTouched": evaluation.newly_touched,
+            "immediatelyPlayableTouched": evaluation.immediately_playable_touched,
+            "criticalTouched": evaluation.critical_touched,
+            "oldestCardTouched": evaluation.oldest_card_touched,
+            "exact": evaluation.exact.map(|exact| json!({
+                "worlds": exact.worlds,
+                "perfectWorlds": exact.perfect_worlds,
+                "perfectRate": exact.perfect_rate(),
+                "scoreSum": exact.score_sum,
+                "expectedScore": exact.expected_score(),
+                "strikeoutWorlds": exact.strikeout_worlds,
+                "strikeoutRate": exact.strikeout_rate(),
+                "scoreCeilingSum": exact.score_ceiling_sum,
+                "expectedScoreCeiling": exact.expected_score_ceiling(),
+            })),
+        })).collect::<Vec<_>>(),
+    })
 }
 
 fn card_ids_json(cards: &[hanabi_core::CardId]) -> Vec<usize> {

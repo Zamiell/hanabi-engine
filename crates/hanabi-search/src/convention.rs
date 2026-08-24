@@ -1,11 +1,7 @@
 use core::{fmt, str::FromStr};
 
-use hanabi_core::FullState;
-use rand::Rng;
-
 use crate::{
-    ConventionAgnosticPolicy, HGroupInferences, IdentitySet, InformationSet, LogicalDeductions,
-    RolloutPolicy, SampleError, h_group::select_h_group_action, infer_h_group,
+    BeliefConstraints, ConventionAgnosticPolicy, HGroupInferences, IdentitySet, LogicalDeductions,
 };
 
 /// H-Group documentation revision implemented by this engine.
@@ -13,28 +9,6 @@ use crate::{
 /// Keeping the source revision next to the convention implementation makes
 /// analyses reproducible as the living convention framework changes.
 pub const H_GROUP_RULESET_REVISION: &str = "1ef83242d71c62f2db6422f09e83abddba9611dd";
-
-/// Static metadata for a convention framework exposed by the built-in registry.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct ConventionDescriptor {
-    pub id: &'static str,
-    pub display_name: &'static str,
-    pub requires_profile: bool,
-}
-
-/// Convention frameworks discoverable through the built-in registry.
-pub const CONVENTION_DESCRIPTORS: [ConventionDescriptor; 2] = [
-    ConventionDescriptor {
-        id: "none",
-        display_name: "No convention",
-        requires_profile: false,
-    },
-    ConventionDescriptor {
-        id: "h-group",
-        display_name: "H-Group",
-        requires_profile: true,
-    },
-];
 
 /// One numbered level in the cumulative H-Group learning path.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -68,9 +42,6 @@ pub enum HGroupLevel {
 }
 
 impl HGroupLevel {
-    pub const MIN: Self = Self::Level1;
-    pub const MAX: Self = Self::Level25;
-
     #[must_use]
     pub const fn number(self) -> u8 {
         self as u8
@@ -141,11 +112,6 @@ impl HGroupProfile {
     pub const fn includes(self, required: HGroupLevel) -> bool {
         self.effective_level() >= required.number()
     }
-
-    #[must_use]
-    pub const fn is_max(self) -> bool {
-        matches!(self, Self::Max)
-    }
 }
 
 impl fmt::Display for HGroupProfile {
@@ -201,6 +167,27 @@ pub enum ConventionInferences {
     HGroup(Box<HGroupInferences>),
 }
 
+/// One convention-permitted action and its deterministic ordering priority.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ConventionAction {
+    pub action: hanabi_core::Action,
+    pub priority: i32,
+}
+
+/// Complete convention interpretation of one observer-relative position.
+///
+/// Planning and diagnostics consume this object together so candidate
+/// admissibility, ordering, forced continuations, and inferred identities
+/// cannot be reconstructed by separate call paths.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ConventionAnalysis {
+    pub inferences: ConventionInferences,
+    pub actions: Vec<ConventionAction>,
+    pub preferred_action: Option<hanabi_core::Action>,
+    pub forced_action: Option<hanabi_core::Action>,
+    pub belief_constraints: BeliefConstraints,
+}
+
 /// Convention frameworks built into this engine.
 ///
 /// Keeping this registry closed makes command-line configuration, persisted
@@ -221,14 +208,6 @@ impl SupportedConvention {
         match self {
             Self::None => "none",
             Self::HGroup(_) => "h-group",
-        }
-    }
-
-    #[must_use]
-    pub const fn policy_id(self) -> &'static str {
-        match self {
-            Self::None => "convention_agnostic",
-            Self::HGroup(_) => "h_group",
         }
     }
 
@@ -273,227 +252,109 @@ impl FromStr for SupportedConvention {
     }
 }
 
-/// A convention supplies both player behavior and the root belief sampler.
-///
-/// Search deliberately requires this trait instead of accepting only a
-/// [`RolloutPolicy`]. Consequently a future convention cannot change how clues
-/// are interpreted during rollouts while silently leaving root worlds sampled
-/// from a different belief model.
-pub trait ConventionFramework: RolloutPolicy {
-    /// Derives framework-specific interpretations without altering
-    /// [`LogicalDeductions`].
+impl SupportedConvention {
+    /// Interprets one position and constructs the complete convention decision
+    /// consumed by deterministic planning and diagnostics.
     #[must_use]
-    fn infer(&self, deductions: &LogicalDeductions) -> ConventionInferences;
-
-    /// Rule-legal actions that are also permitted by this framework.
-    #[must_use]
-    fn candidate_actions(&self, deductions: &LogicalDeductions) -> Vec<hanabi_core::Action> {
-        deductions.view().legal_actions()
-    }
-
-    /// Relative policy prior for PUCT. This orders plausible convention moves
-    /// without excluding lower-priority legal alternatives from search.
-    #[must_use]
-    fn action_prior(&self, _deductions: &LogicalDeductions, _action: hanabi_core::Action) -> f64 {
-        1.0
-    }
-
-    /// Whether root actions should receive a matched-determinization prepass.
-    /// Convention-heavy searches benefit most; the default preserves the
-    /// exact work budget for simple or third-party frameworks.
-    #[must_use]
-    fn uses_paired_root_evaluation(&self) -> bool {
-        false
-    }
-
-    /// Samples one root world according to this framework's beliefs.
-    ///
-    /// The no-convention implementation preserves the exact card-copy-weighted
-    /// logical distribution. A convention with soft or hard assumptions should
-    /// override this method rather than modifying [`InformationSet`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`SampleError`] when no consistent root world can be sampled.
-    fn sample_root_world<R: Rng + ?Sized>(
-        &self,
-        information_set: &InformationSet,
-        rng: &mut R,
-    ) -> Result<FullState, SampleError>;
-}
-
-impl RolloutPolicy for SupportedConvention {
-    fn uses_history(&self) -> bool {
+    pub fn analyze(self, deductions: &LogicalDeductions) -> ConventionAnalysis {
         match self {
-            Self::None => ConventionAgnosticPolicy.uses_history(),
-            Self::HGroup(_) => true,
-        }
-    }
-
-    fn select_action(
-        &self,
-        deductions: &LogicalDeductions,
-    ) -> Result<hanabi_core::Action, crate::PolicyError> {
-        match self {
-            Self::None => ConventionAgnosticPolicy.select_action(deductions),
-            Self::HGroup(profile) => select_h_group_action(deductions, *profile)
-                .ok_or(crate::PolicyError::NoConventionAction),
-        }
-    }
-
-    fn select_policy_action(
-        &self,
-        deductions: &crate::PolicyDeductions<'_>,
-    ) -> Result<hanabi_core::Action, crate::PolicyError> {
-        match self {
-            Self::None | Self::HGroup(_) => {
-                ConventionAgnosticPolicy.select_policy_action(deductions)
-            }
-        }
-    }
-
-    fn select_search_action(
-        &self,
-        deductions: &LogicalDeductions,
-    ) -> Result<hanabi_core::Action, crate::PolicyError> {
-        match self {
-            Self::None => ConventionAgnosticPolicy.select_action(deductions),
+            Self::None => ConventionAnalysis {
+                inferences: ConventionInferences::None,
+                actions: deductions
+                    .view()
+                    .legal_actions()
+                    .into_iter()
+                    .map(|action| ConventionAction {
+                        action,
+                        priority: 100,
+                    })
+                    .collect(),
+                preferred_action: ConventionAgnosticPolicy.select_action(deductions).ok(),
+                forced_action: None,
+                belief_constraints: BeliefConstraints::default(),
+            },
             Self::HGroup(profile) => {
-                crate::h_group::select_h_group_search_rollout_action(deductions, *profile)
-                    .ok_or(crate::PolicyError::NoConventionAction)
-            }
-        }
-    }
-
-    fn predictable_action(&self, deductions: &LogicalDeductions) -> Option<hanabi_core::Action> {
-        match self {
-            Self::None => None,
-            Self::HGroup(profile) => {
-                crate::h_group::h_group_predictable_action(deductions, *profile)
+                let decision = crate::h_group::analyze_h_group_convention(deductions, profile);
+                let actions = decision
+                    .actions
+                    .into_iter()
+                    .map(|(action, priority)| ConventionAction { action, priority })
+                    .collect();
+                let belief_constraints =
+                    h_group_belief_constraints(deductions, &decision.inferences);
+                ConventionAnalysis {
+                    inferences: ConventionInferences::HGroup(Box::new(decision.inferences)),
+                    actions,
+                    preferred_action: decision.preferred,
+                    forced_action: decision.forced,
+                    belief_constraints,
+                }
             }
         }
     }
 }
 
-impl ConventionFramework for SupportedConvention {
-    fn infer(&self, deductions: &LogicalDeductions) -> ConventionInferences {
-        match self {
-            Self::None => ConventionInferences::None,
-            Self::HGroup(profile) => {
-                ConventionInferences::HGroup(Box::new(infer_h_group(deductions, *profile)))
-            }
-        }
+fn h_group_belief_constraints(
+    deductions: &LogicalDeductions,
+    inferred: &HGroupInferences,
+) -> BeliefConstraints {
+    let constraints = inferred
+        .cards
+        .iter()
+        .map(|card| (card.card, card.identities))
+        .collect::<Vec<_>>();
+    if inferred.connection_promises.is_empty() {
+        return BeliefConstraints {
+            constraints,
+            branches: Vec::new(),
+        };
     }
 
-    fn candidate_actions(&self, deductions: &LogicalDeductions) -> Vec<hanabi_core::Action> {
-        match self {
-            Self::None => deductions.view().legal_actions(),
-            Self::HGroup(profile) => {
-                crate::h_group::h_group_candidate_actions(deductions, *profile)
-            }
-        }
-    }
-
-    fn action_prior(&self, deductions: &LogicalDeductions, action: hanabi_core::Action) -> f64 {
-        match self {
-            Self::None => 1.0,
-            Self::HGroup(profile) => {
-                crate::h_group::h_group_action_prior(deductions, *profile, action)
-            }
-        }
-    }
-
-    fn uses_paired_root_evaluation(&self) -> bool {
-        matches!(self, Self::HGroup(_))
-    }
-
-    fn sample_root_world<R: Rng + ?Sized>(
-        &self,
-        information_set: &InformationSet,
-        rng: &mut R,
-    ) -> Result<FullState, SampleError> {
-        match self {
-            Self::None => information_set.sample(rng),
-            Self::HGroup(profile) => {
-                let inferred = infer_h_group(information_set, *profile);
-                let constraints = inferred
-                    .cards
+    let view = deductions.view();
+    let immediately_playable = IdentitySet::from_mask(
+        IdentitySet::all()
+            .iter()
+            .filter(|identity| {
+                identity.rank.number()
+                    == u8::try_from(view.play_stacks[identity.suit.index()].len())
+                        .expect("a standard stack has at most five cards")
+                        + 1
+            })
+            .fold(0, |mask, identity| mask | (1 << identity.index())),
+    );
+    let mut branches = vec![Vec::new()];
+    for promise in &inferred.connection_promises {
+        let expected = IdentitySet::singleton(promise.identity);
+        let wrong_success = immediately_playable.without(expected);
+        let alternatives = promise
+            .cards
+            .iter()
+            .enumerate()
+            .map(|(correct, card)| {
+                promise.cards[..correct]
                     .iter()
-                    .map(|card| (card.card, card.identities))
-                    .collect::<Vec<_>>();
-                let view = information_set.view();
-                let immediately_playable = IdentitySet::from_mask(
-                    IdentitySet::all()
+                    .copied()
+                    .map(|prior| (prior, wrong_success))
+                    .chain(core::iter::once((*card, expected)))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        branches = branches
+            .into_iter()
+            .flat_map(|branch| {
+                alternatives.iter().map(move |alternative| {
+                    branch
                         .iter()
-                        .filter(|identity| {
-                            identity.rank.number()
-                                == u8::try_from(view.play_stacks[identity.suit.index()].len())
-                                    .expect("a standard stack has at most five cards")
-                                    + 1
-                        })
-                        .fold(0, |mask, identity| mask | (1 << identity.index())),
-                );
-                let mut branches = vec![Vec::new()];
-                for promise in &inferred.connection_promises {
-                    let expected = IdentitySet::singleton(promise.identity);
-                    let wrong_success = immediately_playable.without(expected);
-                    let alternatives = promise
-                        .cards
-                        .iter()
-                        .enumerate()
-                        .map(|(correct, card)| {
-                            promise.cards[..correct]
-                                .iter()
-                                .copied()
-                                .map(|prior| (prior, wrong_success))
-                                .chain(core::iter::once((*card, expected)))
-                                .collect::<Vec<_>>()
-                        })
-                        .collect::<Vec<_>>();
-                    branches = branches
-                        .into_iter()
-                        .flat_map(|branch| {
-                            alternatives.iter().map(move |alternative| {
-                                branch
-                                    .iter()
-                                    .copied()
-                                    .chain(alternative.iter().copied())
-                                    .collect()
-                            })
-                        })
-                        .collect();
-                }
-                if inferred.connection_promises.is_empty() {
-                    information_set
-                        .sample_constrained(&constraints, rng)
-                        .or_else(|error| match error {
-                            SampleError::NoConsistentWorld => information_set.sample(rng),
-                            other @ SampleError::Determinization(_) => Err(other),
-                        })
-                } else {
-                    information_set
-                        .sample_constrained_branches(&constraints, &branches, rng)
-                        .or_else(|error| match error {
-                            SampleError::NoConsistentWorld => information_set.sample(rng),
-                            other @ SampleError::Determinization(_) => Err(other),
-                        })
-                }
-            }
-        }
+                        .copied()
+                        .chain(alternative.iter().copied())
+                        .collect()
+                })
+            })
+            .collect();
     }
-}
-
-impl ConventionFramework for ConventionAgnosticPolicy {
-    fn infer(&self, _deductions: &LogicalDeductions) -> ConventionInferences {
-        ConventionInferences::None
-    }
-
-    fn sample_root_world<R: Rng + ?Sized>(
-        &self,
-        information_set: &InformationSet,
-        rng: &mut R,
-    ) -> Result<FullState, SampleError> {
-        information_set.sample(rng)
+    BeliefConstraints {
+        constraints,
+        branches,
     }
 }
 
@@ -522,58 +383,12 @@ impl std::error::Error for ParseConventionError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::cell::Cell;
 
-    use hanabi_core::{Action, FullState, PlayerId, standard_deck};
-    use rand::{SeedableRng, rngs::StdRng};
-
-    use crate::{
-        IsmctsConfig, MonteCarloConfig, PolicyDeductions, PolicyError, evaluate_actions,
-        ismcts_search,
-    };
-
-    struct CountingFramework {
-        samples: Cell<u32>,
-    }
-
-    impl RolloutPolicy for CountingFramework {
-        fn uses_history(&self) -> bool {
-            false
-        }
-
-        fn select_action(&self, deductions: &LogicalDeductions) -> Result<Action, PolicyError> {
-            ConventionAgnosticPolicy.select_action(deductions)
-        }
-
-        fn select_policy_action(
-            &self,
-            deductions: &PolicyDeductions<'_>,
-        ) -> Result<Action, PolicyError> {
-            ConventionAgnosticPolicy.select_policy_action(deductions)
-        }
-    }
-
-    impl ConventionFramework for CountingFramework {
-        fn infer(&self, _deductions: &LogicalDeductions) -> ConventionInferences {
-            ConventionInferences::None
-        }
-
-        fn sample_root_world<R: Rng + ?Sized>(
-            &self,
-            information_set: &InformationSet,
-            rng: &mut R,
-        ) -> Result<FullState, SampleError> {
-            self.samples.set(self.samples.get() + 1);
-            information_set.sample(rng)
-        }
-    }
+    use hanabi_core::{FullState, PlayerId, standard_deck};
 
     #[test]
     fn registry_separates_framework_metadata_from_concrete_selections() {
         assert_eq!(SupportedConvention::default(), SupportedConvention::None);
-        assert_eq!(CONVENTION_DESCRIPTORS[0].id, "none");
-        assert_eq!(CONVENTION_DESCRIPTORS[1].id, "h-group");
-        assert!(CONVENTION_DESCRIPTORS[1].requires_profile);
         assert_eq!("none".parse(), Ok(SupportedConvention::None));
         assert!("h-group".parse::<SupportedConvention>().is_err());
         assert_eq!(
@@ -599,10 +414,8 @@ mod tests {
         assert!(level_five.includes(HGroupLevel::Level1));
         assert!(level_five.includes(HGroupLevel::Level5));
         assert!(!level_five.includes(HGroupLevel::Level6));
-        assert!(!level_five.is_max());
 
         assert!(HGroupProfile::Max.includes(HGroupLevel::Level25));
-        assert!(HGroupProfile::Max.is_max());
         assert_eq!(HGroupProfile::Max.effective_level(), 26);
         assert_eq!("1".parse(), Ok(HGroupProfile::Level(HGroupLevel::Level1)));
         assert_eq!("25".parse(), Ok(HGroupProfile::Level(HGroupLevel::Level25)));
@@ -611,24 +424,14 @@ mod tests {
     }
 
     #[test]
-    fn none_preserves_logical_inferences_and_uniform_sampling() {
+    fn none_preserves_logical_inferences() {
         let state = FullState::new_standard(2, standard_deck()).unwrap();
         let view = state.view_for(PlayerId::new(0)).unwrap();
-        let information_set = InformationSet::new(view.clone()).unwrap();
         let deductions = LogicalDeductions::new(view).unwrap();
 
         assert_eq!(
-            SupportedConvention::None.infer(&deductions),
+            SupportedConvention::None.analyze(&deductions).inferences,
             ConventionInferences::None
-        );
-
-        let mut framework_rng = StdRng::seed_from_u64(42);
-        let mut logical_rng = StdRng::seed_from_u64(42);
-        assert_eq!(
-            SupportedConvention::None
-                .sample_root_world(&information_set, &mut framework_rng)
-                .unwrap(),
-            information_set.sample(&mut logical_rng).unwrap()
         );
     }
 
@@ -636,12 +439,11 @@ mod tests {
     fn h_group_selection_has_typed_inferences_and_revision_metadata() {
         let state = FullState::new_standard(2, standard_deck()).unwrap();
         let view = state.view_for(PlayerId::new(0)).unwrap();
-        let information_set = InformationSet::new(view.clone()).unwrap();
         let deductions = LogicalDeductions::new(view).unwrap();
         let convention = SupportedConvention::HGroup(HGroupProfile::Level(HGroupLevel::Level3));
 
         assert!(matches!(
-            convention.infer(&deductions),
+            convention.analyze(&deductions).inferences,
             ConventionInferences::HGroup(inferred) if inferred.clues.is_empty()
         ));
         assert_eq!(
@@ -652,49 +454,5 @@ mod tests {
             convention.ruleset_revision(),
             Some(H_GROUP_RULESET_REVISION)
         );
-
-        let mut framework_rng = StdRng::seed_from_u64(42);
-        let mut logical_rng = StdRng::seed_from_u64(42);
-        assert_eq!(
-            convention
-                .sample_root_world(&information_set, &mut framework_rng)
-                .unwrap(),
-            information_set.sample(&mut logical_rng).unwrap()
-        );
-    }
-
-    #[test]
-    fn both_search_modes_use_the_framework_root_sampler() {
-        let state = FullState::new_standard(2, standard_deck()).unwrap();
-        let information_set =
-            InformationSet::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
-        let framework = CountingFramework {
-            samples: Cell::new(0),
-        };
-
-        ismcts_search(
-            &information_set,
-            &framework,
-            IsmctsConfig {
-                iterations: 7,
-                exploration: core::f64::consts::SQRT_2,
-                seed: 1,
-                objective: crate::SearchObjective::ExpectedScore,
-            },
-        )
-        .unwrap();
-        assert_eq!(framework.samples.get(), 7);
-
-        evaluate_actions(
-            &information_set,
-            &framework,
-            MonteCarloConfig {
-                samples_per_action: 3,
-                seed: 1,
-                objective: crate::SearchObjective::ExpectedScore,
-            },
-        )
-        .unwrap();
-        assert_eq!(framework.samples.get(), 10);
     }
 }

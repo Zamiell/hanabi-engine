@@ -4,6 +4,25 @@ use hanabi_core::{CardId, Clue, EndReason, GameEvent, GameStatus, Suit};
 use hanabi_protocol::{HanabiLiveReplay, ReplayError};
 
 #[test]
+fn partial_options_default_to_no_variant() {
+    let json = r#"{
+        "players":["A","B"],
+        "deck":[
+            {"suitIndex":0,"rank":1},{"suitIndex":0,"rank":1},
+            {"suitIndex":0,"rank":1},{"suitIndex":0,"rank":2},
+            {"suitIndex":0,"rank":2},{"suitIndex":0,"rank":3},
+            {"suitIndex":0,"rank":3},{"suitIndex":0,"rank":4},
+            {"suitIndex":0,"rank":4},{"suitIndex":0,"rank":5}
+        ],
+        "actions":[],
+        "options":{"deckPlays":true}
+    }"#;
+
+    let replay = HanabiLiveReplay::from_json(json).unwrap();
+    assert_eq!(replay.options.unwrap().variant, "No Variant");
+}
+
+#[test]
 fn replays_hanabi_live_no_variant_fixture() {
     let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../../../hanabi-live/packages/client/test_data/no_variant.json");

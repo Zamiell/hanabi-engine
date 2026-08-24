@@ -1,5 +1,3 @@
-use std::collections::BTreeSet;
-
 use hanabi_core::{Action, Card, Clue, FullState, PlayerId, Rank, Suit, standard_deck};
 use hanabi_search::{InformationSet, InformationSetError};
 
@@ -51,10 +49,9 @@ fn clued_player_zero_view() -> (FullState, hanabi_core::PlayerView) {
 }
 
 #[test]
-fn samples_preserve_the_complete_player_view() {
+fn direct_clues_and_counts_restrict_hidden_identities() {
     let (truth, view) = clued_player_zero_view();
-    let information_set = InformationSet::new(view.clone()).unwrap();
-    assert!(information_set.hand_assignment_count() > 0);
+    let information_set = InformationSet::new(&view).unwrap();
 
     let own_hand = truth.hand(PlayerId::new(0)).unwrap();
     let rank_one = own_hand[0];
@@ -75,37 +72,6 @@ fn samples_preserve_the_complete_player_view() {
                 .all(|identity| identity.rank != Rank::One && identity != red_five)
         );
     }
-
-    let visible_hand = truth.hand(PlayerId::new(1)).unwrap().to_vec();
-    let visible_identities = visible_hand
-        .iter()
-        .map(|id| truth.card(*id).unwrap())
-        .collect::<Vec<_>>();
-    let mut sampled_rank_ones = BTreeSet::new();
-
-    for seed in 0..64 {
-        let sampled = information_set.sample_seeded(seed).unwrap();
-        sampled.validate().unwrap();
-        assert_eq!(sampled.view_for(PlayerId::new(0)).unwrap(), view);
-        assert_eq!(sampled.card(rank_one).unwrap().rank, Rank::One);
-        sampled_rank_ones.insert(sampled.card(rank_one).unwrap());
-
-        for (id, expected) in visible_hand.iter().zip(&visible_identities) {
-            assert_eq!(sampled.card(*id), Some(*expected));
-        }
-    }
-    assert!(sampled_rank_ones.len() > 1);
-}
-
-#[test]
-fn seeded_sampling_is_reproducible() {
-    let (_, view) = clued_player_zero_view();
-    let information_set = InformationSet::new(view).unwrap();
-
-    assert_eq!(
-        information_set.sample_seeded(867_5309).unwrap(),
-        information_set.sample_seeded(867_5309).unwrap()
-    );
 }
 
 #[test]
@@ -117,7 +83,7 @@ fn rejects_logically_impossible_clue_constraints() {
     hidden.clues.add_negative_clue(Clue::Suit(Suit::Red));
 
     assert_eq!(
-        InformationSet::new(view),
+        InformationSet::new(&view),
         Err(InformationSetError::NoConsistentWorld)
     );
 }

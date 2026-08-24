@@ -109,7 +109,7 @@ impl fmt::Display for Card {
 ///
 /// The order is stable but intentionally unshuffled. A caller controls the
 /// order supplied to [`crate::FullState::new_standard`], which makes tests and
-/// Monte Carlo determinizations reproducible.
+/// exact world enumeration reproducible.
 #[must_use]
 pub fn standard_deck() -> Vec<Card> {
     let mut deck = Vec::with_capacity(50);

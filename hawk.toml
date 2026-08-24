@@ -1,0 +1,4 @@
+[[production]]
+package = "hanabi-cli"
+bin = "hanabi-engine"
+reason = "shipped command-line program and Hanabi Live engine process"

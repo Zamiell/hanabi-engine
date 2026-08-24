@@ -39,7 +39,12 @@ pub struct HanabiLiveAction {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct HanabiLiveOptions {
+    #[serde(default = "default_variant")]
     pub variant: String,
+}
+
+fn default_variant() -> String {
+    "No Variant".to_owned()
 }
 
 impl HanabiLiveReplay {

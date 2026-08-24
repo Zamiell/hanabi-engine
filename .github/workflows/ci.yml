@@ -50,9 +50,39 @@ jobs:
         run: |
           python3 -m venv .venv
           .venv/bin/python -m pip install --requirement scripts/requirements.txt
-          .venv/bin/python -m py_compile scripts/hanabi_live_bot.py scripts/tests/test_hanabi_live_bot.py
+          .venv/bin/python -m py_compile \
+            scripts/hanabi_live_bot.py \
+            scripts/hanabi_live_engine.py \
+            scripts/hanabi_live_game.py \
+            scripts/hanabi_live_trace.py \
+            scripts/tests/test_hanabi_live_bot.py
           .venv/bin/python -W error::ResourceWarning -m unittest discover -s scripts/tests -v
           .venv/bin/python scripts/hanabi_live_bot.py --help > /dev/null
+
+  dead-code:
+    name: Check workspace dead code
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install Hawk toolchain
+        run: rustup toolchain install 1.97.1 --profile minimal
+
+      - name: Install cargo-hawk 0.1.10
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf \
+            https://github.com/astral-sh/hawk/releases/download/0.1.10/cargo-hawk-installer.sh \
+            | sh
+
+      - name: Check workspace-wide dead public code
+        run: |
+          cargo +1.97.1 hawk check \
+            --manifest-path Cargo.toml \
+            --only dead-public \
+            -D warnings
 
   msrv:
     name: Check MSRV (Rust 1.85)

@@ -41,8 +41,8 @@ Named H-Group moves are compositions of a smaller set of state effects. The inte
 2. Derive direct clue facts and Level 1 focus at clue time, then run only the semantic passes enabled by the selected cumulative profile.
 3. Persist invisible clues, chop movement, queued connections, forced plays/discards, and must-clue obligations across turns.
 4. Keep ambiguous Prompt and layered-Finesse candidates as exact disjunctions: every earlier candidate must be a wrong but immediately playable card, and one candidate must have the promised identity.
-5. Intersect those promises with the observer's logical identity sets. Root determinizations are sampled from the resulting card-copy-weighted constraints and disjunctive branches.
+5. Intersect those promises with the observer's logical identity sets. The planner keeps the resulting constraints symbolic until exhaustive endgame enumeration is feasible.
 6. Generate only rule-legal convention candidates, resolve urgent obligations first, and order otherwise-equivalent plays with the enabled strategy rules (including Level 25 Priority).
-7. Use the same selected framework for root sampling, tree action availability, and rollout behavior, so the search never interprets a clue under one convention and samples worlds under another.
+7. Use the same selected framework for belief constraints, action availability, priorities, and predictable continuations.
 
 The current simulator is standard five-suit Hanabi. Rules whose only observable trigger exists in a non-standard variant remain unreachable until that variant is represented by `hanabi-core`; they are not guessed from a standard-game state.
