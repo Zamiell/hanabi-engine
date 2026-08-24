@@ -34,9 +34,9 @@ fn replay_action_at_turn(replay: &HanabiLiveReplay, turn: u32) -> Action {
 }
 
 #[test]
-fn optimized_expert_replay_matches_engine_through_move_35() {
+fn optimized_expert_replay_matches_engine_through_move_44() {
     let replay = expert_replay_194321();
-    for turn in 0..35 {
+    for turn in 0..44 {
         let state = replay.state_at_turn(turn).expect("fixture prefix is legal");
         let actor = state.current_player();
         let view = state.view_for(actor).expect("current player has a view");
@@ -160,6 +160,166 @@ fn move_35_uses_the_oldest_matching_elimination_note() {
     let libster_deductions = LogicalDeductions::new(libster_view).expect("valid deductions");
     let libster_inferences = infer_h_group(&libster_deductions, HGroupProfile::Max);
     assert!(libster_inferences.playable_now.contains(&CardId::new(33)));
+}
+
+#[test]
+fn move_36_compares_purple_and_four_after_good_touch_closure() {
+    let state = expert_replay_194321()
+        .state_at_turn(35)
+        .expect("fixture prefix is legal");
+    let actor = state.current_player();
+    let view = state.view_for(actor).expect("current player has a view");
+    let deductions = LogicalDeductions::new(view.clone()).expect("valid deductions");
+    let purple = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Suit(Suit::Purple),
+    };
+    let four = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Rank(Rank::Four),
+    };
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let score = |action| {
+        candidates
+            .iter()
+            .find(|candidate| candidate.action == action)
+            .unwrap_or_else(|| panic!("missing candidate {action:?}: {candidates:#?}"))
+            .score
+    };
+
+    assert_eq!(
+        score(purple),
+        score(four) + 1,
+        "both clues secure purple 4 and the automatic purple 5; only the color tie-break remains: {candidates:#?}"
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(purple),
+        "purple must beat rank 4 once redundant Good Touch deductions are normalized: {candidates:#?}"
+    );
+}
+
+#[test]
+fn move_41_plays_the_promised_purple_four_after_the_connection() {
+    let state = expert_replay_194321()
+        .state_at_turn(40)
+        .expect("fixture prefix is legal");
+    let actor = state.current_player();
+    let view = state.view_for(actor).expect("current player has a view");
+    let deductions = LogicalDeductions::new(view).expect("valid deductions");
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    assert!(inferred.playable_now.contains(&CardId::new(34)));
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(34)))
+    );
+}
+
+#[test]
+fn move_45_plays_the_automatic_good_touch_purple_five() {
+    let state = expert_replay_194321()
+        .state_at_turn(44)
+        .expect("fixture prefix is legal");
+    let actor = state.current_player();
+    let view = state.view_for(actor).expect("current player has a view");
+    let deductions = LogicalDeductions::new(view).expect("valid deductions");
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    let purple_five = inferred
+        .cards
+        .iter()
+        .find(|note| note.card == CardId::new(24))
+        .expect("the older purple card retains its Good Touch note");
+
+    assert_eq!(
+        purple_five.identities,
+        IdentitySet::singleton(Card::new(Suit::Purple, Rank::Five))
+    );
+    assert!(inferred.playable_now.contains(&CardId::new(24)));
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(24)))
+    );
+}
+
+#[test]
+fn move_43_prefers_the_final_play_clue_with_known_trash_collateral() {
+    let replay_fixture = expert_replay_194321();
+    let state = replay_fixture
+        .state_at_turn(42)
+        .expect("fixture prefix is legal");
+    let actor = state.current_player();
+    let view = state.view_for(actor).expect("current player has a view");
+    let deductions = LogicalDeductions::new(view).expect("valid deductions");
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    let own_note = inferred
+        .cards
+        .iter()
+        .find(|note| note.card == CardId::new(29))
+        .expect("NoMercy's oldest card has a logical domain");
+    assert!(own_note.identities.len() > 1, "#29's identity is unknown");
+    assert!(
+        own_note
+            .identities
+            .iter()
+            .all(|identity| is_convention_trash(
+                deductions.view(),
+                identity,
+                &inferred.gotten(),
+                &inferred.cards,
+            )),
+        "every remaining identity in NoMercy's hand is nevertheless trash"
+    );
+
+    let green = Action::Clue {
+        target: PlayerId::new(1),
+        clue: Clue::Suit(Suit::Green),
+    };
+    let five = Action::Clue {
+        target: PlayerId::new(1),
+        clue: Clue::Rank(Rank::Five),
+    };
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let score = |action| {
+        candidates
+            .iter()
+            .find(|candidate| candidate.action == action)
+            .unwrap_or_else(|| panic!("missing candidate {action:?}: {candidates:#?}"))
+            .score
+    };
+    assert!(
+        score(green) > score(five),
+        "green adds a known-trash card while rank 5 only gives the play: {candidates:#?}"
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(green)
+    );
+
+    let after_green = replay_fixture
+        .state_at_turn(43)
+        .expect("the green clue is legal");
+    let james = PlayerId::new(1);
+    let james_deductions = LogicalDeductions::new(
+        after_green
+            .view_for(james)
+            .expect("James has a recipient view"),
+    )
+    .expect("valid deductions");
+    let james_inferred = infer_h_group(&james_deductions, HGroupProfile::Max);
+    assert!(james_inferred.playable_now.contains(&CardId::new(44)));
+    let green_one = james_inferred
+        .cards
+        .iter()
+        .find(|note| note.card == CardId::new(40))
+        .expect("the other green card has a convention note");
+    assert!(green_one.identities.iter().all(|identity| {
+        is_convention_trash(
+            james_deductions.view(),
+            identity,
+            &james_inferred.gotten(),
+            &james_inferred.cards,
+        )
+    }));
 }
 
 #[test]

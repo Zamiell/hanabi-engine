@@ -51,29 +51,29 @@ impl ConventionFacts {
                 }
                 _ => {}
             }
-            if let Some(identity) = signal.identity
-                && !matches!(
-                    signal.kind,
-                    HGroupMoveKind::Elimination | HGroupMoveKind::EliminationFinesse
-                )
-            {
-                // Elimination notes are a disjunction over several cards.
-                // The identity is attached to the note group, not established
-                // independently on every candidate card.
-                for card in &signal.cards {
-                    merge_identity(
-                        &mut facts.known_identities[card.index()],
-                        &mut known_conflicts[card.index()],
-                        identity,
-                    );
-                }
-                if signal.kind == HGroupMoveKind::LayeredFinesse {
-                    for card in signal.cards.iter().skip(1) {
+            if !matches!(
+                signal.kind,
+                HGroupMoveKind::Elimination | HGroupMoveKind::EliminationFinesse
+            ) {
+                if let Some(identity) = signal.identity {
+                    // Elimination notes are a disjunction over several cards.
+                    // The identity is attached to the note group, not established
+                    // independently on every candidate card.
+                    for card in &signal.cards {
                         merge_identity(
-                            &mut facts.demonstrated_layers[card.index()],
-                            &mut layer_conflicts[card.index()],
+                            &mut facts.known_identities[card.index()],
+                            &mut known_conflicts[card.index()],
                             identity,
                         );
+                    }
+                    if signal.kind == HGroupMoveKind::LayeredFinesse {
+                        for card in signal.cards.iter().skip(1) {
+                            merge_identity(
+                                &mut facts.demonstrated_layers[card.index()],
+                                &mut layer_conflicts[card.index()],
+                                identity,
+                            );
+                        }
                     }
                 }
             }

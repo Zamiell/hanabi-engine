@@ -96,7 +96,7 @@
     {"type": 0, "target": 34, "value": 0},
     {"type": 1, "target": 25, "value": 0},
     {"type": 2, "target": 1, "value": 2},
-    {"type": 3, "target": 1, "value": 5},
+    {"type": 1, "target": 26, "value": 0},
     {"type": 0, "target": 24, "value": 0},
     {"type": 0, "target": 44, "value": 0}
   ],

@@ -67,6 +67,8 @@ use rules::{HGroupRuleId, rule_enabled};
 use strategic_value::apply_strategic_clue_values;
 use turn_context::{HGroupTurnContext, HGroupTurnSnapshot, HGroupTurnView, HistoricalView};
 
+const KNOWN_TRASH_COLLATERAL_BONUS: u16 = 80;
+
 /// Semantic families used by the cumulative H-Group interpreter.
 ///
 /// The documentation gives many combinations their own names. The engine
@@ -1532,9 +1534,15 @@ fn play_clue_score(
     pending_connections: &[ConnectionObligation],
     convention_cards: &[HGroupCardInference],
 ) -> Option<u16> {
+    let trash_collateral = known_trash_collateral(view, focus, focus_identity, clue, newly_touched);
+    let ordinary_touches = newly_touched
+        .iter()
+        .copied()
+        .filter(|card| !trash_collateral.contains(card))
+        .collect::<Vec<_>>();
     if !good_touch(
         view,
-        newly_touched,
+        &ordinary_touches,
         explicitly_clued,
         fixed_cards,
         convention_cards,
@@ -1577,8 +1585,34 @@ fn play_clue_score(
     };
     Some(
         base + 2 * u16::try_from(newly_touched.len()).unwrap_or(0)
-            + u16::from(matches!(clue, Clue::Suit(_))),
+            + u16::from(matches!(clue, Clue::Suit(_)))
+            + KNOWN_TRASH_COLLATERAL_BONUS
+                .saturating_mul(u16::try_from(trash_collateral.len()).unwrap_or(u16::MAX)),
     )
+}
+
+fn known_trash_collateral(
+    view: &PlayerView,
+    focus: CardId,
+    focus_identity: Card,
+    clue: Clue,
+    newly_touched: &[CardId],
+) -> Vec<CardId> {
+    if clue != Clue::Suit(focus_identity.suit)
+        || focus_identity.rank != Rank::Five
+        || !is_playable_now(view, focus_identity)
+    {
+        return Vec::new();
+    }
+    newly_touched
+        .iter()
+        .copied()
+        .filter(|card| *card != focus)
+        .filter(|card| {
+            current_card_identity(view, *card)
+                .is_some_and(|identity| !is_eventually_useful(view, identity))
+        })
+        .collect()
 }
 
 fn good_touch(
@@ -2335,11 +2369,18 @@ fn infer_clue_to_self(
             mask
         }
     }));
-    // Once a connecting play made after this clue has brought one of the
-    // focus possibilities onto the stack, the promised focus is due. Do not
-    // reinterpret an ancillary card touched by the same clue as a new
-    // Self-Prompt after the original connection has already been demonstrated.
-    let completed_connection = direct.iter().any(|identity| {
+    // Once connecting plays made after this clue have brought any promised
+    // focus identity into the playable position, the focus is due. This must
+    // use the current stack rather than only identities that were immediately
+    // playable when the clue was given: an existing multi-card line can move
+    // a delayed focus several ranks while the clue waits.
+    let demonstrated_focus = IdentitySet::from_mask(
+        focus_possibilities
+            .iter()
+            .filter(|identity| is_playable_now(view, *identity))
+            .fold(0, |mask, identity| mask | (1 << identity.index())),
+    );
+    let completed_connection = demonstrated_focus.iter().any(|identity| {
         let Some(previous_rank) = identity.rank.index().checked_sub(1) else {
             return false;
         };
@@ -2358,7 +2399,7 @@ fn infer_clue_to_self(
     });
     if allow_direct_play
         && completed_connection
-        && !live_direct.is_empty()
+        && !demonstrated_focus.is_empty()
         && !inferred.playable_now.contains(&clue.focus)
     {
         inferred.playable_now.push(clue.focus);
@@ -2641,9 +2682,28 @@ fn convention_card_inferences(
                     duplicates.union(other.identities)
                 });
             if let Some(card) = cards.iter_mut().find(|card| card.card == *non_focus) {
+                // Good Touch is a continuing promise that the non-focus card
+                // will eventually play, not a mask frozen at clue time. As
+                // the stack advances, identities that have become trash fall
+                // away; this is how an older touched Purple card becomes the
+                // Purple 5 automatically after the promised Purple 4 plays.
+                let still_useful = IdentitySet::from_mask(
+                    good_touch
+                        .iter()
+                        .filter(|identity| is_eventually_useful(view, *identity))
+                        .fold(0, |mask, identity| mask | (1 << identity.index())),
+                );
                 let narrowed = card
                     .identities
-                    .intersection(good_touch.without(convention_dupes));
+                    .intersection(still_useful.without(convention_dupes));
+                if !narrowed.is_empty() {
+                    card.identities = narrowed;
+                }
+            }
+        }
+        for (non_focus, trash) in &clue.non_focus_trash_identities {
+            if let Some(card) = cards.iter_mut().find(|card| card.card == *non_focus) {
+                let narrowed = card.identities.intersection(*trash);
                 if !narrowed.is_empty() {
                     card.identities = narrowed;
                 }
@@ -3605,7 +3665,29 @@ fn replay_h_group_inner(
                             .without(focus_identities);
                             (card, good_touch)
                         })
-                        .collect();
+                        .collect::<Vec<_>>();
+                    let completing_suit = (matches!(kind, HGroupClueKind::Play)
+                        && play_identities.len() == 1)
+                        .then(|| play_identities.iter().next())
+                        .flatten()
+                        .filter(|identity| {
+                            *clue == Clue::Suit(identity.suit)
+                                && identity.rank == Rank::Five
+                                && is_playable_at(stack_heights, *identity)
+                        });
+                    let non_focus_trash_identities = completing_suit.map_or_else(Vec::new, |_| {
+                        non_focus_identities
+                            .iter()
+                            .filter_map(|(card, good_touch)| {
+                                let direct = historical.identity(*card).map_or_else(
+                                    || IdentitySet::from_mask(facts[card.index()].identity_mask()),
+                                    IdentitySet::singleton,
+                                );
+                                let trash = direct.without(focus_identities).without(*good_touch);
+                                (!trash.is_empty()).then_some((*card, trash))
+                            })
+                            .collect()
+                    });
                     clues.push(HGroupClueInterpretation {
                         turn: entry.turn,
                         giver: *giver,
@@ -3620,6 +3702,7 @@ fn replay_h_group_inner(
                         save_identities,
                         new_non_focus,
                         non_focus_identities,
+                        non_focus_trash_identities,
                         // Prompt candidates need actual clue information.
                         // A chop-moved card is protected for chop/layout
                         // purposes, but remains an unknown card and cannot be
@@ -6629,9 +6712,8 @@ fn schedule_connection(
                 }
             }
         }
-        if found.is_none()
-            && rule_enabled(profile, HGroupRuleId::Elimination)
-            && let Some((actor, card, elimination_identity)) = elimination_finesse_connection(
+        if found.is_none() && rule_enabled(profile, HGroupRuleId::Elimination) {
+            if let Some((actor, card, elimination_identity)) = elimination_finesse_connection(
                 view,
                 hands,
                 Some(facts),
@@ -6644,12 +6726,12 @@ fn schedule_connection(
                 stack_heights,
                 focus,
                 focus_identity,
-            )
-            && elimination_identity == expected
-            && !scheduled_cards.contains(&card)
-        {
-            actor_index = actor.index();
-            found = Some((actor, vec![card], HGroupConnectionKind::Finesse));
+            ) {
+                if elimination_identity == expected && !scheduled_cards.contains(&card) {
+                    actor_index = actor.index();
+                    found = Some((actor, vec![card], HGroupConnectionKind::Finesse));
+                }
+            }
         }
         let Some((actor, cards, kind)) = found else {
             break;

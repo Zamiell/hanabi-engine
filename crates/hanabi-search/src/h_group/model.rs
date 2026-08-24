@@ -116,6 +116,10 @@ pub struct HGroupClueInterpretation {
     pub new_non_focus: Vec<CardId>,
     /// Good-Touch identities for each newly touched non-focus card.
     pub non_focus_identities: Vec<(CardId, IdentitySet)>,
+    /// Trash identities established on non-focus cards when the focused Play
+    /// Clue completes the clue's suit. These cards are useful collateral: the
+    /// recipient gets both a play and a future safe discard.
+    pub non_focus_trash_identities: Vec<(CardId, IdentitySet)>,
     /// Explicit and invisible clues that existed before this clue.
     pub previously_gotten: Vec<CardId>,
 }

@@ -1,6 +1,6 @@
 use super::{
     Action, Card, CardId, ClueCandidate, HGroupConnection, HGroupProfile, HGroupRuleId,
-    LogicalDeductions, PlayerId, PlayerView, identity_of, infer_h_group_from_replay,
+    LogicalDeductions, PlayerId, PlayerView, Rank, identity_of, infer_h_group_from_replay,
     is_eventually_useful, projected_h_group_replay, prospective_clue_view, rule_enabled,
 };
 
@@ -133,7 +133,49 @@ pub(super) fn apply_strategic_clue_values(
 #[derive(Clone)]
 struct ProjectedLineState {
     useful_commitments: Vec<(CardId, Card)>,
+    useful_promises: Vec<(CardId, Card)>,
     connection: Option<HGroupConnection>,
+}
+
+impl ProjectedLineState {
+    /// Cards that become deterministically actionable after repeatedly
+    /// applying Good Touch to the line's already-promised cards.
+    ///
+    /// A clue does not deserve extra credit merely for identifying a later
+    /// card early when that identity becomes forced as soon as the preceding
+    /// promised cards play. Closing both alternatives to this fixed point
+    /// makes strategic comparisons about eventual actions instead of
+    /// incidental intermediate notes.
+    fn closed_commitments(&self, source: &PlayerView) -> Vec<(CardId, Card)> {
+        let mut closed = self.useful_commitments.clone();
+        loop {
+            let mut changed = false;
+            for (card, identity) in &self.useful_promises {
+                if closed.iter().any(|(known, _)| known == card) {
+                    continue;
+                }
+                let stack_height = source.play_stacks[identity.suit.index()].len();
+                let lower_promises_are_secured = Rank::ALL.iter().copied().all(|rank| {
+                    let number = usize::from(rank.number());
+                    number <= stack_height
+                        || number >= usize::from(identity.rank.number())
+                        || closed.iter().any(|(_, secured)| {
+                            secured.suit == identity.suit && secured.rank == rank
+                        })
+                });
+                if lower_promises_are_secured {
+                    closed.push((*card, *identity));
+                    changed = true;
+                }
+            }
+            if !changed {
+                break;
+            }
+        }
+        closed.sort_unstable_by_key(|(card, identity)| (card.index(), identity.index()));
+        closed.dedup();
+        closed
+    }
 }
 
 fn projected_line_state(
@@ -142,6 +184,11 @@ fn projected_line_state(
     observer: PlayerId,
 ) -> Option<ProjectedLineState> {
     let (deductions, replay) = projected_h_group_replay(source, profile, observer)?;
+    let promised = replay
+        .explicitly_clued
+        .union(&replay.invisibly_clued)
+        .copied()
+        .collect::<Vec<_>>();
     let inferred = infer_h_group_from_replay(&deductions, replay, profile);
     let mut useful_commitments = inferred
         .cards
@@ -161,8 +208,26 @@ fn projected_line_state(
     }));
     useful_commitments.sort_unstable_by_key(|(card, identity)| (card.index(), identity.index()));
     useful_commitments.dedup();
+    let mut useful_promises = promised
+        .into_iter()
+        .filter_map(|card| {
+            identity_of(source, card)
+                .or_else(|| {
+                    inferred
+                        .cards
+                        .iter()
+                        .find(|note| note.card == card && note.identities.len() == 1)
+                        .and_then(|note| note.identities.iter().next())
+                })
+                .filter(|identity| is_eventually_useful(source, *identity))
+                .map(|identity| (card, identity))
+        })
+        .collect::<Vec<_>>();
+    useful_promises.sort_unstable_by_key(|(card, identity)| (card.index(), identity.index()));
+    useful_promises.dedup();
     Some(ProjectedLineState {
         useful_commitments,
+        useful_promises,
         connection: inferred.connection,
     })
 }
@@ -188,12 +253,13 @@ fn clue_line_value(
         let observer =
             PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
         let after = projected_line_state(&after_clue, profile, observer)?;
+        let baseline_commitments = baseline.closed_commitments(source);
         value.commitments.extend(
             after
-                .useful_commitments
+                .closed_commitments(source)
                 .iter()
                 .copied()
-                .filter(|commitment| !baseline.useful_commitments.contains(commitment))
+                .filter(|commitment| !baseline_commitments.contains(commitment))
                 .filter_map(|(card, identity)| {
                     card_owner(source, card).map(|owner| (card, identity, owner))
                 }),
