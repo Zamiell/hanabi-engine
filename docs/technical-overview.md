@@ -88,6 +88,9 @@ H-Group uses shared internal boundaries to keep these answers consistent:
   only current convention truth.
 - `ConventionConstraints` applies mandatory semantics before numeric strategy
   priorities.
+- Convention-admissible Fix alternatives compare recipient-visible negative
+  information using active promises, likely play timing, criticality, and
+  future clue economy before applying the color-over-rank tie-break.
 - `HGroupActionSet` is the canonical action analysis used by selection,
   candidate generation, priorities, safety checks, and continuation detection.
 
@@ -163,12 +166,18 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --lock
 cargo +1.97.1 hawk check --manifest-path Cargo.toml --only dead-public -D warnings
 cargo +1.85.0 check --workspace --all-targets --all-features --locked
 
+.venv/bin/python -m pip install --requirement scripts/requirements-dev.txt
+.venv/bin/ty check
 .venv/bin/python -m py_compile scripts/hanabi_live_bot.py scripts/tests/test_hanabi_live_bot.py
 .venv/bin/python -W error::ResourceWarning -m unittest discover -s scripts/tests -v
 ```
 
 Compatibility tests use the sibling `hanabi-live` repository when available
 and skip only those cross-repository assertions when it is absent.
+
+The Python development requirements pin ty, and `ty.toml` checks every Python
+bridge and test module against Python 3.10. The test suite also rejects any
+function with a missing parameter or return annotation.
 
 The workspace also enables Rust's `dead_code` and `unreachable_pub` lints.
 Hawk treats the `hanabi-engine` binary declared in `hawk.toml` as the shipped

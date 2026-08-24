@@ -22,6 +22,7 @@ mod decision;
 mod effects;
 mod facts;
 mod identity;
+mod information_value;
 mod model;
 mod perspective;
 mod prospective;
@@ -45,6 +46,7 @@ use decision::{
 use effects::{ConventionEffect, ConventionReducer, EffectBatch};
 use facts::ConventionFacts;
 use identity::identity_of;
+use information_value::convention_information_value;
 use model::{CardSet, HGroupState, PerspectiveDepth, PlayerSet, RequiredFix, protected_cards};
 pub use model::{
     HGroupCardInference, HGroupClueInterpretation, HGroupClueKind, HGroupConnection,
@@ -334,10 +336,22 @@ fn h_group_clue_candidates_from_replay_inner(
                             .iter()
                             .all(|identity| !is_playable_now(view, identity))
                 });
+                let contradicts_promised_play =
+                    replay.pending_connections.iter().any(|connection| {
+                        connection.actor == required.target
+                            && connection.cards.contains(&required.focus)
+                            && pending_is_active(connection, &replay.pending_connections)
+                            && !clue.matches(connection.expected)
+                    });
                 (target == required.target
                     && clue.matches(required.identity)
                     && touched.contains(&required.focus)
-                    && unambiguously_stops_play
+                    // A Fix is interpreted before ordinary direct-clue
+                    // playability. Contradicting the identity promised for
+                    // this exact Finesse position proves that the blind play
+                    // was a lie, even if the new positive clue alone would
+                    // still allow some other playable identity.
+                    && (contradicts_promised_play || unambiguously_stops_play)
                     && required_focus_card.is_some_and(|card| !card.clues.has_positive_clue(clue))
                     && !prospective_clue_has_unsafe_connection(
                         view,
@@ -348,17 +362,69 @@ fn h_group_clue_candidates_from_replay_inner(
                         &touched,
                         false,
                     ))
-                .then_some(ClueCandidate {
-                    action,
-                    score: 600,
-                    target,
-                    save: false,
-                    immediate_play: false,
+                .then(|| {
+                    let information =
+                        convention_information_value(view, profile, replay, target, clue, &touched);
+                    (
+                        ClueCandidate {
+                            action,
+                            score: 600,
+                            target,
+                            save: false,
+                            immediate_play: false,
+                        },
+                        touched,
+                        information,
+                    )
                 })
             })
             .collect::<Vec<_>>();
         if !required_candidates.is_empty() {
-            return required_candidates;
+            let comparison_keys = required_candidates
+                .iter()
+                .map(|(candidate, touched, information)| {
+                    let color_tie_break = matches!(
+                        candidate.action,
+                        Action::Clue {
+                            clue: Clue::Suit(_),
+                            ..
+                        }
+                    ) && required_candidates.iter().any(
+                        |(alternative, other_touched, other_information)| {
+                            matches!(
+                                alternative.action,
+                                Action::Clue {
+                                    target,
+                                    clue: Clue::Rank(_),
+                                } if target == candidate.target
+                            ) && other_touched == touched
+                                && other_information == information
+                        },
+                    );
+                    (*information, color_tie_break)
+                })
+                .collect::<Vec<_>>();
+            let information_ranks = comparison_keys
+                .iter()
+                .map(|key| {
+                    comparison_keys
+                        .iter()
+                        .filter(|alternative| *alternative < key)
+                        .count()
+                })
+                .collect::<Vec<_>>();
+            return required_candidates
+                .into_iter()
+                .zip(information_ranks)
+                .map(|((mut candidate, _, _), information_rank)| {
+                    // Valid Fixes are compared by recipient-visible negative
+                    // information. The Level 1 color preference is retained
+                    // only as the final tie-break for identical touch sets.
+                    candidate.score +=
+                        u16::try_from(information_rank).unwrap_or(u16::MAX - candidate.score);
+                    candidate
+                })
+                .collect();
         }
     }
     let promptable = replay.promptable();

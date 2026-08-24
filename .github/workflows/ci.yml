@@ -49,7 +49,8 @@ jobs:
       - name: Check Hanabi Live bot launcher
         run: |
           python3 -m venv .venv
-          .venv/bin/python -m pip install --requirement scripts/requirements.txt
+          .venv/bin/python -m pip install --requirement scripts/requirements-dev.txt
+          .venv/bin/ty check
           .venv/bin/python -m py_compile \
             scripts/hanabi_live_bot.py \
             scripts/hanabi_live_engine.py \

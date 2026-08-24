@@ -94,7 +94,7 @@ fn recognizes_expert_replay_queued_yellow_three() {
 }
 
 #[test]
-fn recognizes_expert_replay_out_of_order_fix() {
+fn out_of_order_fix_accepts_both_clues_and_prefers_color() {
     let state = expert_replay_194321()
         .state_at_turn(6)
         .expect("turn exists");
@@ -104,12 +104,65 @@ fn recognizes_expert_replay_out_of_order_fix() {
             .expect("current player exists"),
     )
     .expect("valid deductions");
+    let green = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Suit(Suit::Green),
+    };
+    let four = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Rank(Rank::Four),
+    };
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    assert!(
+        candidates.iter().any(|candidate| candidate.action == green),
+        "green must be a valid Fix: {candidates:#?}"
+    );
+    assert!(
+        candidates.iter().any(|candidate| candidate.action == four),
+        "rank 4 must remain a valid Fix: {candidates:#?}"
+    );
+    let replay = replay_h_group_inner(
+        &deductions,
+        HGroupProfile::Max,
+        PerspectiveDepth::ObserverOnly,
+    );
+    let green_information = convention_information_value(
+        deductions.view(),
+        HGroupProfile::Max,
+        &replay,
+        PlayerId::new(0),
+        Clue::Suit(Suit::Green),
+        &[CardId::new(3)],
+    );
+    let four_information = convention_information_value(
+        deductions.view(),
+        HGroupProfile::Max,
+        &replay,
+        PlayerId::new(0),
+        Clue::Rank(Rank::Four),
+        &[CardId::new(3)],
+    );
+    assert_eq!(green_information.promised_action_certainty, 1);
+    assert_eq!(
+        green_information.promised_action_certainty,
+        four_information.promised_action_certainty
+    );
+    assert!(green_information.future_clue_savings > 0);
+    assert_eq!(
+        green_information.future_clue_savings,
+        four_information.future_clue_savings
+    );
+    assert!(
+        green_information.weighted_eliminations > four_information.weighted_eliminations,
+        "green's negative information must be more relevant to likely future play: green={green_information:?}, four={four_information:?}"
+    );
+    assert!(
+        green_information > four_information,
+        "green must win on convention-aware negative information, not only the color tie-break: green={green_information:?}, four={four_information:?}"
+    );
     assert_eq!(
         select_h_group_action(&deductions, HGroupProfile::Max),
-        Some(Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Rank(Rank::Four),
-        })
+        Some(green)
     );
 }
 
@@ -259,7 +312,7 @@ fn recognizes_expert_replay_red_three_continuation() {
 }
 
 #[test]
-fn recognizes_expert_replay_deferred_layer_for_green_finesse() {
+fn recognizes_expert_replay_rank_four_fill_in_after_green_fix() {
     let state = expert_replay_194321()
         .state_at_turn(15)
         .expect("turn exists");
@@ -293,27 +346,31 @@ fn recognizes_expert_replay_deferred_layer_for_green_finesse() {
     .expect("valid deductions");
     let expected = Action::Clue {
         target: PlayerId::new(0),
-        clue: Clue::Suit(Suit::Green),
+        clue: Clue::Rank(Rank::Four),
     };
     let after = prospective_clue_view(
         deductions.view(),
         PlayerId::new(0),
-        Clue::Suit(Suit::Green),
+        Clue::Rank(Rank::Four),
         &[CardId::new(3)],
     );
     let (projected, projected_replay) =
         projected_h_group_replay(&after, HGroupProfile::Max, PlayerId::new(0)).unwrap();
     let recipient =
         infer_h_group_from_replay(&projected, projected_replay.clone(), HGroupProfile::Max);
+    assert!(recipient.cards.iter().any(|card| {
+        card.card == CardId::new(3)
+            && card.identities == IdentitySet::singleton(Card::new(Suit::Green, Rank::Four))
+    }));
     assert_eq!(
         prospective_clue_hazard(
             deductions.view(),
             HGroupProfile::Max,
             PlayerId::new(0),
             CardId::new(3),
-            Clue::Suit(Suit::Green),
+            Clue::Rank(Rank::Four),
             &[CardId::new(3)],
-            true,
+            false,
         ),
         None,
         "recipient={recipient:#?}; replay={projected_replay:#?}"

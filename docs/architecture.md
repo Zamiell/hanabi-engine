@@ -25,7 +25,7 @@ H-Group history reducer
 ConventionConstraints        hard required/admissible actions
    |
    v
-strategy priority            ranks only convention-admissible actions
+strategy / information value ranks only convention-admissible actions
    |
    v
 symbolic planner / exact endgame solver
@@ -55,6 +55,11 @@ recipient modeling.
   transitions.
 - `prospective.rs` checks a proposed action from affected players'
   perspectives.
+- `information_value.rs` compares valid alternative Fixes using the
+  recipient's before/after identity domains. It prioritizes action certainty
+  on convention-promised cards, estimated future clue savings, and identities
+  weighted by play timing and criticality; color over rank is only a final
+  tie-break for identical touch sets.
 - `decision.rs` builds the one canonical action analysis consumed by direct
   selection and planning.
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from hanabi_live_engine import PersistentEngine
+from hanabi_live_engine import EngineSession
 
 @dataclass
 class LiveGame:
@@ -26,9 +26,9 @@ class LiveGame:
     last_decided_turn: int | None = None
     synced_actions: int = 0
     engine_initialized: bool = False
-    engine: PersistentEngine | None = None
+    engine: EngineSession | None = None
 
-    def reset_engine(self) -> PersistentEngine | None:
+    def reset_engine(self) -> EngineSession | None:
         old = self.engine
         self.engine = None
         self.engine_initialized = False
@@ -71,4 +71,3 @@ class LiveGame:
         engine = self.reset_engine()
         if engine is not None:
             engine.close()
-

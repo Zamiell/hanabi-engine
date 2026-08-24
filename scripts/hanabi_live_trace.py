@@ -6,12 +6,12 @@ import json
 import os
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 TRACE_SCHEMA_VERSION = 1
 
 _LOG_LOCK = threading.Lock()
-_LOG_STREAM: Any = None
+_LOG_STREAM: TextIO | None = None
 
 
 def configure_log_file(path: Path) -> None:
@@ -206,5 +206,4 @@ class TraceRecorder:
                 temporary.unlink()
             except FileNotFoundError:
                 pass
-
 

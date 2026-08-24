@@ -15,16 +15,27 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, Protocol
 
-from hanabi_live_engine import EngineProcessError, PersistentEngine, validate_engine_binary
+from hanabi_live_engine import (
+    EngineProcessError,
+    EngineSession,
+    PersistentEngine,
+    validate_engine_binary,
+)
 from hanabi_live_game import LiveGame
-from hanabi_live_trace import TraceRecorder, configure_log_file, log
+from hanabi_live_trace import TraceRecorder, close_log_file, configure_log_file, log
 
+if TYPE_CHECKING:
+    from websocket import WebSocketApp
+
+websocket: Any
 try:
-    import websocket
+    import websocket as _websocket
 except ImportError:
     websocket = None
+else:
+    websocket = _websocket
 
 
 DEFAULT_BASE_URL = "https://hanab.live"
@@ -34,6 +45,15 @@ DEFAULT_ENGINE_TIMEOUT = 180.0
 INITIAL_RECONNECT_DELAY = 1.0
 MAX_RECONNECT_DELAY = 30.0
 STABLE_CONNECTION_SECONDS = 30.0
+
+
+class WebSocketConnection(Protocol):
+    """Operations the bot needs from a live or test WebSocket."""
+
+    def send(self, message: str) -> object: ...
+
+    def close(self) -> object: ...
+
 
 def authenticate(base_url: str, username: str, password: str) -> tuple[str, str]:
     parsed = urllib.parse.urlsplit(base_url)
@@ -94,7 +114,7 @@ class HanabiEngineBot:
         debug: bool,
         engine_timeout: float = DEFAULT_ENGINE_TIMEOUT,
         authenticator: Callable[[str, str, str], tuple[str, str]] = authenticate,
-        engine_factory: Callable[[list[str], float], PersistentEngine] = PersistentEngine,
+        engine_factory: Callable[[list[str], float], EngineSession] = PersistentEngine,
         trace_recorder: TraceRecorder | None = None,
     ) -> None:
         self.base_url = base_url
@@ -113,7 +133,7 @@ class HanabiEngineBot:
         self.game_levels: dict[int, str] = {}
         self.tables: dict[int, dict[str, Any]] = {}
         self.games: dict[int, LiveGame] = {}
-        self.ws: Any = None
+        self.ws: WebSocketConnection | None = None
         self.connection_generation = 0
         self.game_generation = 0
         self.opened_at: float | None = None
@@ -190,24 +210,24 @@ class HanabiEngineBot:
                 if self.debug:
                     log(f"WebSocket close failed during shutdown: {error}")
 
-    def on_open(self, _ws: websocket.WebSocketApp) -> None:
+    def on_open(self, _ws: WebSocketApp) -> None:
         with self.lock:
             self.opened_at = time.monotonic()
         log("Connected to Hanabi Live.")
 
-    def on_error(self, _ws: websocket.WebSocketApp, error: object) -> None:
+    def on_error(self, _ws: WebSocketApp, error: object) -> None:
         log(f"WebSocket error: {error}")
 
     def on_close(
         self,
-        _ws: websocket.WebSocketApp,
+        _ws: WebSocketApp,
         status_code: int | None,
         message: str | None,
     ) -> None:
         detail = "" if status_code is None else f" ({status_code}: {message or ''})"
         log(f"Hanabi Live connection closed{detail}.")
 
-    def on_message(self, _ws: websocket.WebSocketApp, message: str) -> None:
+    def on_message(self, _ws: WebSocketApp, message: str) -> None:
         command, separator, raw_data = message.partition(" ")
         if not separator:
             log(f"Ignoring malformed WebSocket message: {message!r}")
@@ -313,7 +333,7 @@ class HanabiEngineBot:
             self.reply(requester, "This bot is not running the H-Group convention.")
             return
 
-        old_engine: PersistentEngine | None = None
+        old_engine: EngineSession | None = None
         active_table: int
         with self.lock:
             target = self._level_target(requester)

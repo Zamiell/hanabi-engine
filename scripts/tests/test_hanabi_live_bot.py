@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 import signal
 import sys
@@ -11,7 +12,7 @@ import unittest
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from unittest import mock
 
 
@@ -20,6 +21,32 @@ sys.path.insert(0, str(SCRIPTS))
 
 import hanabi_live_bot as bridge  # noqa: E402
 import hanabi_live_engine as engine_process  # noqa: E402
+
+
+class AnnotationTests(unittest.TestCase):
+    def test_every_python_function_has_complete_annotations(self) -> None:
+        missing: list[str] = []
+        for path in SCRIPTS.rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    continue
+                location = f"{path.relative_to(SCRIPTS)}:{node.lineno}:{node.name}"
+                if node.returns is None:
+                    missing.append(f"{location}:return")
+                parameters = (
+                    node.args.posonlyargs + node.args.args + node.args.kwonlyargs
+                )
+                missing.extend(
+                    f"{location}:{parameter.arg}"
+                    for parameter in parameters
+                    if parameter.arg not in {"self", "cls"}
+                    and parameter.annotation is None
+                )
+                for parameter in (node.args.vararg, node.args.kwarg):
+                    if parameter is not None and parameter.annotation is None:
+                        missing.append(f"{location}:{parameter.arg}")
+        self.assertEqual(missing, [])
 
 
 class FakeWebSocket:
@@ -117,7 +144,7 @@ def init_message(table_id: int) -> dict[str, Any]:
     }
 
 
-def wait_until(predicate: Any, timeout: float = 2.0) -> None:
+def wait_until(predicate: Callable[[], object], timeout: float = 2.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if predicate():
@@ -296,14 +323,15 @@ class PersistentEngineTests(unittest.TestCase):
                 self.send_header("Set-Cookie", "session=test-cookie; Path=/")
                 self.end_headers()
 
-            def log_message(self, _format: str, *_args: Any) -> None:
-                pass
+            def log_message(self, format: str, *args: Any) -> None:
+                del format, args
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), LoginHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
-            host, port = server.server_address
+            host = server.server_address[0]
+            port = server.server_address[1]
             ws_url, cookie = bridge.authenticate(
                 f"http://{host}:{port}",
                 "Bot User",

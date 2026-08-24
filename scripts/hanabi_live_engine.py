@@ -7,7 +7,15 @@ import subprocess
 import threading
 from collections import deque
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol, TextIO
+
+
+class EngineSession(Protocol):
+    """Interface shared by the Rust subprocess wrapper and test engines."""
+
+    def request(self, payload: dict[str, Any]) -> dict[str, Any]: ...
+
+    def close(self) -> None: ...
 
 def engine_environment() -> dict[str, str]:
     return {
@@ -69,12 +77,12 @@ class PersistentEngine:
             assert self.process is not None
             assert self.process.stdin is not None
             process = self.process
+            stdin = process.stdin
+            assert stdin is not None
             responses = self.responses
             try:
-                process.stdin.write(
-                    json.dumps(payload, separators=(",", ":")) + "\n"
-                )
-                process.stdin.flush()
+                stdin.write(json.dumps(payload, separators=(",", ":")) + "\n")
+                stdin.flush()
             except (BrokenPipeError, OSError) as error:
                 detail = self._failure_detail()
                 self._stop()
@@ -148,14 +156,14 @@ class PersistentEngine:
             stderr_thread.start()
 
     @staticmethod
-    def _read_stdout(stream: Any, responses: queue.Queue[str | None]) -> None:
+    def _read_stdout(stream: TextIO, responses: queue.Queue[str | None]) -> None:
         try:
             for line in stream:
                 responses.put(line)
         finally:
             responses.put(None)
 
-    def _read_stderr(self, stream: Any) -> None:
+    def _read_stderr(self, stream: TextIO) -> None:
         for line in stream:
             self.stderr.append(line.rstrip())
 
@@ -191,4 +199,3 @@ class PersistentEngine:
         for stream in (process.stdout, process.stderr):
             if stream is not None:
                 stream.close()
-
