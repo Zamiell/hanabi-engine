@@ -1,0 +1,254 @@
+use super::{
+    CardId, CardSet, ConnectionManager, ConnectionObligation, ConventionJournal,
+    HGroupConnectionKind, HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, ObservedEvent,
+    ObservedHistoryEntry, PlayerId, PlayerView, PromiseId, identity_of, is_playable_now,
+    push_signal, same_turn_signal, was_clued_before,
+};
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+pub(in crate::h_group) fn apply_transfer_effects(
+    entry: &ObservedHistoryEntry,
+    view: &PlayerView,
+    hands: &[Vec<CardId>],
+    explicitly_clued: &CardSet,
+    invisibly_clued: &mut CardSet,
+    already_playing: &mut CardSet,
+    pending: &mut ConnectionManager,
+    signals: &mut ConventionJournal,
+) {
+    // Sources: https://hanabi.github.io/level-10/#the-gentlemans-discard-gd
+    // https://hanabi.github.io/level-10/#the-layered-gentlemans-discard
+    // https://hanabi.github.io/level-10/#the-baton-discard-bd
+    // https://hanabi.github.io/level-10/#the-sarcastic-finesse
+    // https://hanabi.github.io/level-10/#the-certain-finesse--the-certain-discard
+    // https://hanabi.github.io/level-10/#the-composition-finesse
+    let ObservedEvent::Discarded {
+        player,
+        card,
+        identity,
+    } = &entry.event
+    else {
+        return;
+    };
+    if signals
+        .iter()
+        .any(|signal| signal.turn == entry.turn && signal.kind == HGroupMoveKind::SacrificeDiscard)
+    {
+        return;
+    }
+    if !was_clued_before(view, entry.turn, *card) {
+        return;
+    }
+    let mut transfer = None;
+    let mut kind = HGroupMoveKind::TransferDiscard;
+    for distance in 1..hands.len() {
+        let index = (player.index() + distance) % hands.len();
+        if let Some(target_card) = hands[index].iter().rev().copied().find(|candidate| {
+            explicitly_clued.contains(candidate) && identity_of(view, *candidate) == Some(*identity)
+        }) {
+            transfer = Some((PlayerId::new(u8::try_from(index).unwrap_or(0)), target_card));
+            kind = HGroupMoveKind::SarcasticDiscard;
+            break;
+        }
+    }
+    if transfer.is_none() {
+        for distance in 1..hands.len() {
+            let index = (player.index() + distance) % hands.len();
+            let ungotten = hands[index]
+                .iter()
+                .rev()
+                .copied()
+                .filter(|candidate| {
+                    !explicitly_clued.contains(candidate) && !invisibly_clued.contains(candidate)
+                })
+                .collect::<Vec<_>>();
+            let Some((layer, target_card)) = ungotten
+                .iter()
+                .copied()
+                .enumerate()
+                .find(|(_, candidate)| identity_of(view, *candidate) == Some(*identity))
+            else {
+                continue;
+            };
+            let playable = is_playable_now(view, *identity);
+            let layer_is_safe = if layer == 0 {
+                true
+            } else {
+                let mut heights = core::array::from_fn::<_, 5, _>(|suit| {
+                    u8::try_from(view.play_stacks[suit].len()).unwrap_or(0)
+                });
+                ungotten[..layer].iter().all(|layer_card| {
+                    let Some(layer_identity) = identity_of(view, *layer_card) else {
+                        return false;
+                    };
+                    let suit = layer_identity.suit.index();
+                    if layer_identity.rank.number() != heights[suit] + 1 {
+                        return false;
+                    }
+                    heights[suit] += 1;
+                    true
+                })
+            };
+            if !layer_is_safe {
+                continue;
+            }
+            kind = match (playable, layer) {
+                (true, 0) => HGroupMoveKind::GentlemansDiscard,
+                (true, _) => HGroupMoveKind::LayeredGentlemansDiscard,
+                (false, 0) => HGroupMoveKind::BatonDiscard,
+                // Layered Baton Discards are explicitly illegal: an
+                // unplayable transfer cannot safely unwrap a layer.
+                (false, _) => continue,
+            };
+            transfer = Some((PlayerId::new(u8::try_from(index).unwrap_or(0)), target_card));
+            break;
+        }
+    }
+    let Some((target, target_card)) = transfer else {
+        return;
+    };
+    invisibly_clued.insert(target_card);
+    if is_playable_now(view, *identity) {
+        already_playing.insert(target_card);
+        pending.start(
+            entry.turn,
+            ConnectionObligation {
+                promise: PromiseId::UNASSIGNED,
+                actor: target,
+                cards: vec![target_card],
+                expected: *identity,
+                focus_identity: *identity,
+                kind: HGroupConnectionKind::Finesse,
+                focus: target_card,
+                step: 0,
+            },
+        );
+    }
+    push_signal(
+        signals,
+        entry,
+        *player,
+        Some(target),
+        HGroupMoveKind::TransferDiscard,
+        vec![target_card],
+        Some(*identity),
+    );
+    push_signal(
+        signals,
+        entry,
+        *player,
+        Some(target),
+        kind,
+        vec![target_card],
+        Some(*identity),
+    );
+}
+
+pub(in crate::h_group) fn apply_special_finesse_discard_effects(
+    context: &HGroupTurnContext<'_>,
+    view: &PlayerView,
+    effects: &mut HGroupRuleEffects<'_>,
+) {
+    // Sources:
+    // - https://hanabi.github.io/level-10/#the-sarcastic-finesse
+    // - https://hanabi.github.io/level-10/#the-certain-finesse--the-certain-discard
+    // - https://hanabi.github.io/level-10/#the-composition-finesse
+    let entry = context.entry;
+    let ObservedEvent::Clued { giver, target, .. } = entry.event else {
+        return;
+    };
+    let Some(meaning) = effects
+        .clues
+        .iter()
+        .rev()
+        .find(|meaning| meaning.turn == entry.turn && meaning.target == target)
+    else {
+        return;
+    };
+    let Some(focus_identity) = context.historical.identity(meaning.focus) else {
+        return;
+    };
+    let connection = effects
+        .pending
+        .iter()
+        .find(|connection| connection.focus == meaning.focus);
+    let sarcastic = connection.is_some()
+        && same_turn_signal(effects.signals, entry.turn, HGroupMoveKind::Finesse)
+        && context.before.hands[giver.index()]
+            .iter()
+            .copied()
+            .any(|card| {
+                was_clued_before(view, entry.turn, card)
+                    && context.before.facts[card.index()]
+                        .identity_mask()
+                        .count_ones()
+                        > 1
+                    && context.historical.identity(card) == Some(focus_identity)
+            });
+    let certain = connection.is_some_and(|connection| {
+        context.before.hands[giver.index()]
+            .iter()
+            .copied()
+            .any(|card| {
+                was_clued_before(view, entry.turn, card)
+                    && context.historical.identity(card) == Some(connection.expected)
+            })
+    });
+    if sarcastic && !effects.discard_now.contains(&meaning.focus) {
+        effects.discard_now.push(meaning.focus);
+    }
+    if certain {
+        if let Some(card) = connection
+            .and_then(|connection| connection.cards.first())
+            .copied()
+        {
+            if !effects.discard_now.contains(&card) {
+                effects.discard_now.push(card);
+            }
+        }
+    }
+    for (recognized, kind, cards) in [
+        (
+            sarcastic,
+            HGroupMoveKind::SarcasticFinesse,
+            vec![meaning.focus],
+        ),
+        (
+            certain,
+            HGroupMoveKind::CertainFinesse,
+            connection.map_or_else(Vec::new, |connection| connection.cards.clone()),
+        ),
+        (
+            certain,
+            HGroupMoveKind::CertainDiscard,
+            connection.map_or_else(Vec::new, |connection| connection.cards.clone()),
+        ),
+        (
+            sarcastic && certain,
+            HGroupMoveKind::CompositionFinesse,
+            connection.map_or_else(
+                || vec![meaning.focus],
+                |connection| {
+                    connection
+                        .cards
+                        .iter()
+                        .copied()
+                        .chain(core::iter::once(meaning.focus))
+                        .collect()
+                },
+            ),
+        ),
+    ] {
+        if recognized {
+            push_signal(
+                effects.signals,
+                entry,
+                giver,
+                Some(target),
+                kind,
+                cards,
+                None,
+            );
+        }
+    }
+}

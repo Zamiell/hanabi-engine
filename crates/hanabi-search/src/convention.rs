@@ -172,6 +172,40 @@ pub enum ConventionInferences {
 pub struct ConventionAction {
     pub action: hanabi_core::Action,
     pub priority: i32,
+    pub reason: ConventionActionReason,
+}
+
+/// Structured explanation for why a convention admitted an action.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ConventionActionReason {
+    ConventionFree,
+    Connection,
+    RequiredDiscard,
+    PromisedPlay,
+    PlayClue,
+    SaveClue,
+    OtherClue,
+    Discard,
+    #[default]
+    Fallback,
+}
+
+/// Semantic reason a legal action was excluded by the selected convention.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ConventionRejectionReason {
+    NoNewInformation,
+    NoFocus,
+    RepeatsKnownIdentity,
+    NoConventionMeaning,
+    UnsafeConnection,
+    RedundantOutcome,
+}
+
+/// A legal game action rejected before strategic planning.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RejectedConventionAction {
+    pub action: hanabi_core::Action,
+    pub reason: ConventionRejectionReason,
 }
 
 /// Complete convention interpretation of one observer-relative position.
@@ -183,6 +217,7 @@ pub struct ConventionAction {
 pub struct ConventionAnalysis {
     pub inferences: ConventionInferences,
     pub actions: Vec<ConventionAction>,
+    pub rejected_actions: Vec<RejectedConventionAction>,
     pub preferred_action: Option<hanabi_core::Action>,
     pub forced_action: Option<hanabi_core::Action>,
     pub belief_constraints: BeliefConstraints,
@@ -267,8 +302,10 @@ impl SupportedConvention {
                     .map(|action| ConventionAction {
                         action,
                         priority: 100,
+                        reason: ConventionActionReason::ConventionFree,
                     })
                     .collect(),
+                rejected_actions: Vec::new(),
                 preferred_action: ConventionAgnosticPolicy.select_action(deductions).ok(),
                 forced_action: None,
                 belief_constraints: BeliefConstraints::default(),
@@ -278,17 +315,36 @@ impl SupportedConvention {
                 let actions = decision
                     .actions
                     .into_iter()
-                    .map(|(action, priority)| ConventionAction { action, priority })
+                    .map(|(action, priority, reason)| ConventionAction {
+                        action,
+                        priority,
+                        reason,
+                    })
                     .collect();
                 let belief_constraints =
                     h_group_belief_constraints(deductions, &decision.inferences);
                 ConventionAnalysis {
                     inferences: ConventionInferences::HGroup(Box::new(decision.inferences)),
                     actions,
+                    rejected_actions: decision.rejected_actions,
                     preferred_action: decision.preferred,
                     forced_action: decision.forced,
                     belief_constraints,
                 }
+            }
+        }
+    }
+
+    pub(crate) fn project_symbolic_line(
+        self,
+        view: &hanabi_core::PlayerView,
+        root: hanabi_core::Action,
+        limit: u8,
+    ) -> crate::SymbolicLineOutcome {
+        match self {
+            Self::None => crate::SymbolicLineOutcome::default(),
+            Self::HGroup(profile) => {
+                crate::h_group::project_h_group_line(view, profile, root, limit)
             }
         }
     }

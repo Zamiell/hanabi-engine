@@ -113,12 +113,14 @@ fn analyze_planner(
             );
         } else {
             println!(
-                "{marker}  {:<42} priority {:>6.2}  playable {}  critical {}  new {}",
+                "{marker}  {:<42} priority {:>6.2}  playable {}  critical {}  new {}  line {}/+{}",
                 action_label(view, players, evaluation.action),
                 evaluation.convention_priority,
                 evaluation.immediately_playable_touched,
                 evaluation.critical_touched,
                 evaluation.newly_touched,
+                evaluation.symbolic_line.actions,
+                evaluation.symbolic_line.score_gain,
             );
         }
     }

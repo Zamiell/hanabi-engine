@@ -85,8 +85,8 @@ fn promised_cards(replay: &HGroupState, target: PlayerId) -> CardSet {
             connection.actor == target && pending_is_active(connection, &replay.pending_connections)
         })
         .flat_map(|connection| connection.cards.iter().copied())
-        .chain(replay.forced_playable.iter().copied())
-        .chain(replay.already_playing.iter().copied())
+        .chain(replay.cards.forced_playable.iter().copied())
+        .chain(replay.cards.already_playing.iter().copied())
         .collect()
 }
 

@@ -1,10 +1,10 @@
 use super::{
     Arc, Card, CardId, Clue, ClueFacts, ConnectionObligation, GameStatus, HGroupCardInference,
-    HGroupInferences, HGroupProfile, HGroupState, LogicalDeductions, MAX_CLUE_TOKENS, ObservedCard,
-    ObservedEvent, ObservedHistoryEntry, PerspectiveDepth, PerspectiveProjector, PlayerId,
-    PlayerView, ProspectiveTransition, Rank, RefCell, chop, convention_card_inferences,
-    identity_of, infer_h_group, infer_h_group_from_replay, is_playable_now, next_player,
-    replay_h_group_inner, replay_identity_is_queued,
+    HGroupInferences, HGroupMoveKind, HGroupProfile, HGroupState, LogicalDeductions,
+    MAX_CLUE_TOKENS, ObservedCard, ObservedEvent, ObservedHistoryEntry, PerspectiveDepth,
+    PerspectiveProjector, PlayerId, PlayerView, ProspectiveTransition, Rank, RefCell, chop,
+    convention_card_inferences, identity_of, infer_h_group, infer_h_group_from_replay,
+    is_playable_now, next_player, replay_h_group_inner, replay_identity_is_queued,
 };
 
 pub(super) fn subjective_convention_cards(
@@ -43,6 +43,19 @@ struct CachedProspectiveProjection {
     inferred: HGroupInferences,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ProspectiveClueKey {
+    target: PlayerId,
+    clue: Clue,
+    touched: Vec<CardId>,
+}
+
+#[derive(Clone)]
+struct ProspectiveConventionSnapshot {
+    after: PlayerView,
+    recipient: CachedProspectiveProjection,
+}
+
 #[derive(Clone)]
 enum ProspectiveCacheSlot<T> {
     Empty,
@@ -53,12 +66,18 @@ struct ProspectiveAnalysisCache {
     source_address: usize,
     profile: HGroupProfile,
     baselines: Vec<ProspectiveCacheSlot<CachedProspectiveProjection>>,
+    clue_snapshots: Vec<(ProspectiveClueKey, Option<ProspectiveConventionSnapshot>)>,
     source_hand_worlds: ProspectiveCacheSlot<Arc<Vec<PlayerView>>>,
 }
 
 thread_local! {
     static PROSPECTIVE_ANALYSIS_CACHE: RefCell<Option<ProspectiveAnalysisCache>> =
         const { RefCell::new(None) };
+}
+
+#[cfg(test)]
+thread_local! {
+    static PROSPECTIVE_SNAPSHOT_REDUCTIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 struct ProspectiveAnalysisCacheGuard(Option<ProspectiveAnalysisCache>);
@@ -81,6 +100,7 @@ pub(super) fn with_prospective_analysis_cache<T>(
         source_address: core::ptr::from_ref(source).addr(),
         profile,
         baselines: vec![ProspectiveCacheSlot::Empty; source.hands.len()],
+        clue_snapshots: Vec::new(),
         source_hand_worlds: ProspectiveCacheSlot::Empty,
     };
     let previous = PROSPECTIVE_ANALYSIS_CACHE.with(|cache| cache.replace(Some(replacement)));
@@ -122,6 +142,100 @@ fn prospective_baseline_projection(
         }
     });
     computed
+}
+
+/// Applies a hypothetical clue once and materializes the recipient-relative
+/// convention snapshot consumed by candidate admission, hazard checking, and
+/// strategic evaluation. All consumers therefore observe the same reducer
+/// result instead of independently replaying the hypothetical history.
+fn prospective_clue_snapshot(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    target: PlayerId,
+    clue: Clue,
+    touched: &[CardId],
+) -> Option<ProspectiveConventionSnapshot> {
+    let key = ProspectiveClueKey {
+        target,
+        clue,
+        touched: touched.to_vec(),
+    };
+    let source_address = core::ptr::from_ref(source).addr();
+    if let Some(cached) = PROSPECTIVE_ANALYSIS_CACHE.with(|cache| {
+        let cache = cache.borrow();
+        let cache = cache.as_ref()?;
+        (cache.source_address == source_address && cache.profile == profile)
+            .then(|| {
+                cache
+                    .clue_snapshots
+                    .iter()
+                    .find(|(candidate, _)| candidate == &key)
+                    .map(|(_, snapshot)| snapshot.clone())
+            })
+            .flatten()
+    }) {
+        return cached;
+    }
+
+    let after = prospective_clue_view(source, target, clue, touched);
+    #[cfg(test)]
+    PROSPECTIVE_SNAPSHOT_REDUCTIONS.with(|count| count.set(count.get() + 1));
+    let computed = projected_h_group_replay(&after, profile, target).map(|(deductions, replay)| {
+        let inferred = infer_h_group_from_replay(&deductions, replay.clone(), profile);
+        ProspectiveConventionSnapshot {
+            after,
+            recipient: CachedProspectiveProjection { replay, inferred },
+        }
+    });
+    PROSPECTIVE_ANALYSIS_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if let Some(cache) = cache.as_mut() {
+            if cache.source_address == source_address && cache.profile == profile {
+                cache.clue_snapshots.push((key, computed.clone()));
+            }
+        }
+    });
+    computed
+}
+
+#[cfg(test)]
+mod tests {
+    use hanabi_core::{FullState, standard_deck};
+
+    use super::*;
+
+    #[test]
+    fn candidate_consumers_share_one_convention_snapshot() {
+        let state = FullState::new_standard(3, standard_deck()).expect("standard game");
+        let source = state.view_for(PlayerId::new(0)).expect("observer exists");
+        let target = PlayerId::new(1);
+        let identity = source.hands[target.index()][0]
+            .identity
+            .expect("teammate card is visible");
+        let clue = Clue::Suit(identity.suit);
+        let touched = source.hands[target.index()]
+            .iter()
+            .filter(|card| card.identity.is_some_and(|card| clue.matches(card)))
+            .map(|card| card.id)
+            .collect::<Vec<_>>();
+        let focus = touched[0];
+
+        with_prospective_analysis_cache(&source, HGroupProfile::Max, || {
+            PROSPECTIVE_SNAPSHOT_REDUCTIONS.with(|count| count.set(0));
+            let _ =
+                prospective_clue_signal_kinds(&source, HGroupProfile::Max, target, clue, &touched);
+            let _ = prospective_clue_hazard(
+                &source,
+                HGroupProfile::Max,
+                target,
+                focus,
+                clue,
+                &touched,
+                false,
+            );
+            PROSPECTIVE_SNAPSHOT_REDUCTIONS.with(|count| assert_eq!(count.get(), 1));
+        });
+    }
 }
 
 fn prospective_source_hand_worlds(
@@ -203,8 +317,14 @@ pub(super) fn prospective_play_has_unsafe_inference(
     else {
         return true;
     };
+    let causal_cards = after_replay
+        .signals
+        .iter()
+        .filter(|signal| signal.turn == source.turn)
+        .flat_map(|signal| signal.cards.iter().copied())
+        .collect::<super::CardSet>();
     let after = infer_h_group_from_replay(&after_deductions, after_replay, profile);
-    let newly_promised = after
+    let mut newly_promised = after
         .playable_now
         .iter()
         .copied()
@@ -220,8 +340,12 @@ pub(super) fn prospective_play_has_unsafe_inference(
                 }),
         );
 
-    newly_promised.into_iter().any(|candidate| {
-        identity_of(source, candidate).is_some_and(|actual| !is_playable_now(&after_play, actual))
+    newly_promised.any(|candidate| {
+        identity_of(source, candidate).is_some_and(|actual| {
+            let caused_by_play = causal_cards.contains(&candidate)
+                || (actual.suit == identity.suit && actual.rank.number() > identity.rank.number());
+            caused_by_play && !is_playable_now(&after_play, actual)
+        })
     })
 }
 
@@ -253,7 +377,7 @@ pub(super) fn prospective_clue_marks_focus_saved(
         let after_clue = prospective_clue_view(world, target, clue, touched);
         PerspectiveProjector::project_resolved_owned(after_clue, profile, target).is_none_or(
             |(deductions, replay)| {
-                replay.chop_moved.contains(&focus)
+                replay.cards.chop_moved.contains(&focus)
                     || !infer_h_group_from_replay(&deductions, replay, profile)
                         .saved
                         .contains(&focus)
@@ -261,6 +385,30 @@ pub(super) fn prospective_clue_marks_focus_saved(
         )
     });
     !unsafe_world
+}
+
+/// Exact convention signals the recipient would attach to a hypothetical
+/// clue. Candidate generation uses the same reducer as replay instead of
+/// maintaining a second, inevitably incomplete catalog of Max-only moves.
+pub(super) fn prospective_clue_signal_kinds(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    target: PlayerId,
+    clue: Clue,
+    touched: &[CardId],
+) -> Vec<HGroupMoveKind> {
+    let turn = source.turn;
+    let Some(snapshot) = prospective_clue_snapshot(source, profile, target, clue, touched) else {
+        return Vec::new();
+    };
+    snapshot
+        .recipient
+        .replay
+        .signals
+        .iter()
+        .filter(|signal| signal.turn == turn)
+        .map(|signal| signal.kind)
+        .collect()
 }
 
 pub(super) fn prospective_clue_has_unsafe_connection(
@@ -272,7 +420,7 @@ pub(super) fn prospective_clue_has_unsafe_connection(
     touched: &[CardId],
     expect_immediate_focus: bool,
 ) -> bool {
-    prospective_clue_hazard(
+    let hazard = prospective_clue_hazard(
         source,
         profile,
         target,
@@ -280,8 +428,8 @@ pub(super) fn prospective_clue_has_unsafe_connection(
         clue,
         touched,
         expect_immediate_focus,
-    )
-    .is_some()
+    );
+    hazard.is_some()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -304,15 +452,13 @@ pub(super) fn prospective_clue_hazard(
     touched: &[CardId],
     expect_immediate_focus: bool,
 ) -> Option<ProspectiveClueHazard> {
-    let after_clue = prospective_clue_view(source, target, clue, touched);
-
-    let after_projector = PerspectiveProjector::new(&after_clue, profile);
-    let Some((deductions, replay)) =
-        after_projector.project(target, PerspectiveDepth::NestedRecipients)
-    else {
+    let Some(snapshot) = prospective_clue_snapshot(source, profile, target, clue, touched) else {
         return Some(ProspectiveClueHazard::ProjectionFailed);
     };
-    let inferred = infer_h_group_from_replay(&deductions, replay.clone(), profile);
+    let after_clue = &snapshot.after;
+    let after_projector = PerspectiveProjector::new(after_clue, profile);
+    let replay = &snapshot.recipient.replay;
+    let inferred = &snapshot.recipient.inferred;
     let Some(baseline) = prospective_baseline_projection(source, profile, target) else {
         return Some(ProspectiveClueHazard::ProjectionFailed);
     };
@@ -320,8 +466,8 @@ pub(super) fn prospective_clue_hazard(
         source,
         focus,
         expect_immediate_focus,
-        &replay,
-        &inferred,
+        replay,
+        inferred,
         &baseline.replay,
         &baseline.inferred,
     ) {
@@ -329,11 +475,11 @@ pub(super) fn prospective_clue_hazard(
     }
     if expect_immediate_focus
         && identity_of(source, focus).is_some_and(|identity| is_playable_now(source, identity))
-        && recipient_follow_up_is_unsafe(source, &after_clue, profile, target, focus)
+        && recipient_follow_up_is_unsafe(source, after_clue, profile, target, focus)
     {
         return Some(ProspectiveClueHazard::RecipientWrongConnection);
     }
-    if other_player_projection_is_unsafe(source, &after_clue, profile, target, &after_projector) {
+    if other_player_projection_is_unsafe(source, after_clue, profile, target, &after_projector) {
         return Some(ProspectiveClueHazard::OtherPlayerWrongPromise);
     }
     if touched.len() <= 1 {
@@ -397,19 +543,20 @@ fn recipient_projection_hazard(
         && !inferred.playable_now.contains(&focus);
     let competing_connection = expect_immediate_focus
         && identity_of(source, focus).is_some_and(|actual| is_playable_now(source, actual))
-        && replay.signals.iter().any(|signal| {
-            !baseline.signals.contains(signal)
-                && matches!(
-                    signal.kind,
-                    super::HGroupMoveKind::Prompt
-                        | super::HGroupMoveKind::Finesse
-                        | super::HGroupMoveKind::ReverseFinesse
-                        | super::HGroupMoveKind::SelfFinesse
-                        | super::HGroupMoveKind::LayeredFinesse
-                        | super::HGroupMoveKind::Bluff
-                        | super::HGroupMoveKind::DoubleBluff
-                )
-                && signal.cards.iter().any(|card| *card != focus)
+        && [
+            super::HGroupMoveKind::Prompt,
+            super::HGroupMoveKind::Finesse,
+            super::HGroupMoveKind::ReverseFinesse,
+            super::HGroupMoveKind::SelfFinesse,
+            super::HGroupMoveKind::LayeredFinesse,
+            super::HGroupMoveKind::Bluff,
+            super::HGroupMoveKind::DoubleBluff,
+        ]
+        .into_iter()
+        .any(|kind| {
+            replay.signals.of_kind(kind).any(|signal| {
+                !baseline.signals.contains(signal) && signal.cards.iter().any(|card| *card != focus)
+            })
         });
     let wrong_save = replay
         .implicit_saves
@@ -469,6 +616,11 @@ fn other_player_projection_is_unsafe(
     target: PlayerId,
     after_projector: &PerspectiveProjector<'_>,
 ) -> bool {
+    let Some(giver_baseline) = prospective_baseline_projection(source, profile, source.observer)
+    else {
+        return true;
+    };
+    let giver_promptable = giver_baseline.replay.promptable();
     for player in 0..source.hands.len() {
         let observer =
             PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
@@ -505,14 +657,27 @@ fn other_player_projection_is_unsafe(
                         Card::new(connection.identity.suit, Rank::ALL[rank - 1]),
                     )
                 });
+            let duplicates_existing_promise = replay_identity_is_queued(
+                other_after_deductions.view(),
+                &other_baseline.replay,
+                connection.identity,
+            );
+            let duplicates_possible_giver_promise =
+                giver_baseline.inferred.cards.iter().any(|card| {
+                    card.card != connection.card
+                        && giver_promptable.contains(&card.card)
+                        && card.identities.contains(connection.identity)
+                });
             other_baseline
                 .inferred
                 .connection
                 .is_none_or(|prior| prior.card != connection.card)
-                && identity_of(source, connection.card).is_some_and(|actual| {
-                    (actual != connection.identity || !connection_is_reachable)
-                        && !is_playable_now(after_clue, actual)
-                })
+                && (duplicates_existing_promise
+                    || duplicates_possible_giver_promise
+                    || identity_of(source, connection.card).is_some_and(|actual| {
+                        (actual != connection.identity || !connection_is_reachable)
+                            && !is_playable_now(after_clue, actual)
+                    }))
         });
         if wrong_new_play || wrong_new_connection {
             return true;

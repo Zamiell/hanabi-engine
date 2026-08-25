@@ -26,7 +26,10 @@ impl Hasher for CompactIdHasher {
 pub(super) type CardSet = HashSet<CardId, BuildHasherDefault<CompactIdHasher>>;
 pub(super) type PlayerSet = HashSet<PlayerId, BuildHasherDefault<CompactIdHasher>>;
 
-use super::{ConnectionManager, ConventionFacts, HGroupMoveKind};
+use super::{
+    ConnectionManager, ConventionFacts, ConventionTransitionResult, HGroupMoveKind, MutationDomain,
+    SignalHistory,
+};
 
 /// How far observer projection may recurse while interpreting conventions.
 /// A named mode prevents call sites from silently disagreeing about the
@@ -102,6 +105,10 @@ pub struct HGroupClueInterpretation {
     pub giver: PlayerId,
     pub target: PlayerId,
     pub clue: Clue,
+    /// Every card physically touched by the clue, including cards that were
+    /// already gotten. This preserves causal evidence for later Good Touch
+    /// closure without reconstructing it from current hand state.
+    pub touched: Vec<CardId>,
     /// Stack heights when the clue was given. Direct and delayed meanings are
     /// fixed at clue time; later plays must not retroactively create Prompts.
     pub stack_heights: [u8; 5],
@@ -196,35 +203,61 @@ impl HGroupInferences {
     }
 }
 
+/// Canonical observer-relative convention facts produced by the history
+/// reducer. Card facts may describe any hand visible in this perspective;
+/// action selection must project them onto the acting observer's hand.
+#[derive(Clone, Debug)]
+pub(super) struct ConventionCardState {
+    pub(super) explicitly_clued: CardSet,
+    pub(super) invisibly_clued: CardSet,
+    pub(super) already_playing: CardSet,
+    pub(super) chop_moved: CardSet,
+    pub(super) discard_now: Vec<CardId>,
+    pub(super) forced_playable: CardSet,
+    pub(super) invalidated_focuses: CardSet,
+    /// Direct Play interpretations their owner publicly declined. This is an
+    /// action-selection fact, not a rewrite of the underlying clue facts.
+    pub(super) declined_direct_plays: CardSet,
+    /// Incremental semantic facts and relational identity claims.
+    pub(super) facts: ConventionFacts,
+}
+
+impl ConventionCardState {
+    pub(super) fn validate(&self) -> Result<(), String> {
+        self.facts.validate()?;
+        let mut seen_discards = CardSet::default();
+        if self
+            .discard_now
+            .iter()
+            .any(|card| !seen_discards.insert(*card))
+        {
+            return Err("required discard is duplicated".to_owned());
+        }
+        Ok(())
+    }
+}
+
 /// Canonical observer-relative convention state produced by the history reducer.
 #[derive(Clone, Debug)]
 pub(super) struct HGroupState {
     pub(super) hands: Vec<Vec<CardId>>,
-    pub(super) explicitly_clued: CardSet,
-    pub(super) invisibly_clued: CardSet,
+    pub(super) cards: ConventionCardState,
     pub(super) clues: Vec<HGroupClueInterpretation>,
     pub(super) pending_connections: ConnectionManager,
-    pub(super) already_playing: CardSet,
     pub(super) early_game: bool,
-    pub(super) signals: Vec<HGroupSignal>,
-    pub(super) chop_moved: CardSet,
-    pub(super) discard_now: Vec<CardId>,
+    pub(super) signals: SignalHistory,
     pub(super) must_clue: PlayerSet,
-    pub(super) forced_playable: CardSet,
-    /// Play-clue focuses whose Prompt/Finesse chain was disproved by a
-    /// successful play of the wrong connector identity.
-    pub(super) invalidated_focuses: CardSet,
     pub(super) implicit_saves: Vec<(CardId, IdentitySet)>,
     pub(super) required_fix: Option<RequiredFix>,
-    /// Query index for live convention state; `signals` remain the audit log.
-    pub(super) facts: ConventionFacts,
+    pub(super) transitions: Vec<ConventionTransitionResult>,
 }
 
 impl HGroupState {
     /// Cards eligible to act as Prompts. Chop movement alone is not a clue.
     pub(super) fn promptable(&self) -> CardSet {
-        self.explicitly_clued
-            .union(&self.invisibly_clued)
+        self.cards
+            .explicitly_clued
+            .union(&self.cards.invisibly_clued)
             .copied()
             .collect()
     }
@@ -232,11 +265,12 @@ impl HGroupState {
     /// Extends one Prompt set with permanent chop movement for chop purposes.
     pub(super) fn gotten_from(&self, promptable: &CardSet) -> CardSet {
         let mut gotten = promptable.clone();
-        gotten.extend(self.chop_moved.iter().copied());
+        gotten.extend(self.cards.chop_moved.iter().copied());
         gotten
     }
 
     pub(super) fn validate(&self) -> Result<(), String> {
+        self.cards.validate()?;
         self.pending_connections.validate()?;
         for connection in self.pending_connections.iter() {
             if let Some(card) = connection
@@ -249,6 +283,47 @@ impl HGroupState {
                     connection.actor,
                     self.hands[connection.actor.index()]
                 ));
+            }
+        }
+        for pair in self.transitions.windows(2) {
+            if pair[0].turn > pair[1].turn {
+                return Err("convention transitions are not in turn order".to_owned());
+            }
+        }
+        for transition in &self.transitions {
+            let mut prior_phase = None;
+            for proposal in &transition.proposals {
+                if prior_phase.is_some_and(|phase| phase > proposal.phase) {
+                    return Err("rule proposals are not in semantic phase order".to_owned());
+                }
+                prior_phase = Some(proposal.phase);
+                let Some(signals) = self.signals.get(proposal.signal_range.clone()) else {
+                    return Err("rule proposal signal range is invalid".to_owned());
+                };
+                let Some(promises) = self
+                    .pending_connections
+                    .transitions()
+                    .get(proposal.promise_transition_range.clone())
+                else {
+                    return Err("rule proposal promise range is invalid".to_owned());
+                };
+                if signals.iter().any(|signal| signal.turn != transition.turn)
+                    || promises
+                        .iter()
+                        .any(|promise| promise.turn != transition.turn)
+                {
+                    return Err(format!(
+                        "rule {:?} emitted an effect for a different turn",
+                        proposal.rule
+                    ));
+                }
+                if !signals.is_empty() && !proposal.mutations.contains(MutationDomain::CurrentFacts)
+                {
+                    return Err("signal proposal did not mark current facts changed".to_owned());
+                }
+                if proposal.is_empty() {
+                    return Err("empty rule proposal was retained".to_owned());
+                }
             }
         }
         Ok(())
@@ -267,7 +342,7 @@ pub(super) fn protected_cards(
         .collect()
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct RequiredFix {
     pub(super) actor: PlayerId,
     pub(super) target: PlayerId,

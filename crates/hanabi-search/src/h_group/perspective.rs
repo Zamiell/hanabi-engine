@@ -117,12 +117,18 @@ impl<'a> PerspectiveProjector<'a> {
         profile: HGroupProfile,
         observer: PlayerId,
     ) -> Option<(LogicalDeductions, HGroupState)> {
-        debug_assert!(
-            view.hands
-                .iter()
-                .flatten()
-                .all(|card| card.identity.is_some())
-        );
+        if view
+            .hands
+            .iter()
+            .flatten()
+            .any(|card| card.identity.is_none())
+        {
+            // Symbolic continuations deliberately represent hypothetical draws
+            // as blank cards. A source-hand assignment resolves only the
+            // source observer's hidden cards, so it cannot turn such a partial
+            // continuation into the complete sampled world required here.
+            return None;
+        }
         let identities: [Option<Card>; 50] =
             core::array::from_fn(|index| identity_of(&view, CardId::new(index)));
         view.observer = observer;
@@ -183,6 +189,16 @@ impl ProspectiveTransition {
         clue: Clue,
         touched: &[CardId],
     ) -> PlayerView {
+        Self::clue_by(source, source.observer, target, clue, touched)
+    }
+
+    pub(super) fn clue_by(
+        source: &PlayerView,
+        giver: PlayerId,
+        target: PlayerId,
+        clue: Clue,
+        touched: &[CardId],
+    ) -> PlayerView {
         let untouched = source.hands[target.index()]
             .iter()
             .map(|card| card.id)
@@ -199,7 +215,7 @@ impl ProspectiveTransition {
         after.history.push(ObservedHistoryEntry {
             turn: source.turn,
             event: ObservedEvent::Clued {
-                giver: source.observer,
+                giver,
                 target,
                 clue,
                 touched: touched.to_vec(),
@@ -221,19 +237,65 @@ impl ProspectiveTransition {
         card: CardId,
         identity: Card,
     ) -> PlayerView {
+        Self::card_action(source, player, card, identity, true, true)
+    }
+
+    pub(super) fn discard(
+        source: &PlayerView,
+        player: PlayerId,
+        card: CardId,
+        identity: Card,
+    ) -> PlayerView {
+        Self::card_action(source, player, card, identity, false, true)
+    }
+
+    pub(super) fn play(
+        source: &PlayerView,
+        player: PlayerId,
+        card: CardId,
+        identity: Card,
+        successful: bool,
+    ) -> PlayerView {
+        Self::card_action(source, player, card, identity, true, successful)
+    }
+
+    fn card_action(
+        source: &PlayerView,
+        player: PlayerId,
+        card: CardId,
+        identity: Card,
+        play: bool,
+        successful: bool,
+    ) -> PlayerView {
         let mut after = source.clone();
-        after.history.push(ObservedHistoryEntry {
-            turn: source.turn,
-            event: ObservedEvent::Played {
+        let event = if play {
+            ObservedEvent::Played {
                 player,
                 card,
                 identity,
-                successful: true,
-            },
+                successful,
+            }
+        } else {
+            ObservedEvent::Discarded {
+                player,
+                card,
+                identity,
+            }
+        };
+        after.history.push(ObservedHistoryEntry {
+            turn: source.turn,
+            event,
         });
         after.hands[player.index()].retain(|candidate| candidate.id != card);
-        after.play_stacks[identity.suit.index()].push((card, identity));
-        if identity.rank == Rank::Five {
+        if play && successful {
+            after.play_stacks[identity.suit.index()].push((card, identity));
+        } else {
+            after.discard_pile.push((card, identity));
+        }
+        if play && !successful {
+            after.strikes = after.strikes.saturating_add(1);
+        }
+        if !play || successful && identity.rank == Rank::Five {
             after.clue_tokens = after.clue_tokens.saturating_add(1).min(MAX_CLUE_TOKENS);
         }
         if source.deck_size > 0 {
@@ -294,6 +356,43 @@ mod tests {
                 identity: None,
             }) if *player == PlayerId::new(0) && *card == CardId::new(15)
         ));
+    }
+
+    #[test]
+    fn discard_projects_the_public_pile_token_and_blank_draw() {
+        let state = FullState::new_standard(3, standard_deck()).unwrap();
+        let source = state.view_for(PlayerId::new(0)).unwrap();
+        let discarded = source.hands[0][0].id;
+        let identity = state.card(discarded).unwrap();
+
+        let after = ProspectiveTransition::discard(&source, PlayerId::new(0), discarded, identity);
+
+        assert!(after.discard_pile.contains(&(discarded, identity)));
+        assert_eq!(after.clue_tokens, MAX_CLUE_TOKENS);
+        assert_eq!(after.deck_size, source.deck_size - 1);
+        assert_eq!(after.hands[0].last().unwrap().identity, None);
+    }
+
+    #[test]
+    fn resolved_projection_rejects_a_symbolic_blank_draw() {
+        let state = FullState::new_standard(3, standard_deck()).unwrap();
+        let mut source = state.view_for(PlayerId::new(0)).unwrap();
+        for card in source.hands.iter_mut().flatten() {
+            card.identity = state.card(card.id);
+        }
+        let played = source.hands[0][0].id;
+        let identity = state.card(played).unwrap();
+        let after =
+            ProspectiveTransition::successful_play(&source, PlayerId::new(0), played, identity);
+
+        assert!(
+            PerspectiveProjector::project_resolved_owned(
+                after,
+                HGroupProfile::Max,
+                PlayerId::new(1),
+            )
+            .is_none()
+        );
     }
 
     #[test]

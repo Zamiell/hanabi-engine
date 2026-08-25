@@ -4,9 +4,30 @@ use hanabi_core::{Card, CardId, PlayerId};
 
 use super::HGroupConnectionKind;
 
+/// Stable identity for one concrete connection promise lifecycle.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(super) struct PromiseId(u32);
+
+impl PromiseId {
+    pub(super) const UNASSIGNED: Self = Self(u32::MAX);
+}
+
+/// Immutable origin of a connection promise. Current status lives in the
+/// manager; provenance survives completion and invalidation for explanation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct PromiseProvenance {
+    pub(super) id: PromiseId,
+    pub(super) created_turn: u32,
+    pub(super) actor: PlayerId,
+    pub(super) focus: CardId,
+    pub(super) expected: Card,
+    pub(super) kind: HGroupConnectionKind,
+}
+
 /// One active, typed step in a Prompt or Finesse chain.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct ConnectionObligation {
+    pub(super) promise: PromiseId,
     pub(super) actor: PlayerId,
     pub(super) cards: Vec<CardId>,
     pub(super) expected: Card,
@@ -44,6 +65,7 @@ pub(super) enum ConnectionTransitionReason {
 /// state; they are not themselves queried as current convention facts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct ConnectionTransition {
+    pub(super) promise: PromiseId,
     pub(super) turn: u32,
     pub(super) focus: CardId,
     pub(super) actor: PlayerId,
@@ -67,6 +89,8 @@ pub(super) struct ConnectionAdvance {
 pub(super) struct ConnectionManager {
     active: Vec<ConnectionObligation>,
     transitions: Vec<ConnectionTransition>,
+    provenance: Vec<PromiseProvenance>,
+    next_promise: u32,
 }
 
 impl Deref for ConnectionManager {
@@ -78,9 +102,15 @@ impl Deref for ConnectionManager {
 }
 
 impl ConnectionManager {
-    #[cfg(test)]
     pub(super) fn transitions(&self) -> &[ConnectionTransition] {
         &self.transitions
+    }
+
+    pub(super) fn provenance(&self, id: PromiseId) -> Option<PromiseProvenance> {
+        self.provenance
+            .iter()
+            .copied()
+            .find(|origin| origin.id == id)
     }
 
     pub(super) fn validate(&self) -> Result<(), String> {
@@ -116,14 +146,35 @@ impl ConnectionManager {
             }) {
                 return Err("active connection has no scheduled transition".to_owned());
             }
+            if self.provenance(connection.promise).is_none() {
+                return Err("active connection has no promise provenance".to_owned());
+            }
         }
         Ok(())
     }
 
-    pub(super) fn start(&mut self, turn: u32, obligation: ConnectionObligation) {
-        if self.active.contains(&obligation) {
+    pub(super) fn start(&mut self, turn: u32, mut obligation: ConnectionObligation) {
+        if self.active.iter().any(|active| {
+            active.actor == obligation.actor
+                && active.cards == obligation.cards
+                && active.expected == obligation.expected
+                && active.focus_identity == obligation.focus_identity
+                && active.kind == obligation.kind
+                && active.focus == obligation.focus
+                && active.step == obligation.step
+        }) {
             return;
         }
+        obligation.promise = PromiseId(self.next_promise);
+        self.next_promise = self.next_promise.saturating_add(1);
+        self.provenance.push(PromiseProvenance {
+            id: obligation.promise,
+            created_turn: turn,
+            actor: obligation.actor,
+            focus: obligation.focus,
+            expected: obligation.expected,
+            kind: obligation.kind,
+        });
         // One actor can have only one live interpretation for a particular
         // step of a focus connection. More-specific rules run after the
         // general connection scheduler, so a later interpretation replaces
@@ -312,6 +363,7 @@ impl ConnectionManager {
         reason: ConnectionTransitionReason,
     ) {
         self.transitions.push(ConnectionTransition {
+            promise: obligation.promise,
             turn,
             focus: obligation.focus,
             actor: obligation.actor,
@@ -331,6 +383,7 @@ mod tests {
 
     fn obligation(cards: Vec<CardId>) -> ConnectionObligation {
         ConnectionObligation {
+            promise: PromiseId::UNASSIGNED,
             actor: PlayerId::new(1),
             cards,
             expected: Card::new(Suit::Red, Rank::Two),
@@ -373,7 +426,16 @@ mod tests {
 
         manager.start(3, replacement.clone());
 
-        assert_eq!(&*manager, &[replacement]);
+        assert_eq!(manager.len(), 1);
+        assert_eq!(manager[0].cards, replacement.cards);
+        assert_eq!(manager[0].expected, replacement.expected);
+        assert_ne!(manager[0].promise, PromiseId::UNASSIGNED);
+        assert_eq!(
+            manager
+                .provenance(manager[0].promise)
+                .map(|origin| origin.created_turn),
+            Some(3)
+        );
         assert!(manager.validate().is_ok());
         assert!(manager.transitions().iter().any(|transition| {
             transition.reason == ConnectionTransitionReason::Superseded

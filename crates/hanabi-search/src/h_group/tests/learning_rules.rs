@@ -1,0 +1,2552 @@
+#[test]
+fn learning_path_metadata_covers_every_cumulative_level() {
+    assert_eq!(H_GROUP_LEVELS.len(), 26);
+    for (index, descriptor) in H_GROUP_LEVELS.iter().enumerate() {
+        assert_eq!(usize::from(descriptor.profile.effective_level()), index + 1);
+        assert!(!descriptor.title.is_empty());
+        assert!(!descriptor.effects.is_empty());
+    }
+    assert!(
+        H_GROUP_LEVELS[9]
+            .effects
+            .contains(&HGroupMoveKind::Directness)
+    );
+    assert_eq!(HGroupProfile::Max.effective_level(), 26);
+}
+
+#[test]
+fn level_thirteen_admits_the_opening_hard_three_self_bluff() {
+    let fixture = expert_replay_p4v0s9();
+    let state = fixture.state_at_turn(0).expect("opening position exists");
+    let actor = state.current_player();
+    let deductions = LogicalDeductions::new(state.view_for(actor).expect("actor has a view"))
+        .expect("valid deductions");
+    let bluff = replay_action_at_turn(&fixture, 0);
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    assert!(
+        candidates.iter().any(|candidate| candidate.action == bluff),
+        "Hard 3 Self-Bluff must be a convention-valid candidate: {candidates:#?}"
+    );
+    let after = fixture.state_at_turn(1).expect("Bluff clue is legal");
+    let recipient = after.current_player();
+    let recipient_deductions =
+        LogicalDeductions::new(after.view_for(recipient).expect("recipient has a view"))
+            .expect("valid recipient deductions");
+    let inferred = infer_h_group(&recipient_deductions, HGroupProfile::Max);
+    assert!(
+        inferred.playable_now.contains(&CardId::new(7)),
+        "Self-Bluff must tell Bob to blind-play his Finesse Position: {inferred:#?}"
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(bluff),
+        "the three-card Bluff must beat the ordinary rank-1 clue: {candidates:#?}"
+    );
+
+    let after_blind_play = fixture
+        .state_at_turn(2)
+        .expect("Bluff continuation is legal");
+    let cathy = after_blind_play.current_player();
+    let cathy_deductions =
+        LogicalDeductions::new(after_blind_play.view_for(cathy).expect("Cathy has a view"))
+            .expect("valid Cathy deductions");
+    let cathy_replay = replay_h_group(&cathy_deductions, HGroupProfile::Max);
+    assert!(
+        cathy_replay.required_fix.is_none(),
+        "a resolved Bluff must not leave an ordinary-connection Fix obligation"
+    );
+    let cathy_candidates = h_group_clue_candidates(&cathy_deductions, HGroupProfile::Max);
+    assert_eq!(
+        select_h_group_action(&cathy_deductions, HGroupProfile::Max),
+        Some(replay_action_at_turn(&fixture, 2)),
+        "Cathy should give the efficient rank-1 clue after the Bluff resolves: {cathy_candidates:#?}"
+    );
+
+    let after_multi_one = fixture
+        .state_at_turn(3)
+        .expect("multi-one clue is legal");
+    let donald = after_multi_one.current_player();
+    let donald_deductions =
+        LogicalDeductions::new(after_multi_one.view_for(donald).expect("Donald has a view"))
+            .expect("valid Donald deductions");
+    let donald_replay = replay_h_group(&donald_deductions, HGroupProfile::Max);
+    let donald_inferences =
+        infer_h_group_from_replay(&donald_deductions, donald_replay.clone(), HGroupProfile::Max);
+    assert!(donald_inferences.playable_now.contains(&CardId::new(12)));
+    assert!(donald_inferences.playable_now.contains(&CardId::new(13)));
+    assert_eq!(
+        select_h_group_action(&donald_deductions, HGroupProfile::Max),
+        Some(replay_action_at_turn(&fixture, 3)),
+        "Donald should prefer the playable 1 that advances the opening line"
+    );
+}
+
+#[test]
+fn second_replay_order_chop_move_protects_alices_red_two() {
+    let fixture = expert_replay_p4v0s9();
+    let after_skip = fixture
+        .state_at_turn(4)
+        .expect("the out-of-order red-1 play is legal");
+    let alice = after_skip.current_player();
+    let deductions =
+        LogicalDeductions::new(after_skip.view_for(alice).expect("Alice has a view"))
+            .expect("valid Alice deductions");
+    let replay = with_transition_recording(|| replay_h_group(&deductions, HGroupProfile::Max));
+
+    assert!(
+        replay.cards.chop_moved.contains(&CardId::new(0)),
+        "signals: {:#?}",
+        replay.signals
+    );
+    assert!(replay.signals.iter().any(|signal| {
+        signal.turn == 3
+            && signal.actor == PlayerId::new(3)
+            && signal.target == Some(PlayerId::new(0))
+            && signal.kind == HGroupMoveKind::OrderChopMove
+            && signal.cards == [CardId::new(0)]
+    }));
+    let order_chop_proposal = replay
+        .transitions
+        .iter()
+        .find(|transition| transition.turn == 3)
+        .and_then(|transition| {
+            transition.proposals.iter().find(|proposal| {
+                replay
+                    .signals
+                    .get(proposal.signal_range.clone())
+                    .is_some_and(|signals| {
+                        signals
+                            .iter()
+                            .any(|signal| signal.kind == HGroupMoveKind::OrderChopMove)
+                    })
+            })
+        })
+        .expect("the OCM has a causal rule proposal");
+    assert_eq!(order_chop_proposal.rule, HGroupRuleId::ChopMoves);
+    assert!(
+        order_chop_proposal
+            .mutations
+            .contains(MutationDomain::ChopMovement)
+    );
+
+    let bob_turn = fixture
+        .state_at_turn(5)
+        .expect("Alice's purple clue is legal");
+    let bob = bob_turn.current_player();
+    let bob_deductions =
+        LogicalDeductions::new(bob_turn.view_for(bob).expect("Bob has a view"))
+            .expect("valid Bob deductions");
+    let bob_candidates = h_group_clue_candidates(&bob_deductions, HGroupProfile::Max);
+    assert_eq!(
+        select_h_group_action(&bob_deductions, HGroupProfile::Max),
+        Some(replay_action_at_turn(&fixture, 5)),
+        "the rank-2 clue must load Alice's green 2 behind Donald's promised green 1; candidates: {bob_candidates:#?}",
+    );
+}
+
+#[test]
+fn clue_giver_does_not_prompt_their_own_ambiguous_rank_three() {
+    let fixture = expert_replay_p4v0s9();
+    let state = fixture
+        .state_at_turn(13)
+        .expect("the second replay prefix is legal");
+    let bob = state.current_player();
+    let deductions = LogicalDeductions::new(state.view_for(bob).expect("Bob has a view"))
+        .expect("valid Bob deductions");
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
+
+    assert!(
+        replay.pending_connections.iter().all(|connection| {
+            connection.actor != bob || !connection.cards.contains(&CardId::new(5))
+        }),
+        "Bob cannot knowingly use his merely-compatible rank 3 as his own Prompt: {:#?}",
+        replay.pending_connections
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(replay_action_at_turn(&fixture, 13))
+    );
+}
+
+#[test]
+fn purple_to_donald_does_not_promise_cathys_ambiguous_purple_four() {
+    let fixture = expert_replay_p4v0s9();
+    let state = fixture
+        .state_at_turn(9)
+        .expect("the second replay prefix is legal");
+    let bob = state.current_player();
+    let view = state.view_for(bob).expect("Bob has a view");
+    let donald = PlayerId::new(3);
+    let purple = Clue::Suit(Suit::Purple);
+    let touched = view.hands[donald.index()]
+        .iter()
+        .filter(|card| card.identity.is_some_and(|identity| purple.matches(identity)))
+        .map(|card| card.id)
+        .collect::<Vec<_>>();
+    let after = prospective_clue_view(&view, donald, purple, &touched);
+    let cathy = PlayerId::new(2);
+    let (cathy_deductions, cathy_replay) =
+        projected_h_group_replay(&after, HGroupProfile::Max, cathy)
+            .expect("Cathy can interpret the prospective clue");
+    let inferred = infer_h_group_from_replay(
+        &cathy_deductions,
+        cathy_replay,
+        HGroupProfile::Max,
+    );
+    let purple_card = inferred
+        .cards
+        .iter()
+        .find(|note| note.card == CardId::new(9))
+        .expect("Cathy retains a note for her purple card");
+
+    assert!(
+        purple_card
+            .identities
+            .contains(Card::new(Suit::Purple, Rank::Four))
+    );
+    assert!(
+        purple_card
+            .identities
+            .contains(Card::new(Suit::Purple, Rank::Five))
+    );
+    assert!(!inferred.playable_now.contains(&CardId::new(9)));
+}
+
+#[test]
+fn second_replay_rank_four_secures_more_than_purple_to_donald() {
+    let fixture = expert_replay_p4v0s9();
+    let state = fixture
+        .state_at_turn(9)
+        .expect("the second replay prefix is legal");
+    let bob = state.current_player();
+    let deductions = LogicalDeductions::new(state.view_for(bob).expect("Bob has a view"))
+        .expect("valid Bob deductions");
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(replay_action_at_turn(&fixture, 9)),
+        "rank 4 uniquely secures Cathy's purple 4 and must not receive a Directness penalty: {candidates:#?}"
+    );
+}
+
+#[test]
+fn second_replay_rank_one_trash_chop_move_is_admitted() {
+    let fixture = expert_replay_p4v0s9();
+    let state = fixture
+        .state_at_turn(14)
+        .expect("the second replay prefix is legal");
+    let cathy = state.current_player();
+    let deductions = LogicalDeductions::new(state.view_for(cathy).expect("Cathy has a view"))
+        .expect("valid Cathy deductions");
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    assert!(
+        candidates.iter().any(|candidate| {
+            candidate.action == replay_action_at_turn(&fixture, 14)
+                && candidate.recognition == ClueRecognition::RecipientReplay
+        }),
+        "rank 1 on Alice's trash purple 1 must be admitted as a Trash Chop Move: {candidates:#?}"
+    );
+}
+
+/// <https://hanabi.github.io/level-14/#the-trash-order-chop-move-tocm>
+#[test]
+fn trash_order_chop_move_uses_the_number_of_skipped_known_trash_cards() {
+    let mut state = state_with_prefix(
+        3,
+        &[
+            Card::new(Suit::Red, Rank::One),
+            Card::new(Suit::Red, Rank::One),
+            Card::new(Suit::Blue, Rank::Four),
+            Card::new(Suit::Green, Rank::Four),
+            Card::new(Suit::Purple, Rank::Four),
+            Card::new(Suit::Red, Rank::One),
+            Card::new(Suit::Yellow, Rank::Four),
+            Card::new(Suit::Blue, Rank::Five),
+            Card::new(Suit::Green, Rank::Five),
+            Card::new(Suit::Purple, Rank::Five),
+        ],
+    );
+    state
+        .apply(Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Red),
+        })
+        .unwrap();
+    state.apply(Action::Play(CardId::new(5))).unwrap();
+    state
+        .apply(Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Red),
+        })
+        .unwrap();
+    state
+        .apply(Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Five),
+        })
+        .unwrap();
+    state
+        .apply(Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::One),
+        })
+        .unwrap();
+    let player_two_chop = state.hands()[2][0];
+    state.apply(Action::Discard(player_two_chop)).unwrap();
+    state.apply(Action::Discard(CardId::new(1))).unwrap();
+
+    let observer = state.current_player();
+    assert_eq!(observer, PlayerId::new(1));
+    let deductions = LogicalDeductions::new(state.view_for(observer).unwrap()).unwrap();
+    let max = replay_h_group(&deductions, HGroupProfile::Max);
+    assert!(
+        max.cards.chop_moved.contains(&CardId::new(6)),
+        "hands={:?}; signals={:#?}",
+        max.hands,
+        max.signals
+    );
+    assert!(max.signals.iter().any(|signal| {
+        signal.turn == 6
+            && signal.actor == PlayerId::new(0)
+            && signal.target == Some(PlayerId::new(1))
+            && signal.kind == HGroupMoveKind::TrashOrderChopMove
+            && signal.cards == [CardId::new(6)]
+    }));
+
+    let level_13 = replay_h_group(
+        &deductions,
+        HGroupProfile::Level(crate::HGroupLevel::Level13),
+    );
+    assert!(!level_13.cards.chop_moved.contains(&CardId::new(6)));
+}
+
+#[test]
+fn level_two_enables_an_off_chop_five_stall() {
+    let state = state_with_prefix(
+        2,
+        &[
+            Card::new(Suit::Blue, Rank::Three),
+            Card::new(Suit::Green, Rank::Three),
+            Card::new(Suit::Yellow, Rank::Four),
+            Card::new(Suit::Purple, Rank::Four),
+            Card::new(Suit::Red, Rank::Three),
+            Card::new(Suit::Blue, Rank::One),
+            Card::new(Suit::Red, Rank::Five),
+            Card::new(Suit::Green, Rank::Four),
+            Card::new(Suit::Yellow, Rank::Three),
+            Card::new(Suit::Purple, Rank::Four),
+        ],
+    );
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let five_stall = Action::Clue {
+        target: PlayerId::new(1),
+        clue: Clue::Rank(Rank::Five),
+    };
+    let level_one = h_group_clue_candidates(&deductions, HGroupProfile::Level(HGroupLevel::Level1));
+    let level_two = h_group_clue_candidates(&deductions, HGroupProfile::Level(HGroupLevel::Level2));
+    let level_one_score = level_one
+        .iter()
+        .find(|candidate| candidate.action == five_stall)
+        .map(|candidate| candidate.score());
+    let level_two_score = level_two
+        .iter()
+        .find(|candidate| candidate.action == five_stall)
+        .map(|candidate| candidate.score());
+    assert!(level_two_score > level_one_score);
+}
+
+#[test]
+fn level_five_keeps_a_layered_finesse_as_an_exact_disjunction() {
+    let mut state = state_with_prefix(
+        3,
+        &[
+            Card::new(Suit::Blue, Rank::Four),
+            Card::new(Suit::Green, Rank::Four),
+            Card::new(Suit::Yellow, Rank::Three),
+            Card::new(Suit::Purple, Rank::Four),
+            Card::new(Suit::Blue, Rank::Five),
+            Card::new(Suit::Yellow, Rank::Four),
+            Card::new(Suit::Purple, Rank::Three),
+            Card::new(Suit::Blue, Rank::Four),
+            Card::new(Suit::Red, Rank::One),
+            Card::new(Suit::Green, Rank::One),
+            Card::new(Suit::Red, Rank::Two),
+            Card::new(Suit::Blue, Rank::Three),
+            Card::new(Suit::Green, Rank::Four),
+            Card::new(Suit::Yellow, Rank::Five),
+            Card::new(Suit::Purple, Rank::Four),
+        ],
+    );
+    state
+        .apply(Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        })
+        .unwrap();
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    let level_four = infer_h_group(&deductions, HGroupProfile::Level(HGroupLevel::Level4));
+    let level_five = infer_h_group(&deductions, HGroupProfile::Level(HGroupLevel::Level5));
+    assert_eq!(
+        level_four.connection_promises[0].cards,
+        vec![CardId::new(9)]
+    );
+    assert_eq!(
+        level_five.connection_promises[0].cards[..2],
+        [CardId::new(9), CardId::new(8)]
+    );
+    assert!(
+        level_five
+            .signals
+            .iter()
+            .any(|signal| signal.kind == HGroupMoveKind::LayeredFinesse)
+    );
+}
+
+#[test]
+fn level_sixteen_ejects_the_second_finesse_position() {
+    let mut state = state_with_prefix(
+        3,
+        &[
+            Card::new(Suit::Blue, Rank::Three),
+            Card::new(Suit::Green, Rank::Four),
+            Card::new(Suit::Yellow, Rank::Three),
+            Card::new(Suit::Purple, Rank::Four),
+            Card::new(Suit::Blue, Rank::Five),
+            Card::new(Suit::Yellow, Rank::Four),
+            Card::new(Suit::Purple, Rank::Three),
+            Card::new(Suit::Blue, Rank::Four),
+            Card::new(Suit::Green, Rank::One),
+            Card::new(Suit::Yellow, Rank::One),
+            Card::new(Suit::Red, Rank::Five),
+            Card::new(Suit::Blue, Rank::Three),
+            Card::new(Suit::Green, Rank::Four),
+            Card::new(Suit::Yellow, Rank::Five),
+            Card::new(Suit::Purple, Rank::Four),
+        ],
+    );
+    state
+        .apply(Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        })
+        .unwrap();
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    let level_fifteen = infer_h_group(&deductions, HGroupProfile::Level(HGroupLevel::Level15));
+    let level_sixteen = infer_h_group(&deductions, HGroupProfile::Level(HGroupLevel::Level16));
+    assert!(!level_fifteen.playable_now.contains(&CardId::new(8)));
+    assert!(level_sixteen.connection.is_none());
+    assert!(
+        level_sixteen.playable_now.contains(&CardId::new(8)),
+        "inference: {level_sixteen:#?}"
+    );
+    assert!(
+        level_sixteen
+            .signals
+            .iter()
+            .any(|signal| signal.kind == HGroupMoveKind::FiveColorEjection)
+    );
+}
+
+#[test]
+fn focus_prefers_chop_when_a_clue_newly_touches_multiple_cards() {
+    let red_one = Card::new(Suit::Red, Rank::One);
+    let mut state = state_with_prefix(
+        2,
+        &[
+            red_one,
+            Card::new(Suit::Blue, Rank::Three),
+            Card::new(Suit::Green, Rank::Four),
+            Card::new(Suit::Yellow, Rank::Three),
+            Card::new(Suit::Purple, Rank::Four),
+            red_one,
+            Card::new(Suit::Blue, Rank::One),
+            Card::new(Suit::Green, Rank::Four),
+            Card::new(Suit::Yellow, Rank::One),
+            red_one,
+        ],
+    );
+    state
+        .apply(Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::One),
+        })
+        .unwrap();
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    let inferred = infer_h_group(
+        &deductions,
+        HGroupProfile::Level(crate::HGroupLevel::Level1),
+    );
+    assert_eq!(inferred.clues[0].focus, CardId::new(5));
+    assert!(inferred.clues[0].focus_was_chop);
+}
+
+#[test]
+fn focus_rules_cover_retouched_single_and_leftmost_new_cards() {
+    let hand = (0..5).map(CardId::new).collect::<Vec<_>>();
+    let gotten = [CardId::new(0), CardId::new(1)]
+        .into_iter()
+        .collect::<CardSet>();
+    let current_chop = chop(&hand, &gotten);
+    assert_eq!(current_chop, Some(CardId::new(2)));
+    assert_eq!(
+        focus(
+            &hand,
+            &[CardId::new(0), CardId::new(1)],
+            current_chop,
+            &gotten,
+        ),
+        Some(CardId::new(1))
+    );
+    assert_eq!(
+        focus(
+            &hand,
+            &[CardId::new(0), CardId::new(3)],
+            current_chop,
+            &gotten,
+        ),
+        Some(CardId::new(3))
+    );
+    assert_eq!(
+        focus(
+            &hand,
+            &[CardId::new(3), CardId::new(4)],
+            current_chop,
+            &gotten,
+        ),
+        Some(CardId::new(4))
+    );
+    assert_eq!(
+        focus(
+            &hand,
+            &[CardId::new(2), CardId::new(3)],
+            current_chop,
+            &gotten,
+        ),
+        Some(CardId::new(2))
+    );
+}
+
+#[test]
+fn two_save_is_followed_by_the_more_efficient_rank_one_play_clue() {
+    let mut state = paired_sample_five_state();
+    state
+        .apply(Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        })
+        .unwrap();
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        }),
+        "candidates: {:#?}",
+        h_group_clue_candidates(&deductions, HGroupProfile::Max),
+    );
+}
+
+#[test]
+fn out_of_order_clue_is_not_given_to_the_immediate_next_player() {
+    let mut state = paired_sample_five_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Play(CardId::new(12)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    assert!(
+        !candidates.iter().any(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(2),
+                    clue: Clue::Suit(Suit::Blue),
+                }
+        }),
+        "the recipient would act before anyone could give the required Fix Clue: {candidates:#?}"
+    );
+}
+
+#[test]
+fn multi_card_purple_clue_prompts_purple_one_before_purple_two() {
+    let mut state = paired_sample_two_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Purple),
+        },
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    assert_eq!(inferred.connection, None);
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(0))),
+        "inference: {inferred:#?}; clues: {:#?}",
+        h_group_clue_candidates(&deductions, HGroupProfile::Max)
+    );
+}
+
+#[test]
+fn repeated_two_clue_does_not_play_red_two_before_its_prompt() {
+    let mut state = paired_sample_two_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(0)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Play(CardId::new(4)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(10)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    assert_ne!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(5))),
+        "inference: {inferred:#?}"
+    );
+}
+
+#[test]
+fn delayed_green_three_without_connectors_is_not_a_fix_clue() {
+    let mut state = paired_sample_two_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(0)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Play(CardId::new(4)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(10)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    assert!(
+        !candidates.iter().any(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(0),
+                    clue: Clue::Suit(Suit::Green),
+                }
+        }),
+        "candidates: {candidates:#?}"
+    );
+    assert!(
+        !candidates.iter().any(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(2),
+                    clue: Clue::Suit(Suit::Blue),
+                }
+        }),
+        "a blue-4 out-of-order clue has no accounted blue 2: {candidates:#?}"
+    );
+}
+
+#[test]
+fn self_prompt_survives_an_intervening_fix_clue() {
+    let mut state = paired_sample_three_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Play(CardId::new(3)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Three),
+        },
+        Action::Play(CardId::new(2)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Play(CardId::new(12)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+
+    assert_ne!(
+        h_group_predictable_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(26))),
+        "yellow 4 cannot be a predictable play before yellow 3: {inferred:#?}"
+    );
+    assert_ne!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(9))),
+        "inference: {inferred:#?}"
+    );
+}
+
+#[test]
+fn immediate_rank_three_clue_is_rejected_when_it_creates_a_false_self_prompt() {
+    let mut state = paired_sample_one_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Play(CardId::new(1)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::One),
+        },
+    ] {
+        state.apply(action).unwrap();
+    }
+    let action = Action::Clue {
+        target: PlayerId::new(1),
+        clue: Clue::Rank(Rank::Three),
+    };
+    let giver = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
+    assert!(
+        !h_group_clue_candidates(&giver, HGroupProfile::Max)
+            .iter()
+            .any(|candidate| candidate.action == action),
+        "candidates: {:#?}",
+        h_group_clue_candidates(&giver, HGroupProfile::Max),
+    );
+}
+
+#[test]
+fn five_color_ejection_is_not_given_when_second_finesse_position_would_misplay() {
+    let mut state = paired_sample_seven_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Play(CardId::new(12)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Green),
+        },
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    let candidates = ordered_h_group_actions(&deductions, HGroupProfile::Max);
+
+    assert!(!candidates.contains(&Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Suit(Suit::Purple),
+    }));
+}
+
+#[test]
+fn duplicate_rank_ones_use_a_focused_play_clue_instead_of_ignition() {
+    let mut state = paired_sample_one_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Play(CardId::new(1)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Play(CardId::new(4)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+
+    let rank_one = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Rank(Rank::One),
+    };
+    assert!(ordered_h_group_actions(&deductions, HGroupProfile::Max).contains(&rank_one));
+
+    state.apply(rank_one).unwrap();
+    let receiver = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
+    let inferred = infer_h_group(&receiver, HGroupProfile::Max);
+    assert_eq!(
+        select_h_group_action(&receiver, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(13)))
+    );
+    assert!(!inferred.playable_now.contains(&CardId::new(11)));
+    assert!(!inferred.playable_now.contains(&CardId::new(12)));
+}
+
+#[test]
+fn delayed_green_four_is_not_clued_over_an_invalid_finesse() {
+    let mut state = paired_sample_zero_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Play(CardId::new(0)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    let clue_candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    assert!(
+        !clue_candidates.iter().any(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(0),
+                    clue: Clue::Suit(Suit::Green),
+                }
+        }),
+        "candidates: {clue_candidates:#?}, inference: {:#?}",
+        infer_h_group(&deductions, HGroupProfile::Max)
+    );
+}
+
+#[test]
+fn low_score_five_stall_does_not_also_finesse_the_next_player() {
+    let mut state = paired_sample_zero_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Play(CardId::new(0)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Five),
+        },
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+
+    assert_eq!(inferred.connection, None);
+    assert_ne!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(16)))
+    );
+}
+
+#[test]
+fn completed_blue_prompt_plays_the_focus_before_same_clue_ancillary_cards() {
+    let profile = HGroupProfile::Level(HGroupLevel::Level25);
+    let mut state = paired_sample_zero_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(13)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let inferred = infer_h_group(&deductions, profile);
+
+    assert_eq!(
+        select_h_group_action(&deductions, profile),
+        Some(Action::Play(CardId::new(0))),
+        "inference: {inferred:#?}"
+    );
+}
+
+#[test]
+fn tempo_clue_does_not_reclue_an_active_play_promise() {
+    let mut state = paired_sample_zero_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Play(CardId::new(0)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Blue),
+        },
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    assert!(
+        !candidates.iter().any(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(1),
+                    clue: Clue::Suit(Suit::Blue),
+                }
+        }),
+        "candidates: {candidates:#?}"
+    );
+}
+
+#[test]
+fn out_of_order_fix_obligation_selects_the_repairing_rank_clue() {
+    let profile = HGroupProfile::Level(HGroupLevel::Level25);
+    let mut state = paired_sample_one_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(1)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Green),
+        },
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
+    let inferred = infer_h_group(&deductions, profile);
+
+    assert_eq!(
+        select_h_group_action(&deductions, profile),
+        Some(Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Two),
+        }),
+        "inference: {inferred:#?}"
+    );
+}
+
+#[test]
+fn collateral_fix_cancels_the_false_finesse_it_would_otherwise_create() {
+    let mut state = paired_sample_one_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(1)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Green),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Play(CardId::new(4)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Purple),
+        },
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+
+    assert_ne!(
+        inferred.connection.map(|connection| connection.card),
+        Some(CardId::new(15)),
+        "inference: {inferred:#?}"
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(13))),
+        "inference: {inferred:#?}"
+    );
+}
+
+#[test]
+fn rank_two_clue_can_prompt_red_one_while_good_touching_a_purple_two() {
+    let mut state = paired_sample_one_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Play(CardId::new(1)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Play(CardId::new(4)),
+        Action::Play(CardId::new(6)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Play(CardId::new(17)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Discard(CardId::new(11)),
+        Action::Play(CardId::new(2)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    assert!(
+        candidates.iter().any(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(2),
+                    clue: Clue::Rank(Rank::Two),
+                }
+        }),
+        "the newer red 2 is the focus and the red 1 is its valid Self-Prompt: {candidates:#?}"
+    );
+}
+
+#[test]
+fn blue_three_clue_is_rejected_when_its_blue_two_finesse_would_misplay() {
+    let mut state = paired_sample_one_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(8)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Play(CardId::new(5)),
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Play(CardId::new(1)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Three),
+        },
+        Action::Play(CardId::new(4)),
+        Action::Play(CardId::new(6)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    assert!(
+        !candidates.iter().any(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(1),
+                    clue: Clue::Suit(Suit::Blue),
+                }
+        }),
+        "candidates: {candidates:#?}"
+    );
+}
+
+#[test]
+fn two_save_does_not_finesse_the_next_players_green_four() {
+    let mut state = paired_sample_three_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Play(CardId::new(2)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Two),
+        },
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+
+    assert_ne!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(16))),
+        "inference: {inferred:#?}"
+    );
+}
+
+#[test]
+fn multi_card_red_clue_rejects_a_chop_moved_false_prompt() {
+    let mut state = paired_sample_five_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(3)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Green),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Play(CardId::new(0)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Discard(CardId::new(17)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Discard(CardId::new(11)),
+        Action::Play(CardId::new(19)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Discard(CardId::new(12)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let giver = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let replay = replay_h_group(&giver, HGroupProfile::Max);
+    assert!(
+        !replay.cards.explicitly_clued.contains(&CardId::new(8))
+            && !replay.cards.invisibly_clued.contains(&CardId::new(8)),
+        "the false Prompt card must not be promptable: {replay:#?}"
+    );
+    let candidates = h_group_clue_candidates(&giver, HGroupProfile::Max);
+    assert!(
+        !candidates.iter().any(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(1),
+                    clue: Clue::Suit(Suit::Red),
+                }
+        }),
+        "the giver must reject a clue its recipient would misplay: {candidates:#?}"
+    );
+    assert_ne!(
+        select_h_group_action(&giver, HGroupProfile::Max),
+        Some(Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Red),
+        }),
+        "candidate fallback selected the rejected clue: {candidates:#?}"
+    );
+}
+
+#[test]
+fn unknown_trash_discharge_is_rejected_when_third_finesse_would_misplay() {
+    let mut state = paired_sample_two_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(0)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Play(CardId::new(4)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(10)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let invalid = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Rank(Rank::One),
+    };
+
+    assert!(
+        !candidates
+            .iter()
+            .any(|candidate| candidate.action == invalid),
+        "candidates: {candidates:#?}"
+    );
+    assert_ne!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(invalid),
+        "candidates: {candidates:#?}"
+    );
+}
+
+#[test]
+fn anxiety_plays_the_known_blue_four_instead_of_blind_yellow_four() {
+    let mut state = paired_sample_zero_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Play(CardId::new(0)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::Four),
+        },
+        Action::Play(CardId::new(7)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Five),
+        },
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(2))),
+        "inference: {inferred:#?}"
+    );
+}
+
+#[test]
+fn green_clue_is_rejected_when_the_next_player_would_misplay_yellow_four() {
+    let mut state = paired_sample_zero_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Play(CardId::new(0)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::Four),
+        },
+        Action::Play(CardId::new(7)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Play(CardId::new(2)),
+        Action::Discard(CardId::new(6)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(4)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Discard(CardId::new(11)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Discard(CardId::new(8)),
+        Action::Play(CardId::new(22)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Discard(CardId::new(18)),
+        Action::Play(CardId::new(12)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Discard(CardId::new(23)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
+    let clue = Action::Clue {
+        target: PlayerId::new(1),
+        clue: Clue::Suit(Suit::Green),
+    };
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    assert!(
+        candidates.iter().any(|candidate| candidate.action == clue),
+        "expected the direct green-1 clue to be valid: {candidates:#?}"
+    );
+    state.apply(clue).unwrap();
+    let receiver = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let inferred = infer_h_group(&receiver, HGroupProfile::Max);
+    assert_ne!(
+        select_h_group_action(&receiver, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(17))),
+        "inference: {inferred:#?}"
+    );
+}
+
+#[test]
+fn fixed_red_one_is_not_a_priority_alternative_to_blue_four() {
+    let mut state = paired_sample_two_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(0)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Play(CardId::new(4)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(10)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::Four),
+        },
+        Action::Discard(CardId::new(6)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Discard(CardId::new(2)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(19)),
+        Action::Discard(CardId::new(3)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Discard(CardId::new(11)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(7)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(16))),
+        "inference: {inferred:#?}"
+    );
+    state.apply(Action::Play(CardId::new(16))).unwrap();
+    let next = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let next_inferred = infer_h_group(&next, HGroupProfile::Max);
+    assert_ne!(
+        select_h_group_action(&next, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(23))),
+        "a fixed card cannot induce a Priority Finesse: {next_inferred:#?}"
+    );
+}
+
+#[test]
+fn delayed_green_four_without_connectors_is_not_a_play_clue() {
+    let mut state = paired_sample_zero_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Play(CardId::new(0)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(7)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    assert!(
+        !candidates.iter().any(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(0),
+                    clue: Clue::Suit(Suit::Green),
+                }
+        }),
+        "candidates: {candidates:#?}, inference: {:#?}",
+        infer_h_group(&deductions, HGroupProfile::Max)
+    );
+}
+
+#[test]
+fn existing_blue_one_satisfies_a_later_blue_connection() {
+    let profile = HGroupProfile::Level(HGroupLevel::Level25);
+    let mut state = paired_sample_zero_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue),
+        },
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
+    assert_eq!(
+        select_h_group_action(&deductions, profile),
+        Some(Action::Play(CardId::new(13))),
+        "inference: {:#?}; clues: {:#?}; actions: {:#?}",
+        infer_h_group(&deductions, profile),
+        h_group_clue_candidates(&deductions, profile),
+        ordered_h_group_actions(&deductions, profile),
+    );
+}
+
+/// <https://hanabi.github.io/extras/chop-moves/#double-order-chop-move-for-3-player-games>
+#[test]
+fn max_turns_a_three_player_three_skip_into_a_double_order_chop_move() {
+    let mut state = paired_sample_zero_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let numbered = infer_h_group(
+        &deductions,
+        HGroupProfile::Level(HGroupLevel::Level25),
+    );
+    let maximum = infer_h_group(&deductions, HGroupProfile::Max);
+
+    assert!(numbered.signals.iter().any(|signal| {
+        signal.turn == 2
+            && signal.kind == HGroupMoveKind::OrderChopMove
+            && signal.cards == [CardId::new(10)]
+    }));
+    assert!(maximum.signals.iter().any(|signal| {
+        signal.turn == 2
+            && signal.kind == HGroupMoveKind::DoubleOrderChopMove
+            && signal.cards == [CardId::new(0), CardId::new(1)]
+    }));
+}
+
+#[test]
+fn red_five_connection_uses_existing_red_one_prompt() {
+    let mut state = paired_sample_zero_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Play(CardId::new(0)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(7)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Discard(CardId::new(3)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Red),
+        },
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+
+    assert_ne!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(16))),
+        "inference: {inferred:#?}"
+    );
+}
+
+#[test]
+fn layered_red_four_connection_is_not_discarded() {
+    let mut state = paired_sample_zero_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Play(CardId::new(0)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(7)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Discard(CardId::new(3)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Discard(CardId::new(15)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(18)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+
+    assert_ne!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Discard(CardId::new(16))),
+        "inference: {inferred:#?}"
+    );
+}
+
+#[test]
+fn multi_yellow_clue_does_not_play_non_focus_yellow_four() {
+    let mut state = paired_sample_zero_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Play(CardId::new(0)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(7)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Play(CardId::new(2)),
+        Action::Discard(CardId::new(18)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Play(CardId::new(4)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Discard(CardId::new(15)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+
+    assert_ne!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(17))),
+        "inference: {inferred:#?}"
+    );
+}
+
+#[test]
+fn extra_clue_does_not_create_an_invalid_purple_two_finesse() {
+    let mut state = paired_sample_one_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Play(CardId::new(1)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Play(CardId::new(4)),
+        Action::Play(CardId::new(6)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Play(CardId::new(17)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Play(CardId::new(12)),
+        Action::Discard(CardId::new(0)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Green),
+        },
+        Action::Discard(CardId::new(15)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    assert!(
+        !candidates.iter().any(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(2),
+                    clue: Clue::Rank(Rank::Two),
+                }
+        }),
+        "candidates: {candidates:#?}"
+    );
+}
+
+#[test]
+fn color_clue_to_an_unplayable_five_is_not_a_play_clue() {
+    let mut state = paired_sample_two_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(0)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Play(CardId::new(4)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(10)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    assert!(
+        !candidates.iter().any(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(0),
+                    clue: Clue::Suit(Suit::Red),
+                }
+        }),
+        "candidates: {candidates:#?}"
+    );
+}
+
+#[test]
+fn bluff_is_not_given_to_a_player_with_a_queued_play() {
+    let mut state = paired_sample_two_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(0)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Play(CardId::new(4)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(10)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Play(CardId::new(17)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    assert!(
+        !candidates.iter().any(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(0),
+                    clue: Clue::Suit(Suit::Yellow),
+                }
+        }),
+        "James already has a queued red 1, so a Bluff cannot resolve immediately: {candidates:#?}"
+    );
+}
+
+#[test]
+fn trash_chop_move_requires_publicly_known_trash() {
+    let mut state = paired_sample_two_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(0)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Play(CardId::new(4)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(10)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Play(CardId::new(17)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    assert!(
+        !candidates.iter().any(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(0),
+                    clue: Clue::Suit(Suit::Purple),
+                }
+        }),
+        "the recipient could interpret the fresh purple 1 as purple 4: {candidates:#?}"
+    );
+}
+
+#[test]
+fn ordinary_discard_does_not_finesse_the_matching_card() {
+    let mut state = paired_sample_two_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(0)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Play(CardId::new(4)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(10)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Play(CardId::new(12)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Discard(CardId::new(7)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Discard(CardId::new(2)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+
+    assert!(
+        !inferred.playable_now.contains(&CardId::new(6)),
+        "inference: {inferred:#?}"
+    );
+    assert_ne!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(6))),
+        "inference: {inferred:#?}"
+    );
+}
+
+#[test]
+fn no_information_reclue_does_not_fix_an_unqueued_card() {
+    let mut state = paired_sample_zero_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(13)),
+        Action::Play(CardId::new(0)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(7)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Play(CardId::new(2)),
+        Action::Discard(CardId::new(18)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Play(CardId::new(4)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Discard(CardId::new(15)),
+        Action::Play(CardId::new(21)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    assert!(
+        !candidates.iter().any(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(0),
+                    clue: Clue::Suit(Suit::Yellow),
+                }
+        }),
+        "the yellow 4 is not queued and the clue adds no information: {candidates:#?}"
+    );
+}
+
+#[test]
+fn out_of_order_red_clue_is_not_given_without_time_for_a_fix() {
+    let mut state = paired_sample_zero_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    assert!(
+        !candidates.iter().any(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(1),
+                    clue: Clue::Suit(Suit::Red),
+                }
+        }),
+        "the recipient would act before the out-of-order Fix Clue: {candidates:#?}"
+    );
+}
+
+#[test]
+fn duplicate_rank_ones_are_fixed_before_optional_play_clues() {
+    let mut state = paired_sample_one_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        })
+    );
+}
+
+#[test]
+fn out_of_order_red_chain_requires_its_fix_clue() {
+    let mut state = paired_sample_zero_state();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(14)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Play(CardId::new(8)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Red),
+        },
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Four),
+        }),
+        "the out-of-order red-4 focus must be fixed before the recipient acts: {inferred:#?}"
+    );
+}
+
+#[test]
+fn corrected_two_save_continuation_uses_a_yellow_one_before_discarding_its_duplicate() {
+    let convention = crate::SupportedConvention::HGroup(HGroupProfile::Max);
+    let mut state = paired_sample_five_state();
+    state
+        .apply(Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Two),
+        })
+        .unwrap();
+    let report = continuation_for_search(state, convention).unwrap();
+
+    assert_eq!(
+        report.outcome.actions().first(),
+        Some(&Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::One),
+        })
+    );
+    let actions = report.outcome.actions();
+    let discard = actions
+        .iter()
+        .position(|action| *action == Action::Discard(CardId::new(14)));
+    if let Some(discard) = discard {
+        assert!(
+            actions[..discard]
+                .iter()
+                .any(|action| *action == Action::Play(CardId::new(3))),
+            "a live yellow 1 was discarded before its duplicate played: {actions:?}",
+        );
+    }
+    assert!(
+        actions.contains(&Action::Play(CardId::new(3)))
+            || actions.contains(&Action::Play(CardId::new(14))),
+        "neither yellow 1 was used: {actions:?}",
+    );
+}
+
+#[test]
+fn five_save_does_not_also_pull_the_adjacent_purple_four() {
+    let state = paired_sample_five_after_second_five_save();
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+
+    assert!(
+        inferred.saved.contains(&CardId::new(19)),
+        "inference: {inferred:#?}"
+    );
+    assert!(!inferred.playable_now.contains(&CardId::new(4)));
+    assert!(
+        !inferred
+            .signals
+            .iter()
+            .any(|signal| { signal.turn == 14 && signal.kind == HGroupMoveKind::FivePull })
+    );
+}

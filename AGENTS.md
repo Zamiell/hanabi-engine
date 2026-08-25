@@ -1,33 +1,18 @@
 # Repository Instructions
 
-## WSL file ownership
+## Windows Subsystem for Linux (WSL) file ownership
 
-This repository lives in Ubuntu WSL at `/home/james/repositories/hanabi-engine`.
-All repository files and directories must remain owned by `james:james`.
+If this repository is cloned inside WSL, ensure that newly created files are
+owned by the same user and group as the repository parent. Windows-hosted
+editing tools can accidentally create files owned by `root:root`.
 
-Windows-hosted editing tools can create new WSL files as `root:root`. After
-creating any file or directory, verify its ownership and correct it immediately
-when necessary:
+## Validation
 
-```powershell
-wsl.exe -d Ubuntu -u root -- chown james:james /home/james/repositories/hanabi-engine/<exact-path>
-```
-
-Use `chown -R` only when the exact directory being corrected has first been
-verified to be inside this repository. Never run a recursive ownership command
-against `/home/james`, `/home/james/repositories`, `/`, or an unresolved path.
-
-Before completing work, audit the repository for ownership problems:
+While working, run the checks most relevant to the files being changed. Before
+completing a task, run the repository's full validation suite:
 
 ```bash
-find /home/james/repositories/hanabi-engine -xdev \
-  \( ! -user james -o ! -group james \) -print
+scripts/check.sh
 ```
 
-If that audit returns paths, correct only those results. From a Windows-hosted
-session, the following command safely confines the repair to this repository:
-
-```powershell
-wsl.exe -d Ubuntu -u root -- find /home/james/repositories/hanabi-engine -xdev `
-  \( ! -user james -o ! -group james \) -exec chown james:james -- {} +
-```
+If the full suite cannot be run, report which checks were skipped and why.

@@ -172,7 +172,39 @@ pub struct PlannerActionEvaluation {
     pub immediately_playable_touched: u8,
     pub critical_touched: u8,
     pub oldest_card_touched: bool,
+    /// Convention-forced public continuation with unresolved draws kept blank.
+    pub symbolic_line: SymbolicLineOutcome,
     pub exact: Option<ExactActionValue>,
+}
+
+/// Deterministic consequences reachable before a genuine choice or unknown
+/// identity branch interrupts the projected line.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SymbolicLineOutcome {
+    pub actions: u8,
+    pub score_gain: u8,
+    pub discards: u8,
+    pub clues_spent: u8,
+    pub clues_gained: u8,
+    pub strikes: u8,
+    pub identity_branch: bool,
+    pub reached_limit: bool,
+}
+
+impl SymbolicLineOutcome {
+    fn compare(self, other: Self) -> Ordering {
+        other
+            .strikes
+            .cmp(&self.strikes)
+            .then_with(|| self.score_gain.cmp(&other.score_gain))
+            .then_with(|| self.net_clues().cmp(&other.net_clues()))
+            .then_with(|| other.discards.cmp(&self.discards))
+            .then_with(|| self.actions.cmp(&other.actions))
+    }
+
+    fn net_clues(self) -> i16 {
+        i16::from(self.clues_gained) - i16::from(self.clues_spent)
+    }
 }
 
 /// Result of deterministic symbolic planning or an exhaustive endgame solve.
@@ -229,6 +261,28 @@ pub(crate) fn plan_move_with_analysis(
         .copied()
         .map(|action| symbolic_evaluation(deductions, action))
         .collect::<Vec<_>>();
+
+    // Forced-line projection is comparatively expensive and is meaningful
+    // only among candidates the convention already considers equivalent.
+    // Semantic obligations and the convention's explicit preferred action
+    // therefore remain authoritative.
+    let best_priority = evaluations
+        .iter()
+        .map(|evaluation| evaluation.convention_priority)
+        .max()
+        .unwrap_or(i32::MIN);
+    let best_priority_count = evaluations
+        .iter()
+        .filter(|evaluation| evaluation.convention_priority == best_priority)
+        .count();
+    if best_priority_count > 1 {
+        for evaluation in &mut evaluations {
+            if evaluation.convention_priority == best_priority {
+                evaluation.symbolic_line =
+                    convention.project_symbolic_line(deductions.view(), evaluation.action, 32);
+            }
+        }
+    }
 
     let belief = &analysis.belief_constraints;
     let count = information_set.world_count_up_to(belief, config.exact_world_limit);
@@ -317,6 +371,7 @@ fn planning_candidates(analysis: &ConventionAnalysis) -> Cow<'_, [ConventionActi
                     .unwrap_or(ConventionAction {
                         action: forced,
                         priority: 0,
+                        reason: crate::ConventionActionReason::Fallback,
                     }),
             ])
         },
@@ -382,6 +437,7 @@ fn symbolic_evaluation(
         immediately_playable_touched,
         critical_touched,
         oldest_card_touched,
+        symbolic_line: SymbolicLineOutcome::default(),
         exact: None,
     }
 }
@@ -436,6 +492,7 @@ fn best_symbolic_index(
                 .then_with(|| {
                     (preferred == Some(left.action)).cmp(&(preferred == Some(right.action)))
                 })
+                .then_with(|| left.symbolic_line.compare(right.symbolic_line))
                 .then_with(|| left.certainly_playable.cmp(&right.certainly_playable))
                 .then_with(|| left.certainly_useless.cmp(&right.certainly_useless))
                 .then_with(|| left.critical_touched.cmp(&right.critical_touched))
@@ -695,10 +752,12 @@ mod tests {
                 ConventionAction {
                     action: first,
                     priority: 900,
+                    reason: crate::ConventionActionReason::PromisedPlay,
                 },
                 ConventionAction {
                     action: forced,
                     priority: 400,
+                    reason: crate::ConventionActionReason::PromisedPlay,
                 },
             ],
             forced_action: Some(forced),
@@ -710,6 +769,7 @@ mod tests {
             &[ConventionAction {
                 action: forced,
                 priority: 400,
+                reason: crate::ConventionActionReason::PromisedPlay,
             }]
         );
     }

@@ -265,6 +265,16 @@ fn planner_details_json(
             "immediatelyPlayableTouched": evaluation.immediately_playable_touched,
             "criticalTouched": evaluation.critical_touched,
             "oldestCardTouched": evaluation.oldest_card_touched,
+            "symbolicLine": {
+                "actions": evaluation.symbolic_line.actions,
+                "scoreGain": evaluation.symbolic_line.score_gain,
+                "discards": evaluation.symbolic_line.discards,
+                "cluesSpent": evaluation.symbolic_line.clues_spent,
+                "cluesGained": evaluation.symbolic_line.clues_gained,
+                "strikes": evaluation.symbolic_line.strikes,
+                "identityBranch": evaluation.symbolic_line.identity_branch,
+                "reachedLimit": evaluation.symbolic_line.reached_limit,
+            },
             "exact": evaluation.exact.map(|exact| json!({
                 "worlds": exact.worlds,
                 "perfectWorlds": exact.perfect_worlds,

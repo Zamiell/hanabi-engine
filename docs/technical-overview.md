@@ -44,6 +44,13 @@ playability or uselessness, newly touched cards, immediately playable touches,
 critical-card protection, and oldest-card protection. Identical input therefore
 produces identical output without a random seed or iteration budget.
 
+When convention priority and explicit preference do not separate root actions,
+the planner projects each convention-predictable continuation. Unknown draws
+remain blank rather than receiving sampled identities, and the projection stops
+at the first real policy or identity branch. The reported trajectory compares
+score gain, strikes, discards, and clue flow without pretending to know hidden
+cards.
+
 Before attempting an exact endgame, the planner counts worlds only up to
 `--exact-world-limit` (4096 by default) and performs a conservative complexity
 preflight against `--exact-node-limit` (50000 by default). If the belief is too
@@ -69,30 +76,57 @@ exact node count, root priorities, and exact action values when available.
 `SupportedConvention` is the user-facing registry. `none` uses direct logic
 only. `h-group` requires a cumulative level from 1 through 25, or `max`, which
 is treated as effective level 26. `H_GROUP_LEVELS` is the machine-readable
-catalog and `H_GROUP_RULESET_REVISION` pins the implemented documentation.
+catalog and `H_GROUP_RULESET_REVISION` pins the implemented documentation. See
+the [section-by-section H-Group coverage audit](h-group-coverage.md) for the
+pinned 357-section inventory and its enforcement rules.
 
 `SupportedConvention::analyze` returns one `ConventionAnalysis` containing:
 
 - typed convention inferences;
-- an ordered, integer-ranked candidate list;
+- an ordered candidate list with structured semantic values and admission
+  reasons;
+- a typed rejection reason for every excluded legal clue;
 - preferred and convention-forced actions; and
 - hard identity constraints for exact endgame planning.
 
 H-Group uses shared internal boundaries to keep these answers consistent:
 
 - `PerspectiveProjector` reconstructs what another player could know.
+- `EpistemicState` makes observer-owned identity domains and their provenance
+  explicit without exposing simulator truth; action obligations stay in the
+  canonical convention state.
 - `HistoricalView` prevents future identity reveals from changing old moves.
 - `HGroupTurnContext` exposes explicit pre-event and post-event facts.
 - `ConnectionManager` owns the auditable Prompt/Finesse lifecycle.
-- typed effects produce an explanation log, while `ConventionFacts` indexes
-  only current convention truth.
+- typed effects update a `ConventionJournal` incrementally: signals preserve
+  provenance, while relational `ConventionFacts` indexes only current truth.
+- one executable rule registry dispatches historical and hypothetical events
+  in the same semantic order; rule phases and dependencies are validated.
+- `ConventionCardState` is the canonical owner for per-card convention facts,
+  avoiding parallel state collections with independent update paths.
+- shared identity and hand modules give clue givers, recipients, hypothetical
+  projection, and planning one definition of playability, trash, focus, chop,
+  and finesse position.
 - `ConventionConstraints` applies mandatory semantics before numeric strategy
   priorities.
+- `LineOutcome` retains promised actions, protected cards, known trash, and
+  connections so Teamwork and Directness compare semantics before scores.
+- candidate signal inspection and hazard checks reuse one cached prospective
+  convention snapshot.
+- diagnostic replays can retain per-rule causal proposals covering explanation
+  signals, promise transitions, and materialized-state mutations. Normal engine
+  operation skips this audit bookkeeping.
+- connection promises have stable IDs and durable origin metadata rather than
+  being inferred later from whichever card sets survived.
+- clue selection has explicit semantic-admission, recipient-replay, and causal
+  outcome-ranking stages.
 - Convention-admissible Fix alternatives compare recipient-visible negative
   information using active promises, likely play timing, criticality, and
   future clue economy before applying the color-over-rank tie-break.
 - `HGroupActionSet` is the canonical action analysis used by selection,
   candidate generation, priorities, safety checks, and continuation detection.
+- otherwise-equivalent candidates use deterministic blank-card forced-line
+  projection before exact endgame solving is considered.
 
 See [H-Group architecture](architecture.md) for invariants and extension rules,
 and [H-Group convention interpreter](h-group.md) for the level matrix.

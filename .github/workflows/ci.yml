@@ -18,7 +18,7 @@ jobs:
   quality:
     name: Build, test, and lint
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Check out repository
@@ -29,45 +29,10 @@ jobs:
           rustup toolchain install stable --profile minimal --component clippy,rustfmt
           rustup default stable
 
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Build all targets
-        run: cargo build --workspace --all-targets --all-features --locked
-
-      - name: Run Clippy
-        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-
-      - name: Run tests
-        run: cargo test --workspace --all-targets --all-features --locked
-
-      - name: Check documentation
-        env:
-          RUSTDOCFLAGS: -D warnings
-        run: cargo doc --workspace --all-features --no-deps --locked
-
-      - name: Check Hanabi Live bot launcher
+      - name: Install Python development dependencies
         run: |
           python3 -m venv .venv
           .venv/bin/python -m pip install --requirement scripts/requirements-dev.txt
-          .venv/bin/ty check
-          .venv/bin/python -m py_compile \
-            scripts/hanabi_live_bot.py \
-            scripts/hanabi_live_engine.py \
-            scripts/hanabi_live_game.py \
-            scripts/hanabi_live_trace.py \
-            scripts/tests/test_hanabi_live_bot.py
-          .venv/bin/python -W error::ResourceWarning -m unittest discover -s scripts/tests -v
-          .venv/bin/python scripts/hanabi_live_bot.py --help > /dev/null
-
-  dead-code:
-    name: Check workspace dead code
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
 
       - name: Install Hawk toolchain
         run: rustup toolchain install 1.97.1 --profile minimal
@@ -78,24 +43,5 @@ jobs:
             https://github.com/astral-sh/hawk/releases/download/0.1.10/cargo-hawk-installer.sh \
             | sh
 
-      - name: Check workspace-wide dead public code
-        run: |
-          cargo +1.97.1 hawk check \
-            --manifest-path Cargo.toml \
-            --only dead-public \
-            -D warnings
-
-  msrv:
-    name: Check MSRV (Rust 1.85)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-
-      - name: Install minimum supported Rust
-        run: rustup toolchain install 1.85.0 --profile minimal
-
-      - name: Compile all targets with MSRV
-        run: cargo +1.85.0 check --workspace --all-targets --all-features --locked
+      - name: Build, test, and lint
+        run: scripts/check.sh
