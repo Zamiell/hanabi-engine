@@ -59,6 +59,17 @@ EOF
   exit 1
 fi
 
+if ! cargo nextest --version >/dev/null 2>&1; then
+  cat >&2 <<'EOF'
+cargo-nextest 0.9.143 is missing. Install its prebuilt WSL/Linux binary with:
+
+  curl --proto '=https' --tlsv1.2 -LsSf \
+    https://get.nexte.st/0.9.143/linux \
+    | tar zxf - -C "$HOME/.cargo/bin"
+EOF
+  exit 1
+fi
+
 echo 'Checking Rust formatting...'
 cargo fmt --all -- --check
 
@@ -68,8 +79,17 @@ cargo build --workspace --all-targets --all-features --locked
 echo 'Running Clippy...'
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
-echo 'Running Rust tests...'
-cargo test --workspace --all-targets --all-features --locked
+echo 'Running fast Rust tests with fail-fast scheduling...'
+cargo nextest run \
+  --workspace \
+  --all-targets \
+  --all-features \
+  --locked \
+  --fail-fast
+
+# Nextest deliberately does not run rustdoc tests.
+echo 'Running Rust documentation tests...'
+cargo test --workspace --all-features --doc --locked
 
 echo 'Checking Rust documentation...'
 RUSTDOCFLAGS='-D warnings' \

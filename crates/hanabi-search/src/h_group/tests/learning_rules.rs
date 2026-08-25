@@ -23,7 +23,6 @@ fn level_thirteen_admits_the_opening_hard_three_self_bluff() {
         .expect("valid deductions");
     let bluff = replay_action_at_turn(&fixture, 0);
     let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
-
     assert!(
         candidates.iter().any(|candidate| candidate.action == bluff),
         "Hard 3 Self-Bluff must be a convention-valid candidate: {candidates:#?}"
@@ -129,6 +128,12 @@ fn second_replay_order_chop_move_protects_alices_red_two() {
             .mutations
             .contains(MutationDomain::ChopMovement)
     );
+    let alice_candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(replay_action_at_turn(&fixture, 4)),
+        "Alice must extinguish the available Play Clue before ending the Early Game: {alice_candidates:#?}",
+    );
 
     let bob_turn = fixture
         .state_at_turn(5)
@@ -223,7 +228,6 @@ fn second_replay_rank_four_secures_more_than_purple_to_donald() {
     let deductions = LogicalDeductions::new(state.view_for(bob).expect("Bob has a view"))
         .expect("valid Bob deductions");
     let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
-
     assert_eq!(
         select_h_group_action(&deductions, HGroupProfile::Max),
         Some(replay_action_at_turn(&fixture, 9)),
@@ -240,13 +244,265 @@ fn second_replay_rank_one_trash_chop_move_is_admitted() {
     let cathy = state.current_player();
     let deductions = LogicalDeductions::new(state.view_for(cathy).expect("Cathy has a view"))
         .expect("valid Cathy deductions");
+    let alice_playable = crate::h_group::prospective::subjective_playable_cards(
+        deductions.view(),
+        HGroupProfile::Max,
+        PlayerId::new(0),
+    )
+    .expect("Alice has a subjective convention projection");
+    let alice_cards = crate::h_group::prospective::subjective_convention_cards(
+        deductions.view(),
+        HGroupProfile::Max,
+        PlayerId::new(0),
+    )
+    .expect("Alice has subjective card notes");
+    let alice_two = alice_cards
+        .iter()
+        .find(|card| card.card == CardId::new(0))
+        .expect("Alice retains her rank-2 note");
+    assert!(
+        !alice_two
+            .identities
+            .contains(Card::new(Suit::Purple, Rank::Two)),
+        "Donald's played purple 2 disproves Alice's provisional purple-2 Prompt: {alice_two:#?}"
+    );
+    assert!(
+        alice_playable.contains(&CardId::new(0)),
+        "Alice's rank-2 card is already playing before Cathy acts: playable={alice_playable:?}, cards={alice_cards:#?}"
+    );
+    let bob_playable = crate::h_group::prospective::subjective_playable_cards(
+        deductions.view(),
+        HGroupProfile::Max,
+        PlayerId::new(1),
+    )
+    .expect("Bob has a subjective convention projection");
+    let bob_cards = crate::h_group::prospective::subjective_convention_cards(
+        deductions.view(),
+        HGroupProfile::Max,
+        PlayerId::new(1),
+    )
+    .expect("Bob has subjective card notes");
+    let bob_three = bob_cards
+        .iter()
+        .find(|card| card.card == CardId::new(5))
+        .expect("Bob retains his red-3 note");
+    assert!(
+        bob_three
+            .identities
+            .contains(Card::new(Suit::Red, Rank::Three)),
+        "Bob's rank-3 possibilities still include its visible red-3 identity: {bob_three:#?}"
+    );
+    assert!(
+        !bob_playable.contains(&CardId::new(5)),
+        "Bob's red 3 is not already playing: {bob_playable:?}"
+    );
     let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let redundant_red_fill_in = Action::Clue {
+        target: PlayerId::new(1),
+        clue: Clue::Suit(Suit::Red),
+    };
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| candidate.action != redundant_red_fill_in),
+        "red to Bob cannot manufacture a Prompt from Alice's already-playing red 2: {candidates:#?}"
+    );
     assert!(
         candidates.iter().any(|candidate| {
             candidate.action == replay_action_at_turn(&fixture, 14)
                 && candidate.recognition == ClueRecognition::RecipientReplay
         }),
         "rank 1 on Alice's trash purple 1 must be admitted as a Trash Chop Move: {candidates:#?}"
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(replay_action_at_turn(&fixture, 14)),
+        "the Trash Chop Move is the best remaining legal clue: {candidates:#?}"
+    );
+}
+
+#[test]
+fn second_replay_off_chop_trash_moves_both_fours_before_move_twenty() {
+    let fixture = expert_replay_p4v0s9();
+    let state = fixture
+        .state_at_turn(19)
+        .expect("the second replay prefix is legal");
+    let donald = state.current_player();
+    let deductions = LogicalDeductions::new(state.view_for(donald).expect("Donald has a view"))
+        .expect("valid deductions");
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
+
+    assert!(replay.cards.chop_moved.contains(&CardId::new(2)));
+    assert!(replay.cards.chop_moved.contains(&CardId::new(20)));
+    assert!(replay.signals.iter().any(|signal| {
+        signal.turn == 14
+            && signal.kind == HGroupMoveKind::TrashChopMove
+            && signal.cards == [CardId::new(20), CardId::new(2)]
+    }));
+    let gotten = replay.gotten_from(&replay.promptable());
+    assert_eq!(
+        chop(&replay.hands[0], &gotten),
+        Some(CardId::new(24)),
+        "Alice's green 1 is chop after both 4s are Chop Moved"
+    );
+    let rank_four_touched = [CardId::new(2), CardId::new(20)];
+    assert_eq!(
+        focus(
+            &replay.hands[0],
+            &rank_four_touched,
+            chop(&replay.hands[0], &gotten),
+            &gotten,
+        ),
+        Some(CardId::new(20)),
+        "a rank-4 reclue is leftmost-focused on Alice's green 4"
+    );
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let illegal_rank_four = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Rank(Rank::Four),
+    };
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| candidate.action != illegal_rank_four),
+        "rank 4 cannot borrow the Yellow-4 Reverse Finesse when it focuses green 4: {candidates:#?}"
+    );
+}
+
+#[test]
+fn second_replay_move_twenty_admits_the_visible_reverse_finesse() {
+    let fixture = expert_replay_p4v0s9();
+    let state = fixture
+        .state_at_turn(19)
+        .expect("the second replay prefix is legal");
+    let donald = state.current_player();
+    let view = state.view_for(donald).expect("Donald has a view");
+    let deductions = LogicalDeductions::new(view.clone()).expect("valid deductions");
+    let expected = replay_action_at_turn(&fixture, 19);
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let touched = view.hands[0]
+        .iter()
+        .filter(|card| {
+            card.identity
+                .is_some_and(|identity| Clue::Suit(Suit::Yellow).matches(identity))
+        })
+        .map(|card| card.id)
+        .collect::<Vec<_>>();
+    let after = prospective_clue_view(
+        &view,
+        PlayerId::new(0),
+        Clue::Suit(Suit::Yellow),
+        &touched,
+    );
+    let (_recipient_deductions, recipient_replay) = projected_h_group_replay(
+        &after,
+        HGroupProfile::Max,
+        PlayerId::new(0),
+    )
+    .expect("recipient replay succeeds");
+    let interpretation = recipient_replay
+        .clues
+        .last()
+        .expect("the prospective clue has an interpretation");
+    let yellow_four = Card::new(Suit::Yellow, Rank::Four);
+    assert_eq!(interpretation.kind, HGroupClueKind::Play);
+    assert_eq!(interpretation.focus, CardId::new(2));
+    assert_eq!(
+        interpretation.focus_identities,
+        IdentitySet::singleton(yellow_four)
+    );
+    let new_connections = recipient_replay
+        .pending_connections
+        .iter()
+        .filter(|connection| connection.focus == CardId::new(2))
+        .map(|connection| {
+            (
+                connection.actor,
+                connection.cards.clone(),
+                connection.expected,
+                connection.kind,
+                connection.focus_identity,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        new_connections,
+        vec![
+            (
+                PlayerId::new(2),
+                vec![CardId::new(26)],
+                Card::new(Suit::Yellow, Rank::Two),
+                HGroupConnectionKind::Finesse,
+                yellow_four,
+            ),
+            (
+                PlayerId::new(1),
+                vec![CardId::new(4)],
+                Card::new(Suit::Yellow, Rank::Three),
+                HGroupConnectionKind::Prompt,
+                yellow_four,
+            ),
+        ]
+    );
+    assert!(recipient_replay.signals.iter().any(|signal| {
+        signal.turn == 19
+            && signal.kind == HGroupMoveKind::ReverseFinesse
+            && signal.cards == [CardId::new(26)]
+    }));
+    assert_eq!(
+        expected,
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Yellow),
+        }
+    );
+    assert!(
+        candidates.iter().any(|candidate| {
+            candidate.action == expected
+                && candidate.recognition == ClueRecognition::RecipientReplay
+                && candidate.score() == 373
+        }),
+        "the Yellow-2 Reverse Finesse must retain its full strategic value: {candidates:#?}"
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(expected)
+    );
+}
+
+#[test]
+fn second_replay_move_twenty_two_rejects_a_good_touch_duplicate() {
+    let fixture = expert_replay_p4v0s9();
+    let state = fixture
+        .state_at_turn(21)
+        .expect("the second replay prefix is legal");
+    let bob = state.current_player();
+    let deductions =
+        LogicalDeductions::new(state.view_for(bob).expect("Bob has a view"))
+            .expect("valid deductions");
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    let existing_red_three = inferred
+        .cards
+        .iter()
+        .find(|card| card.card == CardId::new(5))
+        .expect("Bob retains the opening rank-3 card");
+    assert!(
+        existing_red_three
+            .identities
+            .contains(Card::new(Suit::Red, Rank::Three)),
+        "Bob's own promised 3 can still be red 3, so he may not duplicate it"
+    );
+
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let duplicate_red = Action::Clue {
+        target: PlayerId::new(3),
+        clue: Clue::Suit(Suit::Red),
+    };
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| candidate.action != duplicate_red),
+        "red to Donald illegally duplicates Bob's promised red 3 ({existing_red_three:?}): {candidates:#?}"
     );
 }
 
@@ -572,7 +828,6 @@ fn out_of_order_clue_is_not_given_to_the_immediate_next_player() {
     }
     let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
     let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
-
     assert!(
         !candidates.iter().any(|candidate| {
             candidate.action
@@ -696,7 +951,6 @@ fn delayed_green_three_without_connectors_is_not_a_fix_clue() {
     }
     let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
     let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
-
     assert!(
         !candidates.iter().any(|candidate| {
             candidate.action
@@ -1072,6 +1326,70 @@ fn tempo_clue_does_not_reclue_an_active_play_promise() {
     );
 }
 
+/// <https://hanabi.github.io/level-6/#the-tempo-clue-chop-move-tccm>
+#[test]
+fn rank_fill_in_is_a_tccm_outside_a_stalling_situation() {
+    let mut state = state_with_prefix(
+        3,
+        &[
+            Card::new(Suit::Blue, Rank::Three),
+            Card::new(Suit::Green, Rank::Three),
+            Card::new(Suit::Yellow, Rank::Four),
+            Card::new(Suit::Purple, Rank::Four),
+            Card::new(Suit::Blue, Rank::Four),
+            Card::new(Suit::Green, Rank::Four),
+            Card::new(Suit::Yellow, Rank::Three),
+            Card::new(Suit::Purple, Rank::Three),
+            Card::new(Suit::Red, Rank::Two),
+            Card::new(Suit::Red, Rank::One),
+            Card::new(Suit::Blue, Rank::Three),
+            Card::new(Suit::Green, Rank::Three),
+            Card::new(Suit::Yellow, Rank::Four),
+            Card::new(Suit::Purple, Rank::Four),
+            Card::new(Suit::Blue, Rank::Four),
+            Card::new(Suit::Green, Rank::Four),
+        ],
+    );
+    state
+        .apply(Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Red),
+        })
+        .unwrap();
+    state.apply(Action::Play(CardId::new(9))).unwrap();
+
+    let cathy = state.current_player();
+    let deductions = LogicalDeductions::new(state.view_for(cathy).unwrap()).unwrap();
+    let fill_in = Action::Clue {
+        target: PlayerId::new(1),
+        clue: Clue::Rank(Rank::Two),
+    };
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    assert!(
+        candidates.iter().any(|candidate| candidate.action == fill_in),
+        "the rank fill-in must remain admissible as a TCCM: {candidates:#?}"
+    );
+
+    state.apply(fill_in).unwrap();
+    let bob = PlayerId::new(1);
+    let deductions = LogicalDeductions::new(state.view_for(bob).unwrap()).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    assert!(inferred.signals.iter().any(|signal| {
+        signal.turn == 2
+            && signal.kind == HGroupMoveKind::TempoClue
+            && signal.cards == [CardId::new(8)]
+    }));
+    assert!(inferred.signals.iter().any(|signal| {
+        signal.turn == 2
+            && signal.kind == HGroupMoveKind::TempoClueChopMove
+            && signal.cards == [CardId::new(5)]
+    }));
+    assert!(!inferred.signals.iter().any(|signal| {
+        signal.turn == 2
+            && matches!(signal.kind, HGroupMoveKind::Stall | HGroupMoveKind::FillInClue)
+    }));
+}
+
 #[test]
 fn out_of_order_fix_obligation_selects_the_repairing_rank_clue() {
     let profile = HGroupProfile::Level(HGroupLevel::Level25);
@@ -1177,7 +1495,7 @@ fn collateral_fix_cancels_the_false_finesse_it_would_otherwise_create() {
 }
 
 #[test]
-fn rank_two_clue_can_prompt_red_one_while_good_touching_a_purple_two() {
+fn rank_two_clue_preserves_play_delayed_and_save_superposition_without_a_self_prompt() {
     let mut state = paired_sample_one_state();
     for action in [
         Action::Clue {
@@ -1225,16 +1543,36 @@ fn rank_two_clue_can_prompt_red_one_while_good_touching_a_purple_two() {
     }
     let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
     let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
-
+    let clue = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Rank(Rank::Two),
+    };
     assert!(
-        candidates.iter().any(|candidate| {
-            candidate.action
-                == Action::Clue {
-                    target: PlayerId::new(2),
-                    clue: Clue::Rank(Rank::Two),
-                }
+        candidates.iter().any(|candidate| candidate.action == clue),
+        "the rank-2 clue is a valid ambiguous play/delayed/save clue: {candidates:#?}"
+    );
+
+    state.apply(clue).unwrap();
+    let recipient = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
+    let inferred = infer_h_group(&recipient, HGroupProfile::Max);
+    let expected = IdentitySet::singleton(Card::new(Suit::Red, Rank::Two))
+        .union(IdentitySet::singleton(Card::new(Suit::Blue, Rank::Two)))
+        .union(IdentitySet::singleton(Card::new(Suit::Purple, Rank::Two)));
+    let focus = inferred
+        .cards
+        .iter()
+        .find(|card| card.card == CardId::new(21))
+        .expect("the newly drawn focused 2 has a convention note");
+    assert_eq!(focus.identities, expected, "inference: {inferred:#?}");
+    assert!(
+        !inferred.playable_now.contains(&CardId::new(21)),
+        "not every identity in the focus superposition is playable: {inferred:#?}"
+    );
+    assert!(
+        inferred.connection.is_none_or(|connection| {
+            connection.focus != CardId::new(21) || connection.card != CardId::new(12)
         }),
-        "the newer red 2 is the focus and the red 1 is its valid Self-Prompt: {candidates:#?}"
+        "a direct-play possibility makes the red-1 Self-Prompt invalid: {inferred:#?}"
     );
 }
 

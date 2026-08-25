@@ -1,6 +1,6 @@
 use hanabi_core::{Card, CardId, PlayerId};
 
-use super::{CardSet, HGroupMoveKind, HGroupSignal};
+use super::{CardSet, HGroupMoveKind, HGroupSignal, IdentitySet};
 
 /// How a convention identity claim applies to its referenced cards.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -34,6 +34,7 @@ pub(super) struct ConventionFacts {
     fixed_cards: CardSet,
     known_identities: [Option<Card>; 50],
     known_conflicts: [bool; 50],
+    excluded_identities: [IdentitySet; 50],
     demonstrated_layers: [Option<Card>; 50],
     layer_conflicts: [bool; 50],
     active_priority: CardSet,
@@ -46,6 +47,7 @@ impl Default for ConventionFacts {
             fixed_cards: CardSet::default(),
             known_identities: [None; 50],
             known_conflicts: [false; 50],
+            excluded_identities: [IdentitySet::default(); 50],
             demonstrated_layers: [None; 50],
             layer_conflicts: [false; 50],
             active_priority: CardSet::default(),
@@ -110,6 +112,21 @@ impl ConventionFacts {
         let Some(identity) = signal.identity else {
             return;
         };
+        if signal.kind == HGroupMoveKind::Retraction {
+            let retracted = IdentitySet::singleton(identity);
+            for card in &signal.cards {
+                self.excluded_identities[card.index()] =
+                    self.excluded_identities[card.index()].union(retracted);
+            }
+            self.identity_claims.retain(|claim| {
+                claim.identity != identity
+                    || !claim.cards.iter().any(|card| signal.cards.contains(card))
+            });
+            for card in &signal.cards {
+                self.rebuild_known_identity(*card);
+            }
+            return;
+        }
         if signal.kind == HGroupMoveKind::EliminationRewrite {
             // https://hanabi.github.io/extras/miscellaneous/#the-elimination-rewrite-for-1s
             // The second discarded copy of a playable 1 invalidates the old
@@ -150,6 +167,8 @@ impl ConventionFacts {
             return;
         }
         for card in &signal.cards {
+            self.excluded_identities[card.index()] =
+                self.excluded_identities[card.index()].without(IdentitySet::singleton(identity));
             merge_identity(
                 &mut self.known_identities[card.index()],
                 &mut self.known_conflicts[card.index()],
@@ -175,6 +194,10 @@ impl ConventionFacts {
         self.known_identities[card.index()]
     }
 
+    pub(super) const fn excluded_identities(&self, card: CardId) -> IdentitySet {
+        self.excluded_identities[card.index()]
+    }
+
     pub(super) fn demonstrated_layer(&self, card: CardId) -> Option<Card> {
         self.demonstrated_layers[card.index()]
     }
@@ -196,6 +219,20 @@ impl ConventionFacts {
             return Err("convention identity claim has no candidate cards".to_owned());
         }
         Ok(())
+    }
+
+    fn rebuild_known_identity(&mut self, card: CardId) {
+        self.known_identities[card.index()] = None;
+        self.known_conflicts[card.index()] = false;
+        for claim in self.identity_claims.iter().filter(|claim| {
+            claim.relation == IdentityClaimRelation::Each && claim.cards.contains(&card)
+        }) {
+            merge_identity(
+                &mut self.known_identities[card.index()],
+                &mut self.known_conflicts[card.index()],
+                claim.identity,
+            );
+        }
     }
 }
 
@@ -268,5 +305,19 @@ mod tests {
                 relation: IdentityClaimRelation::OneOf,
             }]
         );
+    }
+
+    #[test]
+    fn retraction_turns_a_disproved_identity_into_negative_knowledge() {
+        let card = CardId::new(3);
+        let purple_two = Card::new(Suit::Purple, Rank::Two);
+        let facts = ConventionFacts::from_signals(&[
+            signal(HGroupMoveKind::Prompt, card, Some(purple_two)),
+            signal(HGroupMoveKind::Retraction, card, Some(purple_two)),
+        ]);
+
+        assert_eq!(facts.known_identity(card), None);
+        assert!(facts.excluded_identities(card).contains(purple_two));
+        assert!(facts.identity_claims().is_empty());
     }
 }

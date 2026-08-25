@@ -14,6 +14,7 @@ pub(in crate::h_group) fn apply_bluff_effects(
     hands: &[Vec<CardId>],
     stack_heights: [u8; 5],
     explicitly_clued: &CardSet,
+    already_playing: &CardSet,
     pending: &mut ConnectionManager,
     forced_playable: &mut CardSet,
     signals: &mut ConventionJournal,
@@ -56,6 +57,18 @@ pub(in crate::h_group) fn apply_bluff_effects(
             return;
         };
         let expected_connector = Card::new(focus_identity.suit, Rank::ALL[usize::from(height)]);
+        let connector_is_already_promised = hands.iter().flatten().any(|card| {
+            already_playing.contains(card) && identity_of(view, *card) == Some(expected_connector)
+        }) || pending.iter().any(|connection| {
+            pending_is_active(connection, pending) && connection.expected == expected_connector
+        });
+        if connector_is_already_promised {
+            // A Self-Bluff supplies a missing connector. If that connector is
+            // already convention-bound, the focus simply follows the queued
+            // play; blind-playing another card would duplicate the line.
+            // Source: https://hanabi.github.io/level-11/#the-self-bluff
+            return;
+        }
         if hands.iter().enumerate().any(|(player, hand)| {
             player != actor.index()
                 && hand

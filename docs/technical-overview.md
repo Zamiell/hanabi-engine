@@ -195,10 +195,11 @@ GitHub Actions are:
 cargo fmt --all -- --check
 cargo build --workspace --all-targets --all-features --locked
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
-cargo test --workspace --all-targets --all-features --locked
+cargo nextest run --workspace --all-targets --all-features --locked --fail-fast
+cargo test --workspace --all-features --doc --locked
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps --locked
 cargo +1.97.1 hawk check --manifest-path Cargo.toml --only dead-public -D warnings
-cargo +1.85.0 check --workspace --all-targets --all-features --locked
+scripts/check-exhaustive.sh
 
 .venv/bin/python -m pip install --requirement scripts/requirements-dev.txt
 .venv/bin/ty check
@@ -208,6 +209,14 @@ cargo +1.85.0 check --workspace --all-targets --all-features --locked
 
 Compatibility tests use the sibling `hanabi-live` repository when available
 and skip only those cross-repository assertions when it is absent.
+
+The ordinary suite keeps representative full-game rollouts for Levels 1, 10,
+18, 25, and Max. The exhaustive script runs the independently scheduled
+full-game matrix for every cumulative profile; CI runs it in a separate job.
+Rust test binaries use `opt-level = 2` while retaining debug assertions and
+overflow checks. The repository pins cargo-nextest 0.9.143 for fail-fast test
+scheduling; nextest's missing rustdoc support is covered by the separate
+`cargo test --doc` command.
 
 The Python development requirements pin ty, and `ty.toml` checks every Python
 bridge and test module against Python 3.10. The test suite also rejects any

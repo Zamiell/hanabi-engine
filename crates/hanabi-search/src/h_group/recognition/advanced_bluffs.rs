@@ -27,6 +27,15 @@ pub(in crate::h_group) fn apply_context_effects(
     else {
         return;
     };
+    if effects
+        .signals
+        .has_at_turn(entry.turn, HGroupMoveKind::FixClue)
+    {
+        // https://hanabi.github.io/level-3/#the-fix-clue
+        // A Fix retracts an earlier identity promise; it does not establish
+        // the touched card as the delayed focus of a new Context clue.
+        return;
+    }
     let prior_gotten = context
         .before
         .hands

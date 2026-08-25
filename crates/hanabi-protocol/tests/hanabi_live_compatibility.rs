@@ -1,10 +1,10 @@
 use std::{fs, path::PathBuf};
 
-use hanabi_core::{CardId, Clue, EndReason, GameEvent, GameStatus, Suit};
-use hanabi_protocol::{HanabiLiveReplay, ReplayError};
+use hanabi_core::{CardId, Clue, EndReason, GameEvent, GameStatus, Suit, standard_deck};
+use hanabi_protocol::{HanabiLiveReplay, ReplayError, hanabi_live::HanabiLiveCard};
 
 #[test]
-fn partial_options_default_to_no_variant() {
+fn no_options_default_to_no_variant() {
     let json = r#"{
         "players":["A","B"],
         "deck":[
@@ -14,12 +14,19 @@ fn partial_options_default_to_no_variant() {
             {"suitIndex":0,"rank":3},{"suitIndex":0,"rank":4},
             {"suitIndex":0,"rank":4},{"suitIndex":0,"rank":5}
         ],
-        "actions":[],
-        "options":{"deckPlays":true}
+        "actions":[]
     }"#;
 
-    let replay = HanabiLiveReplay::from_json(json).unwrap();
-    assert_eq!(replay.options.unwrap().variant, "No Variant");
+    let mut replay = HanabiLiveReplay::from_json(json).unwrap();
+    assert!(replay.options.is_none());
+    replay.deck = standard_deck()
+        .into_iter()
+        .map(|card| HanabiLiveCard {
+            suit_index: u8::try_from(card.suit.index()).unwrap(),
+            rank: card.rank.number(),
+        })
+        .collect();
+    replay.replay().unwrap();
 }
 
 #[test]

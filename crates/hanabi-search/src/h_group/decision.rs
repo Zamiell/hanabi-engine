@@ -232,8 +232,13 @@ pub(super) fn infer_h_group_from_replay(
         .pending_connections
         .iter()
         .filter(|pending| {
+            // A later connection can be established while an earlier card in
+            // the same suit is already promised. It becomes actionable only
+            // after that predecessor reaches the stack; otherwise connection
+            // priority would make the successor misplay first.
             pending.actor == view.observer
                 && pending_is_active(pending, &replay.pending_connections)
+                && is_playable_now(view, pending.expected)
         })
         .min_by_key(|pending| match pending.kind {
             HGroupConnectionKind::Prompt => 0,
@@ -347,6 +352,13 @@ fn ordered_h_group_actions_from_analysis(
         return actions;
     }
 
+    let early_game_has_extinguishing_clue = analysis.replay.early_game
+        && inferred.discard_now.is_empty()
+        && inferred.playable_now.is_empty()
+        && clue_candidates
+            .iter()
+            .any(|candidate| candidate.purpose == CluePurpose::Play || candidate.save);
+
     let mut actions = inferred
         .discard_now
         .iter()
@@ -358,10 +370,19 @@ fn ordered_h_group_actions_from_analysis(
             .into_iter()
             .map(Action::Play),
     );
-    if let Some((card, _)) = scored_discard_candidate(view, inferred) {
-        actions.push(Action::Discard(card));
+    if !early_game_has_extinguishing_clue {
+        if let Some((card, _)) = scored_discard_candidate(view, inferred) {
+            actions.push(Action::Discard(card));
+        }
     }
     actions.extend(clue_candidates.iter().map(|candidate| candidate.action));
+    // https://hanabi.github.io/level-1/#the-early-game
+    // A player may not end the Early Game while a genuine Play or Save Clue
+    // remains. Remove discards at candidate admission so a generic discard
+    // score cannot overrule the convention; other valid clues remain choices.
+    if early_game_has_extinguishing_clue {
+        actions.retain(|action| !matches!(action, Action::Discard(_)));
+    }
     actions.dedup();
     actions.retain(|action| legal_actions.contains(action));
     if inferred.phase == HGroupPhase::EndGame {

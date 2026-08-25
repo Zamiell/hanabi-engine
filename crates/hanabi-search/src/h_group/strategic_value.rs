@@ -1,8 +1,9 @@
 use super::{
     Action, ActionCommitment, Card, CardId, ClueCandidate, EpistemicState, HGroupConnection,
-    HGroupProfile, HGroupRuleId, IdentitySet, LineOutcome, LogicalDeductions, PlayerId, PlayerView,
-    Rank, card_is_trash, identity_of, infer_h_group_from_replay, is_eventually_useful,
-    projected_h_group_replay, prospective_clue_view, rule_enabled,
+    HGroupMoveKind, HGroupProfile, HGroupRuleId, IdentitySet, LineOutcome, LogicalDeductions,
+    PlayerId, PlayerView, Rank, card_is_trash, identity_of, infer_h_group_from_replay,
+    is_eventually_useful, is_playable_now, projected_h_group_replay, prospective_clue_signal_kinds,
+    prospective_clue_view, rule_enabled,
 };
 
 const TEAM_ACTION_COVERAGE_PENALTY: u16 = 80;
@@ -62,7 +63,16 @@ pub(super) fn apply_strategic_clue_values(
         let Some(value) = &values[index] else {
             continue;
         };
-        let uncovered_players = best_coverage.saturating_sub(value.covered_players());
+        let candidate_is_opening_bluff =
+            source.turn == 0 && clue_is_bluff(source, profile, candidate.action);
+        // An opening Bluff has no established team action to displace, so do
+        // not penalize the concentration that makes the Bluff work. Once the
+        // game has started, ordinary Teamwork comparisons still apply.
+        let uncovered_players = if candidate_is_opening_bluff {
+            0
+        } else {
+            best_coverage.saturating_sub(value.covered_players())
+        };
         candidate.value.penalize_teamwork(
             TEAM_ACTION_COVERAGE_PENALTY
                 .saturating_mul(u16::try_from(uncovered_players).unwrap_or(u16::MAX)),
@@ -106,6 +116,25 @@ pub(super) fn apply_strategic_clue_values(
                 .saturating_mul(u16::try_from(unnecessary_connections).unwrap_or(u16::MAX)),
         );
     }
+}
+
+fn clue_is_bluff(source: &PlayerView, profile: HGroupProfile, action: Action) -> bool {
+    let Action::Clue { target, clue } = action else {
+        return false;
+    };
+    let touched = source.hands[target.index()]
+        .iter()
+        .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
+        .map(|card| card.id)
+        .collect::<Vec<_>>();
+    prospective_clue_signal_kinds(source, profile, target, clue, &touched)
+        .into_iter()
+        .any(|kind| {
+            matches!(
+                kind,
+                HGroupMoveKind::Bluff | HGroupMoveKind::SelfBluff | HGroupMoveKind::DoubleBluff
+            )
+        })
 }
 
 #[derive(Clone)]
@@ -247,13 +276,16 @@ fn projected_line_state(
                 .iter()
                 .next()
                 .filter(|_| note.identities.len() == 1)
+                .filter(|identity| {
+                    identity_of(source, note.card).is_none_or(|actual| actual == *identity)
+                })
                 .filter(|identity| is_eventually_useful(source, *identity))
                 .map(|identity| (note.card, identity))
         })
         .collect::<Vec<_>>();
     giver_visible_commitments.extend(inferred.playable_now.iter().filter_map(|card| {
         identity_of(source, *card)
-            .filter(|identity| is_eventually_useful(source, *identity))
+            .filter(|identity| is_playable_now(source, *identity))
             .map(|identity| (*card, identity))
     }));
     giver_visible_commitments

@@ -235,14 +235,7 @@ fn apply_rule(
                 apply_chop_move_effects(context, view, effects);
             }
         }
-        HGroupRuleId::TempoClues => apply_tempo_effects(
-            context.entry,
-            view,
-            context.after.hands,
-            effects.explicitly_clued,
-            effects.chop_moved,
-            effects.signals,
-        ),
+        HGroupRuleId::TempoClues => apply_tempo_effects(context, view, effects),
         HGroupRuleId::EmergencyDiscards => apply_emergency_discard_effects(
             context,
             view,
@@ -271,6 +264,7 @@ fn apply_rule(
             context.after.hands,
             context.after.stack_heights,
             effects.explicitly_clued,
+            effects.already_playing,
             effects.pending,
             effects.forced_playable,
             effects.signals,
@@ -280,15 +274,7 @@ fn apply_rule(
             apply_intermediate_bluff_effects(context, view, effects);
         }
         HGroupRuleId::TrashMoves => {
-            apply_trash_effects(
-                context.entry,
-                view,
-                context.after.hands,
-                context.after.stack_heights,
-                effects.chop_moved,
-                effects.pending,
-                effects.signals,
-            );
+            apply_trash_effects(context, view, effects);
             apply_trash_connection_refinements(context, effects);
         }
         HGroupRuleId::DoubleBluffs => apply_double_bluff_effects(context, view, effects),

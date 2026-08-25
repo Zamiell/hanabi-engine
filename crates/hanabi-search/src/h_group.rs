@@ -99,7 +99,7 @@ use prospective::{
     projected_h_group_replay, prospective_clue_has_unsafe_connection,
     prospective_clue_marks_focus_saved, prospective_clue_signal_kinds, prospective_clue_view,
     prospective_play_has_unsafe_inference, prospective_play_view, subjective_chop_before_action,
-    subjective_convention_cards, with_prospective_analysis_cache,
+    subjective_convention_cards, subjective_playable_cards, with_prospective_analysis_cache,
 };
 use recognition::apply_resolved_bluff_effects;
 use rule_engine::apply_post_event_rules;
@@ -849,6 +849,7 @@ fn replay_h_group_inner(
             historical_clue_tokens,
             historical_deck_size,
             early_game,
+            already_playing.clone(),
         );
         let clue_tokens_before = before.clue_tokens;
         if rule_enabled(profile, HGroupRuleId::Bluffs) {
@@ -896,6 +897,20 @@ fn replay_h_group_inner(
                 declined_with_clue = Some(*giver);
                 required_clue_deferral = is_required_fix;
                 if is_required_fix {
+                    // https://hanabi.github.io/level-3/#the-fix-clue
+                    // Promise repair is decided and applied here, before the
+                    // per-level recognizers run. Journal the same transition
+                    // at its canonical mutation point so current facts do not
+                    // mistake the physical clue for a Play/Tempo promise.
+                    push_signal(
+                        &mut signals,
+                        entry,
+                        *giver,
+                        Some(*target),
+                        HGroupMoveKind::FixClue,
+                        touched.clone(),
+                        None,
+                    );
                     let fixed_cards = touched.iter().copied().collect::<CardSet>();
                     let mut occupied =
                         protected_cards(&explicitly_clued, &invisibly_clued, &chop_moved);
@@ -1416,6 +1431,32 @@ fn replay_h_group_inner(
                                 Some(connection.expected),
                             );
 
+                            let player_count = hands.len();
+                            let target_distance =
+                                (target.index() + player_count - giver.index()) % player_count;
+                            let actor_distance = (connection.actor.index() + player_count
+                                - giver.index())
+                                % player_count;
+                            if connection.kind == HGroupConnectionKind::Finesse
+                                && actor_distance > target_distance
+                            {
+                                // The executable graph is also the source of
+                                // the named Level-2 interpretation. Deriving
+                                // Reverse Finesse independently from the
+                                // focus identity failed whenever that identity
+                                // was hidden from the recipient.
+                                // Source: https://hanabi.github.io/level-2/#the-reverse-finesse
+                                push_signal(
+                                    &mut signals,
+                                    entry,
+                                    *giver,
+                                    Some(connection.actor),
+                                    HGroupMoveKind::ReverseFinesse,
+                                    connection.cards.clone(),
+                                    Some(connection.expected),
+                                );
+                            }
+
                             // The ordered graph is the executable mechanism,
                             // but preserve the exact Level-5 name as an audit
                             // signal. This keeps Hidden, Clandestine, Queued,
@@ -1551,6 +1592,25 @@ fn replay_h_group_inner(
                         .filter(|connection| connection.expected == *identity)
                         .flat_map(|connection| connection.cards.iter().copied())
                         .collect::<CardSet>();
+                    let disproved_prompts = pending_connections
+                        .iter()
+                        .filter(|connection| {
+                            connection.expected == *identity
+                                && connection.kind == HGroupConnectionKind::Prompt
+                        })
+                        .flat_map(|connection| connection.cards.iter().copied())
+                        .collect::<CardSet>();
+                    if !disproved_prompts.is_empty() {
+                        push_signal(
+                            &mut signals,
+                            entry,
+                            *player,
+                            None,
+                            HGroupMoveKind::Retraction,
+                            disproved_prompts.iter().copied().collect(),
+                            Some(*identity),
+                        );
+                    }
                     pending_connections.cancel_where(
                         entry.turn,
                         ConnectionTransitionReason::IdentitySatisfiedElsewhere,
@@ -2081,6 +2141,7 @@ fn schedule_connection(
     };
     let mut actor_index = (giver.index() + 1) % hands.len();
     let mut scheduled_cards = CardSet::default();
+    let mut reverse_cycle_started = false;
     for offset in 0..connection_count {
         let expected_rank = usize::from(height + offset);
         let expected = Card::new(focus_identity.suit, Rank::ALL[expected_rank]);
@@ -2097,12 +2158,39 @@ fn schedule_connection(
             continue;
         }
         let mut found = None;
-        let search_len = if target_loaded {
-            hands.len()
-        } else if rule_enabled(profile, HGroupRuleId::BasicMoves) {
+        let ordinary_search_len = if rule_enabled(profile, HGroupRuleId::BasicMoves) {
             (target.index() + hands.len() - actor_index) % hands.len() + 1
         } else {
             1
+        };
+        let direct_reverse_finesse = rule_enabled(profile, HGroupRuleId::BasicMoves)
+            && !target_loaded
+            && (ordinary_search_len..hands.len()).any(|distance| {
+                let candidate_index = (actor_index + distance) % hands.len();
+                candidate_index != target.index()
+                    && hands[candidate_index]
+                        .iter()
+                        .rev()
+                        .copied()
+                        .find(|card| {
+                            *card != focus
+                                && !promptable_before_clue.contains(card)
+                                && !invisibly_clued.contains(card)
+                                && !scheduled_cards.contains(card)
+                        })
+                        .is_some_and(|card| {
+                            identity_of(view, card) == Some(expected)
+                                || (candidate_index == view.observer.index()
+                                    && facts[card.index()].identity_mask() == 1 << expected.index())
+                        })
+            });
+        if direct_reverse_finesse {
+            reverse_cycle_started = true;
+        }
+        let search_len = if target_loaded || reverse_cycle_started {
+            hands.len()
+        } else {
+            ordinary_search_len
         };
         let directly_clued = hands[target.index()]
             .iter()

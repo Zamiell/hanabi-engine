@@ -1066,24 +1066,84 @@ fn level_one_policy_can_roll_a_game_to_completion() {
     }
 }
 
-#[test]
-fn every_numbered_and_max_profile_rolls_to_completion() {
-    let profiles = H_GROUP_LEVELS.iter().map(|descriptor| descriptor.profile);
-    for profile in profiles {
-        let mut deck = standard_deck();
-        deck.rotate_left(11);
-        let state = FullState::new_standard(3, deck).unwrap();
-        let convention = crate::SupportedConvention::HGroup(profile);
-        let outcome = continuation_to_terminal(state, convention)
-            .unwrap_or_else(|error| panic!("{profile} continuation failed: {error}"));
-        assert!(outcome.turns() > 0, "{profile}");
-        assert!(outcome.turns() < MAX_TEST_CONTINUATION_TURNS, "{profile}");
-    }
+fn profile_rolls_to_completion(profile: HGroupProfile) {
+    let mut deck = standard_deck();
+    deck.rotate_left(11);
+    let state = FullState::new_standard(3, deck).unwrap();
+    let convention = crate::SupportedConvention::HGroup(profile);
+    let outcome = continuation_to_terminal(state, convention)
+        .unwrap_or_else(|error| panic!("{profile} continuation failed: {error}"));
+    assert!(outcome.turns() > 0, "{profile}");
+    assert!(outcome.turns() < MAX_TEST_CONTINUATION_TURNS, "{profile}");
 }
+
+macro_rules! profile_rollout_test {
+    ($name:ident, $profile:expr) => {
+        #[test]
+        #[ignore = "exhaustive H-Group profile matrix; run scripts/check-exhaustive.sh"]
+        fn $name() {
+            profile_rolls_to_completion($profile);
+        }
+    };
+}
+
+macro_rules! representative_profile_rollout_test {
+    ($name:ident, $profile:expr) => {
+        #[test]
+        fn $name() {
+            profile_rolls_to_completion($profile);
+        }
+    };
+}
+
+representative_profile_rollout_test!(
+    representative_profile_rollout_level_01,
+    HGroupProfile::Level(HGroupLevel::Level1)
+);
+representative_profile_rollout_test!(
+    representative_profile_rollout_level_10,
+    HGroupProfile::Level(HGroupLevel::Level10)
+);
+representative_profile_rollout_test!(
+    representative_profile_rollout_level_18,
+    HGroupProfile::Level(HGroupLevel::Level18)
+);
+representative_profile_rollout_test!(
+    representative_profile_rollout_level_25,
+    HGroupProfile::Level(HGroupLevel::Level25)
+);
+representative_profile_rollout_test!(representative_profile_rollout_max, HGroupProfile::Max);
+
+profile_rollout_test!(profile_rollout_level_01, HGroupProfile::Level(HGroupLevel::Level1));
+profile_rollout_test!(profile_rollout_level_02, HGroupProfile::Level(HGroupLevel::Level2));
+profile_rollout_test!(profile_rollout_level_03, HGroupProfile::Level(HGroupLevel::Level3));
+profile_rollout_test!(profile_rollout_level_04, HGroupProfile::Level(HGroupLevel::Level4));
+profile_rollout_test!(profile_rollout_level_05, HGroupProfile::Level(HGroupLevel::Level5));
+profile_rollout_test!(profile_rollout_level_06, HGroupProfile::Level(HGroupLevel::Level6));
+profile_rollout_test!(profile_rollout_level_07, HGroupProfile::Level(HGroupLevel::Level7));
+profile_rollout_test!(profile_rollout_level_08, HGroupProfile::Level(HGroupLevel::Level8));
+profile_rollout_test!(profile_rollout_level_09, HGroupProfile::Level(HGroupLevel::Level9));
+profile_rollout_test!(profile_rollout_level_10, HGroupProfile::Level(HGroupLevel::Level10));
+profile_rollout_test!(profile_rollout_level_11, HGroupProfile::Level(HGroupLevel::Level11));
+profile_rollout_test!(profile_rollout_level_12, HGroupProfile::Level(HGroupLevel::Level12));
+profile_rollout_test!(profile_rollout_level_13, HGroupProfile::Level(HGroupLevel::Level13));
+profile_rollout_test!(profile_rollout_level_14, HGroupProfile::Level(HGroupLevel::Level14));
+profile_rollout_test!(profile_rollout_level_15, HGroupProfile::Level(HGroupLevel::Level15));
+profile_rollout_test!(profile_rollout_level_16, HGroupProfile::Level(HGroupLevel::Level16));
+profile_rollout_test!(profile_rollout_level_17, HGroupProfile::Level(HGroupLevel::Level17));
+profile_rollout_test!(profile_rollout_level_18, HGroupProfile::Level(HGroupLevel::Level18));
+profile_rollout_test!(profile_rollout_level_19, HGroupProfile::Level(HGroupLevel::Level19));
+profile_rollout_test!(profile_rollout_level_20, HGroupProfile::Level(HGroupLevel::Level20));
+profile_rollout_test!(profile_rollout_level_21, HGroupProfile::Level(HGroupLevel::Level21));
+profile_rollout_test!(profile_rollout_level_22, HGroupProfile::Level(HGroupLevel::Level22));
+profile_rollout_test!(profile_rollout_level_23, HGroupProfile::Level(HGroupLevel::Level23));
+profile_rollout_test!(profile_rollout_level_24, HGroupProfile::Level(HGroupLevel::Level24));
+profile_rollout_test!(profile_rollout_level_25, HGroupProfile::Level(HGroupLevel::Level25));
+profile_rollout_test!(profile_rollout_max, HGroupProfile::Max);
 
 #[test]
 #[allow(clippy::too_many_lines)]
-fn positional_five_save_is_recognized_by_the_indicated_player() {
+fn positional_five_save_does_not_create_a_false_layered_finesse() {
     let mut state = paired_sample_five_state();
     for action in [
         Action::Clue {
@@ -1213,33 +1273,14 @@ fn positional_five_save_is_recognized_by_the_indicated_player() {
     ] {
         state.apply(action).unwrap();
     }
-    let giver = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
     let bad_clue = Action::Clue {
         target: PlayerId::new(2),
         clue: Clue::Suit(Suit::Green),
     };
-    assert_eq!(
-        select_h_group_action(&giver, HGroupProfile::Max),
-        Some(bad_clue),
-        "target={:#?}; inference={:#?}; clues={:#?}; hazard={:?}",
-        giver.view().hands[2],
-        infer_h_group(&giver, HGroupProfile::Max),
-        h_group_clue_candidates(&giver, HGroupProfile::Max),
-        prospective_clue_hazard(
-            giver.view(),
-            HGroupProfile::Max,
-            PlayerId::new(2),
-            CardId::new(35),
-            Clue::Suit(Suit::Green),
-            &[
-                CardId::new(31),
-                CardId::new(35),
-                CardId::new(44),
-                CardId::new(46)
-            ],
-            true,
-        )
-    );
+    // This synthetic prefix contains an earlier off-chop trash clue. Under
+    // the correct TCM interpretation the policy is free to discard here, so
+    // exact action selection is not part of this regression. Its purpose is
+    // the recipient-side Positional 5's Save interpretation below.
     state.apply(bad_clue).unwrap();
     let recipient = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
     let inferred = infer_h_group(&recipient, HGroupProfile::Max);

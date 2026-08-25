@@ -1,28 +1,31 @@
 use super::{
-    CardId, CardSet, ConnectionObligation, ConventionJournal, HGroupClueKind, HGroupConnectionKind,
-    HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, IdentitySet, MAX_CLUE_TOKENS,
-    ObservedEvent, ObservedHistoryEntry, PlayerId, PlayerView, PromiseId, Rank, chop, focus,
-    identity_of, is_playable_at, is_playable_now, is_trash_at, next_player, pending_is_active,
-    protected_cards, push_signal, same_turn_signal, was_clued_before, was_clued_before_with,
+    CardId, CardSet, ConnectionObligation, HGroupClueKind, HGroupConnectionKind, HGroupMoveKind,
+    HGroupRuleEffects, HGroupTurnContext, IdentitySet, MAX_CLUE_TOKENS, ObservedEvent, PlayerId,
+    PlayerView, PromiseId, Rank, chop, focus, identity_of, is_playable_at, is_trash_at,
+    next_player, pending_is_active, protected_cards, push_signal, same_turn_signal,
+    was_clued_before,
 };
 
+#[allow(clippy::too_many_lines)]
 pub(in crate::h_group) fn apply_tempo_effects(
-    entry: &ObservedHistoryEntry,
+    context: &HGroupTurnContext<'_>,
     view: &PlayerView,
-    hands: &[Vec<CardId>],
-    explicitly_clued: &CardSet,
-    chop_moved: &mut CardSet,
-    signals: &mut ConventionJournal,
+    effects: &mut HGroupRuleEffects<'_>,
 ) {
-    // Sources: https://hanabi.github.io/level-6/#the-tempo-clue
-    // https://hanabi.github.io/level-6/#the-tempo-clue-chop-move-tccm
+    // Sources:
+    // - https://hanabi.github.io/level-6/#the-tempo-clue
+    // - https://hanabi.github.io/level-6/#the-valuable-tempo-clue
+    // - https://hanabi.github.io/level-6/#the-tempo-clue-stall-a-non-valuable-tempo-clue
+    // - https://hanabi.github.io/level-6/#the-tempo-clue-chop-move-tccm
+    // - https://hanabi.github.io/level-6/#chop-moves--tempo-clues
+    let entry = context.entry;
     if [
         HGroupMoveKind::FiveStall,
         HGroupMoveKind::FixClue,
         HGroupMoveKind::Elimination,
     ]
     .into_iter()
-    .any(|kind| signals.has_at_turn(entry.turn, kind))
+    .any(|kind| effects.signals.has_at_turn(entry.turn, kind))
     {
         return;
     }
@@ -39,33 +42,126 @@ pub(in crate::h_group) fn apply_tempo_effects(
     if touched.is_empty()
         || touched
             .iter()
-            .any(|card| !was_clued_before_with(view, entry.turn, *card, *clue))
-        || !touched
-            .iter()
-            .all(|card| was_clued_before(view, entry.turn, *card) || chop_moved.contains(card))
+            .any(|card| !was_clued_before(view, entry.turn, *card))
     {
+        // A Tempo Clue gets no new cards. In particular, an invisible Chop
+        // Move does not make a card "already clued" for this definition; its
+        // first physical Play Clue is still an ordinary Play Clue.
         return;
     }
+
+    let adds_information = touched
+        .iter()
+        .any(|card| !context.before.facts[card.index()].has_positive_clue(*clue));
+    if !adds_information {
+        // A literal reclue supplies no information. Level 9 may admit it as a
+        // Burn in a permitted stall situation, but it is never Tempo.
+        return;
+    }
+
+    let prior_gotten = context
+        .before
+        .hands
+        .iter()
+        .flatten()
+        .copied()
+        .filter(|card| {
+            was_clued_before(view, entry.turn, *card)
+                || effects.invisibly_clued.contains(card)
+                || effects.chop_moved.contains(card)
+        })
+        .collect::<CardSet>();
+    let target_hand = &context.before.hands[target.index()];
+    let Some(tempo_focus) = focus(
+        target_hand,
+        touched,
+        chop(target_hand, &prior_gotten),
+        &prior_gotten,
+    ) else {
+        return;
+    };
+    let focus_possibilities =
+        IdentitySet::from_mask(context.after.facts[tempo_focus.index()].identity_mask());
+    let recipient_already_knew_playable = {
+        let before =
+            IdentitySet::from_mask(context.before.facts[tempo_focus.index()].identity_mask());
+        !before.is_empty()
+            && before
+                .iter()
+                .all(|identity| is_playable_at(context.before.stack_heights, identity))
+    } || effects.clues.iter().any(|interpretation| {
+        interpretation.turn < entry.turn
+            && interpretation.focus == tempo_focus
+            && !interpretation.play_identities.is_empty()
+            && interpretation
+                .play_identities
+                .iter()
+                .all(|identity| is_playable_at(context.before.stack_heights, identity))
+    });
+    if recipient_already_knew_playable {
+        // Level 6 names this a Burn, not a Tempo Clue. The Level 9 stall
+        // recognizer decides whether the Burn was legal in this context.
+        return;
+    }
+    let gets_focus_to_play = !focus_possibilities.is_empty()
+        && focus_possibilities
+            .iter()
+            .all(|identity| is_playable_at(context.before.stack_heights, identity));
+    if !gets_focus_to_play {
+        return;
+    }
+
     push_signal(
-        signals,
+        effects.signals,
         entry,
         *giver,
         Some(*target),
         HGroupMoveKind::TempoClue,
-        touched.clone(),
+        vec![tempo_focus],
         None,
     );
-    let playable_count = touched
+
+    let immediately_playable_clued = effects
+        .already_playing
         .iter()
-        .filter(|card| {
-            identity_of(view, **card).is_some_and(|identity| is_playable_now(view, identity))
-        })
+        .copied()
+        .filter(|card| !context.before.already_playing.contains(card))
+        .filter(|card| was_clued_before(view, entry.turn, *card))
         .count();
-    if playable_count < 2 {
-        if let Some(card) = chop(&hands[target.index()], explicitly_clued) {
-            chop_moved.insert(card);
+    let focus_position = target_hand
+        .iter()
+        .rev()
+        .position(|card| *card == tempo_focus);
+    let focus_cannot_be_prompted = focus_possibilities
+        .iter()
+        .all(|identity| identity.rank != Rank::Five)
+        && focus_position.is_some_and(|position| {
+            target_hand.iter().rev().take(position).any(|card| {
+                was_clued_before(view, entry.turn, *card) && {
+                    let possibilities =
+                        IdentitySet::from_mask(context.before.facts[card.index()].identity_mask());
+                    !possibilities.is_empty()
+                        && possibilities
+                            .iter()
+                            .any(|identity| !is_playable_at(context.before.stack_heights, identity))
+                }
+            })
+        });
+    let unlocks_hand = target_hand.iter().all(|card| prior_gotten.contains(card));
+    let valuable = immediately_playable_clued >= 2 || focus_cannot_be_prompted || unlocks_hand;
+
+    let giver_locked = context.before.hands[giver.index()]
+        .iter()
+        .all(|card| prior_gotten.contains(card));
+    let valid_stall = effects.must_clue.contains(giver)
+        || giver_locked
+        || (context.before.clue_tokens == MAX_CLUE_TOKENS && entry.turn > 0)
+        || context.before.deck_size <= context.before.hands.len();
+    if !valuable && !valid_stall {
+        if let Some(card) = chop(target_hand, &prior_gotten) {
+            effects.chop_moved.insert(card);
             push_signal(
-                signals,
+                effects.signals,
                 entry,
                 *giver,
                 Some(*target),
@@ -74,7 +170,7 @@ pub(in crate::h_group) fn apply_tempo_effects(
                 None,
             );
             push_signal(
-                signals,
+                effects.signals,
                 entry,
                 *giver,
                 Some(*target),
@@ -727,7 +823,13 @@ pub(in crate::h_group) fn apply_stall_effects(
     } else {
         None
     };
-    if all_previously_gotten {
+    if all_previously_gotten
+        && !same_turn_signal(
+            effects.signals,
+            entry.turn,
+            HGroupMoveKind::TempoClueChopMove,
+        )
+    {
         // Preserve the generic stall effect used by downstream precedence
         // logic. The exact signal below records which Level-9 permission made
         // that otherwise-low-value clue legal.

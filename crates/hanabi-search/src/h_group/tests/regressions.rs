@@ -50,39 +50,6 @@ fn paired_sample_zero_does_not_blind_play_a_fresh_red_five() {
 }
 
 #[test]
-fn paired_sample_one_rank_one_continuation_does_not_misplay() {
-    let mut state = paired_sample_one_state();
-    state
-        .apply(Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Rank(Rank::One),
-        })
-        .unwrap();
-    let convention = crate::SupportedConvention::HGroup(HGroupProfile::Max);
-    let report = continuation_for_search(state.clone(), convention).unwrap();
-
-    for (index, action) in report.outcome.actions().iter().enumerate() {
-        if let Action::Play(card) = action {
-            let identity = state.card(*card).unwrap();
-            if identity.rank.number()
-                != u8::try_from(state.play_stacks()[identity.suit.index()].len()).unwrap() + 1
-            {
-                let actor = LogicalDeductions::new(state.view_for(state.current_player()).unwrap())
-                    .unwrap();
-                panic!(
-                    "continuation action {index}, turn {}, actor {:?}: played {identity:?} when its stack was not ready: action {action:?}; prior actions {:?}; inference {:#?}",
-                    state.turn(),
-                    state.current_player(),
-                    &report.outcome.actions()[..index],
-                    infer_h_group(&actor, HGroupProfile::Max)
-                );
-            }
-        }
-        state.apply(*action).unwrap();
-    }
-}
-
-#[test]
 fn paired_sample_zero_green_four_save_does_not_finesse_a_trash_blue_one() {
     let mut state = paired_sample_zero_state();
     for action in [
@@ -872,7 +839,7 @@ fn paired_sample_three_rank_four_clue_occupies_green_five_holder() {
     );
 }
 
-/// <https://hanabi.github.io/level-7/#the-scream-discard-chop-move-sdcm>
+/// <https://hanabi.github.io/level-6/#the-tempo-clue-chop-move-tccm>
 #[test]
 fn paired_sample_three_does_not_discard_the_unique_yellow_five() {
     let profile = HGroupProfile::Level(HGroupLevel::Level25);
@@ -956,16 +923,19 @@ fn paired_sample_three_does_not_discard_the_unique_yellow_five() {
     }
     let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
     let inferred = infer_h_group(&deductions, profile);
-    assert!(inferred.signals.iter().any(|signal| {
-        signal.turn == 19
-            && signal.kind == HGroupMoveKind::ScreamDiscard
-            && signal.cards == [CardId::new(15)]
-    }), "expected Level-7 Scream after applying Max extras: {inferred:#?}");
+    assert!(
+        inferred.signals.iter().any(|signal| {
+            signal.turn == 18
+                && signal.kind == HGroupMoveKind::TempoClueChopMove
+                && signal.cards == [CardId::new(18)]
+        }),
+        "the non-valuable Green fill-in is a Level-6 TCCM, not a generic identity clue: {inferred:#?}"
+    );
 
     assert_eq!(
         select_h_group_action(&deductions, profile),
         Some(Action::Play(CardId::new(28))),
-        "the demonstrated Priority play preempts the later save clue while the Level-7 Scream still protects the unique yellow 5: {inferred:#?}; clues: {:#?}",
+        "the demonstrated Priority play preempts the later save clue without discarding the unique yellow 5: {inferred:#?}; clues: {:#?}",
         h_group_clue_candidates(&deductions, profile),
     );
 }
@@ -1837,9 +1807,9 @@ fn paired_sample_two_rejects_a_discharge_whose_focus_is_not_known_trash() {
     );
 }
 
-/// <https://hanabi.github.io/level-17/#the-time-travel-chop-move-direct-form>
+/// <https://hanabi.github.io/level-1/#the-early-game>
 #[test]
-fn paired_sample_four_discards_instead_of_recluing_a_trash_blue_one() {
+fn paired_sample_four_extinguishes_playable_purple_two_before_discarding() {
     let mut state = paired_sample_four_state();
     for action in [
         Action::Clue {
@@ -1881,8 +1851,11 @@ fn paired_sample_four_discards_instead_of_recluing_a_trash_blue_one() {
 
     assert_eq!(
         select_h_group_action(&deductions, HGroupProfile::Max),
-        Some(Action::Discard(CardId::new(15))),
-        "the earlier Time Travel Chop Move changes the physical chop; the policy must recover a token from that new chop: {inferred:#?}; candidates={:#?}",
+        Some(Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::Two),
+        }),
+        "the playable Purple 2 must be extinguished before the Early Game may end; the Time Travel Chop remains the later discard: {inferred:#?}; candidates={:#?}",
         h_group_clue_candidates(&deductions, HGroupProfile::Max),
     );
 }

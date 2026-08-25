@@ -472,6 +472,8 @@ pub(in crate::h_group) fn apply_extra_effects(
                             | HGroupMoveKind::TrashDoubleIgnition
                             | HGroupMoveKind::PokeDoubleIgnition
                             | HGroupMoveKind::ChopMoveIgnition
+                            | HGroupMoveKind::TempoClue
+                            | HGroupMoveKind::TempoClueChopMove
                             | HGroupMoveKind::FiveColorEjection
                             | HGroupMoveKind::UnknownTrashDischarge
                             | HGroupMoveKind::UnknownDupeDischarge

@@ -16,6 +16,19 @@ pub(super) fn subjective_convention_cards(
     Some(convention_card_inferences(&deductions, &replay))
 }
 
+/// Cards that one named player is already convention-bound to play from their
+/// own information. Candidate generation uses this projection instead of the
+/// clue giver's visible card faces when deciding whether a proposed clue
+/// creates a genuinely new Prompt.
+pub(super) fn subjective_playable_cards(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    observer: PlayerId,
+) -> Option<Vec<CardId>> {
+    let (deductions, replay) = subjective_h_group_replay(source, profile, observer)?;
+    Some(infer_h_group_from_replay(&deductions, replay, profile).playable_now)
+}
+
 fn subjective_h_group_replay(
     source: &PlayerView,
     profile: HGroupProfile,

@@ -1,6 +1,6 @@
 use hanabi_core::{Card, CardId, ClueFacts, ObservedEvent, ObservedHistoryEntry, PlayerView};
 
-use super::identity_of;
+use super::{CardSet, identity_of};
 
 /// Identity information legally available immediately before one history turn.
 ///
@@ -74,6 +74,10 @@ pub(super) struct HGroupTurnSnapshot {
     pub(super) clue_tokens: u8,
     pub(super) deck_size: usize,
     pub(super) early_game: bool,
+    /// Convention play commitments established strictly before this event.
+    /// Rule recognizers compare this snapshot with their mutable post-event
+    /// effects instead of reconstructing a subtly different baseline.
+    pub(super) already_playing: CardSet,
 }
 
 impl HGroupTurnSnapshot {
@@ -84,6 +88,7 @@ impl HGroupTurnSnapshot {
         clue_tokens: u8,
         deck_size: usize,
         early_game: bool,
+        already_playing: CardSet,
     ) -> Self {
         Self {
             hands: hands.to_vec(),
@@ -92,6 +97,7 @@ impl HGroupTurnSnapshot {
             clue_tokens,
             deck_size,
             early_game,
+            already_playing,
         }
     }
 }

@@ -29,6 +29,11 @@ jobs:
           rustup toolchain install stable --profile minimal --component clippy,rustfmt
           rustup default stable
 
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@v2
+        with:
+          tool: nextest@0.9.143
+
       - name: Install Python development dependencies
         run: |
           python3 -m venv .venv
@@ -45,3 +50,20 @@ jobs:
 
       - name: Build, test, and lint
         run: scripts/check.sh
+
+  exhaustive-h-group-profiles:
+    name: Exhaustive H-Group profile matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Test every cumulative H-Group profile
+        run: scripts/check-exhaustive.sh

@@ -2,24 +2,23 @@ use super::{
     Card, CardId, CardSet, Clue, ClueFacts, ConnectionManager, ConnectionObligation,
     ConnectionTransitionReason, ConventionJournal, HGroupClueInterpretation, HGroupConnectionKind,
     HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, IdentitySet, ObservedEvent,
-    ObservedHistoryEntry, PlayerId, PlayerView, PromiseId, Rank, finesse_position_id, identity_of,
-    is_playable_at, is_playable_now, is_trash_at, next_player, pending_is_active, protected_cards,
-    push_signal, same_turn_signal, was_clued_before,
+    ObservedHistoryEntry, PlayerId, PlayerView, PromiseId, Rank, chop, finesse_position_id,
+    identity_of, is_playable_at, is_playable_now, is_trash_at, next_player, pending_is_active,
+    protected_cards, push_signal, same_turn_signal, was_clued_before,
 };
 
 pub(in crate::h_group) fn apply_trash_effects(
-    entry: &ObservedHistoryEntry,
+    context: &HGroupTurnContext<'_>,
     view: &PlayerView,
-    hands: &[Vec<CardId>],
-    stack_heights: [u8; 5],
-    chop_moved: &mut CardSet,
-    pending: &mut ConnectionManager,
-    signals: &mut ConventionJournal,
+    effects: &mut HGroupRuleEffects<'_>,
 ) {
     // Sources: https://hanabi.github.io/level-14/#the-trash-push
     // https://hanabi.github.io/level-14/#the-trash-finesse
     // https://hanabi.github.io/level-14/#the-reverse-trash-finesse
     // https://hanabi.github.io/level-14/#the-trash-bluff
+    let entry = context.entry;
+    let hands = context.after.hands;
+    let stack_heights = context.after.stack_heights;
     match &entry.event {
         ObservedEvent::Clued {
             giver,
@@ -34,6 +33,22 @@ pub(in crate::h_group) fn apply_trash_effects(
             }) =>
         {
             let hand = &hands[target.index()];
+            // Post-event rule dispatch runs after the physical clue has added
+            // every touched card to `explicitly_clued`. Trash Push semantics,
+            // however, depend on whether the trash was chop immediately
+            // before the clue. Reconstruct that prior protected set without
+            // erasing cards that were already explicitly or invisibly gotten.
+            let mut explicitly_clued_before = effects.explicitly_clued.clone();
+            for card in touched {
+                if !was_clued_before(view, entry.turn, *card) {
+                    explicitly_clued_before.remove(card);
+                }
+            }
+            let gotten_before = protected_cards(
+                &explicitly_clued_before,
+                effects.invisibly_clued,
+                effects.chop_moved,
+            );
             let focus = touched
                 .iter()
                 .filter_map(|card| {
@@ -43,9 +58,15 @@ pub(in crate::h_group) fn apply_trash_effects(
                 })
                 .max_by_key(|(position, _)| *position)
                 .map(|(_, card)| card);
-            if let Some(focus) = focus {
+            if let Some(focus) = focus.filter(|focus| chop(hand, &gotten_before) == Some(*focus)) {
+                // A known-trash clue is a Trash Push only when the trash
+                // itself is on chop. Off-chop trash retains the lower-level
+                // Trash Chop Move meaning and moves every intervening card.
+                // Sources:
+                // - https://hanabi.github.io/level-4/#the-trash-chop-move-tcm
+                // - https://hanabi.github.io/level-14/#the-trash-push
                 push_signal(
-                    signals,
+                    effects.signals,
                     entry,
                     *giver,
                     Some(*target),
@@ -55,7 +76,7 @@ pub(in crate::h_group) fn apply_trash_effects(
                 );
                 if let Some(position) = hand.iter().position(|card| *card == focus) {
                     if let Some(pushed) = hand.get(position + 1).copied() {
-                        chop_moved.insert(pushed);
+                        effects.chop_moved.insert(pushed);
                     }
                 }
             }
@@ -74,7 +95,7 @@ pub(in crate::h_group) fn apply_trash_effects(
                     .map(|expected| (finesse, expected))
             });
             if let Some((finesse, expected)) = playable_finesse {
-                pending.start(
+                effects.pending.start(
                     entry.turn,
                     ConnectionObligation {
                         promise: PromiseId::UNASSIGNED,
@@ -88,7 +109,7 @@ pub(in crate::h_group) fn apply_trash_effects(
                     },
                 );
                 push_signal(
-                    signals,
+                    effects.signals,
                     entry,
                     *player,
                     Some(target),

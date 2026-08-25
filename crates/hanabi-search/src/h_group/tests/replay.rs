@@ -33,7 +33,7 @@ fn optimized_expert_replay_matches_engine() {
 }
 
 #[test]
-#[ignore = "pending expert review of the strategic choice at move 15"]
+#[ignore = "pending expert review of the strategic choice at move 22"]
 fn second_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine(&expert_replay_p4v0s9());
 }

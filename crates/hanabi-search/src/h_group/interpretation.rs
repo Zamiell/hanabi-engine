@@ -17,12 +17,13 @@ use super::{
     bluff_play_connects, bluff_target_order_is_legal, card_is_trash, chop,
     convention_information_value, finesse_position, five_pulled_card, focus,
     identity_is_queued_before_target, identity_of, identity_set, infer_h_group_from_replay,
-    is_critical, is_eventually_useful, is_playable_at, is_playable_now, is_unique_visible,
-    next_player, ordered_playable_cards, pending_identity_is_queued, pending_is_active,
-    positional_discard_candidate, projected_h_group_replay, prospective_clue_has_unsafe_connection,
-    prospective_clue_marks_focus_saved, prospective_clue_signal_kinds, prospective_clue_view,
-    prospective_play_view, replay_identity_is_queued, rule_enabled, subjective_convention_cards,
-    was_clued_before, with_prospective_analysis_cache,
+    is_convention_trash, is_critical, is_eventually_useful, is_playable_at, is_playable_now,
+    is_unique_visible, next_player, ordered_playable_cards, pending_identity_is_queued,
+    pending_is_active, positional_discard_candidate, projected_h_group_replay,
+    prospective_clue_has_unsafe_connection, prospective_clue_marks_focus_saved,
+    prospective_clue_signal_kinds, prospective_clue_view, prospective_play_view,
+    replay_identity_is_queued, rule_enabled, subjective_convention_cards,
+    subjective_playable_cards, was_clued_before, with_prospective_analysis_cache,
 };
 
 mod candidate_validation;
@@ -198,6 +199,14 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             .expect("standard Hanabi has at most five players"),
     );
     let convention_cards = convention_card_inferences(deductions, replay);
+    let mut baseline_playing = replay.cards.already_playing.clone();
+    for player in 0..view.hands.len() {
+        let observer =
+            PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
+        if let Some(cards) = subjective_playable_cards(view, profile, observer) {
+            baseline_playing.extend(cards);
+        }
+    }
     let next_player_has_multi_one = view.hands[next_player.index()]
         .iter()
         .filter(|card| {
@@ -302,7 +311,8 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             });
             continue;
         }
-        let redundant_successor_fill_in = gotten.contains(&focus)
+        let redundant_delayed_successor_fill_in = gotten.contains(&focus)
+            && !is_playable_now(view, focus_identity)
             && focus_identity.rank != Rank::One
             && replay.clues.iter().rev().any(|prior| {
                 let predecessor = Card::new(
@@ -316,11 +326,13 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                     && prior.touched.contains(&focus)
                     && prior.focus_identities == IdentitySet::singleton(predecessor)
             });
-        if redundant_successor_fill_in {
-            // Once the promised predecessor plays, Good Touch identifies this
-            // already-protected successor automatically. Filling it in now
-            // creates no new action and fails Minimum Clue Value.
-            // Source: https://hanabi.github.io/level-1/#good-touch-principle
+        if redundant_delayed_successor_fill_in {
+            // Level 6 does not make generic identity fill-ins legal. A Tempo
+            // Clue must get an already-clued card to play now; merely naming a
+            // delayed successor behind an existing Good Touch line creates no
+            // new action. The currently-playable case is deliberately kept so
+            // it can be classified as valuable Tempo, Tempo Stall, or TCCM.
+            // Source: https://hanabi.github.io/level-6/#the-tempo-clue
             continue;
         }
         let endangered_discard = positional_discard_candidate(deductions, target, &gotten);
@@ -339,6 +351,50 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
         } else {
             None
         };
+        let duplicates_existing_good_touch = is_eventually_useful(view, focus_identity)
+            && (convention_cards.iter().any(|card| {
+                card.card != focus
+                    && promptable.contains(&card.card)
+                    && view
+                        .hands
+                        .iter()
+                        .flatten()
+                        .any(|held| held.id == card.card && held.identity.is_none())
+                    && card.identities.contains(focus_identity)
+            }) || view.hands.iter().flatten().any(|card| {
+                card.id != focus
+                    && promptable.contains(&card.id)
+                    && card.identity == Some(focus_identity)
+            }));
+        let adds_valuable_non_focus = newly_informed.iter().copied().any(|card| {
+            card != focus
+                && identity_of(view, card)
+                    .is_some_and(|identity| is_eventually_useful(view, identity))
+        });
+        let adds_non_focus_tempo = hand.iter().any(|card| {
+            card.id != focus
+                && touched.contains(&card.id)
+                && promptable.contains(&card.id)
+                && !card.clues.has_positive_clue(clue)
+                && card
+                    .identity
+                    .is_some_and(|identity| is_playable_now(view, identity))
+        });
+        if duplicates_existing_good_touch
+            && !adds_valuable_non_focus
+            && !adds_non_focus_tempo
+            && save_score.is_none()
+        {
+            // A Play Clue cannot spend a clue merely to duplicate an identity
+            // already promised by Good Touch. Retouching old cards does not
+            // create Duplicitous Value: the clue must get an additional card,
+            // not just add a redundant suit/rank fact to cards already gotten.
+            // Save clues have their separate Duplication Responsibility rules.
+            // Sources:
+            // - https://hanabi.github.io/level-1/#good-touch-principle
+            // - https://hanabi.github.io/level-17/#the-duplicitous-value-clue
+            continue;
+        }
         let mut play_score = play_clue_score(
             view,
             profile,
@@ -358,7 +414,8 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 .count(),
             &promptable,
             fixed_cards,
-            &replay.cards.already_playing,
+            &replay.cards.invalidated_focuses,
+            &baseline_playing,
             &replay.pending_connections,
             &convention_cards,
         )
@@ -417,7 +474,9 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
         }
         if play_score.is_some()
             && newly_informed.is_empty()
-            && replay.cards.already_playing.contains(&focus)
+            && baseline_playing.contains(&focus)
+            && !fixed_cards.contains(&focus)
+            && !replay.cards.invalidated_focuses.contains(&focus)
         {
             // A fill-in on a card that is already promised to play creates no
             // new action. Retouching other gotten cards does not rescue the
@@ -439,7 +498,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 focus,
                 focus_identity,
                 &promptable,
-                &replay.cards.already_playing,
+                &baseline_playing,
                 &replay.pending_connections,
                 std::array::from_fn(|suit| {
                     u8::try_from(view.play_stacks[suit].len())
@@ -488,7 +547,13 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
         if play_score.is_some()
             && !repairable_lie
             && prospective_clue_has_unsafe_connection(
-                view, profile, target, focus, clue, &touched, true,
+                view,
+                profile,
+                target,
+                focus,
+                clue,
+                &touched,
+                is_playable_now(view, focus_identity),
             )
         {
             continue;
@@ -629,7 +694,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             || view.clue_tokens == MAX_CLUE_TOKENS
             || has_out_of_order_prompt(view, &gotten))
     {
-        candidates.extend(tempo_clue_candidates(view, replay, &gotten));
+        candidates.extend(tempo_clue_candidates(view, replay, &gotten, profile));
     }
     if rule_enabled(profile, HGroupRuleId::Stalling) && view.clue_tokens == 1 {
         // Every clue source, including the fallback Tempo path above, must
@@ -866,10 +931,15 @@ pub(super) fn advanced_clue_candidates(
                         .then_some(HGroupMoveKind::FiveNumberEjection)
                 }
             });
+        let clue_focus = focus(layout, &touched, chop(layout, gotten), gotten);
+        let recipient_playing = subjective_playable_cards(view, profile, target).map_or_else(
+            || replay.cards.already_playing.clone(),
+            |cards| cards.into_iter().collect::<CardSet>(),
+        );
         let tempo = newly_touched.is_empty()
             && touched.iter().any(|card| {
                 !previously_fixed.contains(card)
-                    && !replay.cards.already_playing.contains(card)
+                    && !recipient_playing.contains(card)
                     && !replay.cards.forced_playable.contains(card)
                     && !replay.pending_connections.iter().any(|connection| {
                         connection.actor == target && connection.cards.contains(card)
@@ -877,6 +947,31 @@ pub(super) fn advanced_clue_candidates(
                     && identity_of(view, *card)
                         .is_some_and(|identity| is_playable_now(view, identity))
             });
+        let tempo_focus_is_blocked_from_prompt = clue_focus
+            .and_then(|focus| {
+                identity_of(view, focus).map(|identity| {
+                    (
+                        focus,
+                        identity,
+                        layout.iter().rev().position(|card| *card == focus),
+                    )
+                })
+            })
+            .is_some_and(|(_focus, identity, position)| {
+                identity.rank != Rank::Five
+                    && position.is_some_and(|position| {
+                        layout.iter().rev().take(position).any(|card| {
+                            promptable.contains(card)
+                                && identity_of(view, *card)
+                                    .is_some_and(|identity| !is_playable_now(view, identity))
+                        })
+                    })
+            });
+        let target_locked = layout.iter().all(|card| gotten.contains(card));
+        let tempo_stall_allowed = actor_locked
+            || replay.must_clue.contains(&view.observer)
+            || (view.clue_tokens == MAX_CLUE_TOKENS && view.turn > 0)
+            || view.deck_size <= view.hands.len();
         let fills_in = touched.iter().copied().any(|card| {
             hand.iter()
                 .find(|candidate| candidate.id == card)
@@ -925,7 +1020,6 @@ pub(super) fn advanced_clue_candidates(
         });
         let duplicate_touch = identities.len() != identity_set(identities.iter().copied()).len();
         let ejection_actor = next_player(view.current_player, view.hands.len());
-        let clue_focus = focus(layout, &touched, chop(layout, gotten), gotten);
         let unresolved_same_clue_connector = target == ejection_actor
             && clue_focus
                 .and_then(|focus| identity_of(view, focus).map(|identity| (focus, identity)))
@@ -1054,6 +1148,8 @@ pub(super) fn advanced_clue_candidates(
                         target,
                         focus,
                         identity,
+                        previously_fixed.contains(&focus)
+                            || replay.cards.invalidated_focuses.contains(&focus),
                         touched.len() == 1,
                         &replay.cards.explicitly_clued,
                         &replay.cards.already_playing,
@@ -1182,6 +1278,9 @@ pub(super) fn advanced_clue_candidates(
             && !replay.early_game
             && view.clue_tokens == MAX_CLUE_TOKENS
             && clue_focus.is_some_and(|focus| layout.last() != Some(&focus));
+        let trash_chop_move = rule_enabled(profile, HGroupRuleId::ChopMoves)
+            && prospective_clue_signal_kinds(view, profile, target, clue, &touched)
+                .contains(&HGroupMoveKind::TrashChopMove);
         let max_signal = rule_enabled(profile, HGroupRuleId::Extras)
             .then(|| {
                 prospective_clue_signal_kinds(view, profile, target, clue, &touched)
@@ -1335,15 +1434,54 @@ pub(super) fn advanced_clue_candidates(
                 145
             };
             Some((kind, score))
+        } else if rule_enabled(profile, HGroupRuleId::TempoClues) && tempo {
+            // https://hanabi.github.io/level-6/#the-valuable-tempo-clue
+            // https://hanabi.github.io/level-6/#the-tempo-clue-chop-move-tccm
+            // Tempo is valuable only for the three enumerated reasons. Merely
+            // adding focus information does not satisfy Minimum Clue Value.
+            // This branch intentionally precedes Trash Chop Move: Level 6
+            // explicitly gives a clue with both appearances the Tempo meaning.
+            let valuable = playable >= 2 || tempo_focus_is_blocked_from_prompt || target_locked;
+            if valuable {
+                Some((HGroupMoveKind::TempoClue, 205))
+            } else if tempo_stall_allowed {
+                // https://hanabi.github.io/level-6/#the-tempo-clue-stall-a-non-valuable-tempo-clue
+                Some((HGroupMoveKind::TempoClue, 90))
+            } else {
+                Some((HGroupMoveKind::TempoClueChopMove, 180))
+            }
+        } else if trash_chop_move {
+            // https://hanabi.github.io/level-4/#the-trash-chop-move-tcm
+            // A TCM both protects the cards to the right of its trash focus
+            // and gives the recipient a demonstrated safe discard. Spending
+            // the token is urgent when it moves a still-useful chop, but not
+            // when the nominal chop has already become trash.
+            let protects_useful_chop = chop(layout, gotten)
+                .and_then(|card| identity_of(view, card))
+                .is_some_and(|identity| is_eventually_useful(view, identity));
+            let actor_has_known_trash = replay.hands[view.observer.index()].iter().any(|card| {
+                convention_cards
+                    .iter()
+                    .find(|note| note.card == *card)
+                    .is_some_and(|note| {
+                        !note.identities.is_empty()
+                            && note.identities.iter().all(|identity| {
+                                is_convention_trash(view, identity, gotten, convention_cards)
+                            })
+                    })
+            });
+            let target_distance = (target.index() + view.hands.len() - view.current_player.index())
+                % view.hands.len();
+            Some((
+                HGroupMoveKind::TrashChopMove,
+                if protects_useful_chop && !actor_has_known_trash && target_distance <= 2 {
+                    310
+                } else {
+                    210
+                },
+            ))
         } else if rule_enabled(profile, HGroupRuleId::ChopMoves) && all_trash {
             Some((HGroupMoveKind::ChopMove, 210))
-        } else if rule_enabled(profile, HGroupRuleId::TempoClues) && tempo {
-            let valuable = playable >= 2 || actor_locked;
-            if valuable || stalling {
-                Some((HGroupMoveKind::TempoClue, if valuable { 205 } else { 90 }))
-            } else {
-                Some((HGroupMoveKind::ChopMove, 180))
-            }
         } else if let Some(kind) =
             five_tech_kind.filter(|_| rule_enabled(profile, HGroupRuleId::FiveTech))
         {
@@ -1381,6 +1519,7 @@ pub(super) fn advanced_clue_candidates(
                     | HGroupMoveKind::Elimination
                     | HGroupMoveKind::OccupiedPlay
                     | HGroupMoveKind::TempoClue
+                    | HGroupMoveKind::TempoClueChopMove
                     | HGroupMoveKind::Extra
                     | HGroupMoveKind::Stall
             )
@@ -1548,6 +1687,7 @@ pub(super) fn play_clue_score(
     clue_touch_count: usize,
     explicitly_clued: &CardSet,
     fixed_cards: &CardSet,
+    invalidated_focuses: &CardSet,
     already_playing: &CardSet,
     pending_connections: &[ConnectionObligation],
     convention_cards: &[HGroupCardInference],
@@ -1595,6 +1735,7 @@ pub(super) fn play_clue_score(
             target,
             focus,
             focus_identity,
+            fixed_cards.contains(&focus) || invalidated_focuses.contains(&focus),
             clue_touch_count == 1,
             explicitly_clued,
             already_playing,
@@ -1748,6 +1889,7 @@ pub(super) fn delayed_connection_score(
     target: PlayerId,
     focus: CardId,
     focus_identity: Card,
+    focus_was_fixed: bool,
     allow_queued_prefix: bool,
     explicitly_clued: &CardSet,
     already_playing: &CardSet,
@@ -1767,6 +1909,13 @@ pub(super) fn delayed_connection_score(
             )
         });
     if pending_wholly_queued {
+        if explicitly_clued.contains(&focus) && !focus_was_fixed {
+            // Every predecessor was already promised, so Good Touch would
+            // make this already-gotten focus play without the fill-in. The
+            // clue creates no action and fails Minimum Clue Value.
+            // Source: https://hanabi.github.io/level-1/#minimum-clue-value-principle
+            return None;
+        }
         return Some(390);
     }
     let first_unqueued_rank = if allow_queued_prefix {
@@ -1785,22 +1934,18 @@ pub(super) fn delayed_connection_score(
         Some(stack_height + 1)
     };
     let Some(first_unqueued_rank) = first_unqueued_rank else {
-        let first_required = Card::new(focus_identity.suit, Rank::ALL[stack_height]);
-        let target_owes_first_required = pending_connections.iter().any(|connection| {
-            connection.actor == target
-                && connection.expected == first_required
-                && pending_is_active(connection, pending_connections)
-        }) || view.hands[target.index()].iter().any(|card| {
-            already_playing.contains(&card.id) && card.identity == Some(first_required)
-        });
-        if target == next_player(view.current_player, view.hands.len())
-            && target_owes_first_required
-        {
-            // A clue that merely loads the next play behind the recipient's
-            // existing obligation does not improve their immediate action.
-            // Preserve the token and let that promised connector resolve.
+        if explicitly_clued.contains(&focus) && !focus_was_fixed {
+            // `already_playing` can account for every predecessor without a
+            // pending connection record. As above, identifying an
+            // already-gotten successor does not create a Prompt or any other
+            // new play commitment.
             return None;
         }
+        // A newly touched successor still creates a future play commitment
+        // when its predecessor was already scheduled. Only an already-gotten
+        // focus is a no-value fill-in, and that case returned above. This is
+        // the distinction between a legal rank-2 clue that gets a fresh Red 2
+        // behind a known Red 1 and an illegal reclue of an existing Red 3.
         return Some(390);
     };
     // Already-promised plays advance the delayed line. Search for the first
@@ -1830,16 +1975,38 @@ pub(super) fn delayed_connection_score(
         return Some(365);
     }
     let first = (view.current_player.index() + 1) % view.hands.len();
-    let search_len = if explicitly_clued.contains(&focus) {
-        // A fill-in clue on an already gotten delayed card cannot make its
-        // recipient play immediately. Its connection may therefore wrap
-        // beyond that recipient, as in a Green-4 reclue that finesses the
-        // following player's Green 2 and Green 3.
-        view.hands.len()
-    } else if rule_enabled(profile, HGroupRuleId::BasicMoves) {
+    let ordinary_search_len = if rule_enabled(profile, HGroupRuleId::BasicMoves) {
         (target.index() + view.hands.len() - first) % view.hands.len() + 1
     } else {
         1
+    };
+    let direct_reverse_finesse = rule_enabled(profile, HGroupRuleId::BasicMoves)
+        && (ordinary_search_len..view.hands.len()).any(|distance| {
+            let player = (first + distance) % view.hands.len();
+            player != target.index()
+                && view.hands[player]
+                    .iter()
+                    .rev()
+                    .find(|card| {
+                        card.id != focus
+                            && !explicitly_clued.contains(&card.id)
+                            && !already_playing.contains(&card.id)
+                    })
+                    .and_then(|card| card.identity)
+                    == Some(connector)
+        });
+    let search_len = if explicitly_clued.contains(&focus) || direct_reverse_finesse {
+        // A fill-in clue on an already gotten delayed card cannot make its
+        // recipient play immediately. Its connection may therefore wrap
+        // beyond that recipient, as in a Green-4 reclue that finesses the
+        // following player's Green 2 and Green 3. A newly clued card only
+        // wraps when the recipient can see the exact connector in another
+        // player's immediate Finesse Position (a Level-2 Reverse Finesse).
+        // This prevents deeper hidden layers from manufacturing a reverse
+        // line that the recipient could not recognize on the clue turn.
+        view.hands.len()
+    } else {
+        ordinary_search_len
     };
     let player_order = (0..search_len)
         .map(|distance| (first + distance) % view.hands.len())
@@ -1884,6 +2051,18 @@ pub(super) fn delayed_connection_score(
 
     for needed_rank in (first_unqueued_rank + 1)..usize::from(focus_identity.rank.number()) {
         let needed = Card::new(focus_identity.suit, Rank::ALL[needed_rank - 1]);
+        let already_queued =
+            pending_identity_is_queued(pending_connections, needed)
+                || view.hands.iter().flatten().any(|card| {
+                    already_playing.contains(&card.id) && card.identity == Some(needed)
+                });
+        if already_queued {
+            // A later connector can already be convention-bound even when an
+            // earlier connector is the first missing step. Do not demand a
+            // second Prompt/Finesse for an identity the team will already
+            // play before the delayed focus.
+            continue;
+        }
         let false_prompt = view.hands.iter().flatten().any(|card| {
             card.id != focus
                 && explicitly_clued.contains(&card.id)
@@ -2136,6 +2315,7 @@ pub(super) fn tempo_clue_candidates(
     view: &PlayerView,
     replay: &HGroupState,
     gotten: &CardSet,
+    profile: HGroupProfile,
 ) -> Vec<ClueCandidate> {
     let mut candidates = Vec::new();
     for action in view.legal_actions() {
@@ -2170,7 +2350,13 @@ pub(super) fn tempo_clue_candidates(
         else {
             continue;
         };
-        if is_playable_now(view, identity) {
+        let recipient_already_knows_playable = subjective_playable_cards(view, profile, target)
+            .is_none_or(|playing| playing.contains(&focus));
+        if is_playable_now(view, identity) && !recipient_already_knows_playable {
+            // https://hanabi.github.io/level-6/#the-tempo-clue
+            // A Tempo Clue accelerates an already-clued card that was not
+            // already known to be playable. Re-cluing a card already bound to
+            // play is a Burn Clue and is not admitted by this fallback.
             candidates.push(ClueCandidate {
                 action,
                 value: ClueValue::new(100 + u16::from(matches!(clue, Clue::Suit(_)))),
@@ -2361,23 +2547,71 @@ pub(super) fn infer_clue_to_self(
             .filter(|identity| is_playable_now(view, *identity))
             .fold(0, |mask, identity| mask | (1 << identity.index())),
     );
-    let completed_connection = demonstrated_focus.iter().any(|identity| {
-        let Some(previous_rank) = identity.rank.index().checked_sub(1) else {
-            return false;
-        };
-        let connector = Card::new(identity.suit, Rank::ALL[previous_rank]);
-        view.history.iter().any(|entry| {
-            entry.turn > clue.turn
-                && matches!(
-                    entry.event,
-                    ObservedEvent::Played {
-                        identity: played,
-                        successful: true,
-                        ..
-                    } if played == connector
-                )
+    let all_possibilities_completed = demonstrated_focus == focus_possibilities
+        && demonstrated_focus.iter().all(|identity| {
+            let Some(previous_rank) = identity.rank.index().checked_sub(1) else {
+                return false;
+            };
+            let connector = Card::new(identity.suit, Rank::ALL[previous_rank]);
+            view.history.iter().any(|entry| {
+                entry.turn > clue.turn
+                    && matches!(
+                        entry.event,
+                        ObservedEvent::Played {
+                            identity: played,
+                            successful: true,
+                            ..
+                        } if played == connector
+                    )
+            })
+        });
+    let completed_good_touch_chain = matches!(clue.clue, Clue::Suit(_))
+        && focus_possibilities.iter().next().is_some_and(|first| {
+            focus_possibilities
+                .iter()
+                .all(|identity| identity.suit == first.suit)
         })
-    });
+        && clue.touched.iter().copied().any(|card| {
+            card != clue.focus
+                && explicitly_clued.contains(&card)
+                && inferred
+                    .cards
+                    .iter()
+                    .any(|note| note.card == card && note.identities == focus_possibilities)
+        })
+        && demonstrated_focus.iter().any(|identity| {
+            identity.rank.index()
+                == focus_possibilities
+                    .iter()
+                    .map(|candidate| candidate.rank.index())
+                    .min()
+                    .expect("focus possibilities are non-empty")
+                && identity
+                    .rank
+                    .index()
+                    .checked_sub(1)
+                    .is_some_and(|previous| {
+                        let connector = Card::new(identity.suit, Rank::ALL[previous]);
+                        view.history.iter().any(|entry| {
+                            entry.turn > clue.turn
+                                && matches!(
+                                    entry.event,
+                                    ObservedEvent::Played {
+                                        identity: played,
+                                        successful: true,
+                                        ..
+                                    } if played == connector
+                                )
+                        })
+                    })
+        });
+    // https://hanabi.github.io/level-1/#good-touch-principle
+    // A same-suit clue can correlate two previously gotten cards as the next
+    // two ranks. Once the predecessor of the lower identity plays, the focus
+    // is that lower identity and the matching non-focus card is its successor.
+    // This exception does not apply to a rank clue whose alternatives span
+    // suits; one demonstrated connector cannot resolve those alternatives.
+    let completed_connection = all_possibilities_completed || completed_good_touch_chain;
     if allow_direct_play
         && completed_connection
         && !demonstrated_focus.is_empty()
@@ -2409,7 +2643,7 @@ pub(super) fn infer_clue_to_self(
         && !inferred.playable_now.contains(&clue.focus)
     {
         inferred.playable_now.push(clue.focus);
-    } else if allow_direct_play {
+    } else if allow_direct_play && live_direct.is_empty() {
         if let Some(connection) = find_prompt(
             deductions,
             explicitly_clued,

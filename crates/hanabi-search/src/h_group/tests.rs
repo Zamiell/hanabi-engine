@@ -196,7 +196,10 @@ fn move_41_plays_the_promised_purple_four_after_the_connection() {
     let view = state.view_for(actor).expect("current player has a view");
     let deductions = LogicalDeductions::new(view).expect("valid deductions");
     let inferred = infer_h_group(&deductions, HGroupProfile::Max);
-    assert!(inferred.playable_now.contains(&CardId::new(34)));
+    assert!(
+        inferred.playable_now.contains(&CardId::new(34)),
+        "purple 4 should become playable after its connector: {inferred:#?}"
+    );
     assert_eq!(
         select_h_group_action(&deductions, HGroupProfile::Max),
         Some(Action::Play(CardId::new(34)))

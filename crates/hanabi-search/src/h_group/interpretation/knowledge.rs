@@ -125,8 +125,31 @@ pub(in crate::h_group) fn convention_card_inferences(
                 })
         })
         .collect::<Vec<_>>();
+    for card in &mut cards {
+        let narrowed = card
+            .identities
+            .without(replay.cards.facts.excluded_identities(card.card));
+        if !narrowed.is_empty() {
+            card.identities = narrowed;
+        }
+    }
 
     for clue in &replay.clues {
+        let has_existing_prompt_for_delayed_identity = clue.clue == Clue::Rank(Rank::Two)
+            && clue.play_identities.iter().any(|identity| {
+                let height = usize::from(clue.stack_heights[identity.suit.index()]);
+                let rank = usize::from(identity.rank.number());
+                if rank <= height + 1 || height >= Rank::ALL.len() {
+                    return false;
+                }
+                let connector = Card::new(identity.suit, Rank::ALL[height]);
+                clue.previously_gotten.iter().any(|prior| {
+                    cards
+                        .iter()
+                        .find(|card| card.card == *prior)
+                        .is_some_and(|card| card.identities.contains(connector))
+                })
+            });
         if !replay.cards.invalidated_focuses.contains(&clue.focus) {
             if let Some(card) = cards.iter_mut().find(|card| card.card == clue.focus) {
                 let resolved_bluff = replay.signals.of_kind(HGroupMoveKind::Bluff).any(|signal| {
@@ -186,17 +209,17 @@ pub(in crate::h_group) fn convention_card_inferences(
                                     )
                                 })
                         });
-                        if !has_queued_delayed_identity {
+                        if !has_queued_delayed_identity && !has_existing_prompt_for_delayed_identity
+                        {
                             // Without an actual Prompt/Finesse obligation or
-                            // an already-queued connector, an immediately
-                            // playable identity has precedence over a merely
-                            // hypothetical delayed interpretation. This lets a
-                            // loaded recipient recognize a newly clued blue 3
-                            // on a blue-2 stack instead of inventing another
-                            // finesse. A queued connector is different: the
-                            // clue can deliberately load its focus behind that
-                            // existing play without scheduling a duplicate
-                            // connection signal.
+                            // an existing clued Prompt candidate, an
+                            // immediately playable identity has precedence
+                            // over a merely hypothetical delayed
+                            // interpretation. An existing Prompt candidate
+                            // keeps the delayed identity semantically valid,
+                            // but a simultaneous direct-play possibility means
+                            // that the Prompt is not yet actionable; the focus
+                            // remains a superposition instead.
                             let direct = identities_at_distance_at(narrowed, clue.stack_heights, 0);
                             if !direct.is_empty() {
                                 narrowed = direct;
@@ -269,8 +292,10 @@ pub(in crate::h_group) fn convention_card_inferences(
                 // Good Touch is a continuing promise that the non-focus card
                 // will eventually play, not a mask frozen at clue time. As
                 // the stack advances, identities that have become trash fall
-                // away; this is how an older touched Purple card becomes the
-                // Purple 5 automatically after the promised Purple 4 plays.
+                // away, and completed Prompt/Finesse identities remain claimed
+                // by the cards that demonstrated them. This is how an older
+                // touched Purple card becomes the Purple 5 automatically after
+                // the promised Purple 4 plays.
                 let still_useful = IdentitySet::from_mask(
                     good_touch
                         .iter()
@@ -557,59 +582,56 @@ pub(in crate::h_group) fn snapshot_connection_exists(
     stack_heights: [u8; 5],
 ) -> bool {
     let first_actor = (giver.index() + 1) % hands.len();
-    let search_len = if rule_enabled(profile, HGroupRuleId::BasicMoves) {
+    let ordinary_search_len = if rule_enabled(profile, HGroupRuleId::BasicMoves) {
         (target.index() + hands.len() - first_actor) % hands.len() + 1
     } else {
         1
     };
-    let player_order = (0..search_len).map(|distance| (first_actor + distance) % hands.len());
+    // A newly touched delayed focus normally searches only through its
+    // recipient. A Level-2 Reverse Finesse is the exception: when the
+    // recipient can see the exact connector in a later player's immediate
+    // Finesse Position, the connection deliberately wraps past them. Keep
+    // this snapshot test aligned with `schedule_connection`; previously only
+    // candidate validation knew about this exception, so a clue could be
+    // admitted as a Reverse Finesse but replayed as a Stall.
+    // Source: https://hanabi.github.io/level-2/#the-reverse-finesse
+    let direct_reverse_finesse = rule_enabled(profile, HGroupRuleId::BasicMoves)
+        && snapshot_direct_reverse_finesse_exists(
+            expected,
+            target,
+            focus,
+            view,
+            hands,
+            facts,
+            gotten,
+            already_playing,
+            first_actor,
+            ordinary_search_len,
+        );
+    let search_len = if direct_reverse_finesse {
+        hands.len()
+    } else {
+        ordinary_search_len
+    };
+    let player_order = (0..search_len)
+        .map(|distance| (first_actor + distance) % hands.len())
+        .collect::<Vec<_>>();
 
     // Prompts take precedence over Finesses even when the prompted player is
     // later in turn order. This is the same ordering used when the connection
     // obligations are materialized by `schedule_connection` below.
-    let mut unknown_observer_prompt = false;
-    for actor_index in player_order.clone() {
-        let candidates = hands[actor_index]
-            .iter()
-            .rev()
-            .copied()
-            .filter(|card| {
-                *card != focus
-                    && gotten.contains(card)
-                    && !already_playing.contains(card)
-                    && facts[card.index()].allows(expected)
-            })
-            .collect::<Vec<_>>();
-        if candidates.is_empty() {
-            continue;
-        }
-        if actor_index == view.observer.index() && giver != view.observer {
-            unknown_observer_prompt = true;
-            continue;
-        }
-        if candidates
-            .iter()
-            .position(|card| identity_of(view, *card) == Some(expected))
-            .is_some_and(|correct| {
-                candidates[..correct].iter().all(|card| {
-                    identity_of(view, *card).map_or_else(
-                        || {
-                            let possibilities =
-                                IdentitySet::from_mask(facts[card.index()].identity_mask());
-                            !possibilities.is_empty()
-                                && possibilities
-                                    .iter()
-                                    .all(|identity| is_playable_at(stack_heights, identity))
-                        },
-                        |identity| is_playable_at(stack_heights, identity),
-                    )
-                })
-            })
-        {
-            return true;
-        }
-    }
-    if unknown_observer_prompt {
+    if snapshot_prompt_exists(
+        expected,
+        giver,
+        focus,
+        view,
+        hands,
+        facts,
+        gotten,
+        already_playing,
+        stack_heights,
+        &player_order,
+    ) {
         return true;
     }
 
@@ -652,6 +674,95 @@ pub(in crate::h_group) fn snapshot_connection_exists(
         }
     }
     unknown_observer_finesse
+}
+
+#[allow(clippy::too_many_arguments)]
+fn snapshot_prompt_exists(
+    expected: Card,
+    giver: PlayerId,
+    focus: CardId,
+    view: &PlayerView,
+    hands: &[Vec<CardId>],
+    facts: &[ClueFacts],
+    gotten: &CardSet,
+    already_playing: &CardSet,
+    stack_heights: [u8; 5],
+    player_order: &[usize],
+) -> bool {
+    let mut unknown_observer_prompt = false;
+    for &actor_index in player_order {
+        let candidates = hands[actor_index]
+            .iter()
+            .rev()
+            .copied()
+            .filter(|card| {
+                *card != focus
+                    && gotten.contains(card)
+                    && !already_playing.contains(card)
+                    && facts[card.index()].allows(expected)
+            })
+            .collect::<Vec<_>>();
+        if candidates.is_empty() {
+            continue;
+        }
+        if actor_index == view.observer.index() && giver != view.observer {
+            unknown_observer_prompt = true;
+            continue;
+        }
+        if candidates
+            .iter()
+            .position(|card| identity_of(view, *card) == Some(expected))
+            .is_some_and(|correct| {
+                candidates[..correct].iter().all(|card| {
+                    identity_of(view, *card).map_or_else(
+                        || {
+                            let possibilities =
+                                IdentitySet::from_mask(facts[card.index()].identity_mask());
+                            !possibilities.is_empty()
+                                && possibilities
+                                    .iter()
+                                    .all(|identity| is_playable_at(stack_heights, identity))
+                        },
+                        |identity| is_playable_at(stack_heights, identity),
+                    )
+                })
+            })
+        {
+            return true;
+        }
+    }
+    unknown_observer_prompt
+}
+
+#[allow(clippy::too_many_arguments)]
+fn snapshot_direct_reverse_finesse_exists(
+    expected: Card,
+    target: PlayerId,
+    focus: CardId,
+    view: &PlayerView,
+    hands: &[Vec<CardId>],
+    facts: &[ClueFacts],
+    gotten: &CardSet,
+    already_playing: &CardSet,
+    first_actor: usize,
+    ordinary_search_len: usize,
+) -> bool {
+    (ordinary_search_len..hands.len()).any(|distance| {
+        let actor_index = (first_actor + distance) % hands.len();
+        actor_index != target.index()
+            && hands[actor_index]
+                .iter()
+                .rev()
+                .copied()
+                .find(|card| {
+                    *card != focus && !gotten.contains(card) && !already_playing.contains(card)
+                })
+                .is_some_and(|card| {
+                    identity_of(view, card) == Some(expected)
+                        || (actor_index == view.observer.index()
+                            && facts[card.index()].identity_mask() == 1 << expected.index())
+                })
+    })
 }
 
 pub(in crate::h_group) fn snapshot_accounted(

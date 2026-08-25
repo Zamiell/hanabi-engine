@@ -3,7 +3,8 @@ use super::{
     HGroupClueInterpretation, HGroupClueKind, HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext,
     IdentitySet, ObservedEvent, ObservedHistoryEntry, PlayerId, PlayerView, Rank, card_is_trash,
     chop, finesse_position_id, focus, has_higher_basic_priority, identity_of, is_playable_at,
-    is_trash_at, next_player, protected_cards, push_signal, was_clued_before,
+    is_trash_at, next_player, pending_identity_is_queued, protected_cards, push_signal,
+    was_clued_before,
 };
 
 #[allow(clippy::too_many_lines)]
@@ -645,6 +646,14 @@ pub(in crate::h_group) fn apply_charm_effects(
                 return;
             }
             let connector = Card::new(focus_identity.suit, Rank::ALL[usize::from(height)]);
+            if pending_identity_is_queued(pending, connector) {
+                // Hesitation calls for a genuinely missing connector. The
+                // focus owner may discard while an earlier teammate's queued
+                // connection is still waiting for its next turn; that does
+                // not transfer the connection to the following player.
+                // Source: https://hanabi.github.io/level-23/#the-hesitation-blind-play
+                return;
+            }
             let actor = next_player(*player, hands.len());
             let gotten = protected_cards(explicitly_clued, invisibly_clued, chop_moved);
             let hesitation =
