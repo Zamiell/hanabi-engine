@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use super::*;
 
-const SNAPSHOT_SCHEMA_VERSION: u8 = 1;
+const SNAPSHOT_SCHEMA_VERSION: u8 = 3;
 const UPDATE_ENVIRONMENT_VARIABLE: &str = "HANABI_UPDATE_SUPERPOSITIONS";
 
 #[derive(Serialize)]
@@ -14,17 +14,7 @@ struct ReplayEpistemicSnapshot {
     schema_version: u8,
     source: &'static str,
     convention: &'static str,
-    identity_legend: IdentityLegend,
     positions: Vec<PositionSnapshot>,
-}
-
-#[derive(Serialize)]
-struct IdentityLegend {
-    r: &'static str,
-    y: &'static str,
-    g: &'static str,
-    b: &'static str,
-    p: &'static str,
 }
 
 #[derive(Serialize)]
@@ -32,9 +22,6 @@ struct IdentityLegend {
 struct PositionSnapshot {
     /// Number of completed player actions. Turn zero is the initial deal.
     turn: u32,
-    /// One-based move about to be played; absent after the final action.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    before_move: Option<u32>,
     players: Vec<PlayerSnapshot>,
 }
 
@@ -54,11 +41,11 @@ struct CardSnapshot {
     card: usize,
     /// Simulator truth, included only to make human review convenient.
     actual: String,
-    /// Identities allowed by direct clues, visible cards, and card counts.
-    logical: String,
-    /// Identities retained after applying H-Group convention semantics.
-    convention: String,
+    /// H-Group identities, omitted when ordinary logical deduction agrees.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    convention: Option<String>,
     /// Stable semantic states that currently apply to the card.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     flags: Vec<&'static str>,
 }
 
@@ -91,26 +78,19 @@ fn optimized_expert_replay_owner_superpositions_match_snapshot() {
     });
     assert_eq!(
         actual, expected,
-        "owner-relative logical or convention superpositions changed; review the semantic diff, then regenerate with {UPDATE_ENVIRONMENT_VARIABLE}=1 if it is intentional"
+        "owner-relative convention superpositions or semantic states changed; review the semantic diff, then regenerate with {UPDATE_ENVIRONMENT_VARIABLE}=1 if it is intentional"
     );
 }
 
 fn render_snapshot(replay: &HanabiLiveReplay) -> String {
     let action_count = u32::try_from(replay.actions.len()).expect("replay length fits in u32");
     let positions = (0..=action_count)
-        .map(|turn| position_snapshot(replay, turn, action_count))
+        .map(|turn| position_snapshot(replay, turn))
         .collect();
     let snapshot = ReplayEpistemicSnapshot {
         schema_version: SNAPSHOT_SCHEMA_VERSION,
         source: "game-194321.json",
         convention: "H-Group max",
-        identity_legend: IdentityLegend {
-            r: "red",
-            y: "yellow",
-            g: "green",
-            b: "blue",
-            p: "purple",
-        },
         positions,
     };
     let mut json = serde_json::to_string_pretty(&snapshot).expect("snapshot is serializable");
@@ -118,7 +98,7 @@ fn render_snapshot(replay: &HanabiLiveReplay) -> String {
     json
 }
 
-fn position_snapshot(replay: &HanabiLiveReplay, turn: u32, action_count: u32) -> PositionSnapshot {
+fn position_snapshot(replay: &HanabiLiveReplay, turn: u32) -> PositionSnapshot {
     let state = replay
         .state_at_turn(turn)
         .unwrap_or_else(|error| panic!("replay position {turn} is valid: {error}"));
@@ -133,11 +113,7 @@ fn position_snapshot(replay: &HanabiLiveReplay, turn: u32, action_count: u32) ->
             player_snapshot(&state, player, name)
         })
         .collect();
-    PositionSnapshot {
-        turn,
-        before_move: (turn < action_count).then_some(turn + 1),
-        players,
-    }
+    PositionSnapshot { turn, players }
 }
 
 fn player_snapshot(state: &FullState, player: PlayerId, name: &str) -> PlayerSnapshot {
@@ -200,8 +176,7 @@ fn player_snapshot(state: &FullState, player: PlayerId, name: &str) -> PlayerSna
             CardSnapshot {
                 card: observed.id.index(),
                 actual: identity_label(actual),
-                logical: identity_labels(logical),
-                convention: identity_labels(note.identities),
+                convention: (note.identities != logical).then(|| identity_labels(note.identities)),
                 flags,
             }
         })
