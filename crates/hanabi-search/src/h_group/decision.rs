@@ -2,15 +2,16 @@ use super::{
     Action, Card, CardId, CardSet, Clue, ClueCandidate, CluePurpose, ClueRecognition, ClueValue,
     ConstraintReason, ConventionActionReason, ConventionConstraints, HGroupActionKind,
     HGroupActionSet, HGroupAnalyzedAction, HGroupClueKind, HGroupConnection, HGroupConnectionKind,
-    HGroupConnectionPromise, HGroupInferences, HGroupPhase, HGroupProfile, HGroupRuleId,
-    HGroupState, IdentitySet, LogicalDeductions, MAX_CLUE_TOKENS, ObservedCard, OnceLock, PlayerId,
-    PlayerView, Rank, RejectedConventionAction, chop, convention_card_inferences,
+    HGroupConnectionPromise, HGroupInferences, HGroupMoveKind, HGroupPhase, HGroupProfile,
+    HGroupRuleId, HGroupState, IdentitySet, LogicalDeductions, MAX_CLUE_TOKENS, ObservedCard,
+    OnceLock, PerspectiveDepth, PerspectiveProjector, PlayerId, PlayerView, ProspectiveTransition,
+    Rank, RejectedConventionAction, Suit, TeamConventionSnapshot, chop, convention_card_inferences,
     creates_false_anxiety, focus, h_group_clue_candidates_from_replay, h_group_phase,
     h_group_rejected_clues_from_replay, identity_of, infer_clue_to_self, is_convention_trash,
     is_critical, is_playable_at, is_playable_now, next_player, pending_is_active,
     projected_h_group_replay, prospective_clue_has_unsafe_connection,
     prospective_clue_marks_focus_saved, prospective_clue_view,
-    prospective_play_has_unsafe_inference, replay_h_group, rule_enabled, save_clue_score,
+    prospective_play_has_unsafe_inference, replay_h_group, rule_enabled,
 };
 
 #[derive(Clone, Debug)]
@@ -18,7 +19,13 @@ pub(crate) struct HGroupAnalysis {
     replay: HGroupState,
     inferences: HGroupInferences,
     clue_candidates: OnceLock<Vec<ClueCandidate>>,
+    endgame_completion: OnceLock<Option<EndgameCompletionPlan>>,
     action_set: OnceLock<HGroupActionSet>,
+}
+
+#[derive(Clone, Debug)]
+struct EndgameCompletionPlan {
+    unresolved_fives: CardSet,
 }
 
 pub(super) fn build_h_group_analysis(
@@ -31,6 +38,7 @@ pub(super) fn build_h_group_analysis(
         replay,
         inferences,
         clue_candidates: OnceLock::new(),
+        endgame_completion: OnceLock::new(),
         action_set: OnceLock::new(),
     }
 }
@@ -342,6 +350,7 @@ fn ordered_h_group_actions_from_analysis(
         let demonstrated = connection_layer_demonstrated(view, inferred, profile, connection);
         legal_connection_actions(
             view,
+            &analysis.replay,
             connection,
             paused_priority_play(view, inferred, profile, connection),
             demonstrated,
@@ -428,7 +437,7 @@ fn ordered_h_group_actions_from_analysis(
                         },
                         |candidate| {
                             if !inferred.playable_now.is_empty()
-                                && !clue_preempts_play_obligation(view, candidate)
+                                && !clue_preempts_play_obligation(view, &analysis.replay, candidate)
                             {
                                 candidate.score().min(400)
                             } else {
@@ -607,9 +616,29 @@ fn analyze_h_group_actions_from_analysis(
         })
         .collect::<Vec<_>>();
 
-    let predictable = derive_predictable_action(deductions, inferred, profile, &clue_candidates);
-    let (ranked_preferred, _constraint_reason) =
-        derive_preferred_action(deductions, inferred, profile, &clue_candidates, &analyzed);
+    let constraints = derive_convention_constraints(
+        deductions.view(),
+        inferred,
+        &analysis.replay,
+        &clue_candidates,
+        &analyzed,
+    );
+    let predictable = derive_predictable_action(
+        deductions,
+        inferred,
+        &analysis.replay,
+        profile,
+        &clue_candidates,
+    )
+    .filter(|action| constraints.allows(*action))
+    .or_else(|| constraints.single_required());
+    let (ranked_preferred, _constraint_reason) = derive_preferred_action(
+        deductions,
+        profile,
+        &clue_candidates,
+        &analyzed,
+        &constraints,
+    );
     // A predictable convention response is a hard semantic conclusion, not a
     // second recommendation that may conflict with heuristic ranking.
     let preferred = predictable.or(ranked_preferred);
@@ -739,13 +768,11 @@ fn classify_h_group_action(
 
 fn derive_preferred_action(
     deductions: &LogicalDeductions,
-    inferred: &HGroupInferences,
     profile: HGroupProfile,
     clues: &[ClueCandidate],
     analyzed: &[HGroupAnalyzedAction],
+    constraints: &ConventionConstraints,
 ) -> (Option<Action>, Option<ConstraintReason>) {
-    let view = deductions.view();
-    let constraints = derive_convention_constraints(view, inferred, clues, analyzed);
     let mut candidates = analyzed
         .iter()
         .filter(|candidate| constraints.allows(candidate.action))
@@ -765,14 +792,24 @@ fn derive_preferred_action(
 fn derive_convention_constraints(
     view: &PlayerView,
     inferred: &HGroupInferences,
+    replay: &HGroupState,
     clues: &[ClueCandidate],
     analyzed: &[HGroupAnalyzedAction],
 ) -> ConventionConstraints {
     if let Some(urgent) = clues
         .iter()
-        .find(|candidate| clue_preempts_play_obligation(view, candidate))
+        .find(|candidate| hard_clue_obligation(view, replay, candidate))
     {
-        return ConventionConstraints::require(ConstraintReason::UrgentClue, [urgent.action]);
+        return ConventionConstraints::require(
+            ConstraintReason::UrgentClue,
+            clues
+                .iter()
+                .filter(|candidate| {
+                    candidate.action == urgent.action
+                        || (candidate.target == urgent.target && candidate.immediate_play)
+                })
+                .map(|candidate| candidate.action),
+        );
     }
     if inferred.connection.is_some() {
         return ConventionConstraints::require(
@@ -814,6 +851,7 @@ fn h_group_planning_action_safe(
 fn derive_predictable_action(
     deductions: &LogicalDeductions,
     inferred: &HGroupInferences,
+    replay: &HGroupState,
     profile: HGroupProfile,
     clues: &[ClueCandidate],
 ) -> Option<Action> {
@@ -839,6 +877,7 @@ fn derive_predictable_action(
     if let Some(connection) = inferred.connection {
         legal_connection_actions(
             view,
+            replay,
             connection,
             paused_priority_play(view, inferred, profile, connection),
             connection_layer_demonstrated(view, inferred, profile, connection),
@@ -849,8 +888,11 @@ fn derive_predictable_action(
         .and_then(|actions| safe_at_last_strike(actions[0]))
     } else if let [card] = inferred.discard_now.as_slice() {
         safe_at_last_strike(Action::Discard(*card))
-    } else if !clues.iter().any(|candidate| candidate.is_urgent_save())
-        && inferred.playable_now.len() == 1
+    } else if !clues.iter().any(|candidate| {
+        candidate.is_urgent_save()
+            || (candidate.can_preempt_ordinary_play()
+                && !completed_connection_focus_is_due(inferred))
+    }) && inferred.playable_now.len() == 1
     {
         safe_at_last_strike(Action::Play(inferred.playable_now[0]))
     } else if inferred.must_clue.contains(&view.observer) && clues.len() == 1 {
@@ -909,6 +951,8 @@ fn fallback_clue_score(
         save,
         urgent_save: save && (identity.rank == Rank::Five || is_critical(view, identity)),
         immediate_play: !save,
+        connection_steps: 0,
+        action_coverage: 0,
         recognition: ClueRecognition::GeneratorProof,
     };
     if prospective_clue_has_unsafe_connection(view, profile, target, focus, clue, &touched, !save) {
@@ -1046,19 +1090,7 @@ fn scored_discard_candidate(
     }
     let gotten = inferred.gotten();
     let own_hand = &view.hands[view.observer.index()];
-    let known_trash = own_hand.iter().find_map(|card| {
-        inferred
-            .cards
-            .iter()
-            .find(|note| note.card == card.id)
-            .filter(|note| {
-                !note.identities.is_empty()
-                    && note.identities.iter().all(|identity| {
-                        is_convention_trash(view, identity, &gotten, &inferred.cards)
-                    })
-            })
-            .map(|_| card.id)
-    });
+    let known_trash = convention_known_trash_discard(view, inferred);
     if let Some(card) = known_trash {
         // A known-trash discard recovers a clue with no card-value cost. It
         // beats an ordinary Play Clue, but not an already promised play.
@@ -1081,6 +1113,108 @@ fn scored_discard_candidate(
         })
         .flatten()
         .map(|card| (card, 275))
+}
+
+fn convention_known_trash_discard(
+    view: &PlayerView,
+    inferred: &HGroupInferences,
+) -> Option<CardId> {
+    let gotten = inferred.gotten();
+    view.hands[view.observer.index()].iter().find_map(|card| {
+        inferred
+            .cards
+            .iter()
+            .find(|note| note.card == card.id)
+            .filter(|note| {
+                !note.identities.is_empty()
+                    && note.identities.iter().all(|identity| {
+                        is_convention_trash(view, identity, &gotten, &inferred.cards)
+                    })
+            })
+            .map(|_| card.id)
+    })
+}
+
+/// Returns the remaining visible 5s whose owners do not yet know to play.
+///
+/// This deliberately recognizes only the cleanup state in which every stack
+/// has reached 4. A missing 5 in the deck or in the observer's hidden hand
+/// leaves the completion plan unresolved and disables progress dominance.
+fn endgame_completion_plan<'analysis>(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+    analysis: &'analysis HGroupAnalysis,
+) -> Option<&'analysis EndgameCompletionPlan> {
+    analysis
+        .endgame_completion
+        .get_or_init(|| {
+            let view = deductions.view();
+            let team = TeamConventionSnapshot::new(view.clone(), profile);
+            let mut unresolved_fives = CardSet::default();
+            for suit in Suit::ALL {
+                match view.play_stacks[suit.index()].len() {
+                    5 => continue,
+                    4 => {}
+                    _ => return None,
+                }
+                let identity = Card::new(suit, Rank::Five);
+                let (owner, card) = view
+                    .hands
+                    .iter()
+                    .enumerate()
+                    .filter(|(owner, _)| *owner != view.observer.index())
+                    .find_map(|(owner, hand)| {
+                        hand.iter()
+                            .find(|card| card.identity == Some(identity))
+                            .map(|card| (owner, card.id))
+                    })?;
+                let owner = PlayerId::new(
+                    u8::try_from(owner).expect("standard Hanabi has at most five players"),
+                );
+                let projection = team.projection(owner)?;
+                if !projection.inferred.playable_now.contains(&card) {
+                    unresolved_fives.insert(card);
+                }
+            }
+            Some(EndgameCompletionPlan { unresolved_fives })
+        })
+        .as_ref()
+}
+
+/// A known-trash discard is dominated when it only creates a surplus token
+/// while leaving an inevitable final Play Clue for the next teammate to give.
+fn endgame_progress_priority(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+    analysis: &HGroupAnalysis,
+    candidate: &ClueCandidate,
+) -> Option<i32> {
+    let view = deductions.view();
+    if candidate.purpose != CluePurpose::Play
+        || !candidate.immediate_play
+        || convention_known_trash_discard(view, &analysis.inferences).is_none()
+    {
+        return None;
+    }
+    let plan = endgame_completion_plan(deductions, profile, analysis)?;
+    if plan.unresolved_fives.is_empty()
+        || usize::from(view.clue_tokens) < plan.unresolved_fives.len()
+    {
+        return None;
+    }
+    let Action::Clue { target, clue } = candidate.action else {
+        return None;
+    };
+    let advances_plan = view.hands[target.index()].iter().any(|card| {
+        plan.unresolved_fives.contains(&card.id)
+            && card.identity.is_some_and(|identity| clue.matches(identity))
+    });
+    if !advances_plan {
+        return None;
+    }
+    let (_, discard_score) = scored_discard_candidate(view, &analysis.inferences)?;
+    let ordinary_priority = 100 + i32::from(candidate.score());
+    Some(ordinary_priority.max(101 + i32::from(discard_score)))
 }
 
 fn raw_h_group_action_priority(
@@ -1140,6 +1274,11 @@ fn raw_h_group_action_priority(
     if let Action::Discard(card) = action {
         if let Some((candidate, score)) = scored_discard_candidate(deductions.view(), inferred) {
             if candidate == card {
+                if let Some(priority) =
+                    deferred_teamwork_priority(deductions, profile, analysis, card)
+                {
+                    return priority;
+                }
                 return 100 + i32::from(score);
             }
         }
@@ -1147,10 +1286,22 @@ fn raw_h_group_action_priority(
     let clue_candidate = analysis_clue_candidates(deductions, profile, analysis)
         .iter()
         .find(|candidate| candidate.action == action);
-    let clue_priority = clue_candidate.map_or(25, |candidate| 100 + i32::from(candidate.score()));
+    let clue_priority = clue_candidate.map_or(25, |candidate| {
+        endgame_progress_priority(deductions, profile, analysis, candidate)
+            .unwrap_or_else(|| 100 + i32::from(candidate.score()))
+    });
     if !inferred.playable_now.is_empty()
-        && clue_candidate
-            .is_some_and(|candidate| !clue_preempts_play_obligation(deductions.view(), candidate))
+        && !completed_connection_focus_is_due(inferred)
+        && clue_candidate.is_some_and(|candidate| candidate.can_preempt_ordinary_play())
+    {
+        // A semantically strong setup clue can occupy several teammates while
+        // the giver's exact play remains safely parked. Treating every known
+        // play as forced made this multi-play line disappear from planning.
+        clue_priority.max(550)
+    } else if !inferred.playable_now.is_empty()
+        && clue_candidate.is_some_and(|candidate| {
+            !clue_preempts_play_obligation(deductions.view(), &analysis.replay, candidate)
+        })
     {
         // An Occupied player normally takes their promised play. This applies
         // to a valuable ordinary 2 Save for the next player as well as to an
@@ -1160,6 +1311,75 @@ fn raw_h_group_action_priority(
     } else {
         clue_priority
     }
+}
+
+/// Values passing the final clue token when the next player can use the
+/// recovered token for a strictly more efficient convention line.
+///
+/// This is a one-action symbolic continuation, not a hidden-world rollout.
+/// The current player does not know the discarded identity, so every identity
+/// in its logical domain is projected. Deferral is rewarded only when the
+/// next player has a convention-valid clue with greater action coverage in
+/// every branch.
+fn deferred_teamwork_priority(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+    analysis: &HGroupAnalysis,
+    discard: CardId,
+) -> Option<i32> {
+    let source = deductions.view();
+    if source.clue_tokens != 1 || !rule_enabled(profile, HGroupRuleId::SpecialFinesses) {
+        return None;
+    }
+    let current_candidates = analysis_clue_candidates(deductions, profile, analysis);
+    let current_coverage = current_candidates
+        .iter()
+        .map(|candidate| candidate.action_coverage)
+        .max()
+        .unwrap_or(0);
+    if current_coverage < 2 {
+        return None;
+    }
+    let identities = deductions.possible_identities(discard)?;
+    if identities.is_empty() {
+        return None;
+    }
+    let mut guaranteed_future_coverage = u8::MAX;
+    for identity in identities.iter() {
+        let after = ProspectiveTransition::discard(source, source.observer, discard, identity);
+        let next = after.current_player;
+        let (next_deductions, next_replay) = PerspectiveProjector::new(&after, profile)
+            .project(next, PerspectiveDepth::NestedRecipients)?;
+        let best_future_coverage =
+            h_group_clue_candidates_from_replay(&next_deductions, profile, &next_replay)
+                .iter()
+                .map(|candidate| candidate.action_coverage)
+                .max()
+                .unwrap_or(0);
+        guaranteed_future_coverage = guaranteed_future_coverage.min(best_future_coverage);
+    }
+    let extra_actions = guaranteed_future_coverage.checked_sub(current_coverage)?;
+    if extra_actions == 0 {
+        return None;
+    }
+    let best_immediate_clue = current_candidates
+        .iter()
+        .map(|candidate| 100 + i32::from(candidate.score()))
+        .max()
+        .unwrap_or(0);
+    Some(best_immediate_clue + 40 * i32::from(extra_actions))
+}
+
+/// Once teammates have demonstrated a connection for a clue, its focus is a
+/// due convention response rather than an ordinary exact play that can be
+/// parked for a new setup.
+fn completed_connection_focus_is_due(inferred: &HGroupInferences) -> bool {
+    inferred.clues.iter().any(|clue| {
+        inferred.playable_now.contains(&clue.focus)
+            && inferred.signals.iter().any(|signal| {
+                signal.turn == clue.turn && signal.kind == HGroupMoveKind::SuboptimalConnection
+            })
+    })
 }
 
 pub(crate) fn h_group_predictable_action(
@@ -1175,77 +1395,7 @@ fn h_group_predictable_action_from_analysis(
     profile: HGroupProfile,
     analysis: &HGroupAnalysis,
 ) -> Option<Action> {
-    if analysis.inferences.connection.is_none()
-        && analysis.inferences.discard_now.len() != 1
-        && analysis.inferences.playable_now.len() == 1
-        && !has_possible_high_priority_save(deductions, &analysis.replay)
-    {
-        let card = analysis.inferences.playable_now[0];
-        let safe_at_last_strike = deductions.view().strikes < 2
-            || deductions
-                .possible_identities(card)
-                .is_some_and(|identities| {
-                    !identities.is_empty()
-                        && identities
-                            .iter()
-                            .all(|identity| is_playable_now(deductions.view(), identity))
-                });
-        if safe_at_last_strike {
-            return Some(Action::Play(card));
-        }
-    }
     analyze_h_group_actions_from_analysis(deductions, profile, analysis).predictable
-}
-
-/// Cheaply over-approximates the Save clues that can preempt a promised play.
-/// Returning `true` may merely force the full clue analysis; returning `false`
-/// proves that no Level-1 2, 5, or critical Save can score at least 400.
-fn has_possible_high_priority_save(deductions: &LogicalDeductions, replay: &HGroupState) -> bool {
-    let view = deductions.view();
-    if view.clue_tokens == 0 {
-        return false;
-    }
-    let gotten = replay.gotten_from(&replay.promptable());
-    let next = next_player(view.current_player, view.hands.len());
-    view.legal_actions().into_iter().any(|action| {
-        let Action::Clue { target, clue } = action else {
-            return false;
-        };
-        let hand = &view.hands[target.index()];
-        let layout = &replay.hands[target.index()];
-        let touched = hand
-            .iter()
-            .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
-            .map(|card| card.id)
-            .collect::<Vec<_>>();
-        if touched.iter().all(|card| gotten.contains(card)) {
-            return false;
-        }
-        let old_chop = chop(layout, &gotten);
-        let Some(focus) = focus(layout, &touched, old_chop, &gotten) else {
-            return false;
-        };
-        if old_chop != Some(focus)
-            && positional_discard_candidate(deductions, target, &gotten) != Some(focus)
-        {
-            return false;
-        }
-        let Some(identity) = identity_of(view, focus) else {
-            return false;
-        };
-        save_clue_score(
-            view,
-            hand,
-            focus,
-            identity,
-            clue,
-            target,
-            next,
-            &replay.hands,
-            &gotten,
-        )
-        .is_some()
-    })
 }
 
 fn paused_priority_play(
@@ -1299,6 +1449,7 @@ fn clue_can_defer_connection(
 
 fn legal_connection_actions(
     view: &PlayerView,
+    replay: &HGroupState,
     connection: HGroupConnection,
     paused_priority: Option<CardId>,
     layer_demonstrated: bool,
@@ -1316,7 +1467,7 @@ fn legal_connection_actions(
     let mut actions = clue_candidates
         .iter()
         .filter(|candidate| {
-            clue_preempts_play_obligation(view, candidate)
+            clue_preempts_play_obligation(view, replay, candidate)
                 || (layer_demonstrated && candidate.can_defer_demonstrated_layer())
         })
         .map(|candidate| candidate.action)
@@ -1328,10 +1479,43 @@ fn legal_connection_actions(
     (!actions.is_empty()).then_some(actions)
 }
 
-fn clue_preempts_play_obligation(view: &PlayerView, candidate: &ClueCandidate) -> bool {
-    candidate.purpose == CluePurpose::Fix
+fn clue_preempts_play_obligation(
+    view: &PlayerView,
+    replay: &HGroupState,
+    candidate: &ClueCandidate,
+) -> bool {
+    hard_clue_obligation(view, replay, candidate)
         || (candidate.target == next_player(view.current_player, view.hands.len())
             && candidate.is_urgent_for_next_player())
+}
+
+/// Hard clue obligations are distinct from clues that are merely permitted
+/// to preempt a play. A strong immediate Play Clue to the next player may be
+/// considered alongside an occupied player's action, but only a Fix or an
+/// at-risk critical Save excludes that action from planning altogether.
+fn hard_clue_obligation(
+    view: &PlayerView,
+    replay: &HGroupState,
+    candidate: &ClueCandidate,
+) -> bool {
+    if candidate.purpose == CluePurpose::Fix {
+        return true;
+    }
+    let player_count = view.hands.len();
+    let target_distance =
+        (candidate.target.index() + player_count - view.current_player.index()) % player_count;
+    let every_intervening_player_is_occupied = (1..target_distance).all(|distance| {
+        let player = PlayerId::new(
+            u8::try_from((view.current_player.index() + distance) % player_count)
+                .expect("standard Hanabi has at most five players"),
+        );
+        replay.pending_connections.iter().any(|connection| {
+            connection.actor == player && pending_is_active(connection, &replay.pending_connections)
+        }) || replay.hands[player.index()]
+            .iter()
+            .any(|card| replay.cards.already_playing.contains(card))
+    });
+    candidate.is_urgent_save() && every_intervening_player_is_occupied
 }
 
 pub(super) fn ordered_playable_cards(
@@ -1359,7 +1543,7 @@ pub(super) fn ordered_playable_cards(
     cards
 }
 
-type PlayableOrderKey = (bool, bool, bool, usize, u8, u8);
+type PlayableOrderKey = (bool, bool, bool, bool, usize, u8, u8);
 
 struct PlayableOrderContext<'a> {
     view: &'a PlayerView,
@@ -1391,13 +1575,13 @@ fn playable_order_key(context: &PlayableOrderContext<'_>, card: CardId) -> Playa
     let rank = singleton.map_or(6, |identity| identity.rank.number());
     let fresh_one = rank == 1 && card.index() >= context.initial_cards;
     let starting_one = rank == 1 && !fresh_one;
-    let chop_focused = context.inferred.clues.iter().any(|clue| {
-        clue.focus == card
-            && clue.focus_was_chop
-            && clue
-                .focus_identities
-                .iter()
-                .all(|identity| identity.rank == Rank::One)
+    let chop_focused = context
+        .inferred
+        .clues
+        .iter()
+        .any(|clue| clue.focus == card && clue.focus_was_chop);
+    let saved_five_focus = context.inferred.clues.iter().any(|clue| {
+        clue.focus == card && clue.focus_was_chop && clue.clue == Clue::Rank(Rank::Five)
     });
     let blind = note.is_some_and(|note| note.finessed);
     if !rule_enabled(context.profile, HGroupRuleId::Priority)
@@ -1410,9 +1594,17 @@ fn playable_order_key(context: &PlayableOrderContext<'_>, card: CardId) -> Playa
         } else {
             position + 1
         };
-        return (!blind, !chop_focused, !fresh_one, age, 0, 0);
+        return (!blind, !chop_focused, !fresh_one, false, age, 0, 0);
     }
-    priority_playable_order_key(context, card, singleton, blind, rank, position)
+    priority_playable_order_key(
+        context,
+        card,
+        singleton,
+        blind,
+        saved_five_focus,
+        rank,
+        position,
+    )
 }
 
 fn priority_playable_order_key(
@@ -1420,9 +1612,14 @@ fn priority_playable_order_key(
     card: CardId,
     singleton: Option<Card>,
     blind: bool,
+    saved_five_focus: bool,
     rank: u8,
     position: usize,
 ) -> PlayableOrderKey {
+    // When a 5 Save lands on two already-playable 5s, play the chop-focused
+    // card first: that is the card the clue specifically secured. Other ranks
+    // retain the normal Priority ordering (notably the touched-1 ordering),
+    // where clue focus is not itself play precedence.
     // A Finesse/Discharge card remains the outstanding blind obligation even
     // when its identity is exact. Advancing the stack with another copy first
     // can turn that promised play into a duplicate misplay.
@@ -1459,6 +1656,7 @@ fn priority_playable_order_key(
     });
     (
         !blind,
+        !saved_five_focus,
         !leads_other,
         !leads_self,
         usize::from(rank != 5),

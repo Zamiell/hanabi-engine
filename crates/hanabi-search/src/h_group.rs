@@ -81,8 +81,8 @@ use interpretation::h_group_clue_candidates;
 use interpretation::{
     convention_card_inferences, creates_false_anxiety, elimination_finesse_connection,
     h_group_clue_candidates_from_replay, h_group_rejected_clues_from_replay, infer_clue_to_self,
-    loaded_connection_plan, recipient_replay_recognizes_candidate, save_clue_score,
-    snapshot_good_touch_identities, snapshot_play_identities, snapshot_save_identities,
+    loaded_connection_plan, recipient_replay_recognizes_candidate, snapshot_good_touch_identities,
+    snapshot_play_identities, snapshot_save_identities,
 };
 use ledger::{
     ConventionCardSetSnapshot, EffectSource, ProvenancedCardSet,
@@ -955,8 +955,12 @@ fn replay_h_group_inner(
                 }
                 let promised_card_fix = pending_connections.iter().any(|connection| {
                     connection.actor == *target
+                        && pending_is_active(connection, &pending_connections)
                         && !clue.matches(connection.expected)
-                        && touched.iter().any(|card| connection.cards.contains(card))
+                        && connection
+                            .cards
+                            .first()
+                            .is_some_and(|card| touched.contains(card))
                 });
                 let is_required_fix = promised_card_fix
                     || required_fix.is_some_and(|required: RequiredFix| {
@@ -1447,13 +1451,14 @@ fn replay_h_group_inner(
                         && !low_score_number_five
                         && !intermediate_bluff
                     {
-                        let previous_pending = pending_connections.len();
-                        schedule_connection(
+                        let previous_connections = pending_connections.to_vec();
+                        let new_connections = schedule_connection(
                             profile,
                             view,
                             *giver,
                             *target,
                             focus,
+                            *clue,
                             touched,
                             connection_identity,
                             &hands,
@@ -1476,7 +1481,6 @@ fn replay_h_group_inner(
                             &mut already_playing,
                             &mut forced_playable,
                         );
-                        let new_connections = pending_connections[previous_pending..].to_vec();
                         for connection in &new_connections {
                             let elimination_finesse =
                                 signals.facts().identity_claims().iter().any(|claim| {
@@ -1548,7 +1552,7 @@ fn replay_h_group_inner(
                             if rule_enabled(profile, HGroupRuleId::SpecialFinesses)
                                 && connection.kind == HGroupConnectionKind::Finesse
                             {
-                                let was_queued = pending_connections[..previous_pending]
+                                let was_queued = previous_connections
                                     .iter()
                                     .any(|prior| prior.actor == connection.actor);
                                 let matching_finesse_positions = hands
@@ -2212,6 +2216,7 @@ fn schedule_connection(
     giver: PlayerId,
     target: PlayerId,
     focus: CardId,
+    clue: Clue,
     same_clue_touched: &[CardId],
     focus_identity: Option<Card>,
     hands: &[Vec<CardId>],
@@ -2226,13 +2231,14 @@ fn schedule_connection(
     pending: &mut ConnectionManager,
     required_fix: &mut Option<RequiredFix>,
     allow_blind_reverse_empathy: bool,
-) {
+) -> Vec<ConnectionObligation> {
+    let mut scheduled_connections = Vec::new();
     let Some(focus_identity) = focus_identity else {
-        return;
+        return scheduled_connections;
     };
     let height = stack_heights[focus_identity.suit.index()];
     if focus_identity.rank.number() <= height + 1 {
-        return;
+        return scheduled_connections;
     }
     let loaded_plan = rule_enabled(profile, HGroupRuleId::Extras).then(|| {
         loaded_connection_plan(
@@ -2279,7 +2285,45 @@ fn schedule_connection(
                                 && clue.focus_identities == IdentitySet::singleton(expected)
                         }))
             });
-        if pending_identity_is_queued(pending, expected) || expected_is_already_playing {
+        let mut giver_deferred_queued_connection = false;
+        if pending_identity_is_queued(pending, expected) {
+            let giver_is_deferring_this_connection = pending.iter().any(|connection| {
+                connection.actor == giver
+                    && connection.expected == expected
+                    && pending_is_active(connection, pending)
+            });
+            if giver_is_deferring_this_connection {
+                giver_deferred_queued_connection = true;
+                // By giving the connecting clue instead of taking their own
+                // queued play, the giver demonstrates that the old route is
+                // being replaced by the new clue's connection graph.
+                // <https://hanabi.github.io/level-5/#the-layered-finesse>
+                pending.cancel_where(
+                    clues.last().map_or(view.turn, |clue| clue.turn),
+                    ConnectionTransitionReason::DisplacedByClue,
+                    |connection| connection.actor == giver && connection.expected == expected,
+                );
+            } else {
+                if rule_enabled(profile, HGroupRuleId::SpecialFinesses) && !clue.matches(expected) {
+                    if let Some(connection) = extend_queued_finesse_with_playable_layers(
+                        view,
+                        giver,
+                        target,
+                        expected,
+                        hands,
+                        promptable_before_clue,
+                        invisibly_clued,
+                        stack_heights,
+                        pending,
+                        clues.last().map_or(view.turn, |clue| clue.turn),
+                    ) {
+                        scheduled_connections.push(connection);
+                    }
+                }
+                continue;
+            }
+        }
+        if expected_is_already_playing {
             continue;
         }
         let mut found = None;
@@ -2315,7 +2359,44 @@ fn schedule_connection(
                     identity_of(view, *card) == Some(expected)
                         || (*candidate_index == view.observer.index()
                             && facts[card.index()].identity_mask() == 1 << expected.index())
-                });
+                })
+                || rule_enabled(profile, HGroupRuleId::SpecialFinesses)
+                    && (ordinary_search_len..hands.len()).any(|distance| {
+                        let candidate_index = (actor_index + distance) % hands.len();
+                        if candidate_index == target.index() {
+                            return false;
+                        }
+                        let gotten = promptable_before_clue
+                            .union(invisibly_clued)
+                            .copied()
+                            .collect::<CardSet>();
+                        let unclued = hands[candidate_index]
+                            .iter()
+                            .rev()
+                            .copied()
+                            .filter(|card| {
+                                !gotten.contains(card)
+                                    && !scheduled_cards.contains(card)
+                                    && *card != focus
+                            })
+                            .collect::<Vec<_>>();
+                        unclued
+                            .iter()
+                            .position(|card| {
+                                identity_of(view, *card) == Some(expected)
+                                    || (candidate_index == view.observer.index()
+                                        && facts[card.index()].identity_mask()
+                                            == 1 << expected.index())
+                            })
+                            .is_some_and(|position| {
+                                position > 0
+                                    && unclued[..position].iter().all(|card| {
+                                        identity_of(view, *card).is_some_and(|identity| {
+                                            is_playable_at(stack_heights, identity)
+                                        })
+                                    })
+                            })
+                    });
         let blind_reverse_finesse = !visible_reverse_finesse
             && blind_reverse_finesse_is_eligible(view, giver, allow_blind_reverse_empathy)
             && reverse_finesse_positions
@@ -2442,7 +2523,7 @@ fn schedule_connection(
                     u8::try_from(candidate_index)
                         .expect("standard Hanabi has at most five players"),
                 );
-                if target == actor {
+                if target == actor || giver_deferred_queued_connection && giver == actor {
                     continue;
                 }
                 let gotten = promptable_before_clue
@@ -2567,8 +2648,89 @@ fn schedule_connection(
         if kind == HGroupConnectionKind::Finesse && promise != PromiseId::UNASSIGNED {
             invisibly_clued.extend_from(EffectSource::Promise(promise), connection_cards);
         }
+        if promise != PromiseId::UNASSIGNED {
+            if let Some(connection) = pending
+                .iter()
+                .find(|connection| connection.promise == promise)
+                .cloned()
+            {
+                scheduled_connections.push(connection);
+            }
+        }
         actor_index = (actor_index + 1) % hands.len();
     }
+    scheduled_connections
+}
+
+/// Extends an already queued Finesse when a later clue demonstrates playable
+/// cards in front of its current Finesse Position.
+///
+/// [Layered Finesse](https://hanabi.github.io/level-5/#the-layered-finesse)
+/// semantics are cumulative: the old connector remains due, but each visible
+/// playable card in front of it must now be played first. Treating the queued
+/// identity as an unconditional reason to skip connection scheduling loses
+/// precisely this kind of higher-efficiency follow-up.
+#[allow(clippy::too_many_arguments)]
+fn extend_queued_finesse_with_playable_layers(
+    view: &PlayerView,
+    giver: PlayerId,
+    target: PlayerId,
+    expected: Card,
+    hands: &[Vec<CardId>],
+    promptable_before_clue: &CardSet,
+    invisibly_clued: &mut ProvenancedCardSet,
+    stack_heights: [u8; 5],
+    pending: &mut ConnectionManager,
+    turn: u32,
+) -> Option<ConnectionObligation> {
+    let connection = pending
+        .iter()
+        .find(|connection| {
+            connection.expected == expected
+                && connection.kind == HGroupConnectionKind::Finesse
+                && pending_is_active(connection, pending)
+        })?
+        .clone();
+    let current_position = *connection.cards.first()?;
+    let gotten = promptable_before_clue
+        .union(invisibly_clued)
+        .copied()
+        .collect::<CardSet>();
+    let player_count = hands.len();
+    let queued_distance = (connection.actor.index() + player_count - giver.index()) % player_count;
+    let nearer_visible_connector = (1..queued_distance).any(|distance| {
+        let player = (giver.index() + distance) % player_count;
+        player != target.index()
+            && finesse_position_id(&hands[player], &gotten, 0)
+                .is_some_and(|card| identity_of(view, card) == Some(expected))
+    });
+    if nearer_visible_connector {
+        return None;
+    }
+    let mut layers = Vec::new();
+    let mut reached_current_position = false;
+    for card in hands[connection.actor.index()].iter().rev().copied() {
+        if card == current_position {
+            reached_current_position = true;
+            break;
+        }
+        if gotten.contains(&card) {
+            continue;
+        }
+        let identity = identity_of(view, card)?;
+        if !is_playable_at(stack_heights, identity) {
+            return None;
+        }
+        layers.push(card);
+    }
+    if !reached_current_position || layers.is_empty() {
+        return None;
+    }
+    invisibly_clued.extend_from(
+        EffectSource::Promise(connection.promise),
+        layers.iter().copied(),
+    );
+    pending.prepend_layers(turn, connection.promise, &layers)
 }
 
 /// Whether the observer may infer that their own unknown Finesse Position is

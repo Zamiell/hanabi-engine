@@ -9,6 +9,7 @@ const MAX_TEST_CONTINUATION_TURNS: usize = 512;
 
 mod architecture;
 mod replay;
+mod snapshots;
 
 // Keep the large convention corpus physically grouped by responsibility while
 // sharing one set of deterministic scenario builders.
@@ -311,6 +312,60 @@ fn move_43_prefers_the_final_play_clue_with_known_trash_collateral() {
             &james_inferred.cards,
         )
     }));
+}
+
+#[test]
+fn final_play_clues_advance_the_plan_before_surplus_known_trash_discards() {
+    let cases = [
+        (
+            expert_replay_194321(),
+            42,
+            Action::Clue {
+                target: PlayerId::new(1),
+                clue: Clue::Suit(Suit::Green),
+            },
+        ),
+        (
+            expert_replay_p4v0s9(),
+            45,
+            Action::Clue {
+                target: PlayerId::new(0),
+                clue: Clue::Rank(Rank::Five),
+            },
+        ),
+    ];
+
+    for (replay, turn, expected) in cases {
+        let state = replay.state_at_turn(turn).expect("fixture prefix is legal");
+        let actor = state.current_player();
+        let deductions = LogicalDeductions::new(
+            state
+                .view_for(actor)
+                .expect("current player has a legal view"),
+        )
+        .expect("fixture deductions are valid");
+        let decision = analyze_h_group_convention(&deductions, HGroupProfile::Max);
+        let expected_priority = decision
+            .actions
+            .iter()
+            .find_map(|(action, priority, _)| (*action == expected).then_some(*priority))
+            .expect("the final Play Clue is admitted");
+        let trash_priority = decision
+            .actions
+            .iter()
+            .filter_map(|(action, priority, _)| {
+                matches!(action, Action::Discard(_)).then_some(*priority)
+            })
+            .max()
+            .expect("the actor has a known-trash discard");
+
+        assert!(
+            expected_priority > trash_priority,
+            "move {} should advance an outstanding final play ({expected_priority}) instead of creating a surplus clue token ({trash_priority})",
+            turn + 1,
+        );
+        assert_eq!(decision.preferred, Some(expected));
+    }
 }
 
 #[test]

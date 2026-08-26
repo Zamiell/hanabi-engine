@@ -38,7 +38,6 @@ fn optimized_expert_replay_matches_engine() {
 }
 
 #[test]
-#[ignore = "pending expert review of Donald's blind blue-2 play at move 28"]
 fn second_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine(&expert_replay_p4v0s9());
 }

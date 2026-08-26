@@ -7,6 +7,7 @@ use super::{
 };
 
 const TEAM_ACTION_COVERAGE_PENALTY: u16 = 80;
+const TEAM_ACTION_COUNT_PENALTY: u16 = 100;
 const TEAM_MULTI_CARD_PROTECTION_BONUS: u16 = 80;
 const TEAM_ACTION_DELAY_PENALTY: u16 = 2;
 const INDIRECT_CONNECTION_PENALTY: u16 = 24;
@@ -21,12 +22,13 @@ const INDIRECT_CONNECTION_PENALTY: u16 = 24;
 /// actions for more than one teammate; this keeps a token-refunding play from
 /// winning when the extra token has no immediate job but another line prepares
 /// the rest of the team.
+#[allow(clippy::too_many_lines)]
 pub(super) fn apply_strategic_clue_values(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
     candidates: &mut [ClueCandidate],
 ) {
-    if !rule_enabled(profile, HGroupRuleId::SpecialDiscards) || candidates.len() < 2 {
+    if !rule_enabled(profile, HGroupRuleId::SpecialDiscards) {
         return;
     }
     let source = deductions.view();
@@ -53,6 +55,29 @@ pub(super) fn apply_strategic_clue_values(
         .filter_map(|value| value.as_ref().map(LineOutcome::covered_players))
         .max()
         .unwrap_or(0);
+    let immediately_actionable = values
+        .iter()
+        .map(|value| {
+            value.as_ref().is_some_and(|value| {
+                !value.public_actions.is_empty()
+                    && value.public_actions.iter().all(|commitment| {
+                        !commitment.identities.is_empty()
+                            && commitment
+                                .identities
+                                .iter()
+                                .all(|identity| is_playable_now(source, identity))
+                    })
+            })
+        })
+        .collect::<Vec<_>>();
+    let best_action_count = values
+        .iter()
+        .zip(&immediately_actionable)
+        .filter_map(|(value, immediate)| {
+            (*immediate).then(|| value.as_ref().map(|value| value.action_coverage))?
+        })
+        .max()
+        .unwrap_or(0);
     let best_action_distance = values
         .iter()
         .filter_map(|value| {
@@ -67,6 +92,8 @@ pub(super) fn apply_strategic_clue_values(
         let Some(value) = &values[index] else {
             continue;
         };
+        let action_coverage = value.action_coverage;
+        candidate.action_coverage = u8::try_from(action_coverage).unwrap_or(u8::MAX);
         let candidate_is_opening_bluff =
             source.turn == 0 && clue_is_bluff(source, profile, candidate.action);
         // An opening Bluff has no established team action to displace, so do
@@ -80,6 +107,22 @@ pub(super) fn apply_strategic_clue_values(
         candidate.value.penalize_teamwork(
             TEAM_ACTION_COVERAGE_PENALTY
                 .saturating_mul(u16::try_from(uncovered_players).unwrap_or(u16::MAX)),
+        );
+        // The single-step projection is reliable for comparing concrete
+        // remaining plays once the deck is short. Earlier in the game,
+        // advanced clues (especially Bluffs) deliberately defer actions past
+        // this projection horizon, so a raw action-count penalty would make
+        // ordinary multi-card clues incorrectly beat them.
+        let cards_in_hands = source.hands.iter().map(Vec::len).sum::<usize>();
+        let missing_actions = if source.deck_size <= cards_in_hands && immediately_actionable[index]
+        {
+            best_action_count.saturating_sub(action_coverage)
+        } else {
+            0
+        };
+        candidate.value.penalize_teamwork(
+            TEAM_ACTION_COUNT_PENALTY
+                .saturating_mul(u16::try_from(missing_actions).unwrap_or(u16::MAX)),
         );
         let consolidates_chop_move = match candidate.action {
             Action::Clue { target, clue } => source.hands[target.index()].iter().any(|card| {
@@ -149,6 +192,7 @@ struct ProjectedLineState {
     owner_promises: Vec<(CardId, IdentitySet)>,
     owner_clued_superpositions: Vec<(CardId, IdentitySet)>,
     connection: Option<HGroupConnection>,
+    connection_lines: Vec<(PlayerId, CardId, Card, Vec<CardId>)>,
     chop_moved: super::CardSet,
     causal_cards: super::CardSet,
 }
@@ -251,12 +295,25 @@ impl ProjectedLineState {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn projected_line_state(
     source: &PlayerView,
     projection: CachedProspectiveProjection,
 ) -> ProjectedLineState {
     let observer = projection.deductions.view().observer;
     let replay = projection.replay;
+    let connection_lines = replay
+        .pending_connections
+        .iter()
+        .map(|connection| {
+            (
+                connection.actor,
+                connection.focus,
+                connection.expected,
+                connection.cards.clone(),
+            )
+        })
+        .collect();
     let promised = replay
         .cards
         .explicitly_clued
@@ -348,6 +405,7 @@ fn projected_line_state(
         owner_promises,
         owner_clued_superpositions,
         connection: inferred.connection,
+        connection_lines,
         chop_moved,
         causal_cards,
     }
@@ -374,6 +432,7 @@ fn collect_owner_clued_superpositions(
     superpositions
 }
 
+#[allow(clippy::too_many_lines)]
 fn clue_line_value(
     source: &PlayerView,
     profile: HGroupProfile,
@@ -391,6 +450,7 @@ fn clue_line_value(
     let after_clue = prospective_clue_view(source, target, clue, &touched);
     let after_team = TeamConventionSnapshot::new(after_clue.clone(), profile);
     let mut value = LineOutcome::default();
+    let mut giver_public_actions = Vec::new();
     let caused_by_clue = |card: CardId, identity: Card| {
         touched.contains(&card)
             || touched.iter().copied().any(|touched_card| {
@@ -400,16 +460,88 @@ fn clue_line_value(
                 })
             })
     };
+    let connects_to_clue_focus = |identity: Card| {
+        touched.iter().copied().any(|touched_card| {
+            identity_of(source, touched_card).is_some_and(|focus_identity| {
+                focus_identity.suit == identity.suit
+                    && identity.rank.number() < focus_identity.rank.number()
+            })
+        })
+    };
 
     for (player, baseline) in baselines.iter().enumerate() {
         let observer =
             PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
         let after = projected_line_state(&after_clue, after_team.projection(observer)?);
         record_clued_superpositions(&mut value, observer, &after);
+        let changed_connection_cards = after
+            .connection_lines
+            .iter()
+            .flat_map(|(actor, focus, expected, cards)| {
+                let prior = baseline.connection_lines.iter().find(
+                    |(old_actor, old_focus, old_expected, _)| {
+                        old_actor == actor && old_focus == focus && old_expected == expected
+                    },
+                );
+                cards.iter().copied().filter(move |card| {
+                    prior.is_none_or(|(_, _, _, old_cards)| !old_cards.contains(card))
+                })
+            })
+            .collect::<super::CardSet>();
         let commitment_caused = |card: CardId, identity: Card| {
-            caused_by_clue(card, identity) || after.causal_cards.contains(&card)
+            caused_by_clue(card, identity)
+                || after.causal_cards.contains(&card)
+                || changed_connection_cards.contains(&card)
         };
         let baseline_public_commitments = baseline.closed_public_commitments(source);
+        if observer == target {
+            giver_public_actions.extend(
+                after
+                    .closed_public_commitments(source)
+                    .iter()
+                    .copied()
+                    .filter(|commitment| !baseline_public_commitments.contains(commitment))
+                    .filter(|(card, identity)| commitment_caused(*card, *identity))
+                    .filter_map(|(card, identity)| {
+                        card_owner(source, card)
+                            .map(|owner| ActionCommitment::exact(card, owner, identity))
+                    }),
+            );
+            giver_public_actions.extend(changed_connection_cards.iter().copied().filter_map(
+                |card| {
+                    identity_of(source, card)
+                        .filter(|identity| is_eventually_useful(source, *identity))
+                        .filter(|identity| {
+                            !baseline_public_commitments.contains(&(card, *identity))
+                        })
+                        .and_then(|identity| {
+                            card_owner(source, card)
+                                .map(|owner| ActionCommitment::exact(card, owner, identity))
+                        })
+                },
+            ));
+            giver_public_actions.extend(
+                after
+                    .connection_lines
+                    .iter()
+                    .flat_map(|(_, _, _, cards)| cards.iter().copied())
+                    .filter_map(|card| {
+                        identity_of(source, card)
+                            .filter(|identity| {
+                                caused_by_clue(card, *identity)
+                                    || connects_to_clue_focus(*identity)
+                                    || changed_connection_cards.contains(&card)
+                            })
+                            .filter(|identity| {
+                                !baseline_public_commitments.contains(&(card, *identity))
+                            })
+                            .and_then(|identity| {
+                                card_owner(source, card)
+                                    .map(|owner| ActionCommitment::exact(card, owner, identity))
+                            })
+                    }),
+            );
+        }
         value.public_actions.extend(
             after
                 .closed_public_commitments(source)
@@ -476,6 +608,10 @@ fn clue_line_value(
             record_new_connection(&mut value, source, connection);
         }
     }
+    giver_public_actions
+        .sort_unstable_by_key(|commitment| (commitment.card.index(), commitment.owner.index()));
+    giver_public_actions.dedup();
+    value.action_coverage = giver_public_actions.len();
     value.normalize();
     Some(value)
 }

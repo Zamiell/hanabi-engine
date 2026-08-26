@@ -43,6 +43,16 @@ impl ConventionConstraints {
     pub(super) const fn reason(&self) -> Option<ConstraintReason> {
         self.reason
     }
+
+    /// Returns the action when convention semantics leave exactly one legal
+    /// response. Planners must treat that response as forced rather than
+    /// allowing a higher numeric heuristic to reintroduce excluded actions.
+    pub(super) fn single_required(&self) -> Option<Action> {
+        self.required
+            .first()
+            .copied()
+            .filter(|_| self.required.len() == 1)
+    }
 }
 
 #[cfg(test)]

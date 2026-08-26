@@ -141,12 +141,26 @@ impl ConventionFacts {
                     ))
             });
         }
-        let relation = if matches!(
-            signal.kind,
-            HGroupMoveKind::Elimination
-                | HGroupMoveKind::EliminationFinesse
-                | HGroupMoveKind::EliminationRewrite
-        ) {
+        let ambiguous_connection = signal.cards.len() > 1
+            && matches!(
+                signal.kind,
+                HGroupMoveKind::Prompt
+                    | HGroupMoveKind::Finesse
+                    | HGroupMoveKind::ReverseFinesse
+                    | HGroupMoveKind::SelfFinesse
+                    | HGroupMoveKind::LayeredFinesse
+                    | HGroupMoveKind::HiddenFinesse
+                    | HGroupMoveKind::ClandestineFinesse
+                    | HGroupMoveKind::QueuedFinesse
+                    | HGroupMoveKind::AmbiguousFinesse
+            );
+        let relation = if ambiguous_connection
+            || matches!(
+                signal.kind,
+                HGroupMoveKind::Elimination
+                    | HGroupMoveKind::EliminationFinesse
+                    | HGroupMoveKind::EliminationRewrite
+            ) {
             IdentityClaimRelation::OneOf
         } else {
             IdentityClaimRelation::Each
@@ -163,6 +177,15 @@ impl ConventionFacts {
         if !self.identity_claims.contains(&claim) {
             self.identity_claims.push(claim);
         }
+        if signal.kind == HGroupMoveKind::LayeredFinesse {
+            for card in signal.cards.iter().skip(1) {
+                merge_identity(
+                    &mut self.demonstrated_layers[card.index()],
+                    &mut self.layer_conflicts[card.index()],
+                    identity,
+                );
+            }
+        }
         if relation == IdentityClaimRelation::OneOf {
             return;
         }
@@ -174,15 +197,6 @@ impl ConventionFacts {
                 &mut self.known_conflicts[card.index()],
                 identity,
             );
-        }
-        if signal.kind == HGroupMoveKind::LayeredFinesse {
-            for card in signal.cards.iter().skip(1) {
-                merge_identity(
-                    &mut self.demonstrated_layers[card.index()],
-                    &mut self.layer_conflicts[card.index()],
-                    identity,
-                );
-            }
         }
     }
 
@@ -305,6 +319,26 @@ mod tests {
                 relation: IdentityClaimRelation::OneOf,
             }]
         );
+    }
+
+    #[test]
+    fn layered_finesse_identity_is_retained_as_a_disjunction() {
+        let green_three = Card::new(Suit::Green, Rank::Three);
+        let mut layered = signal(
+            HGroupMoveKind::LayeredFinesse,
+            CardId::new(34),
+            Some(green_three),
+        );
+        layered.cards.push(CardId::new(30));
+        let facts = ConventionFacts::from_signals(&[layered]);
+
+        assert_eq!(facts.known_identity(CardId::new(34)), None);
+        assert_eq!(facts.known_identity(CardId::new(30)), None);
+        assert_eq!(
+            facts.identity_claims()[0].relation,
+            IdentityClaimRelation::OneOf
+        );
+        assert_eq!(facts.demonstrated_layer(CardId::new(30)), Some(green_three));
     }
 
     #[test]

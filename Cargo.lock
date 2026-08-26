@@ -32,6 +32,8 @@ version = "0.1.0"
 dependencies = [
  "hanabi-core",
  "hanabi-protocol",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -133,6 +133,8 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                             save: false,
                             urgent_save: false,
                             immediate_play: false,
+                            connection_steps: 0,
+                            action_coverage: 0,
                             recognition: ClueRecognition::GeneratorProof,
                         },
                         touched,
@@ -204,6 +206,12 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
         .iter()
         .filter(|connection| pending_is_active(connection, &replay.pending_connections))
         .flat_map(|connection| connection.cards.iter().copied())
+        .collect::<CardSet>();
+    let conditional_connection_cards = replay
+        .pending_connections
+        .iter()
+        .filter(|connection| pending_is_active(connection, &replay.pending_connections))
+        .flat_map(|connection| connection.cards.iter().skip(1).copied())
         .collect::<CardSet>();
     baseline_playing.extend(active_connection_cards.iter().copied());
     for player in 0..view.hands.len() {
@@ -316,6 +324,8 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 save: false,
                 urgent_save: false,
                 immediate_play: is_playable_now(view, focus_identity),
+                connection_steps: 0,
+                action_coverage: 0,
                 recognition: ClueRecognition::GeneratorProof,
             });
             continue;
@@ -363,6 +373,10 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
         let duplicates_existing_good_touch = is_eventually_useful(view, focus_identity)
             && (convention_cards.iter().any(|card| {
                 card.card != focus
+                    // Later cards in an ordered Finesse are conditional
+                    // alternatives, not independent Good Touch promises. If
+                    // the first card connects, these cards are released.
+                    && !conditional_connection_cards.contains(&card.card)
                     && promptable.contains(&card.card)
                     && view
                         .hands
@@ -637,6 +651,12 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 save: false,
                 urgent_save: false,
                 immediate_play: is_playable_now(view, focus_identity),
+                connection_steps: u8::try_from(
+                    usize::from(focus_identity.rank.number())
+                        .saturating_sub(view.play_stacks[focus_identity.suit.index()].len() + 1),
+                )
+                .expect("a standard connection has at most four steps"),
+                action_coverage: 0,
                 recognition: ClueRecognition::GeneratorProof,
             });
         } else if let Some(score) = save_score {
@@ -653,6 +673,8 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                     urgent_save: focus_identity.rank == Rank::Five
                         || is_critical(view, focus_identity),
                     immediate_play: false,
+                    connection_steps: 0,
+                    action_coverage: 0,
                     recognition: ClueRecognition::GeneratorProof,
                 });
             }
@@ -1604,6 +1626,8 @@ pub(super) fn advanced_clue_candidates(
             save: matches!(kind, HGroupMoveKind::SaveClue | HGroupMoveKind::FakeSave),
             urgent_save: kind == HGroupMoveKind::FakeSave,
             immediate_play: playable > 0,
+            connection_steps: 0,
+            action_coverage: 0,
             recognition: ClueRecognition::GeneratorProof,
         });
     }
@@ -2410,6 +2434,8 @@ pub(super) fn tempo_clue_candidates(
                 save: false,
                 urgent_save: false,
                 immediate_play: true,
+                connection_steps: 0,
+                action_coverage: 0,
                 recognition: ClueRecognition::GeneratorProof,
             });
         }

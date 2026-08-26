@@ -11,6 +11,8 @@ hanabi-core = { path = "../hanabi-core" }
 
 [dev-dependencies]
 hanabi-protocol = { path = "../hanabi-protocol" }
+serde.workspace = true
+serde_json.workspace = true
 
 [lints]
 workspace = true

@@ -151,6 +151,21 @@ fn second_replay_order_chop_move_protects_alices_red_two() {
 }
 
 #[test]
+fn second_replay_move_eight_keeps_the_promised_green_one() {
+    let fixture = expert_replay_p4v0s9();
+    let state = fixture.state_at_turn(7).expect("move-8 position exists");
+    let donald = state.current_player();
+    let deductions = LogicalDeductions::new(state.view_for(donald).expect("Donald has a view"))
+        .expect("valid Donald deductions");
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(12))),
+        "an unrelated clue must not preempt Donald's promised green 1: {candidates:#?}"
+    );
+}
+
+#[test]
 fn clue_giver_does_not_prompt_their_own_ambiguous_rank_three() {
     let fixture = expert_replay_p4v0s9();
     let state = fixture
@@ -171,6 +186,300 @@ fn clue_giver_does_not_prompt_their_own_ambiguous_rank_three() {
     assert_eq!(
         select_h_group_action(&deductions, HGroupProfile::Max),
         Some(replay_action_at_turn(&fixture, 13))
+    );
+}
+
+#[test]
+fn second_replay_direct_blue_two_play_clue_persists_until_played() {
+    let fixture = expert_replay_p4v0s9();
+    let donald = PlayerId::new(3);
+    let blue_two = Card::new(Suit::Blue, Rank::Two);
+    let exact_blue_two = IdentitySet::singleton(blue_two);
+
+    let after_clue = fixture
+        .state_at_turn(14)
+        .expect("the direct blue Play Clue is legal");
+    let clue_deductions = LogicalDeductions::new(
+        after_clue
+            .view_for(donald)
+            .expect("Donald has a post-clue view"),
+    )
+    .expect("valid post-clue deductions");
+    let clue_replay = replay_h_group(&clue_deductions, HGroupProfile::Max);
+    assert!(
+        !clue_replay
+            .signals
+            .has_at_turn(13, HGroupMoveKind::FixClue),
+        "a fresh blue clue on Donald's blue 2 is a direct Play Clue, not a Fix: {:#?}",
+        clue_replay.signals
+    );
+    let clue_inferences = infer_h_group(&clue_deductions, HGroupProfile::Max);
+    let direct_clue = clue_inferences
+        .clues
+        .iter()
+        .find(|clue| clue.turn == 13 && clue.target == donald)
+        .expect("move 14 has a recipient-visible clue interpretation");
+    assert_eq!(
+        direct_clue.kind,
+        HGroupClueKind::Play,
+        "{direct_clue:#?}"
+    );
+    assert_eq!(direct_clue.focus, CardId::new(15));
+    assert_eq!(direct_clue.focus_identities, exact_blue_two);
+    assert_eq!(
+        clue_inferences
+            .cards
+            .iter()
+            .find(|card| card.card == CardId::new(15))
+            .map(|card| card.identities),
+        Some(exact_blue_two),
+        "the recipient must immediately record the direct Play Clue as blue 2: {clue_inferences:#?}"
+    );
+
+    let play_turn = fixture
+        .state_at_turn(27)
+        .expect("the position before move 28 exists");
+    assert_eq!(play_turn.current_player(), donald);
+    let play_deductions = LogicalDeductions::new(
+        play_turn
+            .view_for(donald)
+            .expect("Donald has a move-28 view"),
+    )
+    .expect("valid move-28 deductions");
+    let play_inferences = infer_h_group(&play_deductions, HGroupProfile::Max);
+    assert_eq!(
+        play_inferences
+            .cards
+            .iter()
+            .find(|card| card.card == CardId::new(15))
+            .map(|card| card.identities),
+        Some(exact_blue_two),
+        "later clues must not widen the exact blue-2 Play promise: {play_inferences:#?}"
+    );
+    assert!(play_inferences.playable_now.contains(&CardId::new(15)));
+    assert_eq!(
+        select_h_group_action(&play_deductions, HGroupProfile::Max),
+        Some(replay_action_at_turn(&fixture, 27))
+    );
+}
+
+#[test]
+fn second_replay_move_thirty_one_can_defer_to_a_more_efficient_clue() {
+    let fixture = expert_replay_p4v0s9();
+    let state = fixture
+        .state_at_turn(30)
+        .expect("the position before move 31 exists");
+    let cathy = state.current_player();
+    let view = state.view_for(cathy).expect("Cathy has a move-31 view");
+    let deductions = LogicalDeductions::new(view.clone()).expect("valid Cathy deductions");
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let green = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Suit(Suit::Green),
+    };
+    assert_eq!(
+        candidates
+            .iter()
+            .find(|candidate| candidate.action == green)
+            .map(|candidate| candidate.action_coverage),
+        Some(2),
+        "green promises green 3 and green 4: {candidates:#?}"
+    );
+    let current_rank_four = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Rank(Rank::Four),
+    };
+    assert_eq!(
+        candidates
+            .iter()
+            .find(|candidate| candidate.action == current_rank_four)
+            .map(|candidate| candidate.action_coverage),
+        Some(2),
+        "Cathy sees Donald's nearer green 3, so her rank-4 clue is only a two-action line: {candidates:#?}"
+    );
+
+    let after_discard = ProspectiveTransition::discard(
+        &view,
+        cathy,
+        CardId::new(8),
+        Card::new(Suit::Red, Rank::One),
+    );
+    let donald = after_discard.current_player;
+    let (donald_deductions, donald_replay) = PerspectiveProjector::new(
+        &after_discard,
+        HGroupProfile::Max,
+    )
+    .project(donald, PerspectiveDepth::NestedRecipients)
+    .expect("Donald can see the revealed discard");
+    let next_candidates = h_group_clue_candidates_from_replay(
+        &donald_deductions,
+        HGroupProfile::Max,
+        &donald_replay,
+    );
+    let rank_four = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Rank(Rank::Four),
+    };
+    let touched = after_discard.hands[0]
+        .iter()
+        .filter(|card| {
+            card.identity
+                .is_some_and(|identity| Clue::Rank(Rank::Four).matches(identity))
+        })
+        .map(|card| card.id)
+        .collect::<Vec<_>>();
+    let after_rank_four = prospective_clue_view(
+        donald_deductions.view(),
+        PlayerId::new(0),
+        Clue::Rank(Rank::Four),
+        &touched,
+    );
+    let (_, alice_replay) = projected_h_group_replay(
+        &after_rank_four,
+        HGroupProfile::Max,
+        PlayerId::new(0),
+    )
+    .expect("Alice can interpret rank 4");
+    assert_eq!(
+        next_candidates
+            .iter()
+            .find(|candidate| candidate.action == rank_four)
+            .map(|candidate| candidate.action_coverage),
+        Some(3),
+        "Donald sees the blue-3, green-3, green-4 Layered Finesse: candidates={next_candidates:#?}; pending={:#?}; signals={:#?}",
+        alice_replay.pending_connections,
+        alice_replay.signals
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Discard(CardId::new(8))),
+        "Cathy should recover the last clue so Donald can give the three-action Layered Finesse"
+    );
+}
+
+#[test]
+fn second_replay_move_thirty_three_admits_the_rank_five_clue() {
+    let fixture = expert_replay_p4v0s9();
+    let state = fixture
+        .state_at_turn(32)
+        .expect("the position before move 33 exists");
+    let alice = state.current_player();
+    let deductions = LogicalDeductions::new(state.view_for(alice).expect("Alice has a view"))
+        .expect("valid Alice deductions");
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
+    let candidates = h_group_clue_candidates_from_replay(
+        &deductions,
+        HGroupProfile::Max,
+        &replay,
+    );
+    let rank_five = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Rank(Rank::Five),
+    };
+    let admitted = candidates
+        .iter()
+        .map(|candidate| candidate.action)
+        .collect::<Vec<_>>();
+    let rejected = h_group_rejected_clues_from_replay(
+        &deductions,
+        HGroupProfile::Max,
+        &replay,
+        &admitted,
+    );
+    assert!(
+        admitted.contains(&rank_five),
+        "rank 5 must be admitted: rejected={rejected:#?}; state={state:#?}; replay={replay:#?}; candidates={candidates:#?}"
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(rank_five),
+        "rank 5 should preempt Alice's parked yellow 4: replay={replay:#?}; candidates={candidates:#?}"
+    );
+
+    let after_save = fixture
+        .state_at_turn(33)
+        .expect("the rank-5 Save is legal");
+    let bob = after_save.current_player();
+    let bob_deductions = LogicalDeductions::new(after_save.view_for(bob).expect("Bob has a view"))
+        .expect("valid Bob deductions");
+    let bob_replay = replay_h_group(&bob_deductions, HGroupProfile::Max);
+    let bob_inferences = infer_h_group_from_replay(
+        &bob_deductions,
+        bob_replay.clone(),
+        HGroupProfile::Max,
+    );
+    assert!(
+        bob_replay.pending_connections.iter().any(|connection| {
+            connection.actor == bob
+                && connection.cards.starts_with(&[CardId::new(34), CardId::new(30)])
+                && connection.expected == Card::new(Suit::Green, Rank::Three)
+        }),
+        "Alice's unrelated Save must preserve Bob's layered obligation: {bob_replay:#?}"
+    );
+    assert!(
+        bob_inferences.playable_now.contains(&CardId::new(34)),
+        "Bob must play the first layer, blue 3: {bob_inferences:#?}"
+    );
+}
+
+#[test]
+fn second_replay_move_thirty_eight_keeps_the_layered_green_three_consistent() {
+    let fixture = expert_replay_p4v0s9();
+    let state = fixture
+        .state_at_turn(37)
+        .expect("the position before move 38 exists");
+    let bob = state.current_player();
+    let view = state.view_for(bob).expect("Bob has a view");
+    let information_set = crate::InformationSet::new(&view).expect("valid information set");
+    let deductions = information_set.deductions();
+    let analysis = crate::SupportedConvention::HGroup(HGroupProfile::Max).analyze(deductions);
+    let logical = view.hands[bob.index()]
+        .iter()
+        .map(|card| (card.id, deductions.possible_identities(card.id)))
+        .collect::<Vec<_>>();
+    let count = information_set.world_count_up_to(&analysis.belief_constraints, 4_096);
+    assert!(
+        count.worlds > 0,
+        "the demonstrated blue-3/green-3 layer must have a consistent world: logical={logical:#?}; constraints={:#?}",
+        analysis.belief_constraints,
+    );
+}
+
+#[test]
+fn second_replay_move_forty_two_prefers_both_playable_fives() {
+    let fixture = expert_replay_p4v0s9();
+    let state = fixture
+        .state_at_turn(41)
+        .expect("the position before move 42 exists");
+    let bob = state.current_player();
+    let deductions = LogicalDeductions::new(state.view_for(bob).expect("Bob has a view"))
+        .expect("valid Bob deductions");
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let rank_five = Action::Clue {
+        target: PlayerId::new(3),
+        clue: Clue::Rank(Rank::Five),
+    };
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(rank_five),
+        "rank 5 directly gives Donald both playable 5s: {candidates:#?}"
+    );
+}
+
+#[test]
+fn second_replay_move_forty_four_plays_the_chop_focused_five_first() {
+    let fixture = expert_replay_p4v0s9();
+    let state = fixture
+        .state_at_turn(43)
+        .expect("the position before move 44 exists");
+    let donald = state.current_player();
+    let deductions = LogicalDeductions::new(state.view_for(donald).expect("Donald has a view"))
+        .expect("valid Donald deductions");
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(21))),
+        "the chop-focused green 5 must precede the collateral red 5: {inferred:#?}"
     );
 }
 
@@ -466,7 +775,8 @@ fn second_replay_move_twenty_admits_the_visible_reverse_finesse() {
     );
     assert_eq!(
         select_h_group_action(&deductions, HGroupProfile::Max),
-        Some(expected)
+        Some(expected),
+        "the multi-player setup must be allowed to park Donald's blue 2: {candidates:#?}"
     );
 }
 
@@ -1367,11 +1677,12 @@ fn completed_blue_prompt_plays_the_focus_before_same_clue_ancillary_cards() {
     }
     let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
     let inferred = infer_h_group(&deductions, profile);
+    let candidates = h_group_clue_candidates(&deductions, profile);
 
     assert_eq!(
         select_h_group_action(&deductions, profile),
         Some(Action::Play(CardId::new(0))),
-        "inference: {inferred:#?}"
+        "inference: {inferred:#?}; candidates: {candidates:#?}"
     );
 }
 

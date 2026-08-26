@@ -99,6 +99,8 @@ pub(super) struct ClueCandidate {
     pub(super) save: bool,
     pub(super) urgent_save: bool,
     pub(super) immediate_play: bool,
+    pub(super) connection_steps: u8,
+    pub(super) action_coverage: u8,
     pub(super) recognition: ClueRecognition,
 }
 
@@ -109,7 +111,9 @@ impl ClueCandidate {
 
     /// A save important enough to preempt a convention-promised play.
     pub(super) fn is_urgent_save(self) -> bool {
-        self.urgent_save && self.score() >= 400
+        // Comparative Teamwork and delay penalties order otherwise-valid
+        // clues; they must not erase the semantic urgency of a critical Save.
+        self.urgent_save && self.value.semantic_strength() >= 400
     }
 
     /// A non-immediate setup clue that may interrupt a demonstrated layer.
@@ -118,6 +122,12 @@ impl ClueCandidate {
         // retroactively make a semantically strong setup clue illegal while
         // a demonstrated connection is parked.
         !self.save && !self.immediate_play && self.value.semantic_strength() >= 365
+    }
+
+    /// A line with at least two missing connectors may park an exact ordinary
+    /// play while it occupies the teammates who establish those connectors.
+    pub(super) fn can_preempt_ordinary_play(self) -> bool {
+        self.purpose == CluePurpose::Play && self.connection_steps >= 2
     }
 
     /// A time-sensitive clue to the next player that may preempt occupancy.

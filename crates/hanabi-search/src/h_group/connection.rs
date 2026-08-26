@@ -64,6 +64,7 @@ pub(super) enum ConnectionTransitionReason {
     Superseded,
     FocusInvalidated,
     IdentitySatisfiedElsewhere,
+    LayerExtended,
 }
 
 /// Auditable lifecycle event for a connection. These records explain current
@@ -273,6 +274,50 @@ impl ConnectionManager {
         self.cancel_where(turn, ConnectionTransitionReason::Fixed, |connection| {
             connection.cards.is_empty()
         });
+    }
+
+    /// Prepends newly demonstrated blind plays to an existing Finesse.
+    ///
+    /// A later clue can layer one or more currently playable cards in front
+    /// of a connection that was already queued. Keeping that refinement on
+    /// the original promise preserves its provenance and makes advancement
+    /// release the layers in the same order in which they must be played.
+    pub(super) fn prepend_layers(
+        &mut self,
+        turn: u32,
+        promise: PromiseId,
+        layers: &[CardId],
+    ) -> Option<ConnectionObligation> {
+        if layers.is_empty() {
+            return self
+                .active
+                .iter()
+                .find(|connection| connection.promise == promise)
+                .cloned();
+        }
+        let connection = self
+            .active
+            .iter_mut()
+            .find(|connection| connection.promise == promise)?;
+        let mut cards = layers
+            .iter()
+            .copied()
+            .filter(|card| !connection.cards.contains(card))
+            .collect::<Vec<_>>();
+        if cards.is_empty() {
+            return Some(connection.clone());
+        }
+        cards.append(&mut connection.cards);
+        connection.cards = cards;
+        let updated = connection.clone();
+        self.record(
+            turn,
+            &updated,
+            ConnectionStatus::Pending,
+            ConnectionStatus::Pending,
+            ConnectionTransitionReason::LayerExtended,
+        );
+        Some(updated)
     }
 
     /// Removes a discarded candidate even when its obligation is blocked by

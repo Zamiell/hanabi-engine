@@ -324,35 +324,29 @@ pub(in crate::h_group) fn convention_card_inferences(
     for pending in replay.pending_connections.iter().filter(|pending| {
         pending.actor == view.observer && pending_is_active(pending, &replay.pending_connections)
     }) {
-        for pending_card in &pending.cards {
-            let Some(card) = cards.iter_mut().find(|card| card.card == *pending_card) else {
-                continue;
-            };
-            let expected = IdentitySet::singleton(pending.expected);
-            if pending.kind == HGroupConnectionKind::Finesse {
-                let allowed = if pending.cards.len() == 1 {
-                    expected
-                } else {
-                    expected.union(identities_at_distance(card.identities, view, 0))
-                };
-                let narrowed = card.identities.intersection(allowed);
-                if !narrowed.is_empty() {
-                    card.identities = narrowed;
-                }
-                card.finessed = true;
-            } else {
-                let successful_alternatives = identities_at_distance(card.identities, view, 0);
-                let narrowed = card
-                    .identities
-                    .intersection(expected.union(successful_alternatives));
-                if !narrowed.is_empty() {
-                    card.identities = narrowed;
-                }
-                // Later candidates are conditionally constrained only after
-                // every earlier candidate is a wrong successful play.
-                break;
-            }
+        // Ordered alternatives are conditional. Only the first card is
+        // currently constrained to be either the expected connector or a
+        // successful alternative. If it is the connector, every later card
+        // is unrelated and may have any logical identity; if it is a wrong
+        // successful play, replay advances the promise and constrains the new
+        // first card on the following turn.
+        let Some(pending_card) = pending.cards.first() else {
+            continue;
+        };
+        let Some(card) = cards.iter_mut().find(|card| card.card == *pending_card) else {
+            continue;
+        };
+        let expected = IdentitySet::singleton(pending.expected);
+        let allowed = if pending.cards.len() == 1 {
+            expected
+        } else {
+            expected.union(identities_at_distance(card.identities, view, 0))
+        };
+        let narrowed = card.identities.intersection(allowed);
+        if !narrowed.is_empty() {
+            card.identities = narrowed;
         }
+        card.finessed = true;
     }
     for forced in &replay.cards.forced_playable {
         let Some(card) = cards.iter_mut().find(|card| card.card == *forced) else {

@@ -45,6 +45,10 @@ pub(super) struct LineOutcome {
     pub(super) protected_cards: Vec<CardId>,
     pub(super) known_trash: Vec<CardId>,
     pub(super) new_connections: usize,
+    /// Number of actions in the line as interpreted by the clue recipient.
+    /// Other observer projections remain useful for owner knowledge, but must
+    /// not inflate Teamwork coverage with mutually incompatible readings.
+    pub(super) action_coverage: usize,
 }
 
 impl LineOutcome {
