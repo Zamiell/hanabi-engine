@@ -20,10 +20,10 @@ use super::recognition::{
     apply_trash_effects, apply_unnecessary_move_effects,
 };
 use super::rules::POST_EVENT_RULES;
-use super::transition::transition_recording_enabled;
 use super::{
-    ConventionTransitionResult, HGroupPhase, HGroupProfile, HGroupRuleEffects, HGroupRuleId,
-    HGroupTurnContext, MutationDomain, MutationSet, RuleProposal, h_group_phase_at, rule_enabled,
+    ConventionTransitionDelta, ConventionTransitionResult, HGroupPhase, HGroupProfile,
+    HGroupRuleEffects, HGroupRuleId, HGroupTurnContext, MutationDomain, MutationSet, RuleProposal,
+    h_group_phase_at, rule_enabled,
 };
 
 /// Semantic execution order. It is intentionally not numerical level order:
@@ -36,24 +36,22 @@ pub(super) fn apply_post_event_rules(
     effects: &mut HGroupRuleEffects<'_>,
 ) -> ConventionTransitionResult {
     debug_assert!(registry_is_valid());
-    if !transition_recording_enabled() {
-        for spec in POST_EVENT_RULES {
-            if rule_enabled(profile, spec.id) {
-                apply_rule(spec.id, context, view, profile, effects);
-            }
-        }
-        return ConventionTransitionResult {
-            turn: context.entry.turn,
-            proposals: Vec::new(),
-        };
-    }
     let mut proposals = Vec::new();
     for spec in POST_EVENT_RULES {
         if rule_enabled(profile, spec.id) {
             let before = RuleStateFingerprint::capture(effects);
+            let card_before = effects.card_snapshot();
             let signal_start = effects.signals.len();
             let promise_start = effects.pending.transitions().len();
             apply_rule(spec.id, context, view, profile, effects);
+            effects.reconcile_connection_lifecycles(promise_start);
+            effects.reconcile_card_sources(
+                &card_before,
+                super::EffectSource::Rule {
+                    turn: context.entry.turn,
+                    rule: spec.id,
+                },
+            );
             let after = RuleStateFingerprint::capture(effects);
             let signal_end = effects.signals.len();
             let promise_end = effects.pending.transitions().len();
@@ -67,6 +65,7 @@ pub(super) fn apply_post_event_rules(
                 signal_range: signal_start..signal_end,
                 promise_transition_range: promise_start..promise_end,
                 mutations,
+                card_changes: before.cards.changes_to(&after.cards),
             };
             if !proposal.is_empty() {
                 proposals.push(proposal);
@@ -76,17 +75,15 @@ pub(super) fn apply_post_event_rules(
     ConventionTransitionResult {
         turn: context.entry.turn,
         proposals,
+        delta: ConventionTransitionDelta::default(),
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct RuleStateFingerprint {
-    invisible_clues: usize,
-    playing_promises: usize,
+    cards: super::ConventionCardSetSnapshot,
     connections: (usize, usize),
-    chop_movement: usize,
     must_clue: usize,
-    forced_plays: usize,
     required_discards: usize,
     implicit_saves: usize,
     required_fix: Option<(usize, usize, usize, usize)>,
@@ -95,12 +92,9 @@ struct RuleStateFingerprint {
 impl RuleStateFingerprint {
     fn capture(effects: &HGroupRuleEffects<'_>) -> Self {
         Self {
-            invisible_clues: effects.invisibly_clued.len(),
-            playing_promises: effects.already_playing.len(),
+            cards: effects.card_snapshot(),
             connections: (effects.pending.len(), effects.pending.transitions().len()),
-            chop_movement: effects.chop_moved.len(),
             must_clue: effects.must_clue.len(),
-            forced_plays: effects.forced_playable.len(),
             required_discards: effects.discard_now.len(),
             implicit_saves: effects.implicit_saves.len(),
             required_fix: effects.required_fix.map(|fix| {
@@ -114,14 +108,14 @@ impl RuleStateFingerprint {
         }
     }
 
-    fn changed_domains(self, after: &Self) -> MutationSet {
+    fn changed_domains(&self, after: &Self) -> MutationSet {
         let checks = [
             (
-                self.invisible_clues != after.invisible_clues,
+                self.cards.invisibly_clued != after.cards.invisibly_clued,
                 MutationDomain::InvisibleClues,
             ),
             (
-                self.playing_promises != after.playing_promises,
+                self.cards.already_playing != after.cards.already_playing,
                 MutationDomain::PlayingPromises,
             ),
             (
@@ -129,12 +123,12 @@ impl RuleStateFingerprint {
                 MutationDomain::Connections,
             ),
             (
-                self.chop_movement != after.chop_movement,
+                self.cards.chop_moved != after.cards.chop_moved,
                 MutationDomain::ChopMovement,
             ),
             (self.must_clue != after.must_clue, MutationDomain::MustClue),
             (
-                self.forced_plays != after.forced_plays,
+                self.cards.forced_playable != after.cards.forced_playable,
                 MutationDomain::ForcedPlays,
             ),
             (
@@ -199,13 +193,7 @@ fn apply_rule(
                 );
             }
         }
-        HGroupRuleId::BasicMoves => apply_level_two_effects(
-            context.entry,
-            view,
-            context.after.hands,
-            effects.explicitly_clued,
-            effects.signals,
-        ),
+        HGroupRuleId::BasicMoves => apply_level_two_effects(context, view, effects),
         HGroupRuleId::BasicStrategy => apply_level_three_effects(context, view, effects),
         HGroupRuleId::Elimination => {
             apply_elimination_effects(

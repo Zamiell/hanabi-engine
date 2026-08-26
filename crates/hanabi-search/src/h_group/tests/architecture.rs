@@ -124,6 +124,7 @@ fn every_expert_replay_prefix_satisfies_h_group_state_invariants() {
                 &deductions,
                 HGroupProfile::Max,
                 PerspectiveDepth::ObserverOnly,
+                false,
             );
             assert_eq!(
                 replay.validate(),
@@ -147,13 +148,12 @@ fn transition_proposals_are_a_unique_causal_partition_of_post_event_signals() {
         let observer = state.current_player();
         let deductions = LogicalDeductions::new(state.view_for(observer).expect("observer exists"))
             .expect("valid deductions");
-        let replay = with_transition_recording(|| {
-            replay_h_group_inner(
-                &deductions,
-                HGroupProfile::Max,
-                PerspectiveDepth::ObserverOnly,
-            )
-        });
+        let replay = replay_h_group_inner(
+            &deductions,
+            HGroupProfile::Max,
+            PerspectiveDepth::ObserverOnly,
+            false,
+        );
         let mut proposed = Vec::new();
         for transition in &replay.transitions {
             for proposal in &transition.proposals {
@@ -243,6 +243,7 @@ fn every_replay_clue_uses_the_same_hypothetical_and_recipient_interpretation() {
             &actual_deductions,
             HGroupProfile::Max,
             PerspectiveDepth::ObserverOnly,
+            false,
         );
         let actual_inferences =
             infer_h_group_from_replay(&actual_deductions, actual_replay, HGroupProfile::Max);
@@ -309,4 +310,80 @@ fn observer_epistemic_state_is_invariant_to_leaked_own_hand_truth() {
             );
         }
     }
+}
+
+#[test]
+fn cancelling_a_promise_atomically_retracts_its_materialized_effects() {
+    let mut pending = ConnectionManager::default();
+    let card = CardId::new(5);
+    let focus = CardId::new(9);
+    let promise = pending.start(
+        3,
+        ConnectionObligation {
+            promise: PromiseId::UNASSIGNED,
+            actor: PlayerId::new(1),
+            cards: vec![card],
+            expected: Card::new(Suit::Red, Rank::Two),
+            focus_identity: Card::new(Suit::Red, Rank::Three),
+            kind: HGroupConnectionKind::Finesse,
+            focus,
+            step: 0,
+        },
+    );
+    let source = EffectSource::Promise(promise);
+    let mut invisible = ProvenancedCardSet::default();
+    let mut playing = ProvenancedCardSet::default();
+    let mut forced = ProvenancedCardSet::default();
+    invisible.insert_from(source, card);
+    playing.insert_from(source, focus);
+
+    let transition_start = pending.transitions().len();
+    pending.cancel_where(
+        4,
+        ConnectionTransitionReason::FocusInvalidated,
+        |connection| connection.promise == promise,
+    );
+    reconcile_connection_fact_lifecycles(
+        &pending,
+        transition_start,
+        &mut invisible,
+        &mut playing,
+        &mut forced,
+    );
+
+    assert!(!invisible.contains(&card));
+    assert!(!playing.contains(&focus));
+    assert_eq!(invisible.retractions().len(), 1);
+    assert_eq!(playing.retractions().len(), 1);
+}
+
+#[test]
+fn production_transition_delta_records_exact_clue_cards() {
+    let fixture = expert_replay_194321();
+    let state = fixture.state_at_turn(1).expect("first move is legal");
+    let observer = state.current_player();
+    let deductions = LogicalDeductions::new(state.view_for(observer).expect("observer exists"))
+        .expect("valid deductions");
+    let expected = match &deductions.view().history[0].event {
+        ObservedEvent::Clued { touched, .. } => touched.iter().copied().collect::<CardSet>(),
+        event => panic!("first replay event should be a clue, got {event:?}"),
+    };
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
+    let transition = replay
+        .transitions
+        .iter()
+        .find(|transition| transition.turn == 0)
+        .expect("first clue has a production transition");
+    let explicitly_clued = transition
+        .delta
+        .card_changes
+        .iter()
+        .filter(|change| {
+            change.fact == MaterializedCardFact::ExplicitlyClued
+                && change.kind == FactChangeKind::Added
+        })
+        .map(|change| change.card)
+        .collect::<CardSet>();
+
+    assert_eq!(explicitly_clued, expected);
 }

@@ -28,7 +28,7 @@ pub(super) type PlayerSet = HashSet<PlayerId, BuildHasherDefault<CompactIdHasher
 
 use super::{
     ConnectionManager, ConventionFacts, ConventionTransitionResult, HGroupMoveKind, MutationDomain,
-    SignalHistory,
+    ProvenancedCardSet, SignalHistory,
 };
 
 /// How far observer projection may recurse while interpreting conventions.
@@ -208,12 +208,12 @@ impl HGroupInferences {
 /// action selection must project them onto the acting observer's hand.
 #[derive(Clone, Debug)]
 pub(super) struct ConventionCardState {
-    pub(super) explicitly_clued: CardSet,
-    pub(super) invisibly_clued: CardSet,
-    pub(super) already_playing: CardSet,
-    pub(super) chop_moved: CardSet,
+    pub(super) explicitly_clued: ProvenancedCardSet,
+    pub(super) invisibly_clued: ProvenancedCardSet,
+    pub(super) already_playing: ProvenancedCardSet,
+    pub(super) chop_moved: ProvenancedCardSet,
     pub(super) discard_now: Vec<CardId>,
-    pub(super) forced_playable: CardSet,
+    pub(super) forced_playable: ProvenancedCardSet,
     pub(super) invalidated_focuses: CardSet,
     /// Direct Play interpretations their owner publicly declined. This is an
     /// action-selection fact, not a rewrite of the underlying clue facts.
@@ -225,6 +225,11 @@ pub(super) struct ConventionCardState {
 impl ConventionCardState {
     pub(super) fn validate(&self) -> Result<(), String> {
         self.facts.validate()?;
+        self.explicitly_clued.validate()?;
+        self.invisibly_clued.validate()?;
+        self.already_playing.validate()?;
+        self.chop_moved.validate()?;
+        self.forced_playable.validate()?;
         let mut seen_discards = CardSet::default();
         if self
             .discard_now
@@ -324,6 +329,21 @@ impl HGroupState {
                 if proposal.is_empty() {
                     return Err("empty rule proposal was retained".to_owned());
                 }
+            }
+        }
+        for retraction in self
+            .cards
+            .invisibly_clued
+            .retractions()
+            .iter()
+            .chain(self.cards.already_playing.retractions())
+            .chain(self.cards.forced_playable.retractions())
+        {
+            let super::EffectSource::Promise(promise) = retraction.source else {
+                return Err("non-promise lifecycle retraction was journaled".to_owned());
+            };
+            if self.pending_connections.provenance(promise).is_none() {
+                return Err("retracted convention fact has no promise provenance".to_owned());
             }
         }
         Ok(())

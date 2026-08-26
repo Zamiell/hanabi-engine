@@ -11,18 +11,18 @@ use super::{
     ClueRecognition, ClueValue, ConnectionObligation, ConventionFacts, ConventionRejectionReason,
     HGroupCardInference, HGroupClueInterpretation, HGroupClueKind, HGroupConnection,
     HGroupConnectionKind, HGroupInferences, HGroupMoveKind, HGroupProfile, HGroupRuleId,
-    HGroupSaveKind, HGroupState, HistoricalView, IdentitySet, KNOWN_TRASH_COLLATERAL_BONUS,
-    LogicalDeductions, MAX_CLUE_TOKENS, ObservedCard, ObservedEvent, PlayerId, PlayerSet,
-    PlayerView, Rank, RejectedConventionAction, RequiredFix, SemanticallyAdmittedCandidates,
-    bluff_play_connects, bluff_target_order_is_legal, card_is_trash, chop,
-    convention_information_value, finesse_position, five_pulled_card, focus,
+    HGroupState, HistoricalView, IdentitySet, KNOWN_TRASH_COLLATERAL_BONUS, LogicalDeductions,
+    MAX_CLUE_TOKENS, ObservedCard, ObservedEvent, PlayerId, PlayerSet, PlayerView, Rank,
+    RejectedConventionAction, RequiredFix, SemanticallyAdmittedCandidates, bluff_play_connects,
+    bluff_target_order_is_legal, card_is_trash, chop, convention_information_value,
+    finesse_position, five_chop_moved_card, five_pulled_card, focus,
     identity_is_queued_before_target, identity_of, identity_set, infer_h_group_from_replay,
     is_convention_trash, is_critical, is_eventually_useful, is_playable_at, is_playable_now,
     is_unique_visible, next_player, ordered_playable_cards, pending_identity_is_queued,
     pending_is_active, positional_discard_candidate, projected_h_group_replay,
     prospective_clue_has_unsafe_connection, prospective_clue_marks_focus_saved,
-    prospective_clue_signal_kinds, prospective_clue_view, prospective_play_view,
-    replay_identity_is_queued, rule_enabled, subjective_convention_cards,
+    prospective_clue_primary_kind, prospective_clue_signal_kinds, prospective_clue_view,
+    prospective_play_view, replay_identity_is_queued, rule_enabled, subjective_convention_cards,
     subjective_playable_cards, was_clued_before, with_prospective_analysis_cache,
 };
 
@@ -32,10 +32,9 @@ pub(super) use candidate_validation::{
     h_group_rejected_clues_from_replay, recipient_replay_recognizes_candidate,
 };
 pub(super) use knowledge::{
-    clue_kind_from_masks, convention_card_inferences, convention_playable,
-    delayed_focus_identities, find_prompt, identities_at_distance_at,
-    snapshot_good_touch_identities, snapshot_play_identities, snapshot_save_identities,
-    two_save_allowed,
+    convention_card_inferences, convention_playable, delayed_focus_identities, find_prompt,
+    identities_at_distance_at, snapshot_good_touch_identities, snapshot_play_identities,
+    snapshot_save_identities, two_save_allowed,
 };
 
 #[cfg(test)]
@@ -200,6 +199,13 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
     );
     let convention_cards = convention_card_inferences(deductions, replay);
     let mut baseline_playing = replay.cards.already_playing.clone();
+    let active_connection_cards = replay
+        .pending_connections
+        .iter()
+        .filter(|connection| pending_is_active(connection, &replay.pending_connections))
+        .flat_map(|connection| connection.cards.iter().copied())
+        .collect::<CardSet>();
+    baseline_playing.extend(active_connection_cards.iter().copied());
     for player in 0..view.hands.len() {
         let observer =
             PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
@@ -254,6 +260,9 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             .find(|card| card.id == focus)
             .and_then(|card| card.identity)
             .expect("another player's cards are visible");
+        let five_chop_move = rule_enabled(profile, HGroupRuleId::ChopMoves)
+            && clue == Clue::Rank(Rank::Five)
+            && five_chop_moved_card(layout, &touched, &gotten).is_some();
         let repairs_required_fix = replay.required_fix.is_some_and(|required| {
             required.actor == view.current_player
                 && required.target == target
@@ -459,6 +468,13 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 // a direct clue that concentrates both plays in one hand.
                 .map(|_| 500)
         });
+        if five_chop_move {
+            // A number-5 clue whose rightmost 5 is exactly one unclued card
+            // from chop is a 5CM, not a Play Clue. In particular, it cannot
+            // construct a layered line through the 5's visible identity.
+            // Source: https://hanabi.github.io/level-4/#the-5s-chop-move-5cm
+            play_score = None;
+        }
         if save_score.is_some()
             && matches!(
                 (clue, focus_identity.rank),
@@ -473,17 +489,23 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             play_score = None;
         }
         if play_score.is_some()
-            && newly_informed.is_empty()
             && baseline_playing.contains(&focus)
             && !fixed_cards.contains(&focus)
             && !replay.cards.invalidated_focuses.contains(&focus)
+            && newly_informed
+                .iter()
+                .all(|card| *card == focus || baseline_playing.contains(card))
+            && (newly_informed.is_empty() || active_connection_cards.contains(&focus))
         {
-            // A fill-in on a card that is already promised to play creates no
-            // new action. Retouching other gotten cards does not rescue the
-            // clue: if none of them is newly introduced, the clue is merely
-            // extra identity information and fails Minimum Clue Value outside
-            // an explicitly permitted stalling situation. Required Fixes are
-            // handled before ordinary candidate generation above.
+            // A direct clue on a card already promised to play creates no new
+            // action, regardless of whether that promise came from positive
+            // information or an invisible connection. Touching only that
+            // focus and other already-playing cards is merely extra identity
+            // information and fails Minimum Clue Value. A newly touched focus
+            // is rejected here only when it is already an explicit active
+            // connection card; broader subjective playability must not erase
+            // a new Elimination Finesse or other legitimate clue. Required
+            // Fixes are handled before ordinary candidate generation above.
             play_score = None;
         }
         let repairable_lie = !is_playable_now(view, focus_identity)
@@ -901,6 +923,24 @@ pub(super) fn advanced_clue_candidates(
                 .iter()
                 .any(|identity| identity.rank == Rank::Five)
             && chop(layout, gotten).is_none_or(|card| !touched.contains(&card));
+        let five_chop_moved = (rule_enabled(profile, HGroupRuleId::ChopMoves)
+            && clue == Clue::Rank(Rank::Five))
+        .then(|| five_chop_moved_card(layout, &touched, gotten))
+        .flatten();
+        let five_chop_move = five_chop_moved.is_some() && !stalling;
+        let five_chop_move_has_value = five_chop_moved
+            .and_then(|moved| identity_of(view, moved).map(|identity| (moved, identity)))
+            .is_some_and(|(moved, identity)| {
+                is_eventually_useful(view, identity)
+                    && !view.hands.iter().flatten().any(|card| {
+                        card.id != moved
+                            && promptable.contains(&card.id)
+                            && (card.identity == Some(identity)
+                                || convention_cards.iter().any(|note| {
+                                    note.card == card.id && note.identities.contains(identity)
+                                }))
+                    })
+            });
         let five_pulled = off_chop_five
             .then(|| five_pulled_card(layout, &touched, gotten))
             .flatten();
@@ -933,7 +973,7 @@ pub(super) fn advanced_clue_candidates(
             });
         let clue_focus = focus(layout, &touched, chop(layout, gotten), gotten);
         let recipient_playing = subjective_playable_cards(view, profile, target).map_or_else(
-            || replay.cards.already_playing.clone(),
+            || replay.cards.already_playing.materialized().clone(),
             |cards| cards.into_iter().collect::<CardSet>(),
         );
         let tempo = newly_touched.is_empty()
@@ -1480,6 +1520,11 @@ pub(super) fn advanced_clue_candidates(
                     210
                 },
             ))
+        } else if five_chop_move {
+            // A Chop Move on an identity already secured elsewhere protects
+            // only convention trash and has no Minimum Clue Value. Do not let
+            // the same physical clue fall through to 5 Pull or Play meaning.
+            five_chop_move_has_value.then_some((HGroupMoveKind::FiveChopMove, 210))
         } else if rule_enabled(profile, HGroupRuleId::ChopMoves) && all_trash {
             Some((HGroupMoveKind::ChopMove, 210))
         } else if let Some(kind) =

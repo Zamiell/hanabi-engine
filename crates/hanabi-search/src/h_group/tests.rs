@@ -458,6 +458,7 @@ fn out_of_order_fix_accepts_both_clues_and_prefers_color() {
         &deductions,
         HGroupProfile::Max,
         PerspectiveDepth::ObserverOnly,
+        false,
     );
     let green_information = convention_information_value(
         deductions.view(),
@@ -514,6 +515,7 @@ fn recognizes_expert_replay_play_after_out_of_order_fix() {
         &before_fix,
         HGroupProfile::Max,
         PerspectiveDepth::ObserverOnly,
+        false,
     );
     assert!(
         before_fix.pending_connections.iter().any(|connection| {
@@ -638,6 +640,7 @@ fn recognizes_expert_replay_red_three_continuation() {
         &deductions,
         HGroupProfile::Max,
         PerspectiveDepth::ObserverOnly,
+        false,
     );
     assert!(
         replay.pending_connections.iter().any(|connection| {
@@ -752,6 +755,7 @@ fn recognizes_expert_replay_rank_four_fill_in_after_green_fix() {
         &recipient_baseline,
         HGroupProfile::Max,
         PerspectiveDepth::ObserverOnly,
+        false,
     );
     assert!(
         recipient_baseline
@@ -944,6 +948,7 @@ fn recipient_understands_expert_red_four_lie() {
         &deductions,
         HGroupProfile::Max,
         PerspectiveDepth::ObserverOnly,
+        false,
     );
     let clue = replay
         .clues

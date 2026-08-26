@@ -61,6 +61,7 @@ impl<'a> PerspectiveProjector<'a> {
                     &source_deductions,
                     self.profile,
                     PerspectiveDepth::ObserverOnly,
+                    false,
                 );
                 convention_card_inferences(&source_deductions, &source_replay)
                     .into_iter()
@@ -105,7 +106,7 @@ impl<'a> PerspectiveProjector<'a> {
             }
         }
         let deductions = LogicalDeductions::new(view).ok()?;
-        let replay = replay_h_group_inner(&deductions, self.profile, depth);
+        let replay = replay_h_group_inner(&deductions, self.profile, depth, false);
         Some((deductions, replay))
     }
 
@@ -152,7 +153,12 @@ impl<'a> PerspectiveProjector<'a> {
             }
         }
         let deductions = LogicalDeductions::new(view).ok()?;
-        let replay = replay_h_group_inner(&deductions, profile, PerspectiveDepth::NestedRecipients);
+        let replay = replay_h_group_inner(
+            &deductions,
+            profile,
+            PerspectiveDepth::NestedRecipients,
+            false,
+        );
         Some((deductions, replay))
     }
 
@@ -428,8 +434,12 @@ mod tests {
 
         state.apply(Action::Clue { target, clue }).unwrap();
         let actual_deductions = LogicalDeductions::new(state.view_for(target).unwrap()).unwrap();
-        let actual_replay =
-            replay_h_group_inner(&actual_deductions, profile, PerspectiveDepth::ObserverOnly);
+        let actual_replay = replay_h_group_inner(
+            &actual_deductions,
+            profile,
+            PerspectiveDepth::ObserverOnly,
+            false,
+        );
         let actual_inferences =
             super::super::infer_h_group_from_replay(&actual_deductions, actual_replay, profile);
 

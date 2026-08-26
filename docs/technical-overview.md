@@ -98,24 +98,36 @@ H-Group uses shared internal boundaries to keep these answers consistent:
 - `HistoricalView` prevents future identity reveals from changing old moves.
 - `HGroupTurnContext` exposes explicit pre-event and post-event facts.
 - `ConnectionManager` owns the auditable Prompt/Finesse lifecycle.
+- the provenance ledger, implemented by `ProvenancedCardSet`, gives every
+  materialized clue, protection, play, and chop-move fact one or more event,
+  rule, or `PromiseId` sources. Cancelling a promise atomically retracts only
+  its own consequences.
+- `ClueInterpretationPlan` is the single primary precedence decision for
+  Play, Save, Fix, 5 Chop Move, and Stall meanings.
 - typed effects update a `ConventionJournal` incrementally: signals preserve
   provenance, while relational `ConventionFacts` indexes only current truth.
 - one executable rule registry dispatches historical and hypothetical events
   in the same semantic order; rule phases and dependencies are validated.
-- `ConventionCardState` is the canonical owner for per-card convention facts,
-  avoiding parallel state collections with independent update paths.
+- `ConventionCardState` exposes compact materialized indexes backed by the
+  provenance ledger rather than independently maintained truth sets.
 - shared identity and hand modules give clue givers, recipients, hypothetical
   projection, and planning one definition of playability, trash, focus, chop,
   and finesse position.
 - `ConventionConstraints` applies mandatory semantics before numeric strategy
   priorities.
 - `LineOutcome` retains promised actions, protected cards, known trash, and
-  connections so Teamwork and Directness compare semantics before scores.
-- candidate signal inspection and hazard checks reuse one cached prospective
-  convention snapshot.
-- diagnostic replays can retain per-rule causal proposals covering explanation
-  signals, promise transitions, and materialized-state mutations. Normal engine
-  operation skips this audit bookkeeping.
+  connections so strategic comparisons operate on semantics before scores.
+  Teamwork compares public action coverage and protection; Directness compares
+  owner-relative promised actions and the identity superpositions on every
+  clued card.
+- `LineOutcome` causality comes from transition deltas, not by mining the
+  explanation signal journal or diffing unrelated observer reconstructions.
+- candidate primary-meaning checks, signal inspection, hazard checks, and
+  strategic comparison reuse a lazy `TeamConventionSnapshot` for one coherent
+  hypothetical public position.
+- every production transition retains an exact compact delta of added and
+  removed materialized card facts. Per-rule proposals cover explanation
+  signals, promise transitions, and exact card replacements.
 - connection promises have stable IDs and durable origin metadata rather than
   being inferred later from whichever card sets survived.
 - clue selection has explicit semantic-admission, recipient-replay, and causal
@@ -165,6 +177,12 @@ let result = hanabi_search::analyze_position(
 The same closed convention enum is used by the library, CLI, and live bridge,
 so persisted selections and match dispatch remain exhaustive.
 
+Replay analysis defaults to the convention-free policy and the
+`expected-score` objective; H-Group analysis must specify both
+`--convention h-group` and `--h-group-level`. The live commands instead default
+to H-Group `max` and `perfect-score`. Add `--include-planning-details` to a live
+command to receive the diagnostic action envelope used by the bridge.
+
 ## Hanabi Live bridge
 
 The Python launcher owns authentication, the WebSocket, invitations, and
@@ -203,7 +221,12 @@ scripts/check-exhaustive.sh
 
 .venv/bin/python -m pip install --requirement scripts/requirements-dev.txt
 .venv/bin/ty check
-.venv/bin/python -m py_compile scripts/hanabi_live_bot.py scripts/tests/test_hanabi_live_bot.py
+.venv/bin/python -m py_compile \
+  scripts/hanabi_live_bot.py \
+  scripts/hanabi_live_engine.py \
+  scripts/hanabi_live_game.py \
+  scripts/hanabi_live_trace.py \
+  scripts/tests/test_hanabi_live_bot.py
 .venv/bin/python -W error::ResourceWarning -m unittest discover -s scripts/tests -v
 ```
 
@@ -217,6 +240,11 @@ Rust test binaries use `opt-level = 2` while retaining debug assertions and
 overflow checks. The repository pins cargo-nextest 0.9.143 for fail-fast test
 scheduling; nextest's missing rustdoc support is covered by the separate
 `cargo test --doc` command.
+
+The curated `game-194321.json` replay is an active golden oracle: the planner
+must choose the fixture action at every position. Full parity for
+`game-p4v0s9.json` remains ignored pending expert review of move 28; its
+settled convention behaviors are still covered by focused active regressions.
 
 The Python development requirements pin ty, and `ty.toml` checks every Python
 bridge and test module against Python 3.10. The test suite also rejects any

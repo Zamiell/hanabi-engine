@@ -170,6 +170,19 @@ pub(in crate::h_group) fn apply_ignition_effects(
         });
     if let Some(chop_moved_playable) = same_turn_chop_move {
         let actor = next_player(*giver, context.after.hands.len());
+        let actor_is_occupied = effects
+            .pending
+            .iter()
+            .any(|connection| connection.actor == actor)
+            || context.after.hands[actor.index()].iter().any(|card| {
+                effects.already_playing.contains(card) || effects.forced_playable.contains(card)
+            });
+        // A Chop Move Ignition promises an immediate blind play to the next
+        // player. It has no Minimum Clue Value when that player already has a
+        // pending connection or another promised play.
+        if actor_is_occupied {
+            return;
+        }
         if let Some(ignited) = finesse_position_id(&context.after.hands[actor.index()], &gotten, 0)
         {
             effects.forced_playable.insert(ignited);

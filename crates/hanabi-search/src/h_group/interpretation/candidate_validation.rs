@@ -1,7 +1,7 @@
 use super::{
-    Action, ClueCandidate, ConventionRejectionReason, HGroupProfile, HGroupState,
-    LogicalDeductions, PlayerView, RejectedConventionAction, chop, focus, identity_of,
-    prospective_clue_signal_kinds,
+    Action, ClueCandidate, CluePurpose, ConventionRejectionReason, HGroupClueKind, HGroupMoveKind,
+    HGroupProfile, HGroupState, LogicalDeductions, PlayerView, RejectedConventionAction, chop,
+    focus, identity_of, prospective_clue_primary_kind, prospective_clue_signal_kinds,
 };
 
 /// Classifies every legal clue excluded from the convention action set.
@@ -79,5 +79,23 @@ pub(in crate::h_group) fn recipient_replay_recognizes_candidate(
         .map(|card| card.id)
         .collect::<Vec<_>>();
     let signals = prospective_clue_signal_kinds(view, profile, target, clue, &touched);
-    !signals.is_empty()
+    let primary = prospective_clue_primary_kind(view, profile, target, clue, &touched);
+    match candidate.purpose {
+        CluePurpose::Play => matches!(
+            primary,
+            Some(HGroupClueKind::Play | HGroupClueKind::PlayOrSave)
+        ),
+        CluePurpose::Save => matches!(
+            primary,
+            Some(HGroupClueKind::Save(_) | HGroupClueKind::PlayOrSave)
+        ),
+        CluePurpose::Fix => signals.contains(&HGroupMoveKind::FixClue),
+        CluePurpose::Tempo => signals.iter().any(|kind| {
+            matches!(
+                kind,
+                HGroupMoveKind::TempoClue | HGroupMoveKind::TempoClueChopMove
+            )
+        }),
+        CluePurpose::Advanced | CluePurpose::Fallback => !signals.is_empty(),
+    }
 }

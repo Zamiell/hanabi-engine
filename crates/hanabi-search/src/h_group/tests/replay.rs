@@ -13,7 +13,12 @@ fn assert_expert_replay_matches_engine(replay: &HanabiLiveReplay) {
                 ..crate::PlannerConfig::default()
             },
         )
-        .expect("fixture position is analyzable");
+        .unwrap_or_else(|error| {
+            panic!(
+                "fixture position at move {} is analyzable: {error}",
+                turn + 1
+            )
+        });
         let expected = replay_action_at_turn(replay, turn);
         assert_eq!(
             analysis.planner.best_action,
@@ -33,7 +38,7 @@ fn optimized_expert_replay_matches_engine() {
 }
 
 #[test]
-#[ignore = "pending expert review of the strategic choice at move 22"]
+#[ignore = "pending expert review of Donald's blind blue-2 play at move 28"]
 fn second_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine(&expert_replay_p4v0s9());
 }

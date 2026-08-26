@@ -336,7 +336,8 @@ fn analyzes_a_real_hanabi_live_prefix() {
     );
     let stdout = String::from_utf8(h_group.stdout).unwrap();
     assert!(stdout.contains("Convention: h-group (level 5)"));
-    assert!(
-        stdout.contains("Convention ruleset revision: 2db23dc5bc8bba067fec6c79b3323bef21ed6e1c")
-    );
+    assert!(stdout.contains(&format!(
+        "Convention ruleset revision: {}",
+        hanabi_search::H_GROUP_RULESET_REVISION
+    )));
 }

@@ -1,7 +1,7 @@
 # H-Group documentation coverage
 
 The engine's convention inventory is pinned to `hanabi.github.io` revision
-`2db23dc5bc8bba067fec6c79b3323bef21ed6e1c`. It contains every level-three
+`7ec4381a6a01803cafa73bf925be3daec4c14d02`. It contains every level-three
 heading in levels 1–25 and the Max extras pages: 357 unique sections in total.
 The machine-readable inventory, including an exact website URL for every
 section, lives in `H_GROUP_DOCUMENTATION_SECTIONS`.

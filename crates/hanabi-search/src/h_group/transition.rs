@@ -1,7 +1,6 @@
 use core::ops::Range;
 
-#[cfg(test)]
-use std::cell::Cell;
+use hanabi_core::CardId;
 
 use super::{HGroupRuleId, RulePhase};
 
@@ -46,6 +45,9 @@ pub(super) struct RuleProposal {
     pub(super) signal_range: Range<usize>,
     pub(super) promise_transition_range: Range<usize>,
     pub(super) mutations: MutationSet,
+    /// Exact materialized card facts changed by this rule. Counts are useful
+    /// for profiling, but cannot detect replacing one card with another.
+    pub(super) card_changes: Vec<CardFactChange>,
 }
 
 impl RuleProposal {
@@ -53,6 +55,7 @@ impl RuleProposal {
         self.signal_range.is_empty()
             && self.promise_transition_range.is_empty()
             && self.mutations.is_empty()
+            && self.card_changes.is_empty()
     }
 }
 
@@ -63,39 +66,46 @@ impl RuleProposal {
 pub(super) struct ConventionTransitionResult {
     pub(super) turn: u32,
     pub(super) proposals: Vec<RuleProposal>,
+    /// Net causal delta of the entire public event, including inline clue and
+    /// connection handling as well as post-event recognizers.
+    pub(super) delta: ConventionTransitionDelta,
 }
 
-#[cfg(test)]
-thread_local! {
-    static RECORD_TRANSITIONS: Cell<bool> = const { Cell::new(false) };
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum MaterializedCardFact {
+    ExplicitlyClued,
+    InvisiblyClued,
+    AlreadyPlaying,
+    ChopMoved,
+    ForcedPlayable,
 }
 
-#[cfg(test)]
-pub(super) fn transition_recording_enabled() -> bool {
-    RECORD_TRANSITIONS.get()
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum FactChangeKind {
+    Added,
+    Removed,
 }
 
-#[cfg(not(test))]
-pub(super) const fn transition_recording_enabled() -> bool {
-    false
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct CardFactChange {
+    pub(super) fact: MaterializedCardFact,
+    pub(super) card: CardId,
+    pub(super) kind: FactChangeKind,
 }
 
-#[cfg(test)]
-pub(super) fn with_transition_recording<T>(run: impl FnOnce() -> T) -> T {
-    struct RecordingGuard<'a> {
-        enabled: &'a Cell<bool>,
-        previous: bool,
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(super) struct ConventionTransitionDelta {
+    pub(super) card_changes: Vec<CardFactChange>,
+}
+
+impl ConventionTransitionDelta {
+    pub(super) fn is_empty(&self) -> bool {
+        self.card_changes.is_empty()
     }
 
-    impl Drop for RecordingGuard<'_> {
-        fn drop(&mut self) {
-            self.enabled.set(self.previous);
-        }
+    pub(super) fn added_cards(&self) -> impl Iterator<Item = CardId> + '_ {
+        self.card_changes
+            .iter()
+            .filter_map(|change| (change.kind == FactChangeKind::Added).then_some(change.card))
     }
-
-    RECORD_TRANSITIONS.with(|enabled| {
-        let previous = enabled.replace(true);
-        let _guard = RecordingGuard { enabled, previous };
-        run()
-    })
 }

@@ -12,6 +12,16 @@ pub(super) struct ActionCommitment {
     pub(super) identities: IdentitySet,
 }
 
+/// The complete identity superposition that a card's owner retains after a
+/// clue line. Directness may compare two lines only when these domains agree
+/// for every explicitly or invisibly clued card.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct CluedCardSuperposition {
+    pub(super) card: CardId,
+    pub(super) owner: PlayerId,
+    pub(super) identities: IdentitySet,
+}
+
 impl ActionCommitment {
     pub(super) const fn exact(card: CardId, owner: PlayerId, identity: Card) -> Self {
         Self {
@@ -30,6 +40,8 @@ pub(super) struct LineOutcome {
     pub(super) public_actions: Vec<ActionCommitment>,
     /// Actions known by each card's owner, used for Directness equivalence.
     pub(super) owner_actions: Vec<ActionCommitment>,
+    /// Owner-visible identity domains for every clued card after the line.
+    pub(super) clued_superpositions: Vec<CluedCardSuperposition>,
     pub(super) protected_cards: Vec<CardId>,
     pub(super) known_trash: Vec<CardId>,
     pub(super) new_connections: usize,
@@ -43,6 +55,9 @@ impl LineOutcome {
         self.public_actions.dedup();
         self.owner_actions.sort_unstable_by_key(key);
         self.owner_actions.dedup();
+        self.clued_superpositions
+            .sort_unstable_by_key(|knowledge| (knowledge.card.index(), knowledge.owner.index()));
+        self.clued_superpositions.dedup();
         self.protected_cards
             .sort_unstable_by_key(|card| card.index());
         self.protected_cards.dedup();
@@ -81,10 +96,39 @@ impl LineOutcome {
             .unwrap_or(player_count)
     }
 
-    pub(super) fn directness_key(&self) -> Vec<(CardId, IdentitySet, PlayerId)> {
-        self.owner_actions
-            .iter()
-            .map(|commitment| (commitment.card, commitment.identities, commitment.owner))
-            .collect()
+    pub(super) fn has_same_direct_outcome(&self, other: &Self) -> bool {
+        self.owner_actions == other.owner_actions
+            && self.clued_superpositions == other.clued_superpositions
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use hanabi_core::{Rank, Suit};
+
+    use super::*;
+
+    #[test]
+    fn directness_requires_identical_clued_card_superpositions() {
+        let card = CardId::new(3);
+        let owner = PlayerId::new(1);
+        let action = ActionCommitment::exact(card, owner, Card::new(Suit::Red, Rank::Three));
+        let mut direct = LineOutcome {
+            owner_actions: vec![action],
+            clued_superpositions: vec![CluedCardSuperposition {
+                card,
+                owner,
+                identities: IdentitySet::singleton(Card::new(Suit::Red, Rank::Three)),
+            }],
+            ..LineOutcome::default()
+        };
+        direct.normalize();
+        let mut ambiguous = direct.clone();
+        ambiguous.clued_superpositions[0].identities =
+            IdentitySet::singleton(Card::new(Suit::Red, Rank::Three))
+                .union(IdentitySet::singleton(Card::new(Suit::Red, Rank::Four)));
+
+        assert!(!direct.has_same_direct_outcome(&ambiguous));
+        assert!(direct.has_same_direct_outcome(&direct.clone()));
     }
 }

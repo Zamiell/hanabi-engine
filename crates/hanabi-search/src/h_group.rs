@@ -33,9 +33,11 @@ mod hand;
 mod identity;
 mod information_value;
 mod interpretation;
+mod ledger;
 mod model;
 mod outcome;
 mod perspective;
+mod primary;
 mod prospective;
 mod recognition;
 mod rule_engine;
@@ -66,7 +68,8 @@ use effects::{ConventionJournal, ConventionReducer, EffectBatch, SignalHistory};
 use epistemic::EpistemicState;
 use facts::ConventionFacts;
 use hand::{
-    chop, finesse_position, finesse_position_id, five_pulled_card, focus, is_critical, remove_card,
+    chop, finesse_position, finesse_position_id, five_chop_moved_card, five_pulled_card, focus,
+    is_critical, remove_card,
 };
 use identity::{
     card_is_trash, identity_of, is_convention_trash, is_eventually_useful, is_playable_at,
@@ -76,11 +79,14 @@ use information_value::convention_information_value;
 #[cfg(test)]
 use interpretation::h_group_clue_candidates;
 use interpretation::{
-    clue_kind_from_masks, convention_card_inferences, creates_false_anxiety,
-    elimination_finesse_connection, h_group_clue_candidates_from_replay,
-    h_group_rejected_clues_from_replay, infer_clue_to_self, loaded_connection_plan,
-    recipient_replay_recognizes_candidate, save_clue_score, snapshot_good_touch_identities,
-    snapshot_play_identities, snapshot_save_identities,
+    convention_card_inferences, creates_false_anxiety, elimination_finesse_connection,
+    h_group_clue_candidates_from_replay, h_group_rejected_clues_from_replay, infer_clue_to_self,
+    loaded_connection_plan, recipient_replay_recognizes_candidate, save_clue_score,
+    snapshot_good_touch_identities, snapshot_play_identities, snapshot_save_identities,
+};
+use ledger::{
+    ConventionCardSetSnapshot, EffectSource, ProvenancedCardSet,
+    reconcile_connection_fact_lifecycles,
 };
 use model::{
     CardSet, CompactIdHasher, ConventionCardState, HGroupState, PerspectiveDepth, PlayerSet,
@@ -91,13 +97,15 @@ pub use model::{
     HGroupConnectionKind, HGroupConnectionPromise, HGroupInferences, HGroupPhase, HGroupSaveKind,
     HGroupSignal,
 };
-use outcome::{ActionCommitment, LineOutcome};
+use outcome::{ActionCommitment, CluedCardSuperposition, LineOutcome};
 use perspective::{PerspectiveProjector, ProspectiveTransition};
+use primary::{ClueInterpretationPlan, PrimaryClueInputs};
 #[cfg(test)]
 use prospective::prospective_clue_hazard;
 use prospective::{
-    projected_h_group_replay, prospective_clue_has_unsafe_connection,
-    prospective_clue_marks_focus_saved, prospective_clue_signal_kinds, prospective_clue_view,
+    CachedProspectiveProjection, TeamConventionSnapshot, projected_h_group_replay,
+    prospective_clue_has_unsafe_connection, prospective_clue_marks_focus_saved,
+    prospective_clue_primary_kind, prospective_clue_signal_kinds, prospective_clue_view,
     prospective_play_has_unsafe_inference, prospective_play_view, subjective_chop_before_action,
     subjective_convention_cards, subjective_playable_cards, with_prospective_analysis_cache,
 };
@@ -106,9 +114,12 @@ use rule_engine::apply_post_event_rules;
 use rules::{HGroupRuleId, RulePhase, rule_enabled};
 use strategic_value::apply_strategic_clue_values;
 pub(crate) use symbolic_line::project_h_group_line;
+use transition::{
+    ConventionTransitionDelta, ConventionTransitionResult, MutationDomain, MutationSet,
+    RuleProposal,
+};
 #[cfg(test)]
-use transition::with_transition_recording;
-use transition::{ConventionTransitionResult, MutationDomain, MutationSet, RuleProposal};
+use transition::{FactChangeKind, MaterializedCardFact};
 use turn_context::{HGroupTurnContext, HGroupTurnSnapshot, HGroupTurnView, HistoricalView};
 
 const KNOWN_TRASH_COLLATERAL_BONUS: u16 = 80;
@@ -772,23 +783,75 @@ pub const H_GROUP_LEVELS: [HGroupLevelDescriptor; 26] = [
 /// makes rule inputs uniform and prevents giver-side and recipient-side rules
 /// from rebuilding subtly different slices of replay state.
 pub(super) struct HGroupRuleEffects<'a> {
-    explicitly_clued: &'a CardSet,
-    invisibly_clued: &'a mut CardSet,
+    explicitly_clued: &'a ProvenancedCardSet,
+    invisibly_clued: &'a mut ProvenancedCardSet,
     clues: &'a [HGroupClueInterpretation],
-    already_playing: &'a mut CardSet,
+    already_playing: &'a mut ProvenancedCardSet,
     pending: &'a mut ConnectionManager,
-    chop_moved: &'a mut CardSet,
+    chop_moved: &'a mut ProvenancedCardSet,
     must_clue: &'a mut PlayerSet,
-    forced_playable: &'a mut CardSet,
+    forced_playable: &'a mut ProvenancedCardSet,
     discard_now: &'a mut Vec<CardId>,
     implicit_saves: &'a mut Vec<(CardId, IdentitySet)>,
     required_fix: &'a mut Option<RequiredFix>,
     signals: &'a mut ConventionJournal,
 }
 
+impl HGroupRuleEffects<'_> {
+    fn card_snapshot(&self) -> ConventionCardSetSnapshot {
+        ConventionCardSetSnapshot::capture(
+            self.explicitly_clued,
+            self.invisibly_clued,
+            self.already_playing,
+            self.chop_moved,
+            self.forced_playable,
+        )
+    }
+
+    fn reconcile_card_sources(&mut self, before: &ConventionCardSetSnapshot, source: EffectSource) {
+        self.invisibly_clued
+            .reconcile_mask(before.invisibly_clued, source);
+        self.already_playing
+            .reconcile_mask(before.already_playing, source);
+        self.chop_moved.reconcile_mask(before.chop_moved, source);
+        self.forced_playable
+            .reconcile_mask(before.forced_playable, source);
+    }
+
+    /// Attaches connection-created facts to the promise that owns them and
+    /// retracts all such facts when that promise leaves the pending state.
+    fn reconcile_connection_lifecycles(&mut self, transition_start: usize) {
+        reconcile_connection_fact_lifecycles(
+            self.pending,
+            transition_start,
+            self.invisibly_clued,
+            self.already_playing,
+            self.forced_playable,
+        );
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 fn replay_h_group(deductions: &LogicalDeductions, profile: HGroupProfile) -> HGroupState {
-    replay_h_group_inner(deductions, profile, PerspectiveDepth::NestedRecipients)
+    let ordinary = replay_h_group_inner(
+        deductions,
+        profile,
+        PerspectiveDepth::NestedRecipients,
+        false,
+    );
+    let current = deductions.view().current_player;
+    if ordinary.pending_connections.iter().any(|connection| {
+        connection.actor == current && pending_is_active(connection, &ordinary.pending_connections)
+    }) {
+        ordinary
+    } else {
+        replay_h_group_inner(
+            deductions,
+            profile,
+            PerspectiveDepth::NestedRecipients,
+            true,
+        )
+    }
 }
 
 #[allow(clippy::too_many_lines)]
@@ -796,6 +859,7 @@ fn replay_h_group_inner(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
     perspective_depth: PerspectiveDepth,
+    allow_blind_reverse_empathy: bool,
 ) -> HGroupState {
     debug_assert!(rule_enabled(profile, HGroupRuleId::Basic));
     let view = deductions.view();
@@ -806,8 +870,8 @@ fn replay_h_group_inner(
             (first..first + hand_size).map(CardId::new).collect()
         })
         .collect::<Vec<Vec<CardId>>>();
-    let mut explicitly_clued = CardSet::default();
-    let mut invisibly_clued = CardSet::default();
+    let mut explicitly_clued = ProvenancedCardSet::default();
+    let mut invisibly_clued = ProvenancedCardSet::default();
     let mut clues = Vec::<HGroupClueInterpretation>::new();
     let mut public_removed = [0_u8; 25];
     let mut facts = vec![ClueFacts::default(); 50];
@@ -819,13 +883,13 @@ fn replay_h_group_inner(
             .filter(|entry| matches!(entry.event, ObservedEvent::Drew { .. }))
             .count();
     let mut pending_connections = ConnectionManager::default();
-    let mut already_playing = CardSet::default();
+    let mut already_playing = ProvenancedCardSet::default();
     let mut early_game = true;
     let mut signals = ConventionJournal::default();
-    let mut chop_moved = CardSet::default();
+    let mut chop_moved = ProvenancedCardSet::default();
     let mut discard_now = Vec::new();
     let mut must_clue = PlayerSet::default();
-    let mut forced_playable = CardSet::default();
+    let mut forced_playable = ProvenancedCardSet::default();
     let mut invalidated_focuses = CardSet::default();
     let mut declined_direct_plays = CardSet::default();
     let mut declined_direct_play_turns = Vec::<(CardId, u32)>::new();
@@ -835,6 +899,14 @@ fn replay_h_group_inner(
     let mut historical_clue_tokens = MAX_CLUE_TOKENS;
 
     for (entry_index, entry) in view.history.iter().enumerate() {
+        let event_connection_transition_start = pending_connections.transitions().len();
+        let event_card_snapshot = ConventionCardSetSnapshot::capture(
+            &explicitly_clued,
+            &invisibly_clued,
+            &already_playing,
+            &chop_moved,
+            &forced_playable,
+        );
         let historical = HistoricalView::new(view, entry.turn);
         let mut actor_saw_normal_discard = false;
         let mut declined_with_clue = None;
@@ -849,7 +921,7 @@ fn replay_h_group_inner(
             historical_clue_tokens,
             historical_deck_size,
             early_game,
-            already_playing.clone(),
+            already_playing.materialized().clone(),
         );
         let clue_tokens_before = before.clue_tokens;
         if rule_enabled(profile, HGroupRuleId::Bluffs) {
@@ -1062,6 +1134,7 @@ fn replay_h_group_inner(
                         &chop_moved,
                         stack_heights,
                         entry.turn,
+                        allow_blind_reverse_empathy,
                     );
                     let mut intermediate_bluff = false;
                     if rule_enabled(profile, HGroupRuleId::IntermediateBluffs)
@@ -1112,26 +1185,6 @@ fn replay_h_group_inner(
                         stack_heights,
                         public_removed,
                     );
-                    // Number 2 and number 5 clues to an unclued chop 2/5 are
-                    // Saves by definition, even when that identity happens to
-                    // be playable. Critical Saves only override a delayed Play
-                    // interpretation; an immediately playable critical card
-                    // remains a Play Clue.
-                    let save_precedence = IdentitySet::from_mask(
-                        save_identities
-                            .iter()
-                            .filter(|identity| {
-                                eight_clue_save
-                                    || matches!(
-                                        (*clue, identity.rank),
-                                        (Clue::Rank(Rank::Two), Rank::Two)
-                                            | (Clue::Rank(Rank::Five), Rank::Five)
-                                    )
-                                    || !is_playable_at(stack_heights, *identity)
-                            })
-                            .fold(0, |mask, identity| mask | (1 << identity.index())),
-                    );
-                    play_identities = play_identities.without(save_precedence);
                     let score = stack_heights
                         .iter()
                         .map(|height| usize::from(*height))
@@ -1149,28 +1202,45 @@ fn replay_h_group_inner(
                         && *clue == Clue::Rank(Rank::Five)
                         && !focus_was_chop
                         && !eight_clue_save;
+                    let five_chop_move = rule_enabled(profile, HGroupRuleId::ChopMoves)
+                        && *clue == Clue::Rank(Rank::Five)
+                        && !early_five_stall
+                        && !eight_clue_five_stall
+                        && five_chop_moved_card(&hands[target.index()], touched, &gotten).is_some();
                     let no_information_reclue = touched
                         .iter()
                         .all(|card| was_clued_before_with(view, entry.turn, *card, *clue));
-                    let kind = if is_required_fix
-                        || low_score_number_five
-                        || early_five_stall
-                        || eight_clue_five_stall
-                        || no_information_reclue
-                    {
-                        HGroupClueKind::Unrecognized
-                    } else if eight_clue_save && !save_identities.is_empty() {
-                        HGroupClueKind::Save(HGroupSaveKind::EightClue)
-                    } else {
-                        clue_kind_from_masks(*clue, play_identities, save_identities)
-                    };
-                    if kind == HGroupClueKind::Unrecognized {
-                        // A Fix or Stall still contributes its objective clue
-                        // facts, but it makes no Play promise. Retaining the
-                        // hypothetical play mask here caused an off-chop 5
-                        // Stall to become an exact prompted 5 much later.
-                        play_identities = IdentitySet::default();
-                    }
+                    let interpretation_plan = ClueInterpretationPlan::resolve(PrimaryClueInputs {
+                        clue: *clue,
+                        play_identities,
+                        save_identities,
+                        stack_heights,
+                        eight_clue_save,
+                        suppressions: [
+                            is_required_fix.then_some(primary::PrimarySuppression::Fix),
+                            five_chop_move.then_some(primary::PrimarySuppression::FiveChopMove),
+                            low_score_number_five
+                                .then_some(primary::PrimarySuppression::LowScoreFive),
+                            early_five_stall.then_some(primary::PrimarySuppression::EarlyFiveStall),
+                            eight_clue_five_stall
+                                .then_some(primary::PrimarySuppression::EightClueFiveStall),
+                            no_information_reclue
+                                .then_some(primary::PrimarySuppression::NoInformationReclue),
+                        ],
+                    });
+                    let kind = interpretation_plan.kind;
+                    play_identities = interpretation_plan.play_identities;
+                    let save_identities = interpretation_plan.save_identities;
+                    debug_assert_eq!(
+                        interpretation_plan.suppression.is_some(),
+                        matches!(kind, HGroupClueKind::Unrecognized)
+                            && (is_required_fix
+                                || five_chop_move
+                                || low_score_number_five
+                                || early_five_stall
+                                || eight_clue_five_stall
+                                || no_information_reclue)
+                    );
                     let target_already_loaded = pending_connections.iter().any(|connection| {
                         connection.actor == *target
                             && pending_is_active(connection, &pending_connections)
@@ -1397,6 +1467,14 @@ fn replay_h_group_inner(
                             stack_heights,
                             &mut pending_connections,
                             &mut required_fix,
+                            allow_blind_reverse_empathy,
+                        );
+                        reconcile_connection_fact_lifecycles(
+                            &pending_connections,
+                            event_connection_transition_start,
+                            &mut invisibly_clued,
+                            &mut already_playing,
+                            &mut forced_playable,
                         );
                         let new_connections = pending_connections[previous_pending..].to_vec();
                         for connection in &new_connections {
@@ -1531,7 +1609,16 @@ fn replay_h_group_inner(
                         if (!play_identities.is_empty() && direct_play == play_identities)
                             || !new_connections.is_empty()
                         {
-                            already_playing.insert(focus);
+                            if new_connections.is_empty() {
+                                already_playing.insert_from(EffectSource::Event(entry.turn), focus);
+                            } else {
+                                for connection in &new_connections {
+                                    already_playing.insert_from(
+                                        EffectSource::Promise(connection.promise),
+                                        focus,
+                                    );
+                                }
+                            }
                         }
                     }
                     if is_required_fix {
@@ -1723,10 +1810,7 @@ fn replay_h_group_inner(
             required_fix: &mut required_fix,
             signals: &mut signals,
         };
-        let transition = apply_post_event_rules(&context, view, profile, &mut effects);
-        if !transition.proposals.is_empty() {
-            transitions.push(transition);
-        }
+        let mut transition = apply_post_event_rules(&context, view, profile, &mut effects);
         if action_is_settled {
             if let Some(actor) = declined_with_clue {
                 let recognized_deferral = clue_permits_direct_play_deferral(&signals, entry.turn);
@@ -1750,6 +1834,46 @@ fn replay_h_group_inner(
                     );
                 }
             }
+        }
+        reconcile_connection_fact_lifecycles(
+            &pending_connections,
+            event_connection_transition_start,
+            &mut invisibly_clued,
+            &mut already_playing,
+            &mut forced_playable,
+        );
+        explicitly_clued.reconcile_mask(
+            event_card_snapshot.explicitly_clued,
+            EffectSource::Event(entry.turn),
+        );
+        invisibly_clued.reconcile_mask(
+            event_card_snapshot.invisibly_clued,
+            EffectSource::Event(entry.turn),
+        );
+        already_playing.reconcile_mask(
+            event_card_snapshot.already_playing,
+            EffectSource::Event(entry.turn),
+        );
+        chop_moved.reconcile_mask(
+            event_card_snapshot.chop_moved,
+            EffectSource::Event(entry.turn),
+        );
+        forced_playable.reconcile_mask(
+            event_card_snapshot.forced_playable,
+            EffectSource::Event(entry.turn),
+        );
+        let event_after = ConventionCardSetSnapshot::capture(
+            &explicitly_clued,
+            &invisibly_clued,
+            &already_playing,
+            &chop_moved,
+            &forced_playable,
+        );
+        transition.delta = ConventionTransitionDelta {
+            card_changes: event_card_snapshot.changes_to(&event_after),
+        };
+        if !transition.proposals.is_empty() || !transition.delta.is_empty() {
+            transitions.push(transition);
         }
     }
     if rule_enabled(profile, HGroupRuleId::SpecialDiscards) {
@@ -2097,10 +2221,11 @@ fn schedule_connection(
     already_playing: &CardSet,
     convention_facts: &ConventionFacts,
     chop_moved: &CardSet,
-    invisibly_clued: &mut CardSet,
+    invisibly_clued: &mut ProvenancedCardSet,
     stack_heights: [u8; 5],
     pending: &mut ConnectionManager,
     required_fix: &mut Option<RequiredFix>,
+    allow_blind_reverse_empathy: bool,
 ) {
     let Some(focus_identity) = focus_identity else {
         return;
@@ -2163,27 +2288,45 @@ fn schedule_connection(
         } else {
             1
         };
+        let reverse_finesse_positions = (ordinary_search_len..hands.len())
+            .filter_map(|distance| {
+                let candidate_index = (actor_index + distance) % hands.len();
+                (candidate_index != target.index())
+                    .then(|| {
+                        hands[candidate_index]
+                            .iter()
+                            .rev()
+                            .copied()
+                            .find(|card| {
+                                *card != focus
+                                    && !promptable_before_clue.contains(card)
+                                    && !invisibly_clued.contains(card)
+                                    && !scheduled_cards.contains(card)
+                            })
+                            .map(|card| (candidate_index, card))
+                    })
+                    .flatten()
+            })
+            .collect::<Vec<_>>();
+        let visible_reverse_finesse =
+            reverse_finesse_positions
+                .iter()
+                .any(|(candidate_index, card)| {
+                    identity_of(view, *card) == Some(expected)
+                        || (*candidate_index == view.observer.index()
+                            && facts[card.index()].identity_mask() == 1 << expected.index())
+                });
+        let blind_reverse_finesse = !visible_reverse_finesse
+            && blind_reverse_finesse_is_eligible(view, giver, allow_blind_reverse_empathy)
+            && reverse_finesse_positions
+                .iter()
+                .any(|(candidate_index, card)| {
+                    *candidate_index == view.observer.index()
+                        && facts[card.index()].allows(expected)
+                });
         let direct_reverse_finesse = rule_enabled(profile, HGroupRuleId::BasicMoves)
             && !target_loaded
-            && (ordinary_search_len..hands.len()).any(|distance| {
-                let candidate_index = (actor_index + distance) % hands.len();
-                candidate_index != target.index()
-                    && hands[candidate_index]
-                        .iter()
-                        .rev()
-                        .copied()
-                        .find(|card| {
-                            *card != focus
-                                && !promptable_before_clue.contains(card)
-                                && !invisibly_clued.contains(card)
-                                && !scheduled_cards.contains(card)
-                        })
-                        .is_some_and(|card| {
-                            identity_of(view, card) == Some(expected)
-                                || (candidate_index == view.observer.index()
-                                    && facts[card.index()].identity_mask() == 1 << expected.index())
-                        })
-            });
+            && (visible_reverse_finesse || blind_reverse_finesse);
         if direct_reverse_finesse {
             reverse_cycle_started = true;
         }
@@ -2406,11 +2549,9 @@ fn schedule_connection(
         let Some((actor, cards, kind)) = found else {
             break;
         };
-        if kind == HGroupConnectionKind::Finesse {
-            invisibly_clued.extend(cards.iter().copied());
-        }
         scheduled_cards.extend(cards.iter().copied());
-        pending.start(
+        let connection_cards = cards.clone();
+        let promise = pending.start(
             clues.last().map_or(view.turn, |clue| clue.turn),
             ConnectionObligation {
                 promise: PromiseId::UNASSIGNED,
@@ -2423,8 +2564,31 @@ fn schedule_connection(
                 step: offset,
             },
         );
+        if kind == HGroupConnectionKind::Finesse && promise != PromiseId::UNASSIGNED {
+            invisibly_clued.extend_from(EffectSource::Promise(promise), connection_cards);
+        }
         actor_index = (actor_index + 1) % hands.len();
     }
+}
+
+/// Whether the observer may infer that their own unknown Finesse Position is
+/// the otherwise-unaccounted connector in a Reverse Finesse.
+///
+/// This empathy inference is actionable only for the player whose turn it is.
+/// A direct clue just received by that player takes precedence; speculative
+/// projections must not reinterpret an older clue as a competing blind play.
+fn blind_reverse_finesse_is_eligible(
+    view: &PlayerView,
+    giver: PlayerId,
+    allow_blind_reverse_empathy: bool,
+) -> bool {
+    allow_blind_reverse_empathy
+        && giver != view.observer
+        && view.observer == view.current_player
+        && !matches!(
+            view.history.last().map(|entry| &entry.event),
+            Some(ObservedEvent::Clued { target, .. }) if *target == view.observer
+        )
 }
 
 fn convention_focus_is_live_identity(

@@ -26,6 +26,11 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-targets --all-features --locked
 ```
 
+Run `scripts/check.sh` for the complete local CI suite, including Rust
+documentation, Python typing/tests, and closed-workspace dead-code analysis.
+The additional setup is documented in the
+[technical overview](docs/technical-overview.md#development-and-ci).
+
 ## Example usage
 
 Analyze turn 17 of a Hanabi Live replay with H-Group max. The default planner
@@ -95,3 +100,5 @@ written to `logs/hanabi-live/` by default.
   connection lifecycle, invariants, and extension guidance.
 - [H-Group convention interpreter](docs/h-group.md): level matrix and
   convention algorithm.
+- [H-Group documentation coverage](docs/h-group-coverage.md): pinned source
+  revision, section inventory, and coverage enforcement.

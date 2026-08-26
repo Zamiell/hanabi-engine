@@ -91,7 +91,7 @@ fn second_replay_order_chop_move_protects_alices_red_two() {
     let deductions =
         LogicalDeductions::new(after_skip.view_for(alice).expect("Alice has a view"))
             .expect("valid Alice deductions");
-    let replay = with_transition_recording(|| replay_h_group(&deductions, HGroupProfile::Max));
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
 
     assert!(
         replay.cards.chop_moved.contains(&CardId::new(0)),
@@ -503,6 +503,104 @@ fn second_replay_move_twenty_two_rejects_a_good_touch_duplicate() {
             .iter()
             .all(|candidate| candidate.action != duplicate_red),
         "red to Donald illegally duplicates Bob's promised red 3 ({existing_red_three:?}): {candidates:#?}"
+    );
+
+    let redundant_yellow = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Suit(Suit::Yellow),
+    };
+    let redundant_two = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Rank(Rank::Two),
+    };
+    assert!(
+        candidates.iter().all(|candidate| {
+            candidate.action != redundant_yellow && candidate.action != redundant_two
+        }),
+        "Cathy's yellow 2 is already playing from the move-20 Reverse Finesse, so a direct fill-in has no Minimum Clue Value: {candidates:#?}"
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(replay_action_at_turn(&fixture, 21)),
+        "purple to Donald is the remaining valuable play clue: {candidates:#?}"
+    );
+
+    let after = fixture.state_at_turn(22).expect("move 22 is legal");
+    let cathy = after.current_player();
+    let cathy_deductions = LogicalDeductions::new(after.view_for(cathy).unwrap()).unwrap();
+    let cathy_replay = replay_h_group(&cathy_deductions, HGroupProfile::Max);
+    assert!(
+        cathy_replay.pending_connections.iter().any(|connection| {
+            connection.actor == cathy
+                && connection.cards == [CardId::new(26)]
+                && connection.expected == Card::new(Suit::Yellow, Rank::Two)
+                && connection.focus == CardId::new(2)
+                && connection.kind == HGroupConnectionKind::Finesse
+        }),
+        "the unrelated purple clue must preserve Cathy's move-20 Reverse Finesse: {:#?}",
+        cathy_replay.pending_connections,
+    );
+    assert_eq!(
+        select_h_group_action(&cathy_deductions, HGroupProfile::Max),
+        Some(replay_action_at_turn(&fixture, 22)),
+        "Cathy must blind-play yellow 2 before taking an unrelated discard",
+    );
+}
+
+/// <https://hanabi.github.io/level-4/#the-5s-chop-move-5cm>
+#[test]
+fn second_replay_move_twenty_five_treats_rank_five_as_a_five_chop_move() {
+    let fixture = expert_replay_p4v0s9();
+    let state = fixture
+        .state_at_turn(24)
+        .expect("the second replay prefix is legal");
+    let alice = state.current_player();
+    let deductions = LogicalDeductions::new(state.view_for(alice).expect("Alice has a view"))
+        .expect("valid Alice deductions");
+    let rank_five = Action::Clue {
+        target: PlayerId::new(3),
+        clue: Clue::Rank(Rank::Five),
+    };
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let kinds = prospective_clue_signal_kinds(
+        deductions.view(),
+        HGroupProfile::Max,
+        PlayerId::new(3),
+        Clue::Rank(Rank::Five),
+        &[CardId::new(21), CardId::new(29)],
+    );
+    let after_five = prospective_clue_view(
+        deductions.view(),
+        PlayerId::new(3),
+        Clue::Rank(Rank::Five),
+        &[CardId::new(21), CardId::new(29)],
+    );
+    let (_, donald_replay) = projected_h_group_replay(
+        &after_five,
+        HGroupProfile::Max,
+        PlayerId::new(3),
+    )
+    .expect("Donald has a prospective replay");
+    let five_chop_move = donald_replay
+        .signals
+        .iter()
+        .find(|signal| signal.turn == 24 && signal.kind == HGroupMoveKind::FiveChopMove)
+        .expect("Donald must recognize the 5CM");
+    assert_eq!(five_chop_move.cards, vec![CardId::new(14)]);
+    assert!(
+        kinds.contains(&HGroupMoveKind::FiveChopMove),
+        "rank 5 to Donald must be interpreted as a 5CM on his red 3: {kinds:?}; candidates={candidates:#?}"
+    );
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| candidate.action != rank_five),
+        "the 5CM protects a duplicate red 3 that is already promised elsewhere, so it has no Minimum Clue Value: {candidates:#?}"
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(replay_action_at_turn(&fixture, 24)),
+        "rank 4 to Cathy is the first convention-valid line after rejecting the valueless 5CM: {candidates:#?}"
     );
 }
 

@@ -1,10 +1,11 @@
+use super::super::blind_reverse_finesse_is_eligible;
 use super::{
     Card, CardId, CardSet, Clue, ClueFacts, ConnectionObligation, ConventionFacts,
-    HGroupCardInference, HGroupClueKind, HGroupConnection, HGroupConnectionKind, HGroupMoveKind,
-    HGroupProfile, HGroupRuleId, HGroupSaveKind, HGroupState, HistoricalView, IdentitySet,
-    LogicalDeductions, PlayerId, PlayerView, Rank, chop, elimination_finesse_connection,
-    identity_of, is_eventually_useful, is_playable_at, loaded_connection_plan,
-    pending_identity_is_queued, pending_is_active, replay_identity_is_queued, rule_enabled,
+    HGroupCardInference, HGroupConnection, HGroupConnectionKind, HGroupMoveKind, HGroupProfile,
+    HGroupRuleId, HGroupState, HistoricalView, IdentitySet, LogicalDeductions, PlayerId,
+    PlayerView, Rank, chop, elimination_finesse_connection, identity_of, is_eventually_useful,
+    is_playable_at, loaded_connection_plan, pending_identity_is_queued, pending_is_active,
+    replay_identity_is_queued, rule_enabled,
 };
 
 pub(in crate::h_group) fn delayed_focus_identities(
@@ -417,23 +418,6 @@ pub(in crate::h_group) fn two_save_allowed(
             .all(|card| chops.contains(&Some(card.id)))
 }
 
-pub(in crate::h_group) fn clue_kind_from_masks(
-    clue: Clue,
-    play: IdentitySet,
-    save: IdentitySet,
-) -> HGroupClueKind {
-    match (play.is_empty(), save.is_empty()) {
-        (false, false) => HGroupClueKind::PlayOrSave,
-        (false, true) => HGroupClueKind::Play,
-        (true, false) => match clue {
-            Clue::Rank(Rank::Five) => HGroupClueKind::Save(HGroupSaveKind::Five),
-            Clue::Rank(Rank::Two) => HGroupClueKind::Save(HGroupSaveKind::Two),
-            _ => HGroupClueKind::Save(HGroupSaveKind::Critical),
-        },
-        (true, true) => HGroupClueKind::Unrecognized,
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 pub(in crate::h_group) fn snapshot_play_identities(
     profile: HGroupProfile,
@@ -451,6 +435,7 @@ pub(in crate::h_group) fn snapshot_play_identities(
     chop_moved: &CardSet,
     stack_heights: [u8; 5],
     historical_turn: u32,
+    allow_blind_reverse_empathy: bool,
 ) -> IdentitySet {
     let mask = identities
         .iter()
@@ -471,6 +456,7 @@ pub(in crate::h_group) fn snapshot_play_identities(
                 chop_moved,
                 stack_heights,
                 Some(HistoricalView::new(view, historical_turn)),
+                allow_blind_reverse_empathy,
             )
         })
         .fold(0, |mask, identity| mask | (1 << identity.index()));
@@ -494,6 +480,7 @@ pub(in crate::h_group) fn snapshot_playable(
     chop_moved: &CardSet,
     stack_heights: [u8; 5],
     historical_view: Option<HistoricalView<'_>>,
+    allow_blind_reverse_empathy: bool,
 ) -> bool {
     let height = usize::from(stack_heights[identity.suit.index()]);
     let rank = usize::from(identity.rank.number());
@@ -552,6 +539,7 @@ pub(in crate::h_group) fn snapshot_playable(
         gotten,
         already_playing,
         stack_heights,
+        allow_blind_reverse_empathy,
     ) || (rule_enabled(profile, HGroupRuleId::Elimination)
         && elimination_finesse_connection(
             view,
@@ -580,6 +568,7 @@ pub(in crate::h_group) fn snapshot_connection_exists(
     gotten: &CardSet,
     already_playing: &CardSet,
     stack_heights: [u8; 5],
+    allow_blind_reverse_empathy: bool,
 ) -> bool {
     let first_actor = (giver.index() + 1) % hands.len();
     let ordinary_search_len = if rule_enabled(profile, HGroupRuleId::BasicMoves) {
@@ -598,6 +587,7 @@ pub(in crate::h_group) fn snapshot_connection_exists(
     let direct_reverse_finesse = rule_enabled(profile, HGroupRuleId::BasicMoves)
         && snapshot_direct_reverse_finesse_exists(
             expected,
+            giver,
             target,
             focus,
             view,
@@ -607,6 +597,7 @@ pub(in crate::h_group) fn snapshot_connection_exists(
             already_playing,
             first_actor,
             ordinary_search_len,
+            allow_blind_reverse_empathy,
         );
     let search_len = if direct_reverse_finesse {
         hands.len()
@@ -737,6 +728,7 @@ fn snapshot_prompt_exists(
 #[allow(clippy::too_many_arguments)]
 fn snapshot_direct_reverse_finesse_exists(
     expected: Card,
+    giver: PlayerId,
     target: PlayerId,
     focus: CardId,
     view: &PlayerView,
@@ -746,23 +738,37 @@ fn snapshot_direct_reverse_finesse_exists(
     already_playing: &CardSet,
     first_actor: usize,
     ordinary_search_len: usize,
+    allow_blind_reverse_empathy: bool,
 ) -> bool {
-    (ordinary_search_len..hands.len()).any(|distance| {
-        let actor_index = (first_actor + distance) % hands.len();
-        actor_index != target.index()
-            && hands[actor_index]
-                .iter()
-                .rev()
-                .copied()
-                .find(|card| {
-                    *card != focus && !gotten.contains(card) && !already_playing.contains(card)
+    let finesse_positions = (ordinary_search_len..hands.len())
+        .filter_map(|distance| {
+            let actor_index = (first_actor + distance) % hands.len();
+            (actor_index != target.index())
+                .then(|| {
+                    hands[actor_index]
+                        .iter()
+                        .rev()
+                        .copied()
+                        .find(|card| {
+                            *card != focus
+                                && !gotten.contains(card)
+                                && !already_playing.contains(card)
+                        })
+                        .map(|card| (actor_index, card))
                 })
-                .is_some_and(|card| {
-                    identity_of(view, card) == Some(expected)
-                        || (actor_index == view.observer.index()
-                            && facts[card.index()].identity_mask() == 1 << expected.index())
-                })
-    })
+                .flatten()
+        })
+        .collect::<Vec<_>>();
+    let visible = finesse_positions.iter().any(|(actor_index, card)| {
+        identity_of(view, *card) == Some(expected)
+            || (*actor_index == view.observer.index()
+                && facts[card.index()].identity_mask() == 1 << expected.index())
+    });
+    visible
+        || (blind_reverse_finesse_is_eligible(view, giver, allow_blind_reverse_empathy)
+            && finesse_positions.iter().any(|(actor_index, card)| {
+                *actor_index == view.observer.index() && facts[card.index()].allows(expected)
+            }))
 }
 
 pub(in crate::h_group) fn snapshot_accounted(

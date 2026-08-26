@@ -18,12 +18,15 @@ H-Group history reducer
    |-- HGroupTurnContext      explicit before/after event snapshots
    |-- RuleSpec               phase and dependency metadata
    |-- RuleProposal           typed per-rule transition output
-   |-- TransitionResult       atomic causal record for one public event
+   |-- ConventionTransitionResult  causal record for one public event
+   |-- ConventionTransitionDelta   exact materialized card-fact changes
    |-- ConventionJournal      incremental facts plus explanation history
+   |-- ProvenancedCardSet     source-owned materialized card facts
    |-- ConnectionManager      Prompt/Finesse lifecycle state machine
    |-- HGroupSignal           append-only explanation log
    |-- ConventionFacts        relational current convention truth
-   `-- ConventionCardState    canonical per-card convention state
+   |-- ClueInterpretationPlan one Play/Save/Fix/5CM/Stall precedence result
+   `-- TeamConventionSnapshot coherent lazy per-player epistemic overlays
    |
    v
 EpistemicState               observer-owned identity domains and provenance
@@ -56,9 +59,18 @@ recipient modeling.
   `PromiseId` and immutable provenance, including its creation turn, actor,
   focus, expected identity, and connection kind. It also removes stale
   candidates from blocked later layers and rejects duplicate obligations.
-- `effects.rs` owns `ConventionJournal` and reduces typed recognized effects
-  idempotently. Rule recognizers describe semantic mutations; they do not
-  append duplicate signals or rebuild current facts from history.
+- `ledger.rs` owns provenance for materialized card facts through
+  `ProvenancedCardSet`. A fact can have independent event, rule, and
+  `PromiseId` sources; retracting a promise removes only the consequences it
+  established. Materialized sets are compact read indexes, not independent
+  sources of truth.
+- `primary.rs` is the one primary clue-precedence resolver. Fixes, 5 Chop
+  Moves, low-score 5 handling, stalls, saves, and ordinary Play meanings are
+  resolved once before secondary connections and named explanations run.
+- `effects.rs` owns `ConventionJournal` and reduces recognized journal effects
+  idempotently. Materialized rule changes are committed at the rule boundary,
+  where the ledger attaches the rule source and records an exact delta; direct
+  mutation of an unsourced final state fails validation.
 - `facts.rs` separates current truth from history. `HGroupSignal` explains why
   something was inferred; `ConventionFacts` is what downstream code queries.
   Ambiguous identities are retained as relational `OneOf` claims rather than
@@ -72,7 +84,8 @@ recipient modeling.
   exposes neither deck order nor simulator truth.
 - `outcome.rs` retains clue consequences before strategy converts genuine
   preferences to numeric ordering. Giver-visible team coverage and
-  owner-relative Directness remain separate projections of one outcome.
+  owner-relative promised-action and clued-card-superposition equivalence for
+  Directness remain separate projections of one outcome.
 - `rule_engine.rs` owns ordered post-event execution. Real replay and
   prospective transitions both enter this registry through the same history
   reducer. Each `RuleSpec` declares its semantic phase and dependencies, and
@@ -86,9 +99,11 @@ recipient modeling.
   connection responses, required discards, and must-clue states restrict the
   action set before numeric strategy priorities are compared.
 - `perspective.rs` owns observer projection and hypothetical public
-  transitions.
-- `prospective.rs` applies a proposed action once and shares its cached
-  recipient snapshot between signal recognition and hazard checks.
+  transitions. `TeamConventionSnapshot` groups lazy observer overlays for one
+  coherent public position, so candidate consumers share lifecycle state.
+- `prospective.rs` applies a proposed action once and shares its cached team
+  snapshot between primary-meaning recognition, signal inspection, hazard
+  checks, and strategic evaluation.
 - `information_value.rs` compares valid alternative Fixes using the
   recipient's before/after identity domains. It prioritizes action certainty
   on convention-promised cards, estimated future clue savings, and identities
@@ -114,11 +129,12 @@ recipient modeling.
   late-game rules, and Extras. Observer knowledge derivation and candidate
   validation likewise live in focused `interpretation/` modules. `h_group.rs`
   retains history reduction and connection scheduling.
-- `transition.rs` is the opt-in causal audit boundary. It separates
-  human-readable signals, promise lifecycle changes, and materialized-state
-  mutations, so a regression can identify the responsible rule and phase
-  without reconstructing intent from final card sets. Normal engine operation
-  bypasses its fingerprints and proposal allocation.
+- `transition.rs` is the production causal boundary. Every retained public
+  event has an exact compact `ConventionTransitionDelta` of materialized card
+  facts; rule proposals also retain exact card replacements rather than
+  comparing collection lengths. Strategic evaluation consumes these deltas.
+  Human-readable signals remain explanations rather than an alternative
+  causality source.
 - `strategic_value.rs` compares structured `LineOutcome` values. It may use
   teammate identities visible to the giver for team coverage, but Directness
   uses only each card owner's `EpistemicState`.
@@ -135,28 +151,30 @@ Every completed replay reduction validates that:
 - every active connection was scheduled through the lifecycle manager;
 - the same actor/focus/step obligation is not duplicated; and
 - every connection candidate is still in the promised actor's hand;
-- every discard-now entry is unique; and
-- every relational identity claim has at least one candidate card.
+- every discard-now entry is unique;
+- every relational identity claim has at least one candidate card;
 - every active connection has registered promise provenance; and
-- when diagnostic transition recording is enabled, proposals are phase ordered,
-  non-empty, tied to the event turn, and form a unique partition of post-event
-  signals.
+- every materialized clue, protection, play, chop-move, and forced-play fact
+  has at least one typed source;
+- every promise-sourced retraction names registered promise provenance; and
+- proposals are phase ordered, non-empty, tied to the event turn, and form a
+  unique partition of post-event signals.
 
 Architecture properties additionally require that leaked own-hand truth does
 not change an observer's `EpistemicState`, and that candidate signal and hazard
 inspection share one prospective convention snapshot.
 
-The expert replay regression runs these checks for every prefix and every
-observer. Temporal tests separately assert that future own-card reveals and
-future draws cannot affect an earlier interpretation. Perspective tests should
-construct hypotheses through `PerspectiveProjector` rather than manually
-editing a recipient view. Architecture properties additionally verify that the
-incremental facts equal a complete journal reduction, every legal clue is
-exactly one of admitted or rejected, and a resolved-world hypothetical clue
-produces the same recipient convention state as the corresponding real event.
-The test corpus is physically separated into shared fixtures, learning-path
-rules, historical regressions, strategy behavior, architecture properties, and
-golden replay parity.
+The `game-194321.json` expert replay regression runs these checks for every
+prefix and every observer. Temporal tests separately assert that future
+own-card reveals and future draws cannot affect an earlier interpretation.
+Perspective tests should construct hypotheses through `PerspectiveProjector`
+rather than manually editing a recipient view. Architecture properties
+additionally verify that the incremental facts equal a complete journal
+reduction, every legal clue is exactly one of admitted or rejected, and a
+resolved-world hypothetical clue produces the same recipient convention state
+as the corresponding real event. The test corpus is physically separated into
+shared fixtures, learning-path rules, historical regressions, strategy
+behavior, architecture properties, and golden replay parity.
 
 ## Adding a convention rule
 

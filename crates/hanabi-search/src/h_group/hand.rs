@@ -52,6 +52,29 @@ pub(super) fn five_pulled_card(
         .find(|card| !gotten.contains(card))
 }
 
+/// Returns the single card moved by a
+/// [5's Chop Move](https://hanabi.github.io/level-4/#the-5s-chop-move-5cm).
+///
+/// The rightmost touched 5 is the boundary. Counting only cards that were
+/// previously unclued or unmoved, it is a 5CM exactly when the next card to
+/// its right is the recipient's current chop.
+pub(super) fn five_chop_moved_card(
+    hand: &[CardId],
+    touched: &[CardId],
+    gotten: &CardSet,
+) -> Option<CardId> {
+    let boundary = touched
+        .iter()
+        .filter_map(|card| hand.iter().position(|candidate| candidate == card))
+        .min()?;
+    let moved = hand[..boundary]
+        .iter()
+        .rev()
+        .copied()
+        .find(|card| !gotten.contains(card))?;
+    (chop(hand, gotten) == Some(moved)).then_some(moved)
+}
+
 pub(super) fn focus(
     hand: &[CardId],
     touched: &[CardId],

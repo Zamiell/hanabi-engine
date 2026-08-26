@@ -6,6 +6,7 @@ use super::{
     convention_card_inferences, identity_of, infer_h_group, infer_h_group_from_replay,
     is_playable_now, next_player, replay_h_group_inner, replay_identity_is_queued,
 };
+use std::rc::Rc;
 
 pub(super) fn subjective_convention_cards(
     source: &PlayerView,
@@ -51,9 +52,48 @@ pub(super) fn projected_h_group_replay(
 }
 
 #[derive(Clone)]
-struct CachedProspectiveProjection {
-    replay: HGroupState,
-    inferred: HGroupInferences,
+pub(super) struct CachedProspectiveProjection {
+    pub(super) deductions: Arc<LogicalDeductions>,
+    pub(super) replay: HGroupState,
+    pub(super) inferred: HGroupInferences,
+}
+
+/// One coherent public position with lazily materialized epistemic overlays
+/// for every player. All consumers of a hypothetical share this object, so an
+/// observer projection cannot be reconstructed under a different convention
+/// lifecycle halfway through candidate evaluation.
+#[derive(Clone)]
+pub(super) struct TeamConventionSnapshot {
+    source: PlayerView,
+    profile: HGroupProfile,
+    projections: Rc<RefCell<Vec<Option<CachedProspectiveProjection>>>>,
+}
+
+impl TeamConventionSnapshot {
+    pub(super) fn new(source: PlayerView, profile: HGroupProfile) -> Self {
+        let player_count = source.hands.len();
+        Self {
+            source,
+            profile,
+            projections: Rc::new(RefCell::new(vec![None; player_count])),
+        }
+    }
+
+    pub(super) fn projection(&self, observer: PlayerId) -> Option<CachedProspectiveProjection> {
+        if let Some(cached) = self.projections.borrow()[observer.index()].clone() {
+            return Some(cached);
+        }
+        let (deductions, replay) = projected_h_group_replay(&self.source, self.profile, observer)?;
+        let deductions = Arc::new(deductions);
+        let inferred = infer_h_group_from_replay(&deductions, replay.clone(), self.profile);
+        let projection = CachedProspectiveProjection {
+            deductions,
+            replay,
+            inferred,
+        };
+        self.projections.borrow_mut()[observer.index()] = Some(projection.clone());
+        Some(projection)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -66,7 +106,7 @@ struct ProspectiveClueKey {
 #[derive(Clone)]
 struct ProspectiveConventionSnapshot {
     after: PlayerView,
-    recipient: CachedProspectiveProjection,
+    team: TeamConventionSnapshot,
 }
 
 #[derive(Clone)]
@@ -78,7 +118,7 @@ enum ProspectiveCacheSlot<T> {
 struct ProspectiveAnalysisCache {
     source_address: usize,
     profile: HGroupProfile,
-    baselines: Vec<ProspectiveCacheSlot<CachedProspectiveProjection>>,
+    baseline_team: TeamConventionSnapshot,
     clue_snapshots: Vec<(ProspectiveClueKey, Option<ProspectiveConventionSnapshot>)>,
     source_hand_worlds: ProspectiveCacheSlot<Arc<Vec<PlayerView>>>,
 }
@@ -112,7 +152,7 @@ pub(super) fn with_prospective_analysis_cache<T>(
     let replacement = ProspectiveAnalysisCache {
         source_address: core::ptr::from_ref(source).addr(),
         profile,
-        baselines: vec![ProspectiveCacheSlot::Empty; source.hands.len()],
+        baseline_team: TeamConventionSnapshot::new(source.clone(), profile),
         clue_snapshots: Vec::new(),
         source_hand_worlds: ProspectiveCacheSlot::Empty,
     };
@@ -127,34 +167,18 @@ fn prospective_baseline_projection(
     observer: PlayerId,
 ) -> Option<CachedProspectiveProjection> {
     let source_address = core::ptr::from_ref(source).addr();
-    if let Some(cached) = PROSPECTIVE_ANALYSIS_CACHE.with(|cache| {
+    let cached_team = PROSPECTIVE_ANALYSIS_CACHE.with(|cache| {
         let cache = cache.borrow();
         let cache = cache.as_ref()?;
         if cache.source_address != source_address || cache.profile != profile {
             return None;
         }
-        match &cache.baselines[observer.index()] {
-            ProspectiveCacheSlot::Empty => None,
-            ProspectiveCacheSlot::Computed(projection) => Some(projection.clone()),
-        }
-    }) {
-        return cached;
-    }
-    let computed =
-        projected_h_group_replay(source, profile, observer).map(|(deductions, replay)| {
-            let inferred = infer_h_group_from_replay(&deductions, replay.clone(), profile);
-            CachedProspectiveProjection { replay, inferred }
-        });
-    PROSPECTIVE_ANALYSIS_CACHE.with(|cache| {
-        let mut cache = cache.borrow_mut();
-        if let Some(cache) = cache.as_mut() {
-            if cache.source_address == source_address && cache.profile == profile {
-                cache.baselines[observer.index()] =
-                    ProspectiveCacheSlot::Computed(computed.clone());
-            }
-        }
+        Some(cache.baseline_team.clone())
     });
-    computed
+    if let Some(team) = cached_team {
+        return team.projection(observer);
+    }
+    TeamConventionSnapshot::new(source.clone(), profile).projection(observer)
 }
 
 /// Applies a hypothetical clue once and materializes the recipient-relative
@@ -193,13 +217,10 @@ fn prospective_clue_snapshot(
     let after = prospective_clue_view(source, target, clue, touched);
     #[cfg(test)]
     PROSPECTIVE_SNAPSHOT_REDUCTIONS.with(|count| count.set(count.get() + 1));
-    let computed = projected_h_group_replay(&after, profile, target).map(|(deductions, replay)| {
-        let inferred = infer_h_group_from_replay(&deductions, replay.clone(), profile);
-        ProspectiveConventionSnapshot {
-            after,
-            recipient: CachedProspectiveProjection { replay, inferred },
-        }
-    });
+    let team = TeamConventionSnapshot::new(after.clone(), profile);
+    let computed = team
+        .projection(target)
+        .map(|_| ProspectiveConventionSnapshot { after, team });
     PROSPECTIVE_ANALYSIS_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if let Some(cache) = cache.as_mut() {
@@ -414,14 +435,38 @@ pub(super) fn prospective_clue_signal_kinds(
     let Some(snapshot) = prospective_clue_snapshot(source, profile, target, clue, touched) else {
         return Vec::new();
     };
-    snapshot
-        .recipient
+    let Some(recipient) = snapshot.team.projection(target) else {
+        return Vec::new();
+    };
+    recipient
         .replay
         .signals
         .iter()
         .filter(|signal| signal.turn == turn)
         .map(|signal| signal.kind)
         .collect()
+}
+
+/// Primary meaning assigned by the same replay reducer that handles a real
+/// clue. Candidate admission uses this instead of maintaining a second
+/// Play/Save/Fix precedence ladder.
+pub(super) fn prospective_clue_primary_kind(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    target: PlayerId,
+    clue: Clue,
+    touched: &[CardId],
+) -> Option<super::HGroupClueKind> {
+    let turn = source.turn;
+    prospective_clue_snapshot(source, profile, target, clue, touched)?
+        .team
+        .projection(target)?
+        .replay
+        .clues
+        .iter()
+        .rev()
+        .find(|interpretation| interpretation.turn == turn)
+        .map(|interpretation| interpretation.kind)
 }
 
 pub(super) fn prospective_clue_has_unsafe_connection(
@@ -469,9 +514,11 @@ pub(super) fn prospective_clue_hazard(
         return Some(ProspectiveClueHazard::ProjectionFailed);
     };
     let after_clue = &snapshot.after;
-    let after_projector = PerspectiveProjector::new(after_clue, profile);
-    let replay = &snapshot.recipient.replay;
-    let inferred = &snapshot.recipient.inferred;
+    let Some(recipient) = snapshot.team.projection(target) else {
+        return Some(ProspectiveClueHazard::ProjectionFailed);
+    };
+    let replay = &recipient.replay;
+    let inferred = &recipient.inferred;
     let Some(baseline) = prospective_baseline_projection(source, profile, target) else {
         return Some(ProspectiveClueHazard::ProjectionFailed);
     };
@@ -492,7 +539,7 @@ pub(super) fn prospective_clue_hazard(
     {
         return Some(ProspectiveClueHazard::RecipientWrongConnection);
     }
-    if other_player_projection_is_unsafe(source, after_clue, profile, target, &after_projector) {
+    if other_player_projection_is_unsafe(source, after_clue, profile, target, &snapshot.team) {
         return Some(ProspectiveClueHazard::OtherPlayerWrongPromise);
     }
     if touched.len() <= 1 {
@@ -627,7 +674,7 @@ fn other_player_projection_is_unsafe(
     after_clue: &PlayerView,
     profile: HGroupProfile,
     target: PlayerId,
-    after_projector: &PerspectiveProjector<'_>,
+    after_team: &TeamConventionSnapshot,
 ) -> bool {
     let Some(giver_baseline) = prospective_baseline_projection(source, profile, source.observer)
     else {
@@ -644,13 +691,10 @@ fn other_player_projection_is_unsafe(
         else {
             return true;
         };
-        let Some((other_after_deductions, other_after_replay)) =
-            after_projector.project(observer, PerspectiveDepth::NestedRecipients)
-        else {
+        let Some(other_projection) = after_team.projection(observer) else {
             return true;
         };
-        let other_after =
-            infer_h_group_from_replay(&other_after_deductions, other_after_replay.clone(), profile);
+        let other_after = &other_projection.inferred;
         let wrong_new_play = other_after
             .playable_now
             .iter()
@@ -660,18 +704,19 @@ fn other_player_projection_is_unsafe(
                 identity_of(source, card).is_some_and(|actual| !is_playable_now(after_clue, actual))
             });
         let wrong_new_connection = other_after.connection.is_some_and(|connection| {
-            let height =
-                other_after_deductions.view().play_stacks[connection.identity.suit.index()].len();
+            let height = other_projection.deductions.view().play_stacks
+                [connection.identity.suit.index()]
+            .len();
             let connection_is_reachable =
                 (height + 1..usize::from(connection.identity.rank.number())).all(|rank| {
                     replay_identity_is_queued(
-                        other_after_deductions.view(),
-                        &other_after_replay,
+                        other_projection.deductions.view(),
+                        &other_projection.replay,
                         Card::new(connection.identity.suit, Rank::ALL[rank - 1]),
                     )
                 });
             let duplicates_existing_promise = replay_identity_is_queued(
-                other_after_deductions.view(),
+                other_projection.deductions.view(),
                 &other_baseline.replay,
                 connection.identity,
             );
@@ -825,7 +870,7 @@ pub(super) fn subjective_chop_before_action(
         history: projected_history,
     };
     let deductions = LogicalDeductions::new(view).ok()?;
-    let replay = replay_h_group_inner(&deductions, profile, PerspectiveDepth::ObserverOnly);
+    let replay = replay_h_group_inner(&deductions, profile, PerspectiveDepth::ObserverOnly, false);
     let promptable = replay.promptable();
     let gotten = replay.gotten_from(&promptable);
     chop(&replay.hands[observer.index()], &gotten)

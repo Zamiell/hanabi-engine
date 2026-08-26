@@ -103,11 +103,31 @@ pub(in crate::h_group) fn apply_extra_effects(
                     })
                     .map(|connection| connection.focus)
                     .collect::<CardSet>();
+                let released = effects
+                    .pending
+                    .iter()
+                    .filter(|connection| invalidated.contains(&connection.focus))
+                    .flat_map(|connection| connection.cards.iter().copied())
+                    .collect::<CardSet>();
                 effects.pending.cancel_where(
                     entry.turn,
                     ConnectionTransitionReason::FocusInvalidated,
                     |connection| invalidated.contains(&connection.focus),
                 );
+                // A disproved layered connection must release every candidate
+                // that was protected solely by that connection. Keeping its
+                // trailing candidates invisibly clued after cancellation
+                // changes chop and can make a later 5CM look like a 5 Save.
+                for card in released {
+                    if !effects.explicitly_clued.contains(&card)
+                        && !effects
+                            .pending
+                            .iter()
+                            .any(|connection| connection.cards.contains(&card))
+                    {
+                        effects.invisibly_clued.remove(&card);
+                    }
+                }
             }
 
             // Source: https://hanabi.github.io/extras/chop-moves/#the-transfer-chop-move

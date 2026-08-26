@@ -1,21 +1,21 @@
 use super::{
-    CardId, CardSet, Clue, ConnectionTransitionReason, ConventionJournal, HGroupConnectionKind,
+    CardSet, Clue, ConnectionTransitionReason, ConventionJournal, HGroupConnectionKind,
     HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, IdentitySet, ObservedEvent,
-    ObservedHistoryEntry, PlayerView, Rank, chop, focus, identity_of, identity_set, is_playable_at,
-    is_playable_now, next_player, pending_is_active, push_signal, same_turn_signal,
-    was_clued_before,
+    ObservedHistoryEntry, PlayerView, Rank, chop, five_chop_moved_card, focus, identity_of,
+    identity_set, is_playable_at, is_playable_now, next_player, pending_is_active, protected_cards,
+    push_signal, same_turn_signal, was_clued_before,
 };
 
 pub(in crate::h_group) fn apply_level_two_effects(
-    entry: &ObservedHistoryEntry,
+    context: &HGroupTurnContext<'_>,
     view: &PlayerView,
-    hands: &[Vec<CardId>],
-    explicitly_clued: &CardSet,
-    signals: &mut ConventionJournal,
+    effects: &mut HGroupRuleEffects<'_>,
 ) {
     // Sources: https://hanabi.github.io/level-2/#the-5-stall-cluing-off-chop-5s
     // https://hanabi.github.io/level-2/#the-reverse-finesse
     // https://hanabi.github.io/level-2/#the-self-finesse
+    let entry = context.entry;
+    let hands = context.after.hands;
     let ObservedEvent::Clued {
         giver,
         target,
@@ -26,14 +26,23 @@ pub(in crate::h_group) fn apply_level_two_effects(
     else {
         return;
     };
+    let gotten = protected_cards(
+        effects.explicitly_clued,
+        effects.invisibly_clued,
+        effects.chop_moved,
+    );
+    let five_chop_move = *clue == Clue::Rank(Rank::Five)
+        && !context.before.early_game
+        && five_chop_moved_card(&hands[target.index()], touched, &gotten).is_some();
     if *clue == Clue::Rank(Rank::Five)
         && !touched.is_empty()
+        && !five_chop_move
         && hands[target.index()]
             .first()
             .is_none_or(|chop| !touched.contains(chop))
     {
         push_signal(
-            signals,
+            effects.signals,
             entry,
             *giver,
             Some(*target),
@@ -47,7 +56,7 @@ pub(in crate::h_group) fn apply_level_two_effects(
     // never be inferred independently from the visible rank of a delayed
     // focus: Save precedence can deliberately clue an unplayable chop card,
     // and re-deriving meaning here used to turn that Save into a false play.
-    if !same_turn_signal(signals, entry.turn, HGroupMoveKind::PlayClue) {
+    if !same_turn_signal(effects.signals, entry.turn, HGroupMoveKind::PlayClue) {
         return;
     }
 
@@ -66,13 +75,13 @@ pub(in crate::h_group) fn apply_level_two_effects(
             HGroupMoveKind::SelfFinesse
         } else if target.index() < actor.index() {
             HGroupMoveKind::ReverseFinesse
-        } else if explicitly_clued.contains(&focus) {
+        } else if effects.explicitly_clued.contains(&focus) {
             HGroupMoveKind::Prompt
         } else {
             HGroupMoveKind::Finesse
         };
         push_signal(
-            signals,
+            effects.signals,
             entry,
             *giver,
             Some(*target),

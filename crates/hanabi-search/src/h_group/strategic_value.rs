@@ -1,9 +1,9 @@
 use super::{
-    Action, ActionCommitment, Card, CardId, ClueCandidate, EpistemicState, HGroupConnection,
-    HGroupMoveKind, HGroupProfile, HGroupRuleId, IdentitySet, LineOutcome, LogicalDeductions,
-    PlayerId, PlayerView, Rank, card_is_trash, identity_of, infer_h_group_from_replay,
-    is_eventually_useful, is_playable_now, projected_h_group_replay, prospective_clue_signal_kinds,
-    prospective_clue_view, rule_enabled,
+    Action, ActionCommitment, CachedProspectiveProjection, Card, CardId, ClueCandidate,
+    CluedCardSuperposition, EpistemicState, HGroupConnection, HGroupMoveKind, HGroupProfile,
+    HGroupRuleId, IdentitySet, LineOutcome, LogicalDeductions, PlayerId, PlayerView, Rank,
+    TeamConventionSnapshot, card_is_trash, identity_of, is_eventually_useful, is_playable_now,
+    prospective_clue_signal_kinds, prospective_clue_view, rule_enabled,
 };
 
 const TEAM_ACTION_COVERAGE_PENALTY: u16 = 80;
@@ -15,11 +15,12 @@ const INDIRECT_CONNECTION_PENALTY: u16 = 24;
 /// interpretation have produced the candidate set.
 ///
 /// [Level 10's Directness Principle](https://hanabi.github.io/level-10/#directness-principle)
-/// prefers the least complicated route to an
-/// identical set of promised cards. Team action coverage separately rewards a
-/// clue that establishes useful future actions for more than one teammate;
-/// this keeps a token-refunding play from winning when the extra token has no
-/// immediate job but another line prepares the rest of the team.
+/// prefers the least complicated route only when both the promised actions and
+/// every clued card's owner-visible identity superposition are identical. Team
+/// action coverage separately rewards a clue that establishes useful future
+/// actions for more than one teammate; this keeps a token-refunding play from
+/// winning when the extra token has no immediate job but another line prepares
+/// the rest of the team.
 pub(super) fn apply_strategic_clue_values(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
@@ -29,12 +30,15 @@ pub(super) fn apply_strategic_clue_values(
         return;
     }
     let source = deductions.view();
+    let baseline_team = TeamConventionSnapshot::new(source.clone(), profile);
     let baselines = (0..source.hands.len())
         .map(|player| {
             let observer = PlayerId::new(
                 u8::try_from(player).expect("standard Hanabi has at most five players"),
             );
-            projected_line_state(source, profile, observer)
+            baseline_team
+                .projection(observer)
+                .map(|projection| projected_line_state(source, projection))
         })
         .collect::<Option<Vec<_>>>();
     let Some(baselines) = baselines else {
@@ -104,7 +108,7 @@ pub(super) fn apply_strategic_clue_values(
         let fewest_equivalent_connections = values
             .iter()
             .filter_map(Option::as_ref)
-            .filter(|other| other.directness_key() == value.directness_key())
+            .filter(|other| other.has_same_direct_outcome(value))
             .map(|other| other.new_connections)
             .min()
             .unwrap_or(value.new_connections);
@@ -143,6 +147,7 @@ struct ProjectedLineState {
     giver_visible_promises: Vec<(CardId, Card)>,
     epistemic: EpistemicState,
     owner_promises: Vec<(CardId, IdentitySet)>,
+    owner_clued_superpositions: Vec<(CardId, IdentitySet)>,
     connection: Option<HGroupConnection>,
     chop_moved: super::CardSet,
     causal_cards: super::CardSet,
@@ -248,26 +253,27 @@ impl ProjectedLineState {
 
 fn projected_line_state(
     source: &PlayerView,
-    profile: HGroupProfile,
-    observer: PlayerId,
-) -> Option<ProjectedLineState> {
-    let (deductions, replay) = projected_h_group_replay(source, profile, observer)?;
+    projection: CachedProspectiveProjection,
+) -> ProjectedLineState {
+    let observer = projection.deductions.view().observer;
+    let replay = projection.replay;
     let promised = replay
         .cards
         .explicitly_clued
         .union(&replay.cards.invisibly_clued)
         .copied()
         .collect::<Vec<_>>();
-    let chop_moved = replay.cards.chop_moved.clone();
-    let causal_turn = source.history.last().map(|entry| entry.turn);
+    let chop_moved = replay.cards.chop_moved.materialized().clone();
     let causal_cards = replay
-        .signals
+        .transitions
         .iter()
-        .filter(|signal| Some(signal.turn) == causal_turn)
-        .flat_map(|signal| signal.cards.iter().copied())
+        .rev()
+        .find(|transition| Some(transition.turn) == source.history.last().map(|entry| entry.turn))
+        .into_iter()
+        .flat_map(|transition| transition.delta.added_cards())
         .collect();
-    let inferred = infer_h_group_from_replay(&deductions, replay, profile);
-    let epistemic = EpistemicState::from_analysis(&deductions, &inferred);
+    let inferred = projection.inferred;
+    let epistemic = EpistemicState::from_analysis(&projection.deductions, &inferred);
     let mut giver_visible_commitments = inferred
         .cards
         .iter()
@@ -310,6 +316,8 @@ fn projected_line_state(
     giver_visible_promises
         .sort_unstable_by_key(|(card, identity)| (card.index(), identity.index()));
     giver_visible_promises.dedup();
+    let owner_clued_superpositions =
+        collect_owner_clued_superpositions(source, observer, &epistemic, &promised);
     let mut owner_promises = promised
         .into_iter()
         .filter_map(|card| {
@@ -333,15 +341,37 @@ fn projected_line_state(
         .collect::<Vec<_>>();
     owner_promises.sort_unstable_by_key(|(card, _)| card.index());
     owner_promises.dedup();
-    Some(ProjectedLineState {
+    ProjectedLineState {
         giver_visible_commitments,
         giver_visible_promises,
         epistemic,
         owner_promises,
+        owner_clued_superpositions,
         connection: inferred.connection,
         chop_moved,
         causal_cards,
-    })
+    }
+}
+
+fn collect_owner_clued_superpositions(
+    source: &PlayerView,
+    observer: PlayerId,
+    epistemic: &EpistemicState,
+    clued_cards: &[CardId],
+) -> Vec<(CardId, IdentitySet)> {
+    let mut superpositions = clued_cards
+        .iter()
+        .copied()
+        .filter(|card| card_owner(source, *card) == Some(observer))
+        .filter_map(|card| {
+            epistemic
+                .belief(card)
+                .map(|belief| (card, belief.identities))
+        })
+        .collect::<Vec<_>>();
+    superpositions.sort_unstable_by_key(|(card, _)| card.index());
+    superpositions.dedup();
+    superpositions
 }
 
 fn clue_line_value(
@@ -359,6 +389,7 @@ fn clue_line_value(
         .map(|card| card.id)
         .collect::<Vec<_>>();
     let after_clue = prospective_clue_view(source, target, clue, &touched);
+    let after_team = TeamConventionSnapshot::new(after_clue.clone(), profile);
     let mut value = LineOutcome::default();
     let caused_by_clue = |card: CardId, identity: Card| {
         touched.contains(&card)
@@ -373,7 +404,8 @@ fn clue_line_value(
     for (player, baseline) in baselines.iter().enumerate() {
         let observer =
             PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
-        let after = projected_line_state(&after_clue, profile, observer)?;
+        let after = projected_line_state(&after_clue, after_team.projection(observer)?);
+        record_clued_superpositions(&mut value, observer, &after);
         let commitment_caused = |card: CardId, identity: Card| {
             caused_by_clue(card, identity) || after.causal_cards.contains(&card)
         };
@@ -446,6 +478,25 @@ fn clue_line_value(
     }
     value.normalize();
     Some(value)
+}
+
+fn record_clued_superpositions(
+    value: &mut LineOutcome,
+    observer: PlayerId,
+    state: &ProjectedLineState,
+) {
+    value
+        .clued_superpositions
+        .extend(
+            state
+                .owner_clued_superpositions
+                .iter()
+                .map(|(card, identities)| CluedCardSuperposition {
+                    card: *card,
+                    owner: observer,
+                    identities: *identities,
+                }),
+        );
 }
 
 fn record_new_connection(

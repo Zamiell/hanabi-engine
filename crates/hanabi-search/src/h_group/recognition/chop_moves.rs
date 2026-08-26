@@ -1,7 +1,30 @@
 use super::{
-    Clue, HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, IdentitySet, ObservedEvent,
-    PlayerView, Rank, identity_of, push_signal,
+    Clue, ConventionJournal, HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, IdentitySet,
+    ObservedEvent, PlayerId, PlayerView, Rank, five_chop_moved_card, identity_of, protected_cards,
+    push_signal,
 };
+
+fn same_turn_signal_blocks_chop_move(
+    signals: &ConventionJournal,
+    turn: u32,
+    target: PlayerId,
+) -> bool {
+    signals.iter().any(|signal| {
+        signal.turn == turn
+            && signal.target == Some(target)
+            && matches!(
+                signal.kind,
+                HGroupMoveKind::FiveStall
+                    | HGroupMoveKind::PlayClue
+                    | HGroupMoveKind::SaveClue
+                    | HGroupMoveKind::FixClue
+                    | HGroupMoveKind::TempoClue
+                    | HGroupMoveKind::Stall
+                    | HGroupMoveKind::TrashPush
+                    | HGroupMoveKind::Bluff
+            )
+    })
+}
 
 /// Recognizes Level-4 Trash and 5's Chop Moves from observer-relative clue
 /// facts. The recipient must not need the physical identity of their own
@@ -23,24 +46,18 @@ pub(crate) fn apply_chop_move_effects(
     else {
         return;
     };
-    if effects.signals.iter().any(|signal| {
-        signal.turn == context.entry.turn
-            && signal.target == Some(*target)
-            && matches!(
-                signal.kind,
-                HGroupMoveKind::FiveStall
-                    | HGroupMoveKind::PlayClue
-                    | HGroupMoveKind::SaveClue
-                    | HGroupMoveKind::FixClue
-                    | HGroupMoveKind::TempoClue
-                    | HGroupMoveKind::Stall
-                    | HGroupMoveKind::TrashPush
-                    | HGroupMoveKind::Bluff
-            )
-    }) {
+    if same_turn_signal_blocks_chop_move(effects.signals, context.entry.turn, *target) {
         return;
     }
     let hand = &context.after.hands[target.index()];
+    let gotten = protected_cards(
+        effects.explicitly_clued,
+        effects.invisibly_clued,
+        effects.chop_moved,
+    );
+    let five_chop_moved = (*clue == Clue::Rank(Rank::Five))
+        .then(|| five_chop_moved_card(hand, touched, &gotten))
+        .flatten();
     let all_trash = !touched.is_empty()
         && touched.iter().all(|card| {
             let possibilities = identity_of(view, *card)
@@ -66,27 +83,29 @@ pub(crate) fn apply_chop_move_effects(
                     identity.rank.number() <= context.after.stack_heights[identity.suit.index()]
                 })
         });
-    let five_chop_move = *clue == Clue::Rank(Rank::Five) && !touched.is_empty();
+    let five_chop_move = five_chop_moved.is_some();
     if !all_trash && !five_chop_move {
         return;
     }
     let boundary = touched
         .iter()
         .filter_map(|card| hand.iter().position(|candidate| candidate == card))
-        .min();
-    let Some(boundary) = boundary else {
-        return;
-    };
-    let count = if five_chop_move { 1 } else { boundary };
-    let moved = hand[..boundary]
-        .iter()
-        .rev()
-        .filter(|card| {
-            !effects.explicitly_clued.contains(card) && !effects.chop_moved.contains(card)
-        })
-        .take(count.max(1))
-        .copied()
-        .collect::<Vec<_>>();
+        .min()
+        .unwrap_or(0);
+    let moved = five_chop_moved.map_or_else(
+        || {
+            hand[..boundary]
+                .iter()
+                .rev()
+                .filter(|card| {
+                    !effects.explicitly_clued.contains(card) && !effects.chop_moved.contains(card)
+                })
+                .take(boundary.max(1))
+                .copied()
+                .collect::<Vec<_>>()
+        },
+        |card| vec![card],
+    );
     if moved.is_empty() {
         return;
     }

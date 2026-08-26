@@ -3,7 +3,7 @@ use crate::HGroupProfile;
 use super::H_GROUP_LEVELS;
 
 /// Executable rule group corresponding to one cumulative H-Group level.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 #[repr(u8)]
 pub(super) enum HGroupRuleId {
     Basic = 1,

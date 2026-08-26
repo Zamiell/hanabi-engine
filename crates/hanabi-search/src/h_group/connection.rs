@@ -10,6 +10,11 @@ pub(super) struct PromiseId(u32);
 
 impl PromiseId {
     pub(super) const UNASSIGNED: Self = Self(u32::MAX);
+
+    #[cfg(test)]
+    pub(super) const fn from_raw(value: u32) -> Self {
+        Self(value)
+    }
 }
 
 /// Immutable origin of a connection promise. Current status lives in the
@@ -153,7 +158,7 @@ impl ConnectionManager {
         Ok(())
     }
 
-    pub(super) fn start(&mut self, turn: u32, mut obligation: ConnectionObligation) {
+    pub(super) fn start(&mut self, turn: u32, mut obligation: ConnectionObligation) -> PromiseId {
         if self.active.iter().any(|active| {
             active.actor == obligation.actor
                 && active.cards == obligation.cards
@@ -163,7 +168,19 @@ impl ConnectionManager {
                 && active.focus == obligation.focus
                 && active.step == obligation.step
         }) {
-            return;
+            return self
+                .active
+                .iter()
+                .find(|active| {
+                    active.actor == obligation.actor
+                        && active.cards == obligation.cards
+                        && active.expected == obligation.expected
+                        && active.focus_identity == obligation.focus_identity
+                        && active.kind == obligation.kind
+                        && active.focus == obligation.focus
+                        && active.step == obligation.step
+                })
+                .map_or(PromiseId::UNASSIGNED, |active| active.promise);
         }
         obligation.promise = PromiseId(self.next_promise);
         self.next_promise = self.next_promise.saturating_add(1);
@@ -192,7 +209,9 @@ impl ConnectionManager {
             ConnectionStatus::Pending,
             ConnectionTransitionReason::Scheduled,
         );
+        let promise = obligation.promise;
         self.active.push(obligation);
+        promise
     }
 
     pub(super) fn cancel_where(
