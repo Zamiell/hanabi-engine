@@ -100,7 +100,8 @@ impl Default for PlannerConfig {
 pub enum PlannerPhase {
     /// Unknown identities stayed as constrained domains and public counts.
     Symbolic,
-    /// Every convention-consistent identity world was solved exhaustively.
+    /// Every convention-consistent identity world was used for an exhaustive
+    /// solve or a mathematically conclusive terminal-action proof.
     Exact,
 }
 
@@ -256,33 +257,7 @@ pub(crate) fn plan_move_with_analysis(
         return Err(PlannerError::NoCandidateActions);
     }
     let preferred = analysis.preferred_action;
-    let mut evaluations = candidates
-        .iter()
-        .copied()
-        .map(|action| symbolic_evaluation(deductions, action))
-        .collect::<Vec<_>>();
-
-    // Forced-line projection is comparatively expensive and is meaningful
-    // only among candidates the convention already considers equivalent.
-    // Semantic obligations and the convention's explicit preferred action
-    // therefore remain authoritative.
-    let best_priority = evaluations
-        .iter()
-        .map(|evaluation| evaluation.convention_priority)
-        .max()
-        .unwrap_or(i32::MIN);
-    let best_priority_count = evaluations
-        .iter()
-        .filter(|evaluation| evaluation.convention_priority == best_priority)
-        .count();
-    if best_priority_count > 1 {
-        for evaluation in &mut evaluations {
-            if evaluation.convention_priority == best_priority {
-                evaluation.symbolic_line =
-                    convention.project_symbolic_line(deductions.view(), evaluation.action, 32);
-            }
-        }
-    }
+    let mut evaluations = symbolic_root_evaluations(deductions, convention, &candidates);
 
     let belief = &analysis.belief_constraints;
     let count = information_set.world_count_up_to(belief, config.exact_world_limit);
@@ -292,13 +267,42 @@ pub(crate) fn plan_move_with_analysis(
 
     if count.exact
         && count.worlds > 0
+        && objective == PlanningObjective::PerfectScore
+        && information_set
+            .view()
+            .play_stacks
+            .iter()
+            .map(Vec::len)
+            .sum::<usize>()
+            == 24
+    {
+        let proof = try_terminal_perfect_proof(
+            information_set,
+            analysis,
+            count.worlds,
+            &mut evaluations,
+            preferred,
+        )?;
+        if let Some((best_index, tested_actions)) = proof {
+            return Ok(PlannerResult {
+                best_action: evaluations[best_index].action,
+                phase: PlannerPhase::Exact,
+                considered_worlds: count.worlds,
+                world_count_exact: true,
+                exact_nodes: tested_actions,
+                root_actions: evaluations,
+            });
+        }
+    }
+    let full_exact_search = count.exact
+        && count.worlds > 0
         && exact_preflight(
             information_set.view(),
             count.worlds,
             candidates.len(),
             config.exact_node_limit,
-        )
-    {
+        );
+    if full_exact_search {
         let worlds = information_set
             .collect_worlds_after_count(belief, usize::try_from(count.worlds).unwrap_or(usize::MAX))
             .map_err(PlannerError::EnumerateWorlds)?;
@@ -343,13 +347,72 @@ pub(crate) fn plan_move_with_analysis(
         }
     }
 
+    symbolic_result(evaluations, preferred, count.worlds, count.exact)
+}
+
+fn symbolic_root_evaluations(
+    deductions: &LogicalDeductions,
+    convention: SupportedConvention,
+    candidates: &[ConventionAction],
+) -> Vec<PlannerActionEvaluation> {
+    let mut evaluations = candidates
+        .iter()
+        .copied()
+        .map(|action| symbolic_evaluation(deductions, action))
+        .collect::<Vec<_>>();
+    // Forced-line projection is comparatively expensive and is meaningful
+    // only among candidates the convention already considers equivalent.
+    // Semantic obligations and the convention's explicit preferred action
+    // therefore remain authoritative.
+    let best_priority = evaluations
+        .iter()
+        .map(|evaluation| evaluation.convention_priority)
+        .max()
+        .unwrap_or(i32::MIN);
+    let best_priority_count = evaluations
+        .iter()
+        .filter(|evaluation| evaluation.convention_priority == best_priority)
+        .count();
+    if best_priority_count > 1 {
+        for evaluation in &mut evaluations {
+            if evaluation.convention_priority == best_priority {
+                evaluation.symbolic_line =
+                    convention.project_symbolic_line(deductions.view(), evaluation.action, 32);
+            }
+        }
+    }
+    evaluations
+}
+
+fn try_terminal_perfect_proof(
+    information_set: &InformationSet,
+    analysis: &ConventionAnalysis,
+    world_count: u64,
+    evaluations: &mut [PlannerActionEvaluation],
+    preferred: Option<Action>,
+) -> Result<Option<(usize, u64)>, PlannerError> {
+    let worlds = information_set
+        .collect_worlds_after_count(
+            &analysis.belief_constraints,
+            usize::try_from(world_count).unwrap_or(usize::MAX),
+        )
+        .map_err(PlannerError::EnumerateWorlds)?;
+    prove_unanimous_terminal_perfect(&worlds, evaluations, preferred).map_err(PlannerError::Rule)
+}
+
+fn symbolic_result(
+    evaluations: Vec<PlannerActionEvaluation>,
+    preferred: Option<Action>,
+    considered_worlds: u64,
+    world_count_exact: bool,
+) -> Result<PlannerResult, PlannerError> {
     let best_index =
         best_symbolic_index(&evaluations, preferred).ok_or(PlannerError::NoCandidateActions)?;
     Ok(PlannerResult {
         best_action: evaluations[best_index].action,
         phase: PlannerPhase::Symbolic,
-        considered_worlds: count.worlds,
-        world_count_exact: count.exact,
+        considered_worlds,
+        world_count_exact,
         exact_nodes: 0,
         root_actions: evaluations,
     })
@@ -379,12 +442,6 @@ fn planning_candidates(analysis: &ConventionAnalysis) -> Cow<'_, [ConventionActi
 }
 
 fn exact_preflight(view: &PlayerView, worlds: u64, root_actions: usize, node_limit: u64) -> bool {
-    // Exact search is intentionally an endgame algorithm. Before the last
-    // draw, clue/discard cycles make even a small identity set produce a very
-    // deep action tree.
-    if view.deck_size > 1 {
-        return false;
-    }
     let remaining_turns = view.final_turns_remaining.map_or_else(
         || view.hands.len().saturating_add(view.deck_size),
         usize::from,
@@ -402,6 +459,63 @@ fn exact_preflight(view: &PlayerView, worlds: u64, root_actions: usize, node_lim
         }
     }
     true
+}
+
+/// Finds a root play that ends every convention-consistent world at 25.
+///
+/// A unanimous perfect terminal result is globally maximal under the
+/// perfect-score objective. Non-play actions cannot immediately increase a
+/// score of 24, so only admitted plays need to be checked. Among multiple
+/// proofs, ordinary convention ordering remains the deterministic tie-break.
+fn prove_unanimous_terminal_perfect(
+    worlds: &[FullState],
+    evaluations: &mut [PlannerActionEvaluation],
+    preferred: Option<Action>,
+) -> Result<Option<(usize, u64)>, RuleError> {
+    let mut tested_actions = 0_u64;
+    let mut best: Option<(usize, i32, bool)> = None;
+    for (index, evaluation) in evaluations.iter_mut().enumerate() {
+        if !matches!(evaluation.action, Action::Play(_)) {
+            continue;
+        }
+        tested_actions += 1;
+        let mut value = ExactActionValue {
+            worlds: 0,
+            perfect_worlds: 0,
+            score_sum: 0,
+            strikeout_worlds: 0,
+            score_ceiling_sum: 0,
+        };
+        let mut unanimous = true;
+        for world in worlds {
+            let mut advanced = world.clone();
+            advanced.apply(evaluation.action)?;
+            if advanced.final_score() != Some(25) {
+                unanimous = false;
+                break;
+            }
+            value.add(terminal_value(&advanced));
+        }
+        if !unanimous {
+            continue;
+        }
+        evaluation.exact = Some(value);
+        let priority = evaluation.convention_priority;
+        let is_preferred = preferred == Some(evaluation.action);
+        let replace =
+            best.as_ref()
+                .is_none_or(|(current_index, current_priority, current_preferred)| {
+                    priority
+                        .cmp(current_priority)
+                        .then_with(|| is_preferred.cmp(current_preferred))
+                        .then_with(|| current_index.cmp(&index))
+                        == Ordering::Greater
+                });
+        if replace {
+            best = Some((index, priority, is_preferred));
+        }
+    }
+    Ok(best.map(|(index, _, _)| (index, tested_actions)))
 }
 
 #[allow(clippy::cast_precision_loss)]

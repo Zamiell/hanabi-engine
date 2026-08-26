@@ -234,6 +234,47 @@ fn move_45_plays_the_automatic_good_touch_purple_five() {
 }
 
 #[test]
+fn final_move_exhausts_all_worlds_before_the_last_draw() {
+    let replay = expert_replay_194321();
+    let state = replay
+        .state_at_turn(45)
+        .expect("the final decision position is legal");
+    let actor = state.current_player();
+    let view = state.view_for(actor).expect("the actor has a legal view");
+    assert!(
+        view.deck_size > 1,
+        "the old exact-search gate would reject this position"
+    );
+
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig {
+            objective: crate::PlanningObjective::PerfectScore,
+            ..crate::PlannerConfig::default()
+        },
+    )
+    .expect("the final position is analyzable");
+    assert_eq!(analysis.planner.phase, crate::PlannerPhase::Exact);
+    assert!(analysis.planner.world_count_exact);
+    assert_eq!(
+        analysis.planner.best_action,
+        replay_action_at_turn(&replay, 45)
+    );
+    let exact = analysis
+        .planner
+        .root_actions
+        .iter()
+        .find(|evaluation| evaluation.action == analysis.planner.best_action)
+        .and_then(|evaluation| evaluation.exact)
+        .expect("the selected play has an exact terminal proof");
+    assert_eq!(exact.worlds, analysis.planner.considered_worlds);
+    assert_eq!(exact.perfect_worlds, exact.worlds);
+    assert_eq!(exact.score_sum, 25 * exact.worlds);
+    assert_eq!(exact.strikeout_worlds, 0);
+}
+
+#[test]
 fn move_43_prefers_the_final_play_clue_with_known_trash_collateral() {
     let replay_fixture = expert_replay_194321();
     let state = replay_fixture
