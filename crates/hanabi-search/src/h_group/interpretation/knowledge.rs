@@ -412,6 +412,36 @@ fn compile_convention_card_inferences(
         card.focused = active_focus == Some(card.card);
     }
 
+    // A deterministic later step in a connection chain is known immediately,
+    // even though it is not yet actionable. Keep that epistemic promise
+    // separate from the play obligation assigned to the chain's active head
+    // below. Multi-card steps remain conditional: only their current first
+    // candidate can be constrained after preceding alternatives resolve.
+    for pending in replay
+        .pending_connections
+        .iter()
+        .filter(|pending| pending.actor == view.observer && pending.cards.len() == 1)
+    {
+        let pending_card = pending.cards[0];
+        let conflicting_promise = replay.pending_connections.iter().any(|other| {
+            other.actor == view.observer
+                && other.cards.as_slice() == [pending_card]
+                && other.expected != pending.expected
+        });
+        if conflicting_promise {
+            continue;
+        }
+        let Some(card) = cards.iter_mut().find(|card| card.card == pending_card) else {
+            continue;
+        };
+        let promised = IdentitySet::singleton(pending.expected);
+        let narrowed = card.identities.intersection(promised);
+        if !narrowed.is_empty() {
+            card.identities = narrowed;
+            card.promised_identity = Some(pending.expected);
+        }
+    }
+
     for pending in replay.pending_connections.iter().filter(|pending| {
         pending.actor == view.observer && pending_is_active(pending, &replay.pending_connections)
     }) {
@@ -487,7 +517,8 @@ pub(in crate::h_group) fn build_convention_knowledge(
     let effects = effects_from_projection(deductions, &projected, |card| {
         if let Some(connection) = replay.pending_connections.iter().find(|connection| {
             connection.cards.first() == Some(&card)
-                && pending_is_active(connection, &replay.pending_connections)
+                && (connection.cards.len() == 1
+                    || pending_is_active(connection, &replay.pending_connections))
         }) {
             let turn = replay
                 .pending_connections

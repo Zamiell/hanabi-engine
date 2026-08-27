@@ -35,7 +35,12 @@ fn subjective_h_group_replay(
     profile: HGroupProfile,
     observer: PlayerId,
 ) -> Option<(LogicalDeductions, HGroupState)> {
-    projected_h_group_replay_inner(source, profile, observer, PerspectiveDepth::ObserverOnly)
+    projected_h_group_replay_inner(
+        source,
+        profile,
+        observer,
+        PerspectiveDepth::NestedRecipients,
+    )
 }
 
 pub(super) fn projected_h_group_replay(

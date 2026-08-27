@@ -100,6 +100,34 @@ fn good_touch_does_not_narrow_unclued_connection_suffix_cards() {
     }
 }
 
+#[test]
+fn deterministic_future_connection_steps_are_known_before_they_are_actionable() {
+    let state = expert_replay_194321()
+        .state_at_turn(6)
+        .expect("fixture prefix is legal");
+    let view = state.view_for(PlayerId::new(2)).expect("Cathy has a view");
+    let deductions = LogicalDeductions::new(view).expect("valid deductions");
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+
+    for (card, identity) in [
+        (CardId::new(11), Card::new(Suit::Red, Rank::Two)),
+        (CardId::new(9), Card::new(Suit::Red, Rank::Three)),
+    ] {
+        let note = inferred
+            .cards
+            .iter()
+            .find(|note| note.card == card)
+            .expect("Cathy has a convention note for the future connector");
+        assert_eq!(note.identities, IdentitySet::singleton(identity));
+        assert_eq!(note.promised_identity, Some(identity));
+        assert_eq!(
+            note.play_obligation, None,
+            "a future connection identity is known before its play is due"
+        );
+        assert!(!inferred.playable_now.contains(&card));
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReplayEpistemicSnapshot {

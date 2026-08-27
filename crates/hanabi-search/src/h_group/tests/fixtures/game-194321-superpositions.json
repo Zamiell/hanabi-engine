@@ -305,9 +305,15 @@
             {
               "card": 9,
               "actual": "r3",
+              "convention": "r3",
               "removedFlags": [
                 "chop"
               ]
+            },
+            {
+              "card": 11,
+              "actual": "r2",
+              "convention": "r2"
             },
             {
               "card": 16,
