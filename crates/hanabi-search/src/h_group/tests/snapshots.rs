@@ -273,10 +273,10 @@ struct CardDelta {
     convention: Option<String>,
     /// Flags absent before this turn that are present after it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    added_flags: Vec<&'static str>,
+    added_flags: Vec<SnapshotFlag>,
     /// Flags present before this turn that are no longer present.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    removed_flags: Vec<&'static str>,
+    removed_flags: Vec<SnapshotFlag>,
 }
 
 impl CardDelta {
@@ -326,23 +326,22 @@ impl CardDelta {
         card.convention.clone_from(&self.convention);
         card.flags.retain(|flag| !self.removed_flags.contains(flag));
         card.flags.extend(self.added_flags.iter().copied());
-        card.flags.sort_by_key(|flag| flag_order(flag));
+        card.flags.sort();
     }
 }
 
-fn flag_order(flag: &str) -> usize {
-    match flag {
-        "focused" => 0,
-        "provisional" => 1,
-        "playable" => 2,
-        "trash" => 3,
-        "saved" => 4,
-        "finessed" => 5,
-        "chop" => 6,
-        "chop-moved" => 7,
-        "discard-now" => 8,
-        _ => usize::MAX,
-    }
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum SnapshotFlag {
+    Focused,
+    Provisional,
+    Playable,
+    Trash,
+    Saved,
+    Finessed,
+    Chop,
+    ChopMoved,
+    DiscardNow,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -356,7 +355,7 @@ struct CardSnapshot {
     convention: Option<String>,
     /// Stable semantic states that currently apply to the card.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    flags: Vec<&'static str>,
+    flags: Vec<SnapshotFlag>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -415,15 +414,15 @@ fn card_deltas_report_only_flag_changes() {
         card: 11,
         actual: "r2".to_owned(),
         convention: Some("r2".to_owned()),
-        flags: vec!["finessed"],
+        flags: vec![SnapshotFlag::Finessed],
     };
     let after = CardSnapshot {
-        flags: vec!["playable", "finessed"],
+        flags: vec![SnapshotFlag::Playable, SnapshotFlag::Finessed],
         ..before.clone()
     };
 
     let delta = CardDelta::between(Some(&before), &after).expect("the card gained a flag");
-    assert_eq!(delta.added_flags, ["playable"]);
+    assert_eq!(delta.added_flags, [SnapshotFlag::Playable]);
     assert!(delta.removed_flags.is_empty());
 
     let mut reconstructed = before;
@@ -580,31 +579,33 @@ fn player_snapshot(state: &FullState, player: PlayerId) -> PlayerStateSnapshot {
                     .iter()
                     .all(|identity| is_convention_trash(&view, identity, &gotten, &inferred.cards));
             let mut flags = Vec::new();
-            flags.extend(note.focused.then_some("focused"));
+            flags.extend(note.focused.then_some(SnapshotFlag::Focused));
             flags.extend(
                 (note.identity_status == HGroupIdentityStatus::Provisional)
-                    .then_some("provisional"),
+                    .then_some(SnapshotFlag::Provisional),
             );
             let has_play_obligation = inferred.playable_now.contains(&observed.id)
                 || inferred
                     .connection
                     .is_some_and(|connection| connection.card == observed.id);
-            flags.extend(has_play_obligation.then_some("playable"));
-            flags.extend(trash.then_some("trash"));
-            flags.extend(note.saved.then_some("saved"));
-            flags.extend(note.finessed.then_some("finessed"));
-            flags.extend((inferred.chops[player.index()] == Some(observed.id)).then_some("chop"));
+            flags.extend(has_play_obligation.then_some(SnapshotFlag::Playable));
+            flags.extend(trash.then_some(SnapshotFlag::Trash));
+            flags.extend(note.saved.then_some(SnapshotFlag::Saved));
+            flags.extend(note.finessed.then_some(SnapshotFlag::Finessed));
+            flags.extend(
+                (inferred.chops[player.index()] == Some(observed.id)).then_some(SnapshotFlag::Chop),
+            );
             flags.extend(
                 inferred
                     .chop_moved
                     .contains(&observed.id)
-                    .then_some("chop-moved"),
+                    .then_some(SnapshotFlag::ChopMoved),
             );
             flags.extend(
                 inferred
                     .discard_now
                     .contains(&observed.id)
-                    .then_some("discard-now"),
+                    .then_some(SnapshotFlag::DiscardNow),
             );
             let convention_identities = note
                 .promised_identity
