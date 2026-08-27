@@ -149,6 +149,30 @@ impl ConnectionManager {
         })
     }
 
+    /// Whether an identity belonged to a live connection promise at a past
+    /// turn. This reconstructs historical commitment state from the lifecycle
+    /// journal, so replaying a clue does not forget connectors merely because
+    /// they have since played and left the current hands.
+    pub(super) fn identity_was_queued_at(&self, identity: Card, turn: u32) -> bool {
+        self.transitions
+            .iter()
+            .filter(|transition| {
+                transition.turn <= turn
+                    && transition.reason == ConnectionTransitionReason::Scheduled
+                    && (transition.expected == identity || transition.focus_identity == identity)
+            })
+            .any(|scheduled| {
+                self.transitions
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, transition)| {
+                        transition.promise == scheduled.promise && transition.turn <= turn
+                    })
+                    .max_by_key(|(index, transition)| (transition.turn, *index))
+                    .is_some_and(|(_, transition)| transition.to == ConnectionStatus::Pending)
+            })
+    }
+
     fn promise_was_demonstrated_after(&self, promise: PromiseId, turn: u32) -> bool {
         self.transitions.iter().any(|transition| {
             transition.promise == promise
@@ -584,5 +608,18 @@ mod tests {
                 && transition.from == ConnectionStatus::Pending
                 && transition.to == ConnectionStatus::Pending
         }));
+    }
+
+    #[test]
+    fn historical_queue_state_survives_later_completion() {
+        let mut manager = ConnectionManager::default();
+        let red_two = Card::new(Suit::Red, Rank::Two);
+        let red_three = Card::new(Suit::Red, Rank::Three);
+        manager.start(3, obligation(vec![CardId::new(5)]));
+        manager.advance_play(5, PlayerId::new(1), CardId::new(5), red_two, true);
+
+        assert!(manager.identity_was_queued_at(red_two, 4));
+        assert!(manager.identity_was_queued_at(red_three, 4));
+        assert!(!manager.identity_was_queued_at(red_two, 5));
     }
 }

@@ -1232,6 +1232,55 @@ fn replay_h_group_inner(
                         connection.actor == *target
                             && pending_is_active(connection, &pending_connections)
                     });
+                    // https://hanabi.github.io/level-10/#directness-principle
+                    // When one possible focus identity is reached entirely by
+                    // play commitments that already exist, prefer that direct
+                    // line over a higher identity that would need an extra
+                    // Prompt/Finesse. Keeping both identities would leave the
+                    // recipient with an ambiguity that the clue itself has
+                    // already resolved.
+                    let directness_candidates = IdentitySet::from_mask(
+                        play_identities
+                            .iter()
+                            .filter(|identity| {
+                                !pending_connections.identity_was_queued_at(*identity, entry.turn)
+                            })
+                            .fold(0, |mask, identity| mask | (1 << identity.index())),
+                    );
+                    let directly_accounted_play = IdentitySet::from_mask(
+                        directness_candidates
+                            .iter()
+                            .filter(|identity| {
+                                let height = stack_heights[identity.suit.index()];
+                                ((height + 1)..identity.rank.number()).all(|rank| {
+                                    let expected =
+                                        Card::new(identity.suit, Rank::ALL[usize::from(rank - 1)]);
+                                    pending_identity_is_queued(&pending_connections, expected)
+                                        || pending_connections
+                                            .identity_was_queued_at(expected, entry.turn)
+                                        || already_playing.iter().any(|card| {
+                                            historical.identity(*card) == Some(expected)
+                                                || signals.facts().known_identity(*card)
+                                                    == Some(expected)
+                                                || IdentitySet::from_mask(
+                                                    facts[card.index()].identity_mask(),
+                                                ) == IdentitySet::singleton(expected)
+                                        })
+                                })
+                            })
+                            .fold(0, |mask, identity| mask | (1 << identity.index())),
+                    );
+                    let directness_identity = (focus_identity.is_none()
+                        && directness_candidates.len() > 1
+                        && directness_candidates.iter().all(|identity| {
+                            identity.rank.number() > stack_heights[identity.suit.index()] + 1
+                        })
+                        && directly_accounted_play.len() == 1)
+                        .then(|| directly_accounted_play.iter().next())
+                        .flatten();
+                    if let Some(identity) = directness_identity {
+                        play_identities = IdentitySet::singleton(identity);
+                    }
                     let direct_play = IdentitySet::from_mask(
                         play_identities
                             .iter()
@@ -1420,6 +1469,11 @@ fn replay_h_group_inner(
                         HGroupClueKind::Unrecognized => None,
                     };
                     if let Some(signal_kind) = signal_kind {
+                        let signal_identity = if signal_kind == HGroupMoveKind::PlayClue {
+                            directness_identity.or(focus_identity)
+                        } else {
+                            focus_identity
+                        };
                         push_signal(
                             &mut signals,
                             entry,
@@ -1427,7 +1481,7 @@ fn replay_h_group_inner(
                             Some(*target),
                             signal_kind,
                             vec![focus],
-                            focus_identity,
+                            signal_identity,
                         );
                     }
                     if matches!(kind, HGroupClueKind::Play)

@@ -9,6 +9,41 @@ const SNAPSHOT_SCHEMA_VERSION: u8 = 14;
 const UPDATE_ENVIRONMENT_VARIABLE: &str = "HANABI_UPDATE_SUPERPOSITIONS";
 
 #[test]
+fn directness_resolves_turn_37_purple_focus_to_four() {
+    let purple_four = Card::new(Suit::Purple, Rank::Four);
+    let purple_five = Card::new(Suit::Purple, Rank::Five);
+    for turn in [36, 40] {
+        let state = expert_replay_p4v0s415()
+            .state_at_turn(turn)
+            .expect("fixture prefix is legal");
+        let view = state.view_for(PlayerId::new(0)).expect("Alice has a view");
+        let deductions = LogicalDeductions::new(view).expect("valid deductions");
+        let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+        let focus = inferred
+            .cards
+            .iter()
+            .find(|note| note.card == CardId::new(34))
+            .expect("Alice still holds the focused purple card");
+        let older_touched = inferred
+            .cards
+            .iter()
+            .find(|note| note.card == CardId::new(24))
+            .expect("Alice still holds the older touched purple card");
+
+        assert_eq!(
+            focus.identities,
+            IdentitySet::singleton(purple_four),
+            "purple 4 must stay resolved at turn {turn}"
+        );
+        assert_eq!(
+            older_touched.identities,
+            IdentitySet::singleton(purple_five),
+            "Good Touch must keep the older card purple 5 at turn {turn}"
+        );
+    }
+}
+
+#[test]
 fn focus_is_cleared_after_the_action_following_its_clue() {
     let replay = expert_replay_p4v0s415();
     for (turn, focused) in [(1, true), (2, false)] {

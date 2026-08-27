@@ -907,8 +907,12 @@
           "player": 0,
           "cards": [
             {
+              "card": 24,
+              "convention": "p5"
+            },
+            {
               "card": 34,
-              "convention": "p4 p5",
+              "convention": "p4",
               "addedFlags": [
                 "focused"
               ],
@@ -929,15 +933,6 @@
     {
       "turn": 39,
       "changes": [
-        {
-          "player": 0,
-          "cards": [
-            {
-              "card": 34,
-              "convention": "p4"
-            }
-          ]
-        },
         {
           "player": 1,
           "connection": null
@@ -979,7 +974,6 @@
           "cards": [
             {
               "card": 34,
-              "convention": "p4 p5",
               "addedFlags": [
                 "playable"
               ]
@@ -996,7 +990,6 @@
           "cards": [
             {
               "card": 24,
-              "convention": "p5",
               "addedFlags": [
                 "playable"
               ]
