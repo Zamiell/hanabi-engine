@@ -171,6 +171,9 @@ pub struct HGroupCardInference {
     /// card could physically be another successful play.
     pub promised_identity: Option<Card>,
     pub identity_status: HGroupIdentityStatus,
+    /// Whether this card is the focus of the latest completed clue action.
+    /// Historical focus remains on `HGroupClueInterpretation`; this transient
+    /// marker is cleared as soon as another action occurs.
     pub focused: bool,
     pub saved: bool,
     pub finessed: bool,

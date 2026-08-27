@@ -32,6 +32,9 @@ Only Hanabi Live `No Variant` games are currently supported.
   and its exact promised identity. For example, a card promised as yellow 1
   may physically be another card that will successfully blind-play; the
   connection still requires the player to act on the yellow-1 promise.
+- Focus is event-local: it marks the card selected by the latest clue and is
+  cleared after the next action. The identities and promises established from
+  that focus remain locked in, while historical focus stays in the clue log.
 
 Hidden simulator truth is never passed to an action-selection policy.
 

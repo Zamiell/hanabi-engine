@@ -9,6 +9,32 @@ const SNAPSHOT_SCHEMA_VERSION: u8 = 6;
 const UPDATE_ENVIRONMENT_VARIABLE: &str = "HANABI_UPDATE_SUPERPOSITIONS";
 
 #[test]
+fn focus_is_cleared_after_the_action_following_its_clue() {
+    let replay = expert_replay_194321();
+    for (turn, focused) in [(1, true), (2, false)] {
+        let state = replay.state_at_turn(turn).expect("fixture prefix is legal");
+        let view = state.view_for(PlayerId::new(2)).expect("Cathy has a view");
+        let deductions = LogicalDeductions::new(view).expect("valid deductions");
+        let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+        let green_one = inferred
+            .cards
+            .iter()
+            .find(|note| note.card == CardId::new(8))
+            .expect("Cathy still holds the green 1");
+
+        assert_eq!(
+            green_one.focused, focused,
+            "unexpected focus at turn {turn}"
+        );
+        assert_eq!(
+            green_one.identities,
+            IdentitySet::singleton(Card::new(Suit::Green, Rank::One)),
+            "clearing transient focus must preserve the clue's locked-in identity"
+        );
+    }
+}
+
+#[test]
 fn finesse_separates_its_exact_promise_from_successful_play_contingencies() {
     let expected = [
         Card::new(Suit::Red, Rank::One),

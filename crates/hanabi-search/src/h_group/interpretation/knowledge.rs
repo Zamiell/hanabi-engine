@@ -2,10 +2,10 @@ use super::super::{HGroupIdentityStatus, blind_reverse_finesse_is_eligible};
 use super::{
     Card, CardId, CardSet, Clue, ClueFacts, ConnectionObligation, ConventionFacts,
     HGroupCardInference, HGroupConnection, HGroupConnectionKind, HGroupMoveKind, HGroupProfile,
-    HGroupRuleId, HGroupState, HistoricalView, IdentitySet, LogicalDeductions, PlayerId,
-    PlayerView, Rank, chop, elimination_finesse_connection, identity_of, is_eventually_useful,
-    is_playable_at, loaded_connection_plan, next_player, pending_identity_is_queued,
-    pending_is_active, replay_identity_is_queued, rule_enabled,
+    HGroupRuleId, HGroupState, HistoricalView, IdentitySet, LogicalDeductions, ObservedEvent,
+    PlayerId, PlayerView, Rank, chop, elimination_finesse_connection, identity_of,
+    is_eventually_useful, is_playable_at, loaded_connection_plan, next_player,
+    pending_identity_is_queued, pending_is_active, replay_identity_is_queued, rule_enabled,
 };
 
 pub(in crate::h_group) fn delayed_focus_identities(
@@ -194,7 +194,6 @@ pub(in crate::h_group) fn convention_card_inferences(
                     if !one_away.is_empty() {
                         card.identities = one_away;
                     }
-                    card.focused = true;
                     card.saved = false;
                 } else {
                     let clue_time = clue.play_identities.union(clue.save_identities);
@@ -348,7 +347,6 @@ pub(in crate::h_group) fn convention_card_inferences(
                     if !narrowed.is_empty() {
                         card.identities = narrowed;
                     }
-                    card.focused = true;
                     card.saved |= !card
                         .identities
                         .intersection(clue.save_identities)
@@ -414,6 +412,25 @@ pub(in crate::h_group) fn convention_card_inferences(
                 }
             }
         }
+    }
+
+    // Focus identifies how the latest clue is interpreted; it is not a
+    // persistent card property. The clue history above has already locked in
+    // every resulting identity, save, and play deduction.
+    let active_focus = view.history.last().and_then(|entry| {
+        matches!(&entry.event, ObservedEvent::Clued { .. })
+            .then(|| {
+                replay
+                    .clues
+                    .iter()
+                    .rev()
+                    .find(|clue| clue.turn == entry.turn)
+                    .map(|clue| clue.focus)
+            })
+            .flatten()
+    });
+    for card in &mut cards {
+        card.focused = active_focus == Some(card.card);
     }
 
     for pending in replay.pending_connections.iter().filter(|pending| {
