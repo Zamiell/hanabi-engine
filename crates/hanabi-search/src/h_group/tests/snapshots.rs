@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use super::*;
 
-const SNAPSHOT_SCHEMA_VERSION: u8 = 10;
+const SNAPSHOT_SCHEMA_VERSION: u8 = 11;
 const UPDATE_ENVIRONMENT_VARIABLE: &str = "HANABI_UPDATE_SUPERPOSITIONS";
 
 #[test]
@@ -160,8 +160,8 @@ struct InitialPlayerSnapshot {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TurnDelta {
-    /// Number of completed player actions. Turn one is the position after the
-    /// first action; the initial deal is stored separately in `initial`.
+    /// Hanabi Live turn shown after this action. The initial deal is turn one,
+    /// so the position after the first action is turn two.
     turn: u32,
     changes: Vec<PlayerDelta>,
 }
@@ -478,6 +478,19 @@ fn superposition_deltas_reconstruct_every_replay_position() {
 }
 
 #[test]
+fn snapshot_turns_match_hanabi_live_display_numbers() {
+    let replay = expert_replay_194321();
+    let snapshot: serde_json::Value = serde_json::from_str(&render_snapshot(&replay)).unwrap();
+    let deltas = snapshot["turnDeltas"].as_array().unwrap();
+
+    assert_eq!(deltas.first().unwrap()["turn"], 2);
+    assert_eq!(
+        deltas.last().unwrap()["turn"],
+        u64::try_from(replay.actions.len() + 1).unwrap()
+    );
+}
+
+#[test]
 fn card_deltas_report_only_flag_changes() {
     let before = CardSnapshot {
         card: 11,
@@ -578,7 +591,7 @@ fn render_snapshot(replay: &HanabiLiveReplay) -> String {
         .windows(2)
         .enumerate()
         .map(|(index, positions)| TurnDelta {
-            turn: u32::try_from(index + 1).expect("replay length fits in u32"),
+            turn: u32::try_from(index + 2).expect("replay length fits in u32"),
             changes: position_delta(&positions[0], &positions[1]),
         })
         .collect();
