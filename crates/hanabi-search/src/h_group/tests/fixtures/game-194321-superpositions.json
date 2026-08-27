@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 5,
+  "schemaVersion": 6,
   "source": "game-194321.json",
   "convention": "H-Group max",
   "initial": [
@@ -152,7 +152,7 @@
             {
               "card": 15,
               "actual": "b1",
-              "convention": "r1 y1 b1 p1",
+              "convention": "y1",
               "flags": [
                 "playable",
                 "finessed"
@@ -182,20 +182,6 @@
           "removedCards": [
             8
           ]
-        },
-        {
-          "player": 3,
-          "cards": [
-            {
-              "card": 15,
-              "actual": "b1",
-              "convention": "r1 y1 g2 b1 p1",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            }
-          ]
         }
       ]
     },
@@ -221,7 +207,7 @@
             {
               "card": 14,
               "actual": "b2",
-              "convention": "r1 y1 g2 b2 p1",
+              "convention": "y1",
               "flags": [
                 "playable",
                 "finessed"
@@ -338,15 +324,6 @@
               "convention": "y1 y2 y4 g1 g2 g3 g4 g5 b1 b2 b3 b4 b5 p1 p3 p4 p5"
             },
             {
-              "card": 14,
-              "actual": "b2",
-              "convention": "y1 g2 b2 p1",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            },
-            {
               "card": 17,
               "actual": "r4",
               "convention": "r1 r2 r3 r4",
@@ -419,7 +396,7 @@
             {
               "card": 13,
               "actual": "y1",
-              "convention": "y1 g2 b3 p1",
+              "convention": "y1",
               "flags": [
                 "playable",
                 "finessed"
@@ -517,15 +494,6 @@
               ]
             },
             {
-              "card": 13,
-              "actual": "y1",
-              "convention": "y1 g2 p1",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            },
-            {
               "card": 17,
               "actual": "r4",
               "convention": "r2 r4",
@@ -615,15 +583,6 @@
           "player": 3,
           "cards": [
             {
-              "card": 13,
-              "actual": "y1",
-              "convention": "y1 g2 b4 p1",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            },
-            {
               "card": 21,
               "actual": "y1"
             }
@@ -679,15 +638,6 @@
               "flags": [
                 "chop"
               ]
-            },
-            {
-              "card": 13,
-              "actual": "y1",
-              "convention": "y1 g2 p1",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
             }
           ]
         }
@@ -706,20 +656,6 @@
           ],
           "removedCards": [
             4
-          ]
-        },
-        {
-          "player": 3,
-          "cards": [
-            {
-              "card": 13,
-              "actual": "y1",
-              "convention": "y1 g2 b5 p1",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            }
           ]
         }
       ]
@@ -827,7 +763,7 @@
             {
               "card": 7,
               "actual": "g3",
-              "convention": "r4 y1 g3 p1",
+              "convention": "g3",
               "flags": [
                 "playable",
                 "finessed"
@@ -857,15 +793,6 @@
               "convention": "y1 y4 g1 g2 g4 g5 b1 b2 b5 p1 p4",
               "flags": [
                 "chop"
-              ]
-            },
-            {
-              "card": 13,
-              "actual": "y1",
-              "convention": "y1 b5 p1",
-              "flags": [
-                "playable",
-                "finessed"
               ]
             }
           ]
@@ -912,15 +839,6 @@
               "card": 6,
               "actual": "p2",
               "convention": "r1 r2 r3 r4 y1 y2 y3 y4 g1 g2 g3 g4 g5 p2 p3 p4"
-            },
-            {
-              "card": 7,
-              "actual": "g3",
-              "convention": "r4 y1 g3",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
             }
           ]
         },
@@ -934,15 +852,6 @@
               "flags": [
                 "chop"
               ]
-            },
-            {
-              "card": 13,
-              "actual": "y1",
-              "convention": "y1 b5",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
             }
           ]
         }
@@ -951,20 +860,6 @@
     {
       "turn": 20,
       "changes": [
-        {
-          "player": 1,
-          "cards": [
-            {
-              "card": 7,
-              "actual": "g3",
-              "convention": "y1 g3",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            }
-          ]
-        },
         {
           "player": 2,
           "cards": [
@@ -1012,20 +907,6 @@
           ]
         },
         {
-          "player": 1,
-          "cards": [
-            {
-              "card": 7,
-              "actual": "g3",
-              "convention": "y1 g3 p2",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            }
-          ]
-        },
-        {
           "player": 2,
           "cards": [
             {
@@ -1048,15 +929,6 @@
               "convention": "y1 y4 g1 g2 g4 g5 b1 b2 p4",
               "flags": [
                 "chop"
-              ]
-            },
-            {
-              "card": 13,
-              "actual": "y1",
-              "convention": "y1",
-              "flags": [
-                "playable",
-                "finessed"
               ]
             }
           ]
@@ -1099,20 +971,6 @@
               "card": 23,
               "actual": "r5",
               "convention": "r5 y1 g4",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            }
-          ]
-        },
-        {
-          "player": 3,
-          "cards": [
-            {
-              "card": 13,
-              "actual": "y1",
-              "convention": "y1 g4",
               "flags": [
                 "playable",
                 "finessed"

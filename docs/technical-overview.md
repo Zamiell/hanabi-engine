@@ -28,6 +28,10 @@ Only Hanabi Live `No Variant` games are currently supported.
 - `ConventionInferences` stores interpretations such as focus, saves,
   finesses, chop movement, and connection promises separately from logical
   facts.
+- A Finesse card separately retains its convention-compatible physical domain
+  and its exact promised identity. For example, a card promised as yellow 1
+  may physically be another card that will successfully blind-play; the
+  connection still requires the player to act on the yellow-1 promise.
 
 Hidden simulator truth is never passed to an action-selection policy.
 

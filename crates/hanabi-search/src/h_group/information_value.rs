@@ -70,6 +70,7 @@ fn direct_card_inferences(source: &PlayerView, target: PlayerId) -> Vec<HGroupCa
         .map(|card| HGroupCardInference {
             card: card.id,
             identities: IdentitySet::from_mask(card.clues.identity_mask()),
+            promised_identity: None,
             identity_status: HGroupIdentityStatus::Settled,
             focused: false,
             saved: false,
@@ -209,6 +210,7 @@ mod tests {
         let before = HGroupCardInference {
             card: CardId::new(0),
             identities,
+            promised_identity: None,
             identity_status: HGroupIdentityStatus::Settled,
             focused: false,
             saved: false,

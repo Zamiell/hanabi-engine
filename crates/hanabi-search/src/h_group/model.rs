@@ -162,7 +162,14 @@ pub enum HGroupIdentityStatus {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HGroupCardInference {
     pub card: CardId,
+    /// Convention-compatible physical identities for information-set and
+    /// contingency analysis. This may include successful wrong-play outcomes.
     pub identities: IdentitySet,
+    /// Exact identity promised by the card's currently active connection.
+    /// Unlike `identities`, this records what the player must act as though the
+    /// card is; a Finesse promised as yellow 1 remains yellow 1 even when the
+    /// card could physically be another successful play.
+    pub promised_identity: Option<Card>,
     pub identity_status: HGroupIdentityStatus,
     pub focused: bool,
     pub saved: bool,

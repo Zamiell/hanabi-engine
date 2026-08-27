@@ -4,8 +4,8 @@ use super::{
     HGroupCardInference, HGroupConnection, HGroupConnectionKind, HGroupMoveKind, HGroupProfile,
     HGroupRuleId, HGroupState, HistoricalView, IdentitySet, LogicalDeductions, PlayerId,
     PlayerView, Rank, chop, elimination_finesse_connection, identity_of, is_eventually_useful,
-    is_playable_at, loaded_connection_plan, pending_identity_is_queued, pending_is_active,
-    replay_identity_is_queued, rule_enabled,
+    is_playable_at, loaded_connection_plan, next_player, pending_identity_is_queued,
+    pending_is_active, replay_identity_is_queued, rule_enabled,
 };
 
 pub(in crate::h_group) fn delayed_focus_identities(
@@ -103,12 +103,39 @@ pub(in crate::h_group) fn identities_at_distance_at(
     IdentitySet::from_mask(mask)
 }
 
+/// Stack heights that are forced before the observer's next action.
+///
+/// Only another player's uniquely available promised play is projected. If a
+/// player has multiple promised cards that could play, their choice is not
+/// deterministic and this deliberately leaves the stacks unchanged.
+fn predictable_stack_heights_at_observer_turn(view: &PlayerView, replay: &HGroupState) -> [u8; 5] {
+    let mut stack_heights = std::array::from_fn(|index| {
+        u8::try_from(view.play_stacks[index].len())
+            .expect("a standard stack has at most five cards")
+    });
+    let mut player = view.current_player;
+    while player != view.observer {
+        let playable = view.hands[player.index()]
+            .iter()
+            .filter(|card| replay.cards.already_playing.contains(&card.id))
+            .filter_map(|card| card.identity)
+            .filter(|identity| is_playable_at(stack_heights, *identity))
+            .collect::<Vec<_>>();
+        if let [identity] = playable.as_slice() {
+            stack_heights[identity.suit.index()] += 1;
+        }
+        player = next_player(player, view.hands.len());
+    }
+    stack_heights
+}
+
 #[allow(clippy::too_many_lines)]
 pub(in crate::h_group) fn convention_card_inferences(
     deductions: &LogicalDeductions,
     replay: &HGroupState,
 ) -> Vec<HGroupCardInference> {
     let view = deductions.view();
+    let observer_turn_stack_heights = predictable_stack_heights_at_observer_turn(view, replay);
     let mut cards = view.hands[view.observer.index()]
         .iter()
         .filter_map(|card| {
@@ -117,6 +144,7 @@ pub(in crate::h_group) fn convention_card_inferences(
                 .map(|identities| HGroupCardInference {
                     card: card.id,
                     identities,
+                    promised_identity: None,
                     identity_status: HGroupIdentityStatus::Settled,
                     focused: false,
                     saved: false,
@@ -414,7 +442,7 @@ pub(in crate::h_group) fn convention_card_inferences(
             // the explicit expected connector even though this connection
             // itself makes that identity appear queued.
             let unclaimed_playables = IdentitySet::from_mask(
-                identities_at_distance(card.identities, view, 0)
+                identities_at_distance_at(card.identities, observer_turn_stack_heights, 0)
                     .iter()
                     .filter(|identity| {
                         !replay.cards.already_playing.iter().any(|claimed_card| {
@@ -441,6 +469,7 @@ pub(in crate::h_group) fn convention_card_inferences(
         if !narrowed.is_empty() {
             card.identities = narrowed;
         }
+        card.promised_identity = Some(pending.expected);
         card.finessed = true;
     }
     for forced in &replay.cards.forced_playable {

@@ -5,30 +5,47 @@ use serde::Serialize;
 
 use super::*;
 
-const SNAPSHOT_SCHEMA_VERSION: u8 = 5;
+const SNAPSHOT_SCHEMA_VERSION: u8 = 6;
 const UPDATE_ENVIRONMENT_VARIABLE: &str = "HANABI_UPDATE_SUPERPOSITIONS";
 
 #[test]
-fn finesse_superposition_excludes_an_identity_already_promised_by_good_touch() {
-    let state = expert_replay_194321()
-        .state_at_turn(2)
-        .expect("fixture prefix is legal");
-    let view = state.view_for(PlayerId::new(3)).expect("Donald has a view");
-    let deductions = LogicalDeductions::new(view).expect("valid deductions");
-    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
-    let finesse = inferred
-        .cards
-        .iter()
-        .find(|note| note.card == CardId::new(15))
-        .expect("Donald's newest card has a Finesse note");
-    let expected = [Suit::Red, Suit::Yellow, Suit::Blue, Suit::Purple]
-        .into_iter()
-        .fold(IdentitySet::default(), |identities, suit| {
-            identities.union(IdentitySet::singleton(Card::new(suit, Rank::One)))
-        });
+fn finesse_separates_its_exact_promise_from_successful_play_contingencies() {
+    let expected = [
+        Card::new(Suit::Red, Rank::One),
+        Card::new(Suit::Yellow, Rank::One),
+        Card::new(Suit::Green, Rank::Two),
+        Card::new(Suit::Blue, Rank::One),
+        Card::new(Suit::Purple, Rank::One),
+    ]
+    .into_iter()
+    .fold(IdentitySet::default(), |identities, identity| {
+        identities.union(IdentitySet::singleton(identity))
+    });
 
-    assert_eq!(finesse.identities, expected);
-    assert!(finesse.finessed);
+    for turn in [2, 3] {
+        let state = expert_replay_194321()
+            .state_at_turn(turn)
+            .expect("fixture prefix is legal");
+        let view = state.view_for(PlayerId::new(3)).expect("Donald has a view");
+        let deductions = LogicalDeductions::new(view).expect("valid deductions");
+        let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+        let finesse = inferred
+            .cards
+            .iter()
+            .find(|note| note.card == CardId::new(15))
+            .expect("Donald's newest card has a Finesse note");
+
+        assert_eq!(
+            finesse.identities, expected,
+            "the predictable green-1 play must make green 2 a Finesse alternative before Donald acts at turn {turn}"
+        );
+        assert_eq!(
+            finesse.promised_identity,
+            Some(Card::new(Suit::Yellow, Rank::One)),
+            "the successful-play contingencies must not dilute the exact yellow-1 Finesse promise"
+        );
+        assert!(finesse.finessed);
+    }
 }
 
 #[derive(Serialize)]
@@ -365,12 +382,11 @@ fn player_snapshot(state: &FullState, player: PlayerId) -> PlayerStateSnapshot {
                 (note.identity_status == HGroupIdentityStatus::Provisional)
                     .then_some("provisional"),
             );
-            flags.extend(
-                inferred
-                    .playable_now
-                    .contains(&observed.id)
-                    .then_some("playable"),
-            );
+            let has_play_obligation = inferred.playable_now.contains(&observed.id)
+                || inferred
+                    .connection
+                    .is_some_and(|connection| connection.card == observed.id);
+            flags.extend(has_play_obligation.then_some("playable"));
             flags.extend(trash.then_some("trash"));
             flags.extend(note.saved.then_some("saved"));
             flags.extend(note.finessed.then_some("finessed"));
@@ -387,10 +403,14 @@ fn player_snapshot(state: &FullState, player: PlayerId) -> PlayerStateSnapshot {
                     .contains(&observed.id)
                     .then_some("discard-now"),
             );
+            let convention_identities = note
+                .promised_identity
+                .map_or(note.identities, IdentitySet::singleton);
             CardSnapshot {
                 card: observed.id.index(),
                 actual: identity_label(actual),
-                convention: (note.identities != logical).then(|| identity_labels(note.identities)),
+                convention: (convention_identities != logical)
+                    .then(|| identity_labels(convention_identities)),
                 flags,
             }
         })
