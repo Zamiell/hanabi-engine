@@ -407,7 +407,35 @@ pub(in crate::h_group) fn convention_card_inferences(
         let allowed = if pending.cards.len() == 1 {
             expected
         } else {
-            expected.union(identities_at_distance(card.identities, view, 0))
+            // A wrong Finesse play can be any identity that succeeds now, but
+            // Good Touch still applies across the team's live promises. If a
+            // visible card is already scheduled as (for example) green 1, the
+            // Finesse card cannot independently be another green 1. Preserve
+            // the explicit expected connector even though this connection
+            // itself makes that identity appear queued.
+            let unclaimed_playables = IdentitySet::from_mask(
+                identities_at_distance(card.identities, view, 0)
+                    .iter()
+                    .filter(|identity| {
+                        !replay.cards.already_playing.iter().any(|claimed_card| {
+                            *claimed_card != card.card
+                                && identity_of(view, *claimed_card).or_else(|| {
+                                    replay
+                                        .clues
+                                        .iter()
+                                        .rev()
+                                        .find(|clue| clue.focus == *claimed_card)
+                                        .and_then(|clue| {
+                                            (clue.focus_identities.len() == 1)
+                                                .then(|| clue.focus_identities.iter().next())
+                                                .flatten()
+                                        })
+                                }) == Some(*identity)
+                        })
+                    })
+                    .fold(0, |mask, identity| mask | (1 << identity.index())),
+            );
+            expected.union(unclaimed_playables)
         };
         let narrowed = card.identities.intersection(allowed);
         if !narrowed.is_empty() {

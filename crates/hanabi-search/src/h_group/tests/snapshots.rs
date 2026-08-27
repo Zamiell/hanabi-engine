@@ -8,6 +8,29 @@ use super::*;
 const SNAPSHOT_SCHEMA_VERSION: u8 = 5;
 const UPDATE_ENVIRONMENT_VARIABLE: &str = "HANABI_UPDATE_SUPERPOSITIONS";
 
+#[test]
+fn finesse_superposition_excludes_an_identity_already_promised_by_good_touch() {
+    let state = expert_replay_194321()
+        .state_at_turn(2)
+        .expect("fixture prefix is legal");
+    let view = state.view_for(PlayerId::new(3)).expect("Donald has a view");
+    let deductions = LogicalDeductions::new(view).expect("valid deductions");
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    let finesse = inferred
+        .cards
+        .iter()
+        .find(|note| note.card == CardId::new(15))
+        .expect("Donald's newest card has a Finesse note");
+    let expected = [Suit::Red, Suit::Yellow, Suit::Blue, Suit::Purple]
+        .into_iter()
+        .fold(IdentitySet::default(), |identities, suit| {
+            identities.union(IdentitySet::singleton(Card::new(suit, Rank::One)))
+        });
+
+    assert_eq!(finesse.identities, expected);
+    assert!(finesse.finessed);
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReplayEpistemicSnapshot {

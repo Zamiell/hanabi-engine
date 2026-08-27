@@ -152,7 +152,7 @@
             {
               "card": 15,
               "actual": "b1",
-              "convention": "r1 y1 g1 b1 p1",
+              "convention": "r1 y1 b1 p1",
               "flags": [
                 "playable",
                 "finessed"
