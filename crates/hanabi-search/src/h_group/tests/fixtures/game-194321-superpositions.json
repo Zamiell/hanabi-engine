@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 6,
+  "schemaVersion": 7,
   "source": "game-194321.json",
   "convention": "H-Group max",
   "initial": [
@@ -248,10 +248,7 @@
             15
           ],
           "connection": {
-            "card": 14,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
+            "card": 14
           }
         }
       ]
@@ -396,10 +393,7 @@
             }
           ],
           "connection": {
-            "card": 1,
-            "identity": "r1",
-            "kind": "finesse",
-            "focus": 17
+            "card": 1
           }
         },
         {
@@ -453,10 +447,7 @@
             14
           ],
           "connection": {
-            "card": 13,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
+            "card": 13
           }
         }
       ]
@@ -578,9 +569,7 @@
           ],
           "connection": {
             "card": 9,
-            "identity": "r3",
-            "kind": "finesse",
-            "focus": 17
+            "identity": "r3"
           }
         },
         {
@@ -841,9 +830,7 @@
           ],
           "connection": {
             "card": 7,
-            "identity": "g3",
-            "kind": "finesse",
-            "focus": 3
+            "identity": "g3"
           }
         },
         {

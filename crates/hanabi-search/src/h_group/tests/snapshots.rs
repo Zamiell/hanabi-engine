@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use super::*;
 
-const SNAPSHOT_SCHEMA_VERSION: u8 = 6;
+const SNAPSHOT_SCHEMA_VERSION: u8 = 7;
 const UPDATE_ENVIRONMENT_VARIABLE: &str = "HANABI_UPDATE_SUPERPOSITIONS";
 
 #[test]
@@ -117,8 +117,8 @@ struct PlayerDelta {
     cards: Vec<CardDelta>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     removed_cards: Vec<usize>,
-    /// Absent means unchanged, an object is the new connection, and `null`
-    /// means that the previous connection was cleared.
+    /// Absent means unchanged, an object contains only changed connection
+    /// fields, and `null` means that the previous connection was cleared.
     #[serde(skip_serializing_if = "Option::is_none")]
     connection: Option<ConnectionDelta>,
 }
@@ -132,8 +132,78 @@ impl PlayerDelta {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(untagged)]
 enum ConnectionDelta {
-    Set(ConnectionSnapshot),
+    Changed(ConnectionPatch),
     Cleared,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectionPatch {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    card: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    identity: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    kind: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    focus: Option<usize>,
+}
+
+impl ConnectionDelta {
+    fn between(
+        before: Option<&ConnectionSnapshot>,
+        after: Option<&ConnectionSnapshot>,
+    ) -> Option<Self> {
+        if before == after {
+            return None;
+        }
+        let Some(after) = after else {
+            return Some(Self::Cleared);
+        };
+        Some(Self::Changed(ConnectionPatch {
+            card: (before.map(|connection| connection.card) != Some(after.card))
+                .then_some(after.card),
+            identity: (before.map(|connection| connection.identity.as_str())
+                != Some(after.identity.as_str()))
+            .then(|| after.identity.clone()),
+            kind: (before.map(|connection| connection.kind) != Some(after.kind))
+                .then_some(after.kind),
+            focus: (before.map(|connection| connection.focus) != Some(after.focus))
+                .then_some(after.focus),
+        }))
+    }
+
+    fn apply(&self, connection: &mut Option<ConnectionSnapshot>) {
+        match self {
+            Self::Cleared => *connection = None,
+            Self::Changed(patch) => {
+                if let Some(current) = connection {
+                    if let Some(card) = patch.card {
+                        current.card = card;
+                    }
+                    if let Some(identity) = &patch.identity {
+                        current.identity.clone_from(identity);
+                    }
+                    if let Some(kind) = patch.kind {
+                        current.kind = kind;
+                    }
+                    if let Some(focus) = patch.focus {
+                        current.focus = focus;
+                    }
+                } else {
+                    *connection = Some(ConnectionSnapshot {
+                        card: patch.card.expect("a new connection includes its card"),
+                        identity: patch
+                            .identity
+                            .clone()
+                            .expect("a new connection includes its identity"),
+                        kind: patch.kind.expect("a new connection includes its kind"),
+                        focus: patch.focus.expect("a new connection includes its focus"),
+                    });
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -325,12 +395,8 @@ fn position_delta(
                 .filter(|card| !after.hand.iter().any(|current| current.card == card.card))
                 .map(|card| card.card)
                 .collect();
-            let connection = (before.connection != after.connection).then(|| {
-                after
-                    .connection
-                    .clone()
-                    .map_or(ConnectionDelta::Cleared, ConnectionDelta::Set)
-            });
+            let connection =
+                ConnectionDelta::between(before.connection.as_ref(), after.connection.as_ref());
             let delta = PlayerDelta {
                 player,
                 cards,
@@ -360,10 +426,7 @@ fn apply_position_delta(states: &mut [PlayerStateSnapshot], changes: &[PlayerDel
             }
         }
         if let Some(connection) = &change.connection {
-            match connection {
-                ConnectionDelta::Set(connection) => state.connection = Some(connection.clone()),
-                ConnectionDelta::Cleared => state.connection = None,
-            }
+            connection.apply(&mut state.connection);
         }
     }
 }
