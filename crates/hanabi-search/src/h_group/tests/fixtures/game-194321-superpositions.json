@@ -1,170 +1,112 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "source": "game-194321.json",
   "convention": "H-Group max",
-  "positions": [
+  "initial": [
     {
-      "turn": 0,
-      "players": [
+      "player": 0,
+      "hand": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 0,
-              "actual": "b1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 1,
-              "actual": "r1"
-            },
-            {
-              "card": 2,
-              "actual": "y2"
-            },
-            {
-              "card": 3,
-              "actual": "g4"
-            }
+          "card": 0,
+          "actual": "b1",
+          "flags": [
+            "chop"
           ]
         },
         {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 4,
-              "actual": "b4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 5,
-              "actual": "p2"
-            },
-            {
-              "card": 6,
-              "actual": "p2"
-            },
-            {
-              "card": 7,
-              "actual": "g3"
-            }
-          ]
+          "card": 1,
+          "actual": "r1"
         },
         {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 8,
-              "actual": "g1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 9,
-              "actual": "r3"
-            },
-            {
-              "card": 10,
-              "actual": "y5"
-            },
-            {
-              "card": 11,
-              "actual": "r2"
-            }
-          ]
+          "card": 2,
+          "actual": "y2"
         },
         {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 13,
-              "actual": "y1"
-            },
-            {
-              "card": 14,
-              "actual": "b2"
-            },
-            {
-              "card": 15,
-              "actual": "b1"
-            }
-          ]
+          "card": 3,
+          "actual": "g4"
         }
       ]
     },
     {
+      "player": 1,
+      "hand": [
+        {
+          "card": 4,
+          "actual": "b4",
+          "flags": [
+            "chop"
+          ]
+        },
+        {
+          "card": 5,
+          "actual": "p2"
+        },
+        {
+          "card": 6,
+          "actual": "p2"
+        },
+        {
+          "card": 7,
+          "actual": "g3"
+        }
+      ]
+    },
+    {
+      "player": 2,
+      "hand": [
+        {
+          "card": 8,
+          "actual": "g1",
+          "flags": [
+            "chop"
+          ]
+        },
+        {
+          "card": 9,
+          "actual": "r3"
+        },
+        {
+          "card": 10,
+          "actual": "y5"
+        },
+        {
+          "card": 11,
+          "actual": "r2"
+        }
+      ]
+    },
+    {
+      "player": 3,
+      "hand": [
+        {
+          "card": 12,
+          "actual": "b2",
+          "flags": [
+            "chop"
+          ]
+        },
+        {
+          "card": 13,
+          "actual": "y1"
+        },
+        {
+          "card": 14,
+          "actual": "b2"
+        },
+        {
+          "card": 15,
+          "actual": "b1"
+        }
+      ]
+    }
+  ],
+  "turnDeltas": [
+    {
       "turn": 1,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 0,
-              "actual": "b1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 1,
-              "actual": "r1"
-            },
-            {
-              "card": 2,
-              "actual": "y2"
-            },
-            {
-              "card": 3,
-              "actual": "g4"
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 4,
-              "actual": "b4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 5,
-              "actual": "p2"
-            },
-            {
-              "card": 6,
-              "actual": "p2"
-            },
-            {
-              "card": 7,
-              "actual": "g3"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
+          "player": 2,
+          "cards": [
             {
               "card": 8,
               "actual": "g1",
@@ -180,39 +122,6 @@
               "flags": [
                 "chop"
               ]
-            },
-            {
-              "card": 10,
-              "actual": "y5"
-            },
-            {
-              "card": 11,
-              "actual": "r2"
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 13,
-              "actual": "y1"
-            },
-            {
-              "card": 14,
-              "actual": "b2"
-            },
-            {
-              "card": 15,
-              "actual": "b1"
             }
           ]
         }
@@ -220,22 +129,10 @@
     },
     {
       "turn": 2,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 0,
-              "actual": "b1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 1,
-              "actual": "r1"
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 2,
               "actual": "y2",
@@ -243,82 +140,14 @@
               "flags": [
                 "focused"
               ]
-            },
-            {
-              "card": 3,
-              "actual": "g4"
             }
           ]
         },
         {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 4,
-              "actual": "b4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 5,
-              "actual": "p2"
-            },
-            {
-              "card": 6,
-              "actual": "p2"
-            },
-            {
-              "card": 7,
-              "actual": "g3"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 8,
-              "actual": "g1",
-              "convention": "g1",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 9,
-              "actual": "r3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 10,
-              "actual": "y5"
-            },
-            {
-              "card": 11,
-              "actual": "r2"
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
+          "player": 3,
+          "cards": [
             {
               "card": 12,
-              "actual": "b2"
-            },
-            {
-              "card": 13,
-              "actual": "y1"
-            },
-            {
-              "card": 14,
               "actual": "b2"
             },
             {
@@ -342,102 +171,22 @@
     },
     {
       "turn": 3,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 0,
-              "actual": "b1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 1,
-              "actual": "r1"
-            },
-            {
-              "card": 2,
-              "actual": "y2",
-              "convention": "y1 y2",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 3,
-              "actual": "g4"
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 4,
-              "actual": "b4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 5,
-              "actual": "p2"
-            },
-            {
-              "card": 6,
-              "actual": "p2"
-            },
-            {
-              "card": 7,
-              "actual": "g3"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 9,
-              "actual": "r3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 10,
-              "actual": "y5"
-            },
-            {
-              "card": 11,
-              "actual": "r2"
-            },
+          "player": 2,
+          "cards": [
             {
               "card": 16,
               "actual": "y3"
             }
+          ],
+          "removedCards": [
+            8
           ]
         },
         {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 12,
-              "actual": "b2"
-            },
-            {
-              "card": 13,
-              "actual": "y1"
-            },
-            {
-              "card": 14,
-              "actual": "b2"
-            },
+          "player": 3,
+          "cards": [
             {
               "card": 15,
               "actual": "b1",
@@ -447,34 +196,16 @@
                 "finessed"
               ]
             }
-          ],
-          "connection": {
-            "card": 15,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
-          }
+          ]
         }
       ]
     },
     {
       "turn": 4,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 0,
-              "actual": "b1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 1,
-              "actual": "r1"
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 2,
               "actual": "y2",
@@ -482,75 +213,12 @@
               "flags": [
                 "focused"
               ]
-            },
-            {
-              "card": 3,
-              "actual": "g4"
             }
           ]
         },
         {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 4,
-              "actual": "b4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 5,
-              "actual": "p2"
-            },
-            {
-              "card": 6,
-              "actual": "p2"
-            },
-            {
-              "card": 7,
-              "actual": "g3"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 9,
-              "actual": "r3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 10,
-              "actual": "y5"
-            },
-            {
-              "card": 11,
-              "actual": "r2"
-            },
-            {
-              "card": 16,
-              "actual": "y3"
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 12,
-              "actual": "b2"
-            },
-            {
-              "card": 13,
-              "actual": "y1"
-            },
+          "player": 3,
+          "cards": [
             {
               "card": 14,
               "actual": "b2",
@@ -568,6 +236,9 @@
               ]
             }
           ],
+          "removedCards": [
+            15
+          ],
           "connection": {
             "card": 14,
             "identity": "y1",
@@ -579,80 +250,14 @@
     },
     {
       "turn": 5,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 0,
-              "actual": "b1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 1,
-              "actual": "r1"
-            },
-            {
-              "card": 2,
-              "actual": "y2",
-              "convention": "y2",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 3,
-              "actual": "g4"
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 4,
-              "actual": "b4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 5,
-              "actual": "p2"
-            },
-            {
-              "card": 6,
-              "actual": "p2"
-            },
-            {
-              "card": 7,
-              "actual": "g3"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 9,
-              "actual": "r3",
-              "flags": [
-                "chop"
-              ]
-            },
+          "player": 2,
+          "cards": [
             {
               "card": 10,
               "actual": "y5",
               "convention": "y4 y5"
-            },
-            {
-              "card": 11,
-              "actual": "r2"
             },
             {
               "card": 16,
@@ -666,9 +271,8 @@
           ]
         },
         {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
+          "player": 3,
+          "cards": [
             {
               "card": 12,
               "actual": "b2",
@@ -678,59 +282,17 @@
               "card": 13,
               "actual": "y1",
               "convention": "r1 r2 r3 r4 r5 y1 y2 y4 g1 g2 g3 g4 g5 b1 b2 b3 b4 b5 p1 p3 p4 p5"
-            },
-            {
-              "card": 14,
-              "actual": "b2",
-              "convention": "r1 y1 g2 b2 p1",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            },
-            {
-              "card": 17,
-              "actual": "r4",
-              "flags": [
-                "chop"
-              ]
             }
-          ],
-          "connection": {
-            "card": 14,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
-          }
+          ]
         }
       ]
     },
     {
       "turn": 6,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 0,
-              "actual": "b1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 1,
-              "actual": "r1"
-            },
-            {
-              "card": 2,
-              "actual": "y2",
-              "convention": "y2",
-              "flags": [
-                "focused"
-              ]
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 3,
               "actual": "g4",
@@ -749,62 +311,17 @@
           }
         },
         {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 4,
-              "actual": "b4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 5,
-              "actual": "p2"
-            },
-            {
-              "card": 6,
-              "actual": "p2"
-            },
-            {
-              "card": 7,
-              "actual": "g3"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
+          "player": 2,
+          "cards": [
             {
               "card": 9,
               "actual": "r3"
-            },
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y4 y5"
-            },
-            {
-              "card": 11,
-              "actual": "r2"
-            },
-            {
-              "card": 16,
-              "actual": "y3",
-              "convention": "y1",
-              "flags": [
-                "focused",
-                "provisional"
-              ]
             }
           ]
         },
         {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
+          "player": 3,
+          "cards": [
             {
               "card": 12,
               "actual": "b2",
@@ -832,30 +349,16 @@
                 "focused"
               ]
             }
-          ],
-          "connection": {
-            "card": 14,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
-          }
+          ]
         }
       ]
     },
     {
       "turn": 7,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 0,
-              "actual": "b1",
-              "flags": [
-                "chop"
-              ]
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 1,
               "actual": "r1",
@@ -863,14 +366,6 @@
               "flags": [
                 "playable",
                 "finessed"
-              ]
-            },
-            {
-              "card": 2,
-              "actual": "y2",
-              "convention": "y2",
-              "flags": [
-                "focused"
               ]
             },
             {
@@ -886,190 +381,16 @@
             "identity": "r1",
             "kind": "finesse",
             "focus": 17
-          }
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 4,
-              "actual": "b4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 5,
-              "actual": "p2"
-            },
-            {
-              "card": 6,
-              "actual": "p2"
-            },
-            {
-              "card": 7,
-              "actual": "g3"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 9,
-              "actual": "r3"
-            },
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y4 y5"
-            },
-            {
-              "card": 11,
-              "actual": "r2"
-            },
-            {
-              "card": 16,
-              "actual": "y3",
-              "convention": "y1",
-              "flags": [
-                "focused",
-                "provisional"
-              ]
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "convention": "y1 y2 y4 g1 g2 g3 g4 g5 b1 b2 b3 b4 b5 p1 p3 p4 p5"
-            },
-            {
-              "card": 13,
-              "actual": "y1",
-              "convention": "y1 y2 y4 g1 g2 g3 g4 g5 b1 b2 b3 b4 b5 p1 p3 p4 p5"
-            },
-            {
-              "card": 14,
-              "actual": "b2",
-              "convention": "y1 g2 b2 p1",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            },
-            {
-              "card": 17,
-              "actual": "r4",
-              "convention": "r1 r2 r3 r4",
-              "flags": [
-                "focused"
-              ]
-            }
-          ],
-          "connection": {
-            "card": 14,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
           }
         }
       ]
     },
     {
       "turn": 8,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 0,
-              "actual": "b1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 1,
-              "actual": "r1",
-              "convention": "r1",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            },
-            {
-              "card": 2,
-              "actual": "y2",
-              "convention": "y2",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused"
-              ]
-            }
-          ],
-          "connection": {
-            "card": 1,
-            "identity": "r1",
-            "kind": "finesse",
-            "focus": 17
-          }
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 4,
-              "actual": "b4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 5,
-              "actual": "p2"
-            },
-            {
-              "card": 6,
-              "actual": "p2"
-            },
-            {
-              "card": 7,
-              "actual": "g3"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 9,
-              "actual": "r3"
-            },
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y4 y5"
-            },
-            {
-              "card": 11,
-              "actual": "r2"
-            },
+          "player": 2,
+          "cards": [
             {
               "card": 16,
               "actual": "y3",
@@ -1081,14 +402,8 @@
           ]
         },
         {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "convention": "y1 y2 y4 g1 g2 g3 g4 g5 b1 b2 b3 b4 b5 p1 p3 p4 p5"
-            },
+          "player": 3,
+          "cards": [
             {
               "card": 13,
               "actual": "y1",
@@ -1099,20 +414,15 @@
               ]
             },
             {
-              "card": 17,
-              "actual": "r4",
-              "convention": "r1 r2 r3 r4",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
               "card": 18,
               "actual": "b3",
               "flags": [
                 "chop"
               ]
             }
+          ],
+          "removedCards": [
+            14
           ],
           "connection": {
             "card": 13,
@@ -1125,77 +435,23 @@
     },
     {
       "turn": 9,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 0,
-              "actual": "b1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 2,
-              "actual": "y2",
-              "convention": "y2",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused"
-              ]
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 19,
               "actual": "p1"
             }
-          ]
+          ],
+          "removedCards": [
+            1
+          ],
+          "connection": null
         },
         {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 4,
-              "actual": "b4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 5,
-              "actual": "p2"
-            },
-            {
-              "card": 6,
-              "actual": "p2"
-            },
-            {
-              "card": 7,
-              "actual": "g3"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 9,
-              "actual": "r3"
-            },
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y4 y5"
-            },
+          "player": 2,
+          "cards": [
             {
               "card": 11,
               "actual": "r2",
@@ -1203,14 +459,6 @@
               "flags": [
                 "playable",
                 "finessed"
-              ]
-            },
-            {
-              "card": 16,
-              "actual": "y3",
-              "convention": "y3",
-              "flags": [
-                "focused"
               ]
             }
           ],
@@ -1222,23 +470,8 @@
           }
         },
         {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "convention": "y1 y2 y4 g1 g2 g3 g4 g5 b1 b2 b3 b4 b5 p1 p3 p4 p5"
-            },
-            {
-              "card": 13,
-              "actual": "y1",
-              "convention": "y1 g2 b3 p1",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            },
+          "player": 3,
+          "cards": [
             {
               "card": 17,
               "actual": "r4",
@@ -1246,127 +479,27 @@
               "flags": [
                 "focused"
               ]
-            },
-            {
-              "card": 18,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
             }
-          ],
-          "connection": {
-            "card": 13,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
-          }
+          ]
         }
       ]
     },
     {
       "turn": 10,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 0,
-              "actual": "b1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 2,
-              "actual": "y2",
-              "convention": "y2",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 19,
-              "actual": "p1"
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 4,
-              "actual": "b4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 5,
-              "actual": "p2"
-            },
-            {
-              "card": 6,
-              "actual": "p2"
-            },
-            {
-              "card": 7,
-              "actual": "g3"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
+          "player": 2,
+          "cards": [
             {
               "card": 9,
               "actual": "r3",
               "convention": "r1 r2 r3 r4 r5 b1 b4 b5 p1 p3 p4 p5"
-            },
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y4 y5"
-            },
-            {
-              "card": 11,
-              "actual": "r2",
-              "convention": "r2",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            },
-            {
-              "card": 16,
-              "actual": "y3",
-              "convention": "y3",
-              "flags": [
-                "focused"
-              ]
             }
-          ],
-          "connection": {
-            "card": 11,
-            "identity": "r2",
-            "kind": "finesse",
-            "focus": 17
-          }
+          ]
         },
         {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
+          "player": 3,
+          "cards": [
             {
               "card": 12,
               "actual": "b2"
@@ -1397,80 +530,16 @@
                 "playable"
               ]
             }
-          ],
-          "connection": {
-            "card": 13,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
-          }
+          ]
         }
       ]
     },
     {
       "turn": 11,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 0,
-              "actual": "b1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 2,
-              "actual": "y2",
-              "convention": "y2",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 19,
-              "actual": "p1"
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 4,
-              "actual": "b4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 5,
-              "actual": "p2"
-            },
-            {
-              "card": 6,
-              "actual": "p2"
-            },
-            {
-              "card": 7,
-              "actual": "g3"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
+          "player": 2,
+          "cards": [
             {
               "card": 9,
               "actual": "r3",
@@ -1481,25 +550,15 @@
               ]
             },
             {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y4 y5"
-            },
-            {
-              "card": 16,
-              "actual": "y3",
-              "convention": "y3",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
               "card": 20,
               "actual": "b3",
               "flags": [
                 "chop"
               ]
             }
+          ],
+          "removedCards": [
+            11
           ],
           "connection": {
             "card": 9,
@@ -1509,22 +568,8 @@
           }
         },
         {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 12,
-              "actual": "b2"
-            },
-            {
-              "card": 13,
-              "actual": "y1",
-              "convention": "y1 g2 p1",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            },
+          "player": 3,
+          "cards": [
             {
               "card": 17,
               "actual": "r4",
@@ -1532,80 +577,17 @@
               "flags": [
                 "focused"
               ]
-            },
-            {
-              "card": 18,
-              "actual": "b3",
-              "convention": "b3",
-              "flags": [
-                "focused",
-                "playable"
-              ]
             }
-          ],
-          "connection": {
-            "card": 13,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
-          }
+          ]
         }
       ]
     },
     {
       "turn": 12,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 0,
-              "actual": "b1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 2,
-              "actual": "y2",
-              "convention": "y2",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 19,
-              "actual": "p1"
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 4,
-              "actual": "b4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 5,
-              "actual": "p2"
-            },
-            {
-              "card": 6,
-              "actual": "p2"
-            },
+          "player": 1,
+          "cards": [
             {
               "card": 7,
               "actual": "g3",
@@ -1618,54 +600,8 @@
           ]
         },
         {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 9,
-              "actual": "r3",
-              "convention": "r3",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            },
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y4 y5"
-            },
-            {
-              "card": 16,
-              "actual": "y3",
-              "convention": "y3",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            }
-          ],
-          "connection": {
-            "card": 9,
-            "identity": "r3",
-            "kind": "finesse",
-            "focus": 17
-          }
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 12,
-              "actual": "b2"
-            },
+          "player": 3,
+          "cards": [
             {
               "card": 13,
               "actual": "y1",
@@ -1676,14 +612,6 @@
               ]
             },
             {
-              "card": 17,
-              "actual": "r4",
-              "convention": "r4",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
               "card": 21,
               "actual": "y1",
               "flags": [
@@ -1691,54 +619,18 @@
               ]
             }
           ],
-          "connection": {
-            "card": 13,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
-          }
+          "removedCards": [
+            18
+          ]
         }
       ]
     },
     {
       "turn": 13,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 0,
-              "actual": "b1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 2,
-              "actual": "y2",
-              "convention": "y2",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 19,
-              "actual": "p1"
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
+          "player": 1,
+          "cards": [
             {
               "card": 4,
               "actual": "b4",
@@ -1756,60 +648,14 @@
               ]
             },
             {
-              "card": 6,
-              "actual": "p2"
-            },
-            {
               "card": 7,
               "actual": "g3"
             }
           ]
         },
         {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 9,
-              "actual": "r3",
-              "convention": "r3",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            },
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y4 y5"
-            },
-            {
-              "card": 16,
-              "actual": "y3",
-              "convention": "y3",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            }
-          ],
-          "connection": {
-            "card": 9,
-            "identity": "r3",
-            "kind": "finesse",
-            "focus": 17
-          }
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
+          "player": 3,
+          "cards": [
             {
               "card": 12,
               "actual": "b2",
@@ -1823,142 +669,29 @@
                 "playable",
                 "finessed"
               ]
-            },
-            {
-              "card": 17,
-              "actual": "r4",
-              "convention": "r4",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 21,
-              "actual": "y1",
-              "flags": [
-                "chop"
-              ]
             }
-          ],
-          "connection": {
-            "card": 13,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
-          }
+          ]
         }
       ]
     },
     {
       "turn": 14,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 0,
-              "actual": "b1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 2,
-              "actual": "y2",
-              "convention": "y2",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 19,
-              "actual": "p1"
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 5,
-              "actual": "p2",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 6,
-              "actual": "p2"
-            },
-            {
-              "card": 7,
-              "actual": "g3"
-            },
+          "player": 1,
+          "cards": [
             {
               "card": 22,
               "actual": "g2"
             }
+          ],
+          "removedCards": [
+            4
           ]
         },
         {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 9,
-              "actual": "r3",
-              "convention": "r3",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            },
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y4 y5"
-            },
-            {
-              "card": 16,
-              "actual": "y3",
-              "convention": "y3",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            }
-          ],
-          "connection": {
-            "card": 9,
-            "identity": "r3",
-            "kind": "finesse",
-            "focus": 17
-          }
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "convention": "y1 y2 y4 g1 g2 g4 g5 b1 b2 b5 p1 p4 p5"
-            },
+          "player": 3,
+          "cards": [
             {
               "card": 13,
               "actual": "y1",
@@ -1967,140 +700,30 @@
                 "playable",
                 "finessed"
               ]
-            },
-            {
-              "card": 17,
-              "actual": "r4",
-              "convention": "r4",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 21,
-              "actual": "y1",
-              "flags": [
-                "chop"
-              ]
             }
-          ],
-          "connection": {
-            "card": 13,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
-          }
+          ]
         }
       ]
     },
     {
       "turn": 15,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 0,
-              "actual": "b1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 2,
-              "actual": "y2",
-              "convention": "y2",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 19,
-              "actual": "p1"
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 5,
-              "actual": "p2",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 6,
-              "actual": "p2"
-            },
-            {
-              "card": 7,
-              "actual": "g3"
-            },
-            {
-              "card": 22,
-              "actual": "g2"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y4 y5"
-            },
-            {
-              "card": 16,
-              "actual": "y3",
-              "convention": "y3",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
+          "player": 2,
+          "cards": [
             {
               "card": 23,
               "actual": "r5"
             }
-          ]
+          ],
+          "removedCards": [
+            9
+          ],
+          "connection": null
         },
         {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "convention": "y1 y2 y4 g1 g2 g4 g5 b1 b2 b5 p1 p4 p5"
-            },
-            {
-              "card": 13,
-              "actual": "y1",
-              "convention": "y1 g2 b5 p1",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            },
+          "player": 3,
+          "cards": [
             {
               "card": 17,
               "actual": "r4",
@@ -2109,74 +732,20 @@
                 "focused",
                 "playable"
               ]
-            },
-            {
-              "card": 21,
-              "actual": "y1",
-              "flags": [
-                "chop"
-              ]
             }
-          ],
-          "connection": {
-            "card": 13,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
-          }
+          ]
         }
       ]
     },
     {
       "turn": 16,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 0,
-              "actual": "b1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 2,
-              "actual": "y2",
-              "convention": "y2",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 19,
-              "actual": "p1"
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
+          "player": 1,
+          "cards": [
             {
               "card": 5,
               "actual": "p2"
-            },
-            {
-              "card": 6,
-              "actual": "p2"
-            },
-            {
-              "card": 7,
-              "actual": "g3"
             },
             {
               "card": 22,
@@ -2193,104 +762,16 @@
             "identity": "g2",
             "kind": "finesse",
             "focus": 3
-          }
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y4 y5"
-            },
-            {
-              "card": 16,
-              "actual": "y3",
-              "convention": "y3",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 23,
-              "actual": "r5"
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "convention": "y1 y2 y4 g1 g2 g4 g5 b1 b2 b5 p1 p4 p5"
-            },
-            {
-              "card": 13,
-              "actual": "y1",
-              "convention": "y1 g2 b5 p1",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            },
-            {
-              "card": 17,
-              "actual": "r4",
-              "convention": "r4",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 21,
-              "actual": "y1",
-              "flags": [
-                "chop"
-              ]
-            }
-          ],
-          "connection": {
-            "card": 13,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
           }
         }
       ]
     },
     {
       "turn": 17,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 2,
-              "actual": "y2",
-              "convention": "y2",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused"
-              ]
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 19,
               "actual": "p1",
@@ -2302,162 +783,29 @@
               "card": 24,
               "actual": "p5"
             }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 5,
-              "actual": "p2"
-            },
-            {
-              "card": 6,
-              "actual": "p2"
-            },
-            {
-              "card": 7,
-              "actual": "g3"
-            },
-            {
-              "card": 22,
-              "actual": "g2",
-              "convention": "g2",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            }
           ],
-          "connection": {
-            "card": 22,
-            "identity": "g2",
-            "kind": "finesse",
-            "focus": 3
-          }
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y4 y5"
-            },
-            {
-              "card": 16,
-              "actual": "y3",
-              "convention": "y3",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 23,
-              "actual": "r5"
-            }
+          "removedCards": [
+            0
           ]
         },
         {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
+          "player": 3,
+          "cards": [
             {
               "card": 12,
               "actual": "b2",
               "convention": "y1 y2 y4 g1 g2 g4 g5 b1 b2 b5 p1 p4"
-            },
-            {
-              "card": 13,
-              "actual": "y1",
-              "convention": "y1 g2 b5 p1",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            },
-            {
-              "card": 17,
-              "actual": "r4",
-              "convention": "r4",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 21,
-              "actual": "y1",
-              "flags": [
-                "chop"
-              ]
             }
-          ],
-          "connection": {
-            "card": 13,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
-          }
+          ]
         }
       ]
     },
     {
       "turn": 18,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 2,
-              "actual": "y2",
-              "convention": "y2",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 19,
-              "actual": "p1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 24,
-              "actual": "p5"
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 5,
-              "actual": "p2"
-            },
-            {
-              "card": 6,
-              "actual": "p2"
-            },
+          "player": 1,
+          "cards": [
             {
               "card": 7,
               "actual": "g3",
@@ -2475,6 +823,9 @@
               ]
             }
           ],
+          "removedCards": [
+            22
+          ],
           "connection": {
             "card": 7,
             "identity": "g3",
@@ -2483,39 +834,8 @@
           }
         },
         {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y4 y5"
-            },
-            {
-              "card": 16,
-              "actual": "y3",
-              "convention": "y3",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 23,
-              "actual": "r5"
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
+          "player": 3,
+          "cards": [
             {
               "card": 12,
               "actual": "b2",
@@ -2529,55 +849,17 @@
                 "playable",
                 "finessed"
               ]
-            },
-            {
-              "card": 17,
-              "actual": "r4",
-              "convention": "r4",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 21,
-              "actual": "y1",
-              "flags": [
-                "chop"
-              ]
             }
-          ],
-          "connection": {
-            "card": 13,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
-          }
+          ]
         }
       ]
     },
     {
       "turn": 19,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 2,
-              "actual": "y2",
-              "convention": "y2",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused"
-              ]
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 19,
               "actual": "p1",
@@ -2595,9 +877,8 @@
           ]
         },
         {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
+          "player": 1,
+          "cards": [
             {
               "card": 5,
               "actual": "p2",
@@ -2616,56 +897,12 @@
                 "playable",
                 "finessed"
               ]
-            },
-            {
-              "card": 25,
-              "actual": "y2",
-              "flags": [
-                "chop"
-              ]
-            }
-          ],
-          "connection": {
-            "card": 7,
-            "identity": "g3",
-            "kind": "finesse",
-            "focus": 3
-          }
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y4 y5"
-            },
-            {
-              "card": 16,
-              "actual": "y3",
-              "convention": "y3",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 23,
-              "actual": "r5"
             }
           ]
         },
         {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
+          "player": 3,
+          "cards": [
             {
               "card": 12,
               "actual": "b2",
@@ -2679,85 +916,17 @@
                 "playable",
                 "finessed"
               ]
-            },
-            {
-              "card": 17,
-              "actual": "r4",
-              "convention": "r4",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 21,
-              "actual": "y1",
-              "flags": [
-                "chop"
-              ]
             }
-          ],
-          "connection": {
-            "card": 13,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
-          }
+          ]
         }
       ]
     },
     {
       "turn": 20,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 2,
-              "actual": "y2",
-              "convention": "y2",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 19,
-              "actual": "p1",
-              "convention": "p1",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p3 p4 p5"
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 5,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y1 y2 y3 y4 g1 g2 g3 g4 g5 p2 p3 p4"
-            },
-            {
-              "card": 6,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y1 y2 y3 y4 g1 g2 g3 g4 g5 p2 p3 p4"
-            },
+          "player": 1,
+          "cards": [
             {
               "card": 7,
               "actual": "g3",
@@ -2766,46 +935,12 @@
                 "playable",
                 "finessed"
               ]
-            },
-            {
-              "card": 25,
-              "actual": "y2",
-              "flags": [
-                "chop"
-              ]
             }
-          ],
-          "connection": {
-            "card": 7,
-            "identity": "g3",
-            "kind": "finesse",
-            "focus": 3
-          }
+          ]
         },
         {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y4 y5"
-            },
-            {
-              "card": 16,
-              "actual": "y3",
-              "convention": "y3",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
+          "player": 2,
+          "cards": [
             {
               "card": 23,
               "actual": "r5",
@@ -2818,71 +953,25 @@
           ]
         },
         {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "convention": "y1 y4 g1 g2 g4 g5 b1 b2 b5 p4"
-            },
-            {
-              "card": 13,
-              "actual": "y1",
-              "convention": "y1 b5",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            },
-            {
-              "card": 21,
-              "actual": "y1",
-              "flags": [
-                "chop"
-              ]
-            },
+          "player": 3,
+          "cards": [
             {
               "card": 26,
               "actual": "p1"
             }
           ],
-          "connection": {
-            "card": 13,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
-          }
+          "removedCards": [
+            17
+          ]
         }
       ]
     },
     {
       "turn": 21,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 2,
-              "actual": "y2",
-              "convention": "y2",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p3 p4 p5"
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 27,
               "actual": "b5",
@@ -2890,22 +979,14 @@
                 "chop"
               ]
             }
+          ],
+          "removedCards": [
+            19
           ]
         },
         {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 5,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y1 y2 y3 y4 g1 g2 g3 g4 g5 p2 p3 p4"
-            },
-            {
-              "card": 6,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y1 y2 y3 y4 g1 g2 g3 g4 g5 p2 p3 p4"
-            },
+          "player": 1,
+          "cards": [
             {
               "card": 7,
               "actual": "g3",
@@ -2914,46 +995,12 @@
                 "playable",
                 "finessed"
               ]
-            },
-            {
-              "card": 25,
-              "actual": "y2",
-              "flags": [
-                "chop"
-              ]
             }
-          ],
-          "connection": {
-            "card": 7,
-            "identity": "g3",
-            "kind": "finesse",
-            "focus": 3
-          }
+          ]
         },
         {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y4 y5"
-            },
-            {
-              "card": 16,
-              "actual": "y3",
-              "convention": "y3",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
+          "player": 2,
+          "cards": [
             {
               "card": 23,
               "actual": "r5",
@@ -2966,9 +1013,8 @@
           ]
         },
         {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
+          "player": 3,
+          "cards": [
             {
               "card": 12,
               "actual": "b2",
@@ -2982,43 +1028,17 @@
                 "playable",
                 "finessed"
               ]
-            },
-            {
-              "card": 21,
-              "actual": "y1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 26,
-              "actual": "p1"
             }
-          ],
-          "connection": {
-            "card": 13,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
-          }
+          ]
         }
       ]
     },
     {
       "turn": 22,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 2,
-              "actual": "y2",
-              "convention": "y2",
-              "flags": [
-                "focused"
-              ]
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 3,
               "actual": "g4",
@@ -3026,25 +1046,12 @@
                 "focused",
                 "playable"
               ]
-            },
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p3 p4 p5"
-            },
-            {
-              "card": 27,
-              "actual": "b5",
-              "flags": [
-                "chop"
-              ]
             }
           ]
         },
         {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
+          "player": 1,
+          "cards": [
             {
               "card": 5,
               "actual": "p2",
@@ -3054,11 +1061,6 @@
               ]
             },
             {
-              "card": 6,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y1 y2 y3 y4 g1 g2 g3 g4 g5 p2 p3 p4"
-            },
-            {
               "card": 25,
               "actual": "y2"
             },
@@ -3066,32 +1068,15 @@
               "card": 28,
               "actual": "y3"
             }
-          ]
+          ],
+          "removedCards": [
+            7
+          ],
+          "connection": null
         },
         {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y4 y5"
-            },
-            {
-              "card": 16,
-              "actual": "y3",
-              "convention": "y3",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
+          "player": 2,
+          "cards": [
             {
               "card": 23,
               "actual": "r5",
@@ -3104,14 +1089,8 @@
           ]
         },
         {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "convention": "y1 y4 g1 g2 g4 g5 b1 b2 p4"
-            },
+          "player": 3,
+          "cards": [
             {
               "card": 13,
               "actual": "y1",
@@ -3120,68 +1099,29 @@
                 "playable",
                 "finessed"
               ]
-            },
-            {
-              "card": 21,
-              "actual": "y1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 26,
-              "actual": "p1"
             }
-          ],
-          "connection": {
-            "card": 13,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
-          }
+          ]
         }
       ]
     },
     {
       "turn": 23,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
+          "player": 0,
+          "cards": [
             {
               "card": 2,
               "actual": "y2",
               "flags": [
                 "focused"
               ]
-            },
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p3 p4 p5"
-            },
-            {
-              "card": 27,
-              "actual": "b5",
-              "flags": [
-                "chop"
-              ]
             }
           ]
         },
         {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
+          "player": 1,
+          "cards": [
             {
               "card": 5,
               "actual": "p2",
@@ -3194,93 +1134,29 @@
               "card": 6,
               "actual": "p2",
               "convention": "r1 r2 r3 r4 y2 y3 y4 g1 g2 g3 g4 g5 p2 p3 p4"
-            },
-            {
-              "card": 25,
-              "actual": "y2"
-            },
-            {
-              "card": 28,
-              "actual": "y3"
             }
           ]
         },
         {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y4 y5"
-            },
-            {
-              "card": 16,
-              "actual": "y3",
-              "convention": "y3",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
+          "player": 2,
+          "cards": [
             {
               "card": 29,
               "actual": "y1"
             }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "convention": "y1 y4 g1 g2 g4 g5 b1 b2 p4"
-            },
-            {
-              "card": 13,
-              "actual": "y1",
-              "convention": "y1 g4",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            },
-            {
-              "card": 21,
-              "actual": "y1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 26,
-              "actual": "p1"
-            }
           ],
-          "connection": {
-            "card": 13,
-            "identity": "y1",
-            "kind": "finesse",
-            "focus": 2
-          }
+          "removedCards": [
+            23
+          ]
         }
       ]
     },
     {
       "turn": 24,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
+          "player": 0,
+          "cards": [
             {
               "card": 2,
               "actual": "y2",
@@ -3288,33 +1164,12 @@
                 "focused",
                 "playable"
               ]
-            },
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p3 p4 p5"
-            },
-            {
-              "card": 27,
-              "actual": "b5",
-              "flags": [
-                "chop"
-              ]
             }
           ]
         },
         {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
+          "player": 1,
+          "cards": [
             {
               "card": 5,
               "actual": "p2",
@@ -3327,51 +1182,12 @@
               "card": 6,
               "actual": "p2",
               "convention": "r1 r2 r3 r4 y2 y3 y4 g1 g3 g4 g5 p2 p3 p4"
-            },
-            {
-              "card": 25,
-              "actual": "y2"
-            },
-            {
-              "card": 28,
-              "actual": "y3"
             }
           ]
         },
         {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y4 y5"
-            },
-            {
-              "card": 16,
-              "actual": "y3",
-              "convention": "y3",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 29,
-              "actual": "y1"
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
+          "player": 3,
+          "cards": [
             {
               "card": 12,
               "actual": "b2",
@@ -3385,86 +1201,35 @@
               "actual": "y1"
             },
             {
-              "card": 26,
-              "actual": "p1"
-            },
-            {
               "card": 30,
               "actual": "g2"
             }
-          ]
+          ],
+          "removedCards": [
+            13
+          ],
+          "connection": null
         }
       ]
     },
     {
       "turn": 25,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p3 p4 p5"
-            },
-            {
-              "card": 27,
-              "actual": "b5",
-              "flags": [
-                "chop"
-              ]
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 31,
               "actual": "y4"
             }
+          ],
+          "removedCards": [
+            2
           ]
         },
         {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 5,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y2 y3 y4 g1 g3 g4 g5 p2 p3 p4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 6,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y2 y3 y4 g1 g3 g4 g5 p2 p3 p4"
-            },
-            {
-              "card": 25,
-              "actual": "y2"
-            },
-            {
-              "card": 28,
-              "actual": "y3"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y4 y5"
-            },
+          "player": 2,
+          "cards": [
             {
               "card": 16,
               "actual": "y3",
@@ -3473,43 +1238,6 @@
                 "focused",
                 "playable"
               ]
-            },
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 29,
-              "actual": "y1"
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "convention": "y1 y4 g1 g2 g4 g5 b1 b2 p4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 21,
-              "actual": "y1"
-            },
-            {
-              "card": 26,
-              "actual": "p1"
-            },
-            {
-              "card": 30,
-              "actual": "g2"
             }
           ]
         }
@@ -3517,31 +1245,10 @@
     },
     {
       "turn": 26,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p3 p4 p5"
-            },
-            {
-              "card": 27,
-              "actual": "b5",
-              "flags": [
-                "chop"
-              ]
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 31,
               "actual": "y4",
@@ -3552,36 +1259,8 @@
           ]
         },
         {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 5,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y2 y3 y4 g1 g3 g4 g5 p2 p3 p4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 6,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y2 y3 y4 g1 g3 g4 g5 p2 p3 p4"
-            },
-            {
-              "card": 25,
-              "actual": "y2"
-            },
-            {
-              "card": 28,
-              "actual": "y3"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
+          "player": 2,
+          "cards": [
             {
               "card": 10,
               "actual": "y5",
@@ -3596,17 +1275,6 @@
                 "playable",
                 "finessed"
               ]
-            },
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 29,
-              "actual": "y1"
             }
           ],
           "connection": {
@@ -3615,62 +1283,15 @@
             "kind": "prompt",
             "focus": 31
           }
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "convention": "y1 y4 g1 g2 g4 g5 b1 b2 p4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 21,
-              "actual": "y1"
-            },
-            {
-              "card": 26,
-              "actual": "p1"
-            },
-            {
-              "card": 30,
-              "actual": "g2"
-            }
-          ]
         }
       ]
     },
     {
       "turn": 27,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p3 p4 p5"
-            },
-            {
-              "card": 27,
-              "actual": "b5",
-              "flags": [
-                "chop"
-              ]
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 31,
               "actual": "y4",
@@ -3682,9 +1303,8 @@
           ]
         },
         {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
+          "player": 1,
+          "cards": [
             {
               "card": 5,
               "actual": "p2",
@@ -3697,47 +1317,25 @@
               "card": 6,
               "actual": "p2",
               "convention": "r1 r2 r3 r4 y2 y3 y4 g1 g3 g5 p2 p3 p4"
-            },
-            {
-              "card": 25,
-              "actual": "y2"
-            },
-            {
-              "card": 28,
-              "actual": "y3"
             }
           ]
         },
         {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y5"
-            },
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 29,
-              "actual": "y1"
-            },
+          "player": 2,
+          "cards": [
             {
               "card": 32,
               "actual": "g4"
             }
-          ]
+          ],
+          "removedCards": [
+            16
+          ],
+          "connection": null
         },
         {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
+          "player": 3,
+          "cards": [
             {
               "card": 12,
               "actual": "b2",
@@ -3745,18 +1343,6 @@
               "flags": [
                 "chop"
               ]
-            },
-            {
-              "card": 21,
-              "actual": "y1"
-            },
-            {
-              "card": 26,
-              "actual": "p1"
-            },
-            {
-              "card": 30,
-              "actual": "g2"
             }
           ]
         }
@@ -3764,98 +1350,10 @@
     },
     {
       "turn": 28,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p3 p4 p5"
-            },
-            {
-              "card": 27,
-              "actual": "b5",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 31,
-              "actual": "y4",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 5,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y2 y3 y4 g1 g3 g5 p2 p3 p4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 6,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y2 y3 y4 g1 g3 g5 p2 p3 p4"
-            },
-            {
-              "card": 25,
-              "actual": "y2"
-            },
-            {
-              "card": 28,
-              "actual": "y3"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y5"
-            },
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 29,
-              "actual": "y1"
-            },
-            {
-              "card": 32,
-              "actual": "g4"
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
+          "player": 3,
+          "cards": [
             {
               "card": 21,
               "actual": "y1",
@@ -3864,85 +1362,34 @@
               ]
             },
             {
-              "card": 26,
-              "actual": "p1"
-            },
-            {
-              "card": 30,
-              "actual": "g2"
-            },
-            {
               "card": 33,
               "actual": "p3"
             }
+          ],
+          "removedCards": [
+            12
           ]
         }
       ]
     },
     {
       "turn": 29,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p3 p4 p5"
-            },
-            {
-              "card": 27,
-              "actual": "b5",
-              "flags": [
-                "chop"
-              ]
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 34,
               "actual": "p4"
             }
+          ],
+          "removedCards": [
+            31
           ]
         },
         {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 5,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y2 y3 y4 g1 g3 g5 p2 p3 p4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 6,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y2 y3 y4 g1 g3 g5 p2 p3 p4"
-            },
-            {
-              "card": 25,
-              "actual": "y2"
-            },
-            {
-              "card": 28,
-              "actual": "y3"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
+          "player": 2,
+          "cards": [
             {
               "card": 10,
               "actual": "y5",
@@ -3950,46 +1397,6 @@
               "flags": [
                 "playable"
               ]
-            },
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 29,
-              "actual": "y1"
-            },
-            {
-              "card": 32,
-              "actual": "g4"
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 21,
-              "actual": "y1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 26,
-              "actual": "p1"
-            },
-            {
-              "card": 30,
-              "actual": "g2"
-            },
-            {
-              "card": 33,
-              "actual": "p3"
             }
           ]
         }
@@ -3997,24 +1404,10 @@
     },
     {
       "turn": 30,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p3 p4 p5"
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 27,
               "actual": "b5",
@@ -4030,87 +1423,6 @@
               "flags": [
                 "chop"
               ]
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 5,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y2 y3 y4 g1 g3 g5 p2 p3 p4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 6,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y2 y3 y4 g1 g3 g5 p2 p3 p4"
-            },
-            {
-              "card": 25,
-              "actual": "y2"
-            },
-            {
-              "card": 28,
-              "actual": "y3"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 10,
-              "actual": "y5",
-              "convention": "y5",
-              "flags": [
-                "playable"
-              ]
-            },
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 29,
-              "actual": "y1"
-            },
-            {
-              "card": 32,
-              "actual": "g4"
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 21,
-              "actual": "y1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 26,
-              "actual": "p1"
-            },
-            {
-              "card": 30,
-              "actual": "g2"
-            },
-            {
-              "card": 33,
-              "actual": "p3"
             }
           ]
         }
@@ -4118,46 +1430,10 @@
     },
     {
       "turn": 31,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p3 p4 p5"
-            },
-            {
-              "card": 27,
-              "actual": "b5",
-              "convention": "b5",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 34,
-              "actual": "p4",
-              "flags": [
-                "chop"
-              ]
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
+          "player": 1,
+          "cards": [
             {
               "card": 5,
               "actual": "p2",
@@ -4170,111 +1446,29 @@
               "card": 6,
               "actual": "p2",
               "convention": "r1 r2 r3 y2 y3 y4 g1 g3 g5 p2 p3 p4"
-            },
-            {
-              "card": 25,
-              "actual": "y2"
-            },
-            {
-              "card": 28,
-              "actual": "y3"
             }
           ]
         },
         {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 29,
-              "actual": "y1"
-            },
-            {
-              "card": 32,
-              "actual": "g4"
-            },
+          "player": 2,
+          "cards": [
             {
               "card": 35,
               "actual": "r4"
             }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 21,
-              "actual": "y1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 26,
-              "actual": "p1"
-            },
-            {
-              "card": 30,
-              "actual": "g2"
-            },
-            {
-              "card": 33,
-              "actual": "p3"
-            }
+          ],
+          "removedCards": [
+            10
           ]
         }
       ]
     },
     {
       "turn": 32,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p3 p4 p5"
-            },
-            {
-              "card": 27,
-              "actual": "b5",
-              "convention": "b5",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 34,
-              "actual": "p4",
-              "flags": [
-                "chop"
-              ]
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
+          "player": 1,
+          "cards": [
             {
               "card": 5,
               "actual": "p2",
@@ -4287,46 +1481,12 @@
               "card": 6,
               "actual": "p2",
               "convention": "r1 r2 r3 y2 y3 g1 g3 g5 p2 p3 p4"
-            },
-            {
-              "card": 25,
-              "actual": "y2"
-            },
-            {
-              "card": 28,
-              "actual": "y3"
             }
           ]
         },
         {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 29,
-              "actual": "y1"
-            },
-            {
-              "card": 32,
-              "actual": "g4"
-            },
-            {
-              "card": 35,
-              "actual": "r4"
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
+          "player": 3,
+          "cards": [
             {
               "card": 26,
               "actual": "p1",
@@ -4335,170 +1495,49 @@
               ]
             },
             {
-              "card": 30,
-              "actual": "g2"
-            },
-            {
-              "card": 33,
-              "actual": "p3"
-            },
-            {
               "card": 36,
               "actual": "y4"
             }
+          ],
+          "removedCards": [
+            21
           ]
         }
       ]
     },
     {
       "turn": 33,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p3 p4 p5"
-            },
-            {
-              "card": 34,
-              "actual": "p4",
-              "flags": [
-                "chop"
-              ]
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 37,
               "actual": "r1"
             }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 5,
-              "actual": "p2",
-              "convention": "r1 r2 r3 y2 y3 g1 g3 g5 p2 p3 p4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 6,
-              "actual": "p2",
-              "convention": "r1 r2 r3 y2 y3 g1 g3 g5 p2 p3 p4"
-            },
-            {
-              "card": 25,
-              "actual": "y2"
-            },
-            {
-              "card": 28,
-              "actual": "y3"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 29,
-              "actual": "y1"
-            },
-            {
-              "card": 32,
-              "actual": "g4"
-            },
-            {
-              "card": 35,
-              "actual": "r4"
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 26,
-              "actual": "p1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 30,
-              "actual": "g2"
-            },
-            {
-              "card": 33,
-              "actual": "p3"
-            },
-            {
-              "card": 36,
-              "actual": "y4"
-            }
+          ],
+          "removedCards": [
+            27
           ]
         }
       ]
     },
     {
       "turn": 34,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 24,
               "actual": "p5",
               "convention": "p4 p5"
-            },
-            {
-              "card": 34,
-              "actual": "p4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 37,
-              "actual": "r1"
             }
           ]
         },
         {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
+          "player": 1,
+          "cards": [
             {
               "card": 6,
               "actual": "p2",
@@ -4508,108 +1547,22 @@
               ]
             },
             {
-              "card": 25,
-              "actual": "y2"
-            },
-            {
-              "card": 28,
-              "actual": "y3"
-            },
-            {
               "card": 38,
               "actual": "p3"
             }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 29,
-              "actual": "y1"
-            },
-            {
-              "card": 32,
-              "actual": "g4"
-            },
-            {
-              "card": 35,
-              "actual": "r4"
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 26,
-              "actual": "p1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 30,
-              "actual": "g2"
-            },
-            {
-              "card": 33,
-              "actual": "p3"
-            },
-            {
-              "card": 36,
-              "actual": "y4"
-            }
+          ],
+          "removedCards": [
+            5
           ]
         }
       ]
     },
     {
       "turn": 35,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p4 p5"
-            },
-            {
-              "card": 34,
-              "actual": "p4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 37,
-              "actual": "r1"
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
+          "player": 1,
+          "cards": [
             {
               "card": 6,
               "actual": "p2",
@@ -4625,14 +1578,6 @@
               "flags": [
                 "chop"
               ]
-            },
-            {
-              "card": 28,
-              "actual": "y3"
-            },
-            {
-              "card": 38,
-              "actual": "p3"
             }
           ],
           "connection": {
@@ -4643,45 +1588,8 @@
           }
         },
         {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 29,
-              "actual": "y1"
-            },
-            {
-              "card": 32,
-              "actual": "g4"
-            },
-            {
-              "card": 35,
-              "actual": "r4"
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 26,
-              "actual": "p1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 30,
-              "actual": "g2"
-            },
+          "player": 3,
+          "cards": [
             {
               "card": 33,
               "actual": "p3",
@@ -4689,10 +1597,6 @@
               "flags": [
                 "focused"
               ]
-            },
-            {
-              "card": 36,
-              "actual": "y4"
             }
           ]
         }
@@ -4700,24 +1604,10 @@
     },
     {
       "turn": 36,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 3,
-              "actual": "g4",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p4 p5"
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 34,
               "actual": "p4",
@@ -4732,96 +1622,6 @@
               "flags": [
                 "chop"
               ]
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 6,
-              "actual": "p2",
-              "convention": "p2",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            },
-            {
-              "card": 25,
-              "actual": "y2",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 28,
-              "actual": "y3"
-            },
-            {
-              "card": 38,
-              "actual": "p3"
-            }
-          ],
-          "connection": {
-            "card": 6,
-            "identity": "p2",
-            "kind": "finesse",
-            "focus": 33
-          }
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 29,
-              "actual": "y1"
-            },
-            {
-              "card": 32,
-              "actual": "g4"
-            },
-            {
-              "card": 35,
-              "actual": "r4"
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 26,
-              "actual": "p1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 30,
-              "actual": "g2"
-            },
-            {
-              "card": 33,
-              "actual": "p3",
-              "convention": "p3",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 36,
-              "actual": "y4"
             }
           ]
         }
@@ -4829,141 +1629,27 @@
     },
     {
       "turn": 37,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p4 p5"
-            },
-            {
-              "card": 34,
-              "actual": "p4",
-              "convention": "p4 p5",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 37,
-              "actual": "r1",
-              "flags": [
-                "chop"
-              ]
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 39,
               "actual": "g3"
             }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 6,
-              "actual": "p2",
-              "convention": "p2",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
-            },
-            {
-              "card": 25,
-              "actual": "y2",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 28,
-              "actual": "y3"
-            },
-            {
-              "card": 38,
-              "actual": "p3"
-            }
           ],
-          "connection": {
-            "card": 6,
-            "identity": "p2",
-            "kind": "finesse",
-            "focus": 33
-          }
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 29,
-              "actual": "y1"
-            },
-            {
-              "card": 32,
-              "actual": "g4"
-            },
-            {
-              "card": 35,
-              "actual": "r4"
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 26,
-              "actual": "p1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 30,
-              "actual": "g2"
-            },
-            {
-              "card": 33,
-              "actual": "p3",
-              "convention": "p3",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 36,
-              "actual": "y4"
-            }
+          "removedCards": [
+            3
           ]
         }
       ]
     },
     {
       "turn": 38,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p4 p5"
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 34,
               "actual": "p4",
@@ -4971,85 +1657,25 @@
               "flags": [
                 "focused"
               ]
-            },
-            {
-              "card": 37,
-              "actual": "r1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 39,
-              "actual": "g3"
             }
           ]
         },
         {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 25,
-              "actual": "y2",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 28,
-              "actual": "y3"
-            },
-            {
-              "card": 38,
-              "actual": "p3"
-            },
+          "player": 1,
+          "cards": [
             {
               "card": 40,
               "actual": "g1"
             }
-          ]
+          ],
+          "removedCards": [
+            6
+          ],
+          "connection": null
         },
         {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 20,
-              "actual": "b3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 29,
-              "actual": "y1"
-            },
-            {
-              "card": 32,
-              "actual": "g4"
-            },
-            {
-              "card": 35,
-              "actual": "r4"
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 26,
-              "actual": "p1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 30,
-              "actual": "g2"
-            },
+          "player": 3,
+          "cards": [
             {
               "card": 33,
               "actual": "p3",
@@ -5058,10 +1684,6 @@
                 "focused",
                 "playable"
               ]
-            },
-            {
-              "card": 36,
-              "actual": "y4"
             }
           ]
         }
@@ -5069,66 +1691,10 @@
     },
     {
       "turn": 39,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p4 p5"
-            },
-            {
-              "card": 34,
-              "actual": "p4",
-              "convention": "p4",
-              "flags": [
-                "focused"
-              ]
-            },
-            {
-              "card": 37,
-              "actual": "r1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 39,
-              "actual": "g3"
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 25,
-              "actual": "y2",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 28,
-              "actual": "y3"
-            },
-            {
-              "card": 38,
-              "actual": "p3"
-            },
-            {
-              "card": 40,
-              "actual": "g1"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
+          "player": 2,
+          "cards": [
             {
               "card": 29,
               "actual": "y1",
@@ -5137,63 +1703,22 @@
               ]
             },
             {
-              "card": 32,
-              "actual": "g4"
-            },
-            {
-              "card": 35,
-              "actual": "r4"
-            },
-            {
               "card": 41,
               "actual": "b4"
             }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 26,
-              "actual": "p1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 30,
-              "actual": "g2"
-            },
-            {
-              "card": 33,
-              "actual": "p3",
-              "convention": "p3",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            },
-            {
-              "card": 36,
-              "actual": "y4"
-            }
+          ],
+          "removedCards": [
+            20
           ]
         }
       ]
     },
     {
       "turn": 40,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p4 p5"
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 34,
               "actual": "p4",
@@ -5202,104 +1727,29 @@
                 "focused",
                 "playable"
               ]
-            },
-            {
-              "card": 37,
-              "actual": "r1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 39,
-              "actual": "g3"
             }
           ]
         },
         {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 25,
-              "actual": "y2",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 28,
-              "actual": "y3"
-            },
-            {
-              "card": 38,
-              "actual": "p3"
-            },
-            {
-              "card": 40,
-              "actual": "g1"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 29,
-              "actual": "y1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 32,
-              "actual": "g4"
-            },
-            {
-              "card": 35,
-              "actual": "r4"
-            },
-            {
-              "card": 41,
-              "actual": "b4"
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 26,
-              "actual": "p1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 30,
-              "actual": "g2"
-            },
-            {
-              "card": 36,
-              "actual": "y4"
-            },
+          "player": 3,
+          "cards": [
             {
               "card": 42,
               "actual": "r3"
             }
+          ],
+          "removedCards": [
+            33
           ]
         }
       ]
     },
     {
       "turn": 41,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
+          "player": 0,
+          "cards": [
             {
               "card": 24,
               "actual": "p5",
@@ -5309,26 +1759,17 @@
               ]
             },
             {
-              "card": 37,
-              "actual": "r1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 39,
-              "actual": "g3"
-            },
-            {
               "card": 43,
               "actual": "r1"
             }
+          ],
+          "removedCards": [
+            34
           ]
         },
         {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
+          "player": 1,
+          "cards": [
             {
               "card": 25,
               "actual": "y2",
@@ -5346,60 +1787,6 @@
               "card": 38,
               "actual": "p3",
               "convention": "r2 y2 y3 g1 g5 b1 p1 p3"
-            },
-            {
-              "card": 40,
-              "actual": "g1"
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 29,
-              "actual": "y1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 32,
-              "actual": "g4"
-            },
-            {
-              "card": 35,
-              "actual": "r4"
-            },
-            {
-              "card": 41,
-              "actual": "b4"
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 26,
-              "actual": "p1",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 30,
-              "actual": "g2"
-            },
-            {
-              "card": 36,
-              "actual": "y4"
-            },
-            {
-              "card": 42,
-              "actual": "r3"
             }
           ]
         }
@@ -5407,19 +1794,10 @@
     },
     {
       "turn": 42,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p5",
-              "flags": [
-                "playable"
-              ]
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 37,
               "actual": "r1",
@@ -5427,21 +1805,12 @@
                 "trash",
                 "chop"
               ]
-            },
-            {
-              "card": 39,
-              "actual": "g3"
-            },
-            {
-              "card": 43,
-              "actual": "r1"
             }
           ]
         },
         {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
+          "player": 1,
+          "cards": [
             {
               "card": 28,
               "actual": "y3",
@@ -5454,19 +1823,17 @@
               "actual": "p3"
             },
             {
-              "card": 40,
-              "actual": "g1"
-            },
-            {
               "card": 44,
               "actual": "g5"
             }
+          ],
+          "removedCards": [
+            25
           ]
         },
         {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
+          "player": 2,
+          "cards": [
             {
               "card": 29,
               "actual": "y1",
@@ -5499,9 +1866,8 @@
           ]
         },
         {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
+          "player": 3,
+          "cards": [
             {
               "card": 26,
               "actual": "p1",
@@ -5537,41 +1903,10 @@
     },
     {
       "turn": 43,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p5",
-              "flags": [
-                "playable"
-              ]
-            },
-            {
-              "card": 37,
-              "actual": "r1",
-              "flags": [
-                "trash",
-                "chop"
-              ]
-            },
-            {
-              "card": 39,
-              "actual": "g3"
-            },
-            {
-              "card": 43,
-              "actual": "r1"
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
+          "player": 1,
+          "cards": [
             {
               "card": 28,
               "actual": "y3",
@@ -5602,76 +1937,6 @@
               "flags": [
                 "focused",
                 "playable"
-              ]
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 29,
-              "actual": "y1",
-              "flags": [
-                "trash",
-                "chop"
-              ]
-            },
-            {
-              "card": 32,
-              "actual": "g4",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 35,
-              "actual": "r4",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 41,
-              "actual": "b4",
-              "flags": [
-                "trash"
-              ]
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 26,
-              "actual": "p1",
-              "flags": [
-                "trash",
-                "chop"
-              ]
-            },
-            {
-              "card": 30,
-              "actual": "g2",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 36,
-              "actual": "y4",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 42,
-              "actual": "r3",
-              "flags": [
-                "trash"
               ]
             }
           ]
@@ -5680,114 +1945,10 @@
     },
     {
       "turn": 44,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 24,
-              "actual": "p5",
-              "convention": "p5",
-              "flags": [
-                "playable"
-              ]
-            },
-            {
-              "card": 37,
-              "actual": "r1",
-              "flags": [
-                "trash",
-                "chop"
-              ]
-            },
-            {
-              "card": 39,
-              "actual": "g3"
-            },
-            {
-              "card": 43,
-              "actual": "r1"
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 28,
-              "actual": "y3",
-              "flags": [
-                "trash",
-                "chop"
-              ]
-            },
-            {
-              "card": 38,
-              "actual": "p3",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 40,
-              "actual": "g1",
-              "convention": "g1",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 44,
-              "actual": "g5",
-              "convention": "g5",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 29,
-              "actual": "y1",
-              "flags": [
-                "trash",
-                "chop"
-              ]
-            },
-            {
-              "card": 32,
-              "actual": "g4",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 35,
-              "actual": "r4",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 41,
-              "actual": "b4",
-              "flags": [
-                "trash"
-              ]
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
+          "player": 3,
+          "cards": [
             {
               "card": 30,
               "actual": "g2",
@@ -5797,45 +1958,25 @@
               ]
             },
             {
-              "card": 36,
-              "actual": "y4",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 42,
-              "actual": "r3",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
               "card": 45,
               "actual": "p4",
               "flags": [
                 "trash"
               ]
             }
+          ],
+          "removedCards": [
+            26
           ]
         }
       ]
     },
     {
       "turn": 45,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 37,
-              "actual": "r1",
-              "flags": [
-                "trash",
-                "chop"
-              ]
-            },
+          "player": 0,
+          "cards": [
             {
               "card": 39,
               "actual": "g3",
@@ -5857,175 +1998,19 @@
                 "trash"
               ]
             }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 28,
-              "actual": "y3",
-              "flags": [
-                "trash",
-                "chop"
-              ]
-            },
-            {
-              "card": 38,
-              "actual": "p3",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 40,
-              "actual": "g1",
-              "convention": "g1",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 44,
-              "actual": "g5",
-              "convention": "g5",
-              "flags": [
-                "focused",
-                "playable"
-              ]
-            }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 29,
-              "actual": "y1",
-              "flags": [
-                "trash",
-                "chop"
-              ]
-            },
-            {
-              "card": 32,
-              "actual": "g4",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 35,
-              "actual": "r4",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 41,
-              "actual": "b4",
-              "flags": [
-                "trash"
-              ]
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 30,
-              "actual": "g2",
-              "flags": [
-                "trash",
-                "chop"
-              ]
-            },
-            {
-              "card": 36,
-              "actual": "y4",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 42,
-              "actual": "r3",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 45,
-              "actual": "p4",
-              "flags": [
-                "trash"
-              ]
-            }
+          ],
+          "removedCards": [
+            24
           ]
         }
       ]
     },
     {
       "turn": 46,
-      "players": [
+      "changes": [
         {
-          "playerIndex": 0,
-          "playerName": "Alice",
-          "hand": [
-            {
-              "card": 37,
-              "actual": "r1",
-              "flags": [
-                "trash",
-                "chop"
-              ]
-            },
-            {
-              "card": 39,
-              "actual": "g3",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 43,
-              "actual": "r1",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 46,
-              "actual": "b1",
-              "flags": [
-                "trash"
-              ]
-            }
-          ]
-        },
-        {
-          "playerIndex": 1,
-          "playerName": "Bob",
-          "hand": [
-            {
-              "card": 28,
-              "actual": "y3",
-              "flags": [
-                "trash",
-                "chop"
-              ]
-            },
-            {
-              "card": 38,
-              "actual": "p3",
-              "flags": [
-                "trash"
-              ]
-            },
+          "player": 1,
+          "cards": [
             {
               "card": 40,
               "actual": "g1",
@@ -6033,76 +2018,9 @@
                 "trash"
               ]
             }
-          ]
-        },
-        {
-          "playerIndex": 2,
-          "playerName": "Cathy",
-          "hand": [
-            {
-              "card": 29,
-              "actual": "y1",
-              "flags": [
-                "trash",
-                "chop"
-              ]
-            },
-            {
-              "card": 32,
-              "actual": "g4",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 35,
-              "actual": "r4",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 41,
-              "actual": "b4",
-              "flags": [
-                "trash"
-              ]
-            }
-          ]
-        },
-        {
-          "playerIndex": 3,
-          "playerName": "Donald",
-          "hand": [
-            {
-              "card": 30,
-              "actual": "g2",
-              "flags": [
-                "trash",
-                "chop"
-              ]
-            },
-            {
-              "card": 36,
-              "actual": "y4",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 42,
-              "actual": "r3",
-              "flags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 45,
-              "actual": "p4",
-              "flags": [
-                "trash"
-              ]
-            }
+          ],
+          "removedCards": [
+            44
           ]
         }
       ]

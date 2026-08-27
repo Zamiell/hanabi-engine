@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use super::*;
 
-const SNAPSHOT_SCHEMA_VERSION: u8 = 3;
+const SNAPSHOT_SCHEMA_VERSION: u8 = 4;
 const UPDATE_ENVIRONMENT_VARIABLE: &str = "HANABI_UPDATE_SUPERPOSITIONS";
 
 #[derive(Serialize)]
@@ -14,28 +14,63 @@ struct ReplayEpistemicSnapshot {
     schema_version: u8,
     source: &'static str,
     convention: &'static str,
-    positions: Vec<PositionSnapshot>,
+    initial: Vec<InitialPlayerSnapshot>,
+    turn_deltas: Vec<TurnDelta>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PlayerStateSnapshot {
+    hand: Vec<CardSnapshot>,
+    connection: Option<ConnectionSnapshot>,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PositionSnapshot {
-    /// Number of completed player actions. Turn zero is the initial deal.
-    turn: u32,
-    players: Vec<PlayerSnapshot>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PlayerSnapshot {
-    player_index: usize,
-    player_name: String,
+struct InitialPlayerSnapshot {
+    player: usize,
     hand: Vec<CardSnapshot>,
     #[serde(skip_serializing_if = "Option::is_none")]
     connection: Option<ConnectionSnapshot>,
 }
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TurnDelta {
+    /// Number of completed player actions. Turn one is the position after the
+    /// first action; the initial deal is stored separately in `initial`.
+    turn: u32,
+    changes: Vec<PlayerDelta>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlayerDelta {
+    player: usize,
+    /// Complete replacement snapshots for cards that are new or changed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    cards: Vec<CardSnapshot>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    removed_cards: Vec<usize>,
+    /// Absent means unchanged, an object is the new connection, and `null`
+    /// means that the previous connection was cleared.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    connection: Option<ConnectionDelta>,
+}
+
+impl PlayerDelta {
+    fn is_empty(&self) -> bool {
+        self.cards.is_empty() && self.removed_cards.is_empty() && self.connection.is_none()
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(untagged)]
+enum ConnectionDelta {
+    Set(ConnectionSnapshot),
+    Cleared,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CardSnapshot {
     card: usize,
@@ -49,7 +84,7 @@ struct CardSnapshot {
     flags: Vec<&'static str>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ConnectionSnapshot {
     card: usize,
@@ -82,41 +117,143 @@ fn optimized_expert_replay_owner_superpositions_match_snapshot() {
     );
 }
 
+#[test]
+fn superposition_deltas_reconstruct_every_replay_position() {
+    let replay = expert_replay_194321();
+    let action_count = u32::try_from(replay.actions.len()).expect("replay length fits in u32");
+    let mut reconstructed = player_states(&replay, 0);
+
+    for turn in 1..=action_count {
+        let expected = player_states(&replay, turn);
+        let delta = position_delta(&reconstructed, &expected);
+        apply_position_delta(&mut reconstructed, &delta);
+        assert_eq!(
+            reconstructed, expected,
+            "delta after turn {turn} reconstructs the complete position"
+        );
+    }
+}
+
 fn render_snapshot(replay: &HanabiLiveReplay) -> String {
     let action_count = u32::try_from(replay.actions.len()).expect("replay length fits in u32");
-    let positions = (0..=action_count)
-        .map(|turn| position_snapshot(replay, turn))
+    let states = (0..=action_count)
+        .map(|turn| player_states(replay, turn))
+        .collect::<Vec<_>>();
+    let initial = states[0]
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(player, state)| InitialPlayerSnapshot {
+            player,
+            hand: state.hand,
+            connection: state.connection,
+        })
+        .collect();
+    let turn_deltas = states
+        .windows(2)
+        .enumerate()
+        .map(|(index, positions)| TurnDelta {
+            turn: u32::try_from(index + 1).expect("replay length fits in u32"),
+            changes: position_delta(&positions[0], &positions[1]),
+        })
         .collect();
     let snapshot = ReplayEpistemicSnapshot {
         schema_version: SNAPSHOT_SCHEMA_VERSION,
         source: "game-194321.json",
         convention: "H-Group max",
-        positions,
+        initial,
+        turn_deltas,
     };
     let mut json = serde_json::to_string_pretty(&snapshot).expect("snapshot is serializable");
     json.push('\n');
     json
 }
 
-fn position_snapshot(replay: &HanabiLiveReplay, turn: u32) -> PositionSnapshot {
+fn player_states(replay: &HanabiLiveReplay, turn: u32) -> Vec<PlayerStateSnapshot> {
     let state = replay
         .state_at_turn(turn)
         .unwrap_or_else(|error| panic!("replay position {turn} is valid: {error}"));
-    let players = replay
+    replay
         .players
         .iter()
         .enumerate()
-        .map(|(index, name)| {
+        .map(|(index, _)| {
             let player = PlayerId::new(
                 u8::try_from(index).expect("standard Hanabi has at most five players"),
             );
-            player_snapshot(&state, player, name)
+            player_snapshot(&state, player)
         })
-        .collect();
-    PositionSnapshot { turn, players }
+        .collect()
 }
 
-fn player_snapshot(state: &FullState, player: PlayerId, name: &str) -> PlayerSnapshot {
+fn position_delta(
+    before: &[PlayerStateSnapshot],
+    after: &[PlayerStateSnapshot],
+) -> Vec<PlayerDelta> {
+    assert_eq!(before.len(), after.len(), "player count remains stable");
+    before
+        .iter()
+        .zip(after)
+        .enumerate()
+        .filter_map(|(player, (before, after))| {
+            let cards = after
+                .hand
+                .iter()
+                .filter(|card| {
+                    before.hand.iter().find(|prior| prior.card == card.card) != Some(*card)
+                })
+                .cloned()
+                .collect();
+            let removed_cards = before
+                .hand
+                .iter()
+                .filter(|card| !after.hand.iter().any(|current| current.card == card.card))
+                .map(|card| card.card)
+                .collect();
+            let connection = (before.connection != after.connection).then(|| {
+                after
+                    .connection
+                    .clone()
+                    .map_or(ConnectionDelta::Cleared, ConnectionDelta::Set)
+            });
+            let delta = PlayerDelta {
+                player,
+                cards,
+                removed_cards,
+                connection,
+            };
+            (!delta.is_empty()).then_some(delta)
+        })
+        .collect()
+}
+
+fn apply_position_delta(states: &mut [PlayerStateSnapshot], changes: &[PlayerDelta]) {
+    for change in changes {
+        let state = &mut states[change.player];
+        state
+            .hand
+            .retain(|card| !change.removed_cards.contains(&card.card));
+        for changed_card in &change.cards {
+            if let Some(card) = state
+                .hand
+                .iter_mut()
+                .find(|card| card.card == changed_card.card)
+            {
+                *card = changed_card.clone();
+            } else {
+                state.hand.push(changed_card.clone());
+            }
+        }
+        if let Some(connection) = &change.connection {
+            match connection {
+                ConnectionDelta::Set(connection) => state.connection = Some(connection.clone()),
+                ConnectionDelta::Cleared => state.connection = None,
+            }
+        }
+    }
+}
+
+fn player_snapshot(state: &FullState, player: PlayerId) -> PlayerStateSnapshot {
     let view = state.view_for(player).expect("fixture player has a view");
     let deductions = LogicalDeductions::new(view.clone()).expect("fixture view is logical");
     let inferred = infer_h_group(&deductions, HGroupProfile::Max);
@@ -195,12 +332,7 @@ fn player_snapshot(state: &FullState, player: PlayerId, name: &str) -> PlayerSna
         },
         focus: connection.focus.index(),
     });
-    PlayerSnapshot {
-        player_index: player.index(),
-        player_name: name.to_owned(),
-        hand,
-        connection,
-    }
+    PlayerStateSnapshot { hand, connection }
 }
 
 fn identity_labels(identities: IdentitySet) -> String {
