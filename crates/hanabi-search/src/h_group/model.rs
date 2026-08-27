@@ -27,8 +27,8 @@ pub(super) type CardSet = HashSet<CardId, BuildHasherDefault<CompactIdHasher>>;
 pub(super) type PlayerSet = HashSet<PlayerId, BuildHasherDefault<CompactIdHasher>>;
 
 use super::{
-    ConnectionManager, ConventionFacts, ConventionTransitionResult, HGroupMoveKind, MutationDomain,
-    ProvenancedCardSet, SignalHistory,
+    ConnectionManager, ConventionFacts, ConventionTransitionResult, EffectSource, HGroupMoveKind,
+    MutationDomain, ProvenancedCardSet, SignalHistory,
 };
 
 /// How far observer projection may recurse while interpreting conventions.
@@ -278,10 +278,37 @@ impl HGroupState {
             .collect()
     }
 
-    /// Extends one Prompt set with permanent chop movement for chop purposes.
+    /// Returns cards that are conventionally clued or moved for chop purposes.
+    ///
+    /// An ordered Finesse obligation keeps its conditional suffix reserved so
+    /// the connection can advance after a wrong successful play. Those later
+    /// candidates are not current Finesse Positions, however, and therefore
+    /// do not remove the player's next unclued discard from chop.
     pub(super) fn gotten_from(&self, promptable: &CardSet) -> CardSet {
         let mut gotten = promptable.clone();
         gotten.extend(self.cards.chop_moved.iter().copied());
+        let active_finesse_positions = self
+            .pending_connections
+            .iter()
+            .filter(|connection| connection.kind == HGroupConnectionKind::Finesse)
+            .filter_map(|connection| connection.cards.first().copied())
+            .collect::<CardSet>();
+        for card in &self.cards.invisibly_clued {
+            let only_connection_sources = !self.cards.invisibly_clued.sources(*card).is_empty()
+                && self
+                    .cards
+                    .invisibly_clued
+                    .sources(*card)
+                    .iter()
+                    .all(|source| matches!(source, EffectSource::Promise(_)));
+            if only_connection_sources
+                && !active_finesse_positions.contains(card)
+                && !self.cards.explicitly_clued.contains(card)
+                && !self.cards.chop_moved.contains(card)
+            {
+                gotten.remove(card);
+            }
+        }
         gotten
     }
 

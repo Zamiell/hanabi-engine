@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use super::*;
 
-const SNAPSHOT_SCHEMA_VERSION: u8 = 4;
+const SNAPSHOT_SCHEMA_VERSION: u8 = 5;
 const UPDATE_ENVIRONMENT_VARIABLE: &str = "HANABI_UPDATE_SUPERPOSITIONS";
 
 #[derive(Serialize)]
@@ -48,7 +48,7 @@ struct PlayerDelta {
     player: usize,
     /// Complete replacement snapshots for cards that are new or changed.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    cards: Vec<CardSnapshot>,
+    cards: Vec<CardDelta>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     removed_cards: Vec<usize>,
     /// Absent means unchanged, an object is the new connection, and `null`
@@ -68,6 +68,53 @@ impl PlayerDelta {
 enum ConnectionDelta {
     Set(ConnectionSnapshot),
     Cleared,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CardDelta {
+    card: usize,
+    actual: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    convention: Option<String>,
+    /// Complete current flag set after this turn.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    flags: Vec<&'static str>,
+    /// Flags present before this turn that are no longer present.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    removed_flags: Vec<&'static str>,
+}
+
+impl CardDelta {
+    fn between(before: Option<&CardSnapshot>, after: &CardSnapshot) -> Option<Self> {
+        if before == Some(after) {
+            return None;
+        }
+        let removed_flags = before.map_or_else(Vec::new, |before| {
+            before
+                .flags
+                .iter()
+                .copied()
+                .filter(|flag| !after.flags.contains(flag))
+                .collect()
+        });
+        Some(Self {
+            card: after.card,
+            actual: after.actual.clone(),
+            convention: after.convention.clone(),
+            flags: after.flags.clone(),
+            removed_flags,
+        })
+    }
+
+    fn state(&self) -> CardSnapshot {
+        CardSnapshot {
+            card: self.card,
+            actual: self.actual.clone(),
+            convention: self.convention.clone(),
+            flags: self.flags.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -199,10 +246,12 @@ fn position_delta(
             let cards = after
                 .hand
                 .iter()
-                .filter(|card| {
-                    before.hand.iter().find(|prior| prior.card == card.card) != Some(*card)
+                .filter_map(|card| {
+                    CardDelta::between(
+                        before.hand.iter().find(|prior| prior.card == card.card),
+                        card,
+                    )
                 })
-                .cloned()
                 .collect();
             let removed_cards = before
                 .hand
@@ -239,9 +288,9 @@ fn apply_position_delta(states: &mut [PlayerStateSnapshot], changes: &[PlayerDel
                 .iter_mut()
                 .find(|card| card.card == changed_card.card)
             {
-                *card = changed_card.clone();
+                *card = changed_card.state();
             } else {
-                state.hand.push(changed_card.clone());
+                state.hand.push(changed_card.state());
             }
         }
         if let Some(connection) = &change.connection {
