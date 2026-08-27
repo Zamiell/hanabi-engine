@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use super::*;
 
-const SNAPSHOT_SCHEMA_VERSION: u8 = 11;
+const SNAPSHOT_SCHEMA_VERSION: u8 = 12;
 const UPDATE_ENVIRONMENT_VARIABLE: &str = "HANABI_UPDATE_SUPERPOSITIONS";
 
 #[test]
@@ -170,7 +170,8 @@ struct TurnDelta {
 #[serde(rename_all = "camelCase")]
 struct PlayerDelta {
     player: usize,
-    /// Complete replacement snapshots for cards that are new or changed.
+    /// Superposition or semantic changes. Newly drawn cards are implicit in
+    /// the source replay and appear here only if they immediately gain state.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     cards: Vec<CardDelta>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -268,9 +269,6 @@ impl ConnectionDelta {
 #[serde(rename_all = "camelCase")]
 struct CardDelta {
     card: usize,
-    /// Simulator truth is needed only when a card first enters the hand.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    actual: Option<String>,
     /// Absent means unchanged, a string replaces the conventional domain,
     /// and `null` returns it to the ordinary logical domain.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -294,82 +292,55 @@ impl CardDelta {
     fn between(before: Option<&CardSnapshot>, after: &CardSnapshot) -> Option<Self> {
         // Focus describes only the immediately preceding clue. Advancing to a
         // new turn clears it implicitly; a new clue can add it again below.
-        let normalized_before = before.cloned().map(|mut before| {
-            before.flags.retain(|flag| *flag != SnapshotFlag::Focused);
-            before
-        });
-        let before = normalized_before.as_ref();
-        if before == Some(after) {
+        // A newly drawn card's identity and presence are also implicit in the
+        // source replay, so compare it with an unannotated in-hand baseline.
+        let normalized_before = before.cloned().map_or_else(
+            || CardSnapshot {
+                card: after.card,
+                actual: after.actual.clone(),
+                convention: None,
+                flags: Vec::new(),
+            },
+            |mut before| {
+                before.flags.retain(|flag| *flag != SnapshotFlag::Focused);
+                before
+            },
+        );
+        let before = &normalized_before;
+        if before == after {
             return None;
         }
-        let removed_flags = before.map_or_else(Vec::new, |before| {
-            before
-                .flags
-                .iter()
-                .copied()
-                .filter(|flag| !after.flags.contains(flag))
-                .collect()
+        assert_eq!(
+            before.actual, after.actual,
+            "a dealt card's simulator identity cannot change"
+        );
+        let removed_flags = before
+            .flags
+            .iter()
+            .copied()
+            .filter(|flag| !after.flags.contains(flag))
+            .collect();
+        let added_flags = after
+            .flags
+            .iter()
+            .copied()
+            .filter(|flag| !before.flags.contains(flag))
+            .collect();
+        let convention = (before.convention != after.convention).then(|| {
+            after
+                .convention
+                .clone()
+                .map_or(ConventionDelta::Cleared, ConventionDelta::Changed)
         });
-        let added_flags = before.map_or_else(
-            || after.flags.clone(),
-            |before| {
-                after
-                    .flags
-                    .iter()
-                    .copied()
-                    .filter(|flag| !before.flags.contains(flag))
-                    .collect()
-            },
-        );
-        let actual = before.map_or_else(
-            || Some(after.actual.clone()),
-            |before| {
-                assert_eq!(
-                    before.actual, after.actual,
-                    "a dealt card's simulator identity cannot change"
-                );
-                None
-            },
-        );
-        let convention = before.map_or_else(
-            || after.convention.clone().map(ConventionDelta::Changed),
-            |before| {
-                (before.convention != after.convention).then(|| {
-                    after
-                        .convention
-                        .clone()
-                        .map_or(ConventionDelta::Cleared, ConventionDelta::Changed)
-                })
-            },
-        );
         Some(Self {
             card: after.card,
-            actual,
             convention,
             added_flags,
             removed_flags,
         })
     }
 
-    fn state(&self) -> CardSnapshot {
-        CardSnapshot {
-            card: self.card,
-            actual: self
-                .actual
-                .clone()
-                .expect("a newly introduced card includes its actual identity"),
-            convention: match &self.convention {
-                Some(ConventionDelta::Changed(convention)) => Some(convention.clone()),
-                Some(ConventionDelta::Cleared) | None => None,
-            },
-            flags: self.added_flags.clone(),
-        }
-    }
-
     fn apply(&self, card: &mut CardSnapshot) {
-        if let Some(actual) = &self.actual {
-            card.actual.clone_from(actual);
-        }
         match &self.convention {
             Some(ConventionDelta::Changed(convention)) => {
                 card.convention = Some(convention.clone());
@@ -469,7 +440,7 @@ fn superposition_deltas_reconstruct_every_replay_position() {
     for turn in 1..=action_count {
         let expected = player_states(&replay, turn);
         let delta = position_delta(&reconstructed, &expected);
-        apply_position_delta(&mut reconstructed, &delta);
+        apply_position_delta(&mut reconstructed, &delta, &expected);
         assert_eq!(
             reconstructed, expected,
             "delta after turn {turn} reconstructs the complete position"
@@ -504,7 +475,6 @@ fn card_deltas_report_only_flag_changes() {
     };
 
     let delta = CardDelta::between(Some(&before), &after).expect("the card gained a flag");
-    assert!(delta.actual.is_none());
     assert!(delta.convention.is_none());
     assert_eq!(delta.added_flags, [SnapshotFlag::Playable]);
     assert!(delta.removed_flags.is_empty());
@@ -512,6 +482,30 @@ fn card_deltas_report_only_flag_changes() {
     let mut reconstructed = before;
     delta.apply(&mut reconstructed);
     assert_eq!(reconstructed, after);
+}
+
+#[test]
+fn card_draws_are_implicit_unless_they_gain_superposition_state() {
+    let bare_draw = CardSnapshot {
+        card: 16,
+        actual: "y3".to_owned(),
+        convention: None,
+        flags: Vec::new(),
+    };
+    assert!(CardDelta::between(None, &bare_draw).is_none());
+
+    let annotated_draw = CardSnapshot {
+        convention: Some("y3".to_owned()),
+        flags: vec![SnapshotFlag::Finessed],
+        ..bare_draw
+    };
+    let delta = CardDelta::between(None, &annotated_draw)
+        .expect("draw-time convention state remains explicit");
+    let json = serde_json::to_value(&delta).unwrap();
+    assert_eq!(json["card"], 16);
+    assert_eq!(json["convention"], "y3");
+    assert_eq!(json["addedFlags"], serde_json::json!(["finessed"]));
+    assert!(json.get("actual").is_none());
 }
 
 #[test]
@@ -663,7 +657,24 @@ fn position_delta(
         .collect()
 }
 
-fn apply_position_delta(states: &mut [PlayerStateSnapshot], changes: &[PlayerDelta]) {
+fn apply_position_delta(
+    states: &mut [PlayerStateSnapshot],
+    changes: &[PlayerDelta],
+    expected: &[PlayerStateSnapshot],
+) {
+    assert_eq!(states.len(), expected.len(), "player count remains stable");
+    for (state, expected) in states.iter_mut().zip(expected) {
+        for drawn in &expected.hand {
+            if !state.hand.iter().any(|card| card.card == drawn.card) {
+                state.hand.push(CardSnapshot {
+                    card: drawn.card,
+                    actual: drawn.actual.clone(),
+                    convention: None,
+                    flags: Vec::new(),
+                });
+            }
+        }
+    }
     for state in states.iter_mut() {
         for card in &mut state.hand {
             card.flags.retain(|flag| *flag != SnapshotFlag::Focused);
@@ -682,7 +693,10 @@ fn apply_position_delta(states: &mut [PlayerStateSnapshot], changes: &[PlayerDel
             {
                 changed_card.apply(card);
             } else {
-                state.hand.push(changed_card.state());
+                panic!(
+                    "card {} must come from the replay-implied hand before its delta is applied",
+                    changed_card.card
+                );
             }
         }
         if let Some(connection) = &change.connection {
