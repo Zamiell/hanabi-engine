@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 14,
+  "schemaVersion": 15,
   "source": "game-p4v0s415.json",
   "convention": "H-Group max",
   "initial": [
@@ -1002,81 +1002,12 @@
       "turn": 43,
       "changes": [
         {
-          "player": 0,
-          "cards": [
-            {
-              "card": 37,
-              "addedFlags": [
-                "trash"
-              ]
-            }
-          ]
-        },
-        {
           "player": 1,
           "cards": [
             {
               "card": 28,
               "addedFlags": [
                 "chop"
-              ]
-            }
-          ]
-        },
-        {
-          "player": 2,
-          "cards": [
-            {
-              "card": 29,
-              "addedFlags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 32,
-              "addedFlags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 35,
-              "addedFlags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 41,
-              "addedFlags": [
-                "trash"
-              ]
-            }
-          ]
-        },
-        {
-          "player": 3,
-          "cards": [
-            {
-              "card": 26,
-              "addedFlags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 30,
-              "addedFlags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 36,
-              "addedFlags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 42,
-              "addedFlags": [
-                "trash"
               ]
             }
           ]
@@ -1089,18 +1020,6 @@
         {
           "player": 1,
           "cards": [
-            {
-              "card": 28,
-              "addedFlags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 38,
-              "addedFlags": [
-                "trash"
-              ]
-            },
             {
               "card": 40,
               "convention": "g1",
@@ -1131,40 +1050,6 @@
               "addedFlags": [
                 "chop"
               ]
-            },
-            {
-              "card": 45,
-              "addedFlags": [
-                "trash"
-              ]
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "turn": 46,
-      "changes": [
-        {
-          "player": 0,
-          "cards": [
-            {
-              "card": 39,
-              "addedFlags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 43,
-              "addedFlags": [
-                "trash"
-              ]
-            },
-            {
-              "card": 46,
-              "addedFlags": [
-                "trash"
-              ]
             }
           ]
         }
@@ -1178,7 +1063,10 @@
           "cards": [
             {
               "card": 40,
-              "convention": null
+              "convention": null,
+              "removedFlags": [
+                "trash"
+              ]
             }
           ]
         }

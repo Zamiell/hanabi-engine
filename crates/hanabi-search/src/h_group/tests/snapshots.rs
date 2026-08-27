@@ -5,8 +5,39 @@ use serde::Serialize;
 
 use super::*;
 
-const SNAPSHOT_SCHEMA_VERSION: u8 = 14;
+const SNAPSHOT_SCHEMA_VERSION: u8 = 15;
 const UPDATE_ENVIRONMENT_VARIABLE: &str = "HANABI_UPDATE_SUPERPOSITIONS";
+
+#[test]
+fn trash_flags_only_record_convention_knowledge() {
+    let before_green_clue = expert_replay_p4v0s415()
+        .state_at_turn(42)
+        .expect("fixture prefix is legal");
+    let alice = player_snapshot(&before_green_clue, PlayerId::new(0));
+    let logical_trash = alice
+        .hand
+        .iter()
+        .find(|card| card.card == 37)
+        .expect("Alice holds card 37");
+    assert!(
+        !logical_trash.flags.contains(&SnapshotFlag::Trash),
+        "public game state already proves card 37 is trash"
+    );
+
+    let after_green_clue = expert_replay_p4v0s415()
+        .state_at_turn(43)
+        .expect("fixture prefix is legal");
+    let bob = player_snapshot(&after_green_clue, PlayerId::new(1));
+    let convention_trash = bob
+        .hand
+        .iter()
+        .find(|card| card.card == 40)
+        .expect("Bob holds card 40");
+    assert!(
+        convention_trash.flags.contains(&SnapshotFlag::Trash),
+        "the green clue conventionally distinguishes green 1 from logical green 5"
+    );
+}
 
 #[test]
 fn directness_resolves_turn_37_purple_focus_to_four() {
@@ -868,7 +899,11 @@ fn player_snapshot(state: &FullState, player: PlayerId) -> PlayerStateSnapshot {
                 .find(|visible| visible.id == observed.id)
                 .and_then(|visible| visible.identity)
                 .expect("another player sees the card identity");
-            let trash = note.identity_status != HGroupIdentityStatus::Provisional
+            let logically_trash = !logical.is_empty()
+                && logical
+                    .iter()
+                    .all(|identity| !is_eventually_useful(&view, identity));
+            let convention_trash = note.identity_status != HGroupIdentityStatus::Provisional
                 && !note.identities.is_empty()
                 && note
                     .identities
@@ -885,7 +920,7 @@ fn player_snapshot(state: &FullState, player: PlayerId) -> PlayerStateSnapshot {
                     .connection
                     .is_some_and(|connection| connection.card == observed.id);
             flags.extend(has_play_obligation.then_some(SnapshotFlag::Playable));
-            flags.extend(trash.then_some(SnapshotFlag::Trash));
+            flags.extend((convention_trash && !logically_trash).then_some(SnapshotFlag::Trash));
             flags.extend(note.saved.then_some(SnapshotFlag::Saved));
             flags.extend(note.finessed.then_some(SnapshotFlag::Finessed));
             flags.extend(
