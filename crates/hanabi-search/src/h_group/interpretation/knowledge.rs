@@ -6,7 +6,7 @@ use super::{
     IdentityClaims, IdentitySet, LogicalDeductions, MaterializedCardFact, ObservedEvent, PlayerId,
     PlayerView, Rank, StackTimeline, chop, elimination_finesse_connection, identity_of,
     is_eventually_useful, is_playable_at, loaded_connection_plan, pending_identity_is_queued,
-    pending_is_active, replay_identity_is_queued, rule_enabled,
+    pending_is_active, replay_identity_is_queued, rule_enabled, was_clued_before,
 };
 use crate::h_group::knowledge_effects::{
     KnowledgeSource, effects_from_projection, initial_card_inferences,
@@ -331,6 +331,13 @@ fn compile_convention_card_inferences(
             .any(|kind| replay.signals.has_at_turn(clue.turn, kind));
         if !intentionally_duplicates && clue.focus_identities.len() == 1 {
             for previous in &clue.previously_gotten {
+                // Good Touch narrows identities only on cards that already
+                // carry physical clue information. A Layered Finesse reserves
+                // conditional suffix cards, but that reservation does not turn
+                // those ordinary unclued cards into Good-Touch subjects.
+                if !was_clued_before(view, clue.turn, *previous) {
+                    continue;
+                }
                 let Some(card) = cards.iter_mut().find(|card| card.card == *previous) else {
                     continue;
                 };

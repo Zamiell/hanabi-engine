@@ -74,6 +74,32 @@ fn finesse_separates_its_exact_promise_from_successful_play_contingencies() {
     }
 }
 
+#[test]
+fn good_touch_does_not_narrow_unclued_connection_suffix_cards() {
+    let state = expert_replay_194321()
+        .state_at_turn(5)
+        .expect("fixture prefix is legal");
+    let view = state.view_for(PlayerId::new(3)).expect("Donald has a view");
+    let deductions = LogicalDeductions::new(view).expect("valid deductions");
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+
+    for card in [CardId::new(12), CardId::new(13)] {
+        let logical = deductions
+            .possible_identities(card)
+            .expect("Donald's live card has a logical domain");
+        let conventional = inferred
+            .cards
+            .iter()
+            .find(|note| note.card == card)
+            .expect("Donald's live card has a convention note")
+            .identities;
+        assert_eq!(
+            conventional, logical,
+            "Good Touch from Cathy's yellow clue must not narrow Donald's unclued card {card:?}"
+        );
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReplayEpistemicSnapshot {

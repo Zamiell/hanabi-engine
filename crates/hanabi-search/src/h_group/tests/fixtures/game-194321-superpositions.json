@@ -273,24 +273,6 @@
               ]
             }
           ]
-        },
-        {
-          "player": 3,
-          "cards": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "convention": "r1 r2 r3 r4 r5 y1 y2 y4 g1 g2 g3 g4 g5 b1 b2 b3 b4 b5 p1 p3 p4 p5",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 13,
-              "actual": "y1",
-              "convention": "r1 r2 r3 r4 r5 y1 y2 y4 g1 g2 g3 g4 g5 b1 b2 b3 b4 b5 p1 p3 p4 p5"
-            }
-          ]
         }
       ]
     },
@@ -340,19 +322,6 @@
         {
           "player": 3,
           "cards": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "convention": "y1 y2 y4 g1 g2 g3 g4 g5 b1 b2 b3 b4 b5 p1 p3 p4 p5",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 13,
-              "actual": "y1",
-              "convention": "y1 y2 y4 g1 g2 g3 g4 g5 b1 b2 b3 b4 b5 p1 p3 p4 p5"
-            },
             {
               "card": 17,
               "actual": "r4",
@@ -504,25 +473,8 @@
       "turn": 10,
       "changes": [
         {
-          "player": 2,
-          "cards": [
-            {
-              "card": 9,
-              "actual": "r3",
-              "convention": "r1 r2 r3 r4 r5 b1 b4 b5 p1 p3 p4 p5"
-            }
-          ]
-        },
-        {
           "player": 3,
           "cards": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "flags": [
-                "chop"
-              ]
-            },
             {
               "card": 17,
               "actual": "r4",
@@ -660,19 +612,6 @@
               ]
             }
           ]
-        },
-        {
-          "player": 3,
-          "cards": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "convention": "y1 y2 y4 g1 g2 g4 g5 b1 b2 b5 p1 p4 p5",
-              "flags": [
-                "chop"
-              ]
-            }
-          ]
         }
       ]
     },
@@ -789,19 +728,6 @@
           "removedCards": [
             0
           ]
-        },
-        {
-          "player": 3,
-          "cards": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "convention": "y1 y2 y4 g1 g2 g4 g5 b1 b2 b5 p1 p4",
-              "flags": [
-                "chop"
-              ]
-            }
-          ]
         }
       ]
     },
@@ -832,19 +758,6 @@
             "card": 7,
             "identity": "g3"
           }
-        },
-        {
-          "player": 3,
-          "cards": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "convention": "y1 y4 g1 g2 g4 g5 b1 b2 b5 p1 p4",
-              "flags": [
-                "chop"
-              ]
-            }
-          ]
         }
       ]
     },
@@ -870,37 +783,6 @@
               "card": 24,
               "actual": "p5",
               "convention": "p3 p4 p5"
-            }
-          ]
-        },
-        {
-          "player": 1,
-          "cards": [
-            {
-              "card": 5,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y1 y2 y3 y4 g1 g2 g3 g4 g5 p2 p3 p4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 6,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y1 y2 y3 y4 g1 g2 g3 g4 g5 p2 p3 p4"
-            }
-          ]
-        },
-        {
-          "player": 3,
-          "cards": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "convention": "y1 y4 g1 g2 g4 g5 b1 b2 b5 p4",
-              "flags": [
-                "chop"
-              ]
             }
           ]
         }
@@ -984,19 +866,6 @@
               ]
             }
           ]
-        },
-        {
-          "player": 3,
-          "cards": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "convention": "y1 y4 g1 g2 g4 g5 b1 b2 p4",
-              "flags": [
-                "chop"
-              ]
-            }
-          ]
         }
       ]
     },
@@ -1057,24 +926,6 @@
           ]
         },
         {
-          "player": 1,
-          "cards": [
-            {
-              "card": 5,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y2 y3 y4 g1 g2 g3 g4 g5 p2 p3 p4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 6,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y2 y3 y4 g1 g2 g3 g4 g5 p2 p3 p4"
-            }
-          ]
-        },
-        {
           "player": 2,
           "cards": [
             {
@@ -1100,24 +951,6 @@
               "flags": [
                 "playable"
               ]
-            }
-          ]
-        },
-        {
-          "player": 1,
-          "cards": [
-            {
-              "card": 5,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y2 y3 y4 g1 g3 g4 g5 p2 p3 p4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 6,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y2 y3 y4 g1 g3 g4 g5 p2 p3 p4"
             }
           ]
         },
@@ -1227,24 +1060,6 @@
           ]
         },
         {
-          "player": 1,
-          "cards": [
-            {
-              "card": 5,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y2 y3 y4 g1 g3 g5 p2 p3 p4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 6,
-              "actual": "p2",
-              "convention": "r1 r2 r3 r4 y2 y3 y4 g1 g3 g5 p2 p3 p4"
-            }
-          ]
-        },
-        {
           "player": 2,
           "cards": [
             {
@@ -1256,19 +1071,6 @@
             16
           ],
           "connection": null
-        },
-        {
-          "player": 3,
-          "cards": [
-            {
-              "card": 12,
-              "actual": "b2",
-              "convention": "y1 y4 g1 g2 g5 b1 b2 p4",
-              "flags": [
-                "chop"
-              ]
-            }
-          ]
         }
       ]
     },
@@ -1375,24 +1177,6 @@
           ]
         },
         {
-          "player": 1,
-          "cards": [
-            {
-              "card": 5,
-              "actual": "p2",
-              "convention": "r1 r2 r3 y2 y3 y4 g1 g3 g5 p2 p3 p4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 6,
-              "actual": "p2",
-              "convention": "r1 r2 r3 y2 y3 y4 g1 g3 g5 p2 p3 p4"
-            }
-          ]
-        },
-        {
           "player": 2,
           "cards": [
             {
@@ -1409,24 +1193,6 @@
     {
       "turn": 32,
       "changes": [
-        {
-          "player": 1,
-          "cards": [
-            {
-              "card": 5,
-              "actual": "p2",
-              "convention": "r1 r2 r3 y2 y3 g1 g3 g5 p2 p3 p4",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 6,
-              "actual": "p2",
-              "convention": "r1 r2 r3 y2 y3 g1 g3 g5 p2 p3 p4"
-            }
-          ]
-        },
         {
           "player": 3,
           "cards": [
@@ -1484,7 +1250,6 @@
             {
               "card": 6,
               "actual": "p2",
-              "convention": "r1 r2 r3 y2 y3 g1 g3 g5 p2 p3 p4",
               "flags": [
                 "chop"
               ]
@@ -1731,29 +1496,6 @@
           "removedCards": [
             34
           ]
-        },
-        {
-          "player": 1,
-          "cards": [
-            {
-              "card": 25,
-              "actual": "y2",
-              "convention": "r2 y2 y3 g1 g5 b1 p1 p3",
-              "flags": [
-                "chop"
-              ]
-            },
-            {
-              "card": 28,
-              "actual": "y3",
-              "convention": "r2 y2 y3 g1 g5 b1 p1 p3"
-            },
-            {
-              "card": 38,
-              "actual": "p3",
-              "convention": "r2 y2 y3 g1 g5 b1 p1 p3"
-            }
-          ]
         }
       ]
     },
@@ -1782,10 +1524,6 @@
               "flags": [
                 "chop"
               ]
-            },
-            {
-              "card": 38,
-              "actual": "p3"
             },
             {
               "card": 44,
