@@ -415,17 +415,20 @@ fn compile_convention_card_inferences(
     // A deterministic later step in a connection chain is known immediately,
     // even though it is not yet actionable. Keep that epistemic promise
     // separate from the play obligation assigned to the chain's active head
-    // below. Multi-card steps remain conditional: only their current first
-    // candidate can be constrained after preceding alternatives resolve.
-    for pending in replay
-        .pending_connections
-        .iter()
-        .filter(|pending| pending.actor == view.observer && pending.cards.len() == 1)
-    {
-        let pending_card = pending.cards[0];
+    // below. For a queued ordered step, its first candidate receives the
+    // promise immediately, but its physical domain remains broad until the
+    // preceding step resolves; later fallback candidates remain unmarked.
+    for pending in replay.pending_connections.iter().filter(|pending| {
+        pending.actor == view.observer
+            && (pending.cards.len() == 1
+                || !pending_is_active(pending, &replay.pending_connections))
+    }) {
+        let Some(pending_card) = pending.cards.first().copied() else {
+            continue;
+        };
         let conflicting_promise = replay.pending_connections.iter().any(|other| {
             other.actor == view.observer
-                && other.cards.as_slice() == [pending_card]
+                && other.cards.first() == Some(&pending_card)
                 && other.expected != pending.expected
         });
         if conflicting_promise {
@@ -434,13 +437,16 @@ fn compile_convention_card_inferences(
         let Some(card) = cards.iter_mut().find(|card| card.card == pending_card) else {
             continue;
         };
-        let promised = IdentitySet::singleton(pending.expected);
-        let narrowed = card.identities.intersection(promised);
-        if !narrowed.is_empty() {
+        if pending.cards.len() == 1 {
+            let promised = IdentitySet::singleton(pending.expected);
+            let narrowed = card.identities.intersection(promised);
+            if narrowed.is_empty() {
+                continue;
+            }
             card.identities = narrowed;
-            card.promised_identity = Some(pending.expected);
-            card.finessed = pending.kind == HGroupConnectionKind::Finesse;
         }
+        card.promised_identity = Some(pending.expected);
+        card.finessed = pending.kind == HGroupConnectionKind::Finesse;
     }
 
     for pending in replay.pending_connections.iter().filter(|pending| {

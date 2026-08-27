@@ -132,6 +132,34 @@ fn deterministic_future_connection_steps_are_known_before_they_are_actionable() 
     }
 }
 
+#[test]
+fn queued_ordered_connection_marks_its_first_candidate_before_activation() {
+    let replay = expert_replay_p4v0s415();
+    let expected = Card::new(Suit::Green, Rank::Three);
+
+    for (turn, actionable) in [(16, false), (18, true)] {
+        let state = replay.state_at_turn(turn).expect("fixture prefix is legal");
+        let view = state.view_for(PlayerId::new(1)).expect("Bob has a view");
+        let deductions = LogicalDeductions::new(view).expect("valid deductions");
+        let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+        let green_three = inferred
+            .cards
+            .iter()
+            .find(|note| note.card == CardId::new(7))
+            .expect("Bob still holds the queued green 3 candidate");
+
+        assert_eq!(green_three.promised_identity, Some(expected));
+        assert!(green_three.finessed);
+        assert_eq!(green_three.play_obligation.is_some(), actionable);
+        assert_eq!(
+            inferred
+                .connection
+                .is_some_and(|connection| connection.card == CardId::new(7)),
+            actionable
+        );
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReplayEpistemicSnapshot {

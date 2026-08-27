@@ -507,6 +507,13 @@
           "player": 1,
           "cards": [
             {
+              "card": 7,
+              "convention": "g3",
+              "addedFlags": [
+                "finessed"
+              ]
+            },
+            {
               "card": 22,
               "convention": "g2",
               "addedFlags": [
@@ -548,10 +555,8 @@
           "cards": [
             {
               "card": 7,
-              "convention": "g3",
               "addedFlags": [
-                "playable",
-                "finessed"
+                "playable"
               ]
             }
           ],
