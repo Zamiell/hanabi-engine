@@ -296,10 +296,11 @@ fn prospective_source_hand_worlds(
         return cached;
     }
     let mut worlds = Vec::new();
-    PerspectiveProjector::new(source, profile).visit_source_hand_worlds(256, |world| {
-        worlds.push(world.clone());
-        false
-    })?;
+    let _visit =
+        PerspectiveProjector::new(source, profile).visit_source_hand_worlds(256, |world| {
+            worlds.push(world.clone());
+            false
+        })?;
     let computed = Arc::new(worlds);
     PROSPECTIVE_ANALYSIS_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();

@@ -11,7 +11,7 @@ use hanabi_core::{Action, CardId, Clue, FullState, PlayerView};
 use hanabi_protocol::{HanabiLiveReplay, ReplayError};
 use hanabi_search::{
     AnalyzePositionError, HGroupProfile, PlannerConfig, PlanningObjective, SupportedConvention,
-    analyze_position,
+    WorldCount, analyze_position,
 };
 
 mod live_action;
@@ -85,11 +85,13 @@ fn analyze_planner(
     )
     .map_err(CliError::AnalyzePosition)?;
     let result = analysis.planner;
+    let (world_prefix, worlds) = match result.world_count {
+        WorldCount::Exact(worlds) => ("", worlds),
+        WorldCount::LowerBound(worlds) => (">=", worlds),
+    };
     println!(
         "Planning: deterministic {:?} planner, {}{} consistent worlds",
-        result.phase,
-        if result.world_count_exact { "" } else { ">=" },
-        result.considered_worlds,
+        result.phase, world_prefix, worlds,
     );
     println!(
         "Elapsed: {:.3}s; exact nodes: {}",

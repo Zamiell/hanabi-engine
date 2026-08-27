@@ -202,7 +202,7 @@ struct ConnectionPatch {
     #[serde(skip_serializing_if = "Option::is_none")]
     identity: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    kind: Option<&'static str>,
+    kind: Option<SnapshotConnectionKind>,
     #[serde(skip_serializing_if = "Option::is_none")]
     focus: Option<usize>,
 }
@@ -363,8 +363,24 @@ struct CardSnapshot {
 struct ConnectionSnapshot {
     card: usize,
     identity: String,
-    kind: &'static str,
+    kind: SnapshotConnectionKind,
     focus: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum SnapshotConnectionKind {
+    Prompt,
+    Finesse,
+}
+
+impl From<HGroupConnectionKind> for SnapshotConnectionKind {
+    fn from(kind: HGroupConnectionKind) -> Self {
+        match kind {
+            HGroupConnectionKind::Prompt => Self::Prompt,
+            HGroupConnectionKind::Finesse => Self::Finesse,
+        }
+    }
 }
 
 #[test]
@@ -622,10 +638,7 @@ fn player_snapshot(state: &FullState, player: PlayerId) -> PlayerStateSnapshot {
     let connection = inferred.connection.map(|connection| ConnectionSnapshot {
         card: connection.card.index(),
         identity: identity_label(connection.identity),
-        kind: match connection.kind {
-            HGroupConnectionKind::Prompt => "prompt",
-            HGroupConnectionKind::Finesse => "finesse",
-        },
+        kind: connection.kind.into(),
         focus: connection.focus.index(),
     });
     PlayerStateSnapshot { hand, connection }

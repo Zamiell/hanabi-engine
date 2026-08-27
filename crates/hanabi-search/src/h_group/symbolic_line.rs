@@ -1,6 +1,6 @@
 use hanabi_core::{Action, Card, CardId, Clue, PlayerId, PlayerView};
 
-use crate::{LogicalDeductions, SymbolicLineOutcome};
+use crate::{LogicalDeductions, SymbolicLineOutcome, SymbolicStopReason};
 
 use super::{
     HGroupProfile, PerspectiveDepth, PerspectiveProjector, ProspectiveTransition,
@@ -21,13 +21,14 @@ pub(crate) fn project_h_group_line(
 
     while let Some(current) = action {
         if outcome.actions >= limit {
-            outcome.reached_limit = true;
+            outcome.stop_reason = SymbolicStopReason::Limit;
             break;
         }
         let actor = public.current_player;
         let Some((actor_deductions, actor_replay)) = PerspectiveProjector::new(&public, profile)
             .project(actor, PerspectiveDepth::NestedRecipients)
         else {
+            outcome.stop_reason = SymbolicStopReason::ProjectionUnavailable;
             break;
         };
         let actor_inferences = infer_h_group_from_replay(&actor_deductions, actor_replay, profile);
@@ -39,7 +40,7 @@ pub(crate) fn project_h_group_line(
             current,
             &mut outcome,
         ) else {
-            outcome.identity_branch = true;
+            outcome.stop_reason = SymbolicStopReason::UnknownIdentity;
             break;
         };
         public = after;
@@ -48,6 +49,7 @@ pub(crate) fn project_h_group_line(
         let Some((next_deductions, _)) = PerspectiveProjector::new(&public, profile)
             .project(next, PerspectiveDepth::NestedRecipients)
         else {
+            outcome.stop_reason = SymbolicStopReason::ProjectionUnavailable;
             break;
         };
         action = h_group_predictable_action(&next_deductions, profile);
@@ -151,6 +153,21 @@ mod tests {
         );
 
         assert_eq!(outcome.actions, 0);
-        assert!(outcome.identity_branch);
+        assert_eq!(outcome.stop_reason, SymbolicStopReason::UnknownIdentity);
+    }
+
+    #[test]
+    fn symbolic_action_limit_has_a_distinct_stop_reason() {
+        let state = FullState::new_standard(2, standard_deck()).unwrap();
+        let view = state.view_for(PlayerId::new(0)).unwrap();
+        let outcome = project_h_group_line(
+            &view,
+            HGroupProfile::Max,
+            Action::Play(view.hands[0][0].id),
+            0,
+        );
+
+        assert_eq!(outcome.actions, 0);
+        assert_eq!(outcome.stop_reason, SymbolicStopReason::Limit);
     }
 }

@@ -439,7 +439,7 @@ fn second_replay_move_thirty_eight_keeps_the_layered_green_three_consistent() {
         .collect::<Vec<_>>();
     let count = information_set.world_count_up_to(&analysis.belief_constraints, 4_096);
     assert!(
-        count.worlds > 0,
+        count.worlds() > 0,
         "the demonstrated blue-3/green-3 layer must have a consistent world: logical={logical:#?}; constraints={:#?}",
         analysis.belief_constraints,
     );

@@ -5,7 +5,7 @@ use hanabi_core::{Action, Clue, FullState, GameStatus, PlayerView, Rank, RuleErr
 
 use crate::{
     ConventionAction, ConventionAnalysis, EnumerateWorldsError, InformationSet,
-    InformationSetError, LogicalDeductions, SupportedConvention, assess_card,
+    InformationSetError, LogicalDeductions, SupportedConvention, WorldCount, assess_card,
 };
 
 /// The result the planner should optimize during exact endgame analysis.
@@ -188,8 +188,21 @@ pub struct SymbolicLineOutcome {
     pub clues_spent: u8,
     pub clues_gained: u8,
     pub strikes: u8,
-    pub identity_branch: bool,
-    pub reached_limit: bool,
+    pub stop_reason: SymbolicStopReason,
+}
+
+/// Why a deterministic symbolic continuation stopped.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SymbolicStopReason {
+    /// No convention-forced action remained.
+    #[default]
+    Choice,
+    /// The next action depended on an unresolved card identity.
+    UnknownIdentity,
+    /// The configured symbolic-action bound was reached.
+    Limit,
+    /// A nested player perspective could not be reconstructed.
+    ProjectionUnavailable,
 }
 
 impl SymbolicLineOutcome {
@@ -215,8 +228,7 @@ pub struct PlannerResult {
     pub phase: PlannerPhase,
     /// Exact belief size when known, otherwise the first count beyond the
     /// configured exact-world limit.
-    pub considered_worlds: u64,
-    pub world_count_exact: bool,
+    pub world_count: WorldCount,
     pub exact_nodes: u64,
     pub root_actions: Vec<PlannerActionEvaluation>,
 }
@@ -261,12 +273,13 @@ pub(crate) fn plan_move_with_analysis(
 
     let belief = &analysis.belief_constraints;
     let count = information_set.world_count_up_to(belief, config.exact_world_limit);
-    if count.exact && count.worlds == 0 {
+    let counted_worlds = count.worlds();
+    if count == WorldCount::Exact(0) {
         return Err(PlannerError::ConventionBeliefConflict);
     }
 
-    if count.exact
-        && count.worlds > 0
+    if count.is_exact()
+        && counted_worlds > 0
         && objective == PlanningObjective::PerfectScore
         && information_set
             .view()
@@ -279,7 +292,7 @@ pub(crate) fn plan_move_with_analysis(
         let proof = try_terminal_perfect_proof(
             information_set,
             analysis,
-            count.worlds,
+            counted_worlds,
             &mut evaluations,
             preferred,
         )?;
@@ -287,24 +300,26 @@ pub(crate) fn plan_move_with_analysis(
             return Ok(PlannerResult {
                 best_action: evaluations[best_index].action,
                 phase: PlannerPhase::Exact,
-                considered_worlds: count.worlds,
-                world_count_exact: true,
+                world_count: count,
                 exact_nodes: tested_actions,
                 root_actions: evaluations,
             });
         }
     }
-    let full_exact_search = count.exact
-        && count.worlds > 0
+    let full_exact_search = count.is_exact()
+        && counted_worlds > 0
         && exact_preflight(
             information_set.view(),
-            count.worlds,
+            counted_worlds,
             candidates.len(),
             config.exact_node_limit,
         );
     if full_exact_search {
         let worlds = information_set
-            .collect_worlds_after_count(belief, usize::try_from(count.worlds).unwrap_or(usize::MAX))
+            .collect_worlds_after_count(
+                belief,
+                usize::try_from(counted_worlds).unwrap_or(usize::MAX),
+            )
             .map_err(PlannerError::EnumerateWorlds)?;
         let mut budget = ExactBudget {
             used: 0,
@@ -330,8 +345,7 @@ pub(crate) fn plan_move_with_analysis(
                 return Ok(PlannerResult {
                     best_action: evaluations[best_index].action,
                     phase: PlannerPhase::Exact,
-                    considered_worlds: count.worlds,
-                    world_count_exact: true,
+                    world_count: count,
                     exact_nodes: budget.used,
                     root_actions: evaluations,
                 });
@@ -347,7 +361,7 @@ pub(crate) fn plan_move_with_analysis(
         }
     }
 
-    symbolic_result(evaluations, preferred, count.worlds, count.exact)
+    symbolic_result(evaluations, preferred, count)
 }
 
 fn symbolic_root_evaluations(
@@ -403,16 +417,14 @@ fn try_terminal_perfect_proof(
 fn symbolic_result(
     evaluations: Vec<PlannerActionEvaluation>,
     preferred: Option<Action>,
-    considered_worlds: u64,
-    world_count_exact: bool,
+    world_count: WorldCount,
 ) -> Result<PlannerResult, PlannerError> {
     let best_index =
         best_symbolic_index(&evaluations, preferred).ok_or(PlannerError::NoCandidateActions)?;
     Ok(PlannerResult {
         best_action: evaluations[best_index].action,
         phase: PlannerPhase::Symbolic,
-        considered_worlds,
-        world_count_exact,
+        world_count,
         exact_nodes: 0,
         root_actions: evaluations,
     })
@@ -853,7 +865,7 @@ mod tests {
         .unwrap();
         assert_eq!(first, second);
         assert_eq!(first.phase, PlannerPhase::Symbolic);
-        assert!(!first.world_count_exact);
+        assert!(!first.world_count.is_exact());
         assert_eq!(first.best_action, Action::Play(hanabi_core::CardId::new(4)));
     }
 
@@ -934,7 +946,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(result.phase, PlannerPhase::Exact);
-        assert!(result.world_count_exact);
+        assert!(result.world_count.is_exact());
         assert!(
             result
                 .root_actions

@@ -329,7 +329,7 @@ fn final_move_exhausts_all_worlds_before_the_last_draw() {
     )
     .expect("the final position is analyzable");
     assert_eq!(analysis.planner.phase, crate::PlannerPhase::Exact);
-    assert!(analysis.planner.world_count_exact);
+    assert!(analysis.planner.world_count.is_exact());
     assert_eq!(
         analysis.planner.best_action,
         replay_action_at_turn(&replay, 45)
@@ -341,7 +341,7 @@ fn final_move_exhausts_all_worlds_before_the_last_draw() {
         .find(|evaluation| evaluation.action == analysis.planner.best_action)
         .and_then(|evaluation| evaluation.exact)
         .expect("the selected play has an exact terminal proof");
-    assert_eq!(exact.worlds, analysis.planner.considered_worlds);
+    assert_eq!(exact.worlds, analysis.planner.world_count.worlds());
     assert_eq!(exact.perfect_worlds, exact.worlds);
     assert_eq!(exact.score_sum, 25 * exact.worlds);
     assert_eq!(exact.strikeout_worlds, 0);

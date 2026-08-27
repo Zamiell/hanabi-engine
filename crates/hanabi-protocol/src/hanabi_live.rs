@@ -3,13 +3,7 @@ use core::fmt;
 use hanabi_core::{
     Action, Card, CardId, Clue, FullState, GameStatus, PlayerId, Rank, RuleError, SetupError, Suit,
 };
-use serde::Deserialize;
-
-const ACTION_PLAY: u8 = 0;
-const ACTION_DISCARD: u8 = 1;
-const ACTION_COLOR_CLUE: u8 = 2;
-const ACTION_RANK_CLUE: u8 = 3;
-const ACTION_GAME_OVER: u8 = 4;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// The compact JSON replay exported by Hanabi Live's `/copy` command.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -31,10 +25,67 @@ pub struct HanabiLiveCard {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub struct HanabiLiveAction {
     #[serde(rename = "type")]
-    pub action_type: u8,
+    pub action_type: HanabiLiveActionType,
     pub target: usize,
     #[serde(default)]
     pub value: u8,
+}
+
+/// Numeric action discriminant used by Hanabi Live replay and action payloads.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HanabiLiveActionType {
+    Play,
+    Discard,
+    SuitClue,
+    RankClue,
+    GameOver,
+    /// Retained until semantic validation so callers receive a precise
+    /// unsupported-action error rather than a generic JSON error.
+    Unknown(u8),
+}
+
+impl HanabiLiveActionType {
+    #[must_use]
+    pub const fn from_code(code: u8) -> Self {
+        match code {
+            0 => Self::Play,
+            1 => Self::Discard,
+            2 => Self::SuitClue,
+            3 => Self::RankClue,
+            4 => Self::GameOver,
+            other => Self::Unknown(other),
+        }
+    }
+
+    #[must_use]
+    pub const fn code(self) -> u8 {
+        match self {
+            Self::Play => 0,
+            Self::Discard => 1,
+            Self::SuitClue => 2,
+            Self::RankClue => 3,
+            Self::GameOver => 4,
+            Self::Unknown(code) => code,
+        }
+    }
+}
+
+impl Serialize for HanabiLiveActionType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u8(self.code())
+    }
+}
+
+impl<'de> Deserialize<'de> for HanabiLiveActionType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        u8::deserialize(deserializer).map(Self::from_code)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
@@ -72,7 +123,7 @@ impl HanabiLiveReplay {
         let mut state = self.initial_state()?;
 
         for (turn, action) in self.actions.iter().enumerate() {
-            if action.action_type == ACTION_GAME_OVER {
+            if action.action_type == HanabiLiveActionType::GameOver {
                 if state.status() == GameStatus::InProgress {
                     return Err(ReplayError::ExternalGameOver { turn });
                 }
@@ -105,7 +156,7 @@ impl HanabiLiveReplay {
         }
 
         for (action_index, action) in self.actions.iter().enumerate() {
-            if action.action_type == ACTION_GAME_OVER {
+            if action.action_type == HanabiLiveActionType::GameOver {
                 if state.status() == GameStatus::InProgress {
                     return Err(ReplayError::ExternalGameOver { turn: action_index });
                 }
@@ -158,17 +209,18 @@ fn card_from_live(card: HanabiLiveCard) -> Result<Card, ReplayError> {
 
 fn action_from_live(action: &HanabiLiveAction) -> Result<Action, ReplayError> {
     match action.action_type {
-        ACTION_PLAY => Ok(Action::Play(CardId::new(action.target))),
-        ACTION_DISCARD => Ok(Action::Discard(CardId::new(action.target))),
-        ACTION_COLOR_CLUE => Ok(Action::Clue {
+        HanabiLiveActionType::Play => Ok(Action::Play(CardId::new(action.target))),
+        HanabiLiveActionType::Discard => Ok(Action::Discard(CardId::new(action.target))),
+        HanabiLiveActionType::SuitClue => Ok(Action::Clue {
             target: player_from_target(action.target)?,
             clue: Clue::Suit(suit_from_index(action.value)?),
         }),
-        ACTION_RANK_CLUE => Ok(Action::Clue {
+        HanabiLiveActionType::RankClue => Ok(Action::Clue {
             target: player_from_target(action.target)?,
             clue: Clue::Rank(rank_from_number(action.value)?),
         }),
-        other => Err(ReplayError::UnknownActionType(other)),
+        HanabiLiveActionType::GameOver => unreachable!("game-over actions are handled by replay"),
+        HanabiLiveActionType::Unknown(other) => Err(ReplayError::UnknownActionType(other)),
     }
 }
 
@@ -258,5 +310,31 @@ impl std::error::Error for ReplayError {
             Self::IllegalAction { source, .. } => Some(source),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn action_types_round_trip_as_numeric_wire_values() {
+        assert_eq!(
+            serde_json::to_string(&HanabiLiveActionType::SuitClue).unwrap(),
+            "2"
+        );
+        assert_eq!(
+            serde_json::from_str::<HanabiLiveActionType>("9").unwrap(),
+            HanabiLiveActionType::Unknown(9)
+        );
+        let action = HanabiLiveAction {
+            action_type: HanabiLiveActionType::Unknown(9),
+            target: 0,
+            value: 0,
+        };
+        assert!(matches!(
+            action_from_live(&action),
+            Err(ReplayError::UnknownActionType(9))
+        ));
     }
 }

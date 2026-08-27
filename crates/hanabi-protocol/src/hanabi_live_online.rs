@@ -5,7 +5,9 @@ use hanabi_core::{
     Action, Card, CardId, Clue, ClueFacts, EndReason, GameStatus, ObservedCard, ObservedEvent,
     ObservedHistoryEntry, PlayerId, PlayerView, Rank, Suit,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+use crate::hanabi_live::HanabiLiveActionType;
 
 const STANDARD_DECK_SIZE: usize = 50;
 const MAX_CLUE_TOKENS: u8 = 8;
@@ -36,8 +38,34 @@ struct HanabiLiveOnlineOptions {
 #[derive(Clone, Copy, Debug, Deserialize)]
 struct HanabiLiveOnlineClue {
     #[serde(rename = "type")]
-    clue_type: u8,
+    clue_type: HanabiLiveClueType,
     value: i16,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum HanabiLiveClueType {
+    Suit,
+    Rank,
+    Unknown(u8),
+}
+
+impl HanabiLiveClueType {
+    const fn from_code(code: u8) -> Self {
+        match code {
+            0 => Self::Suit,
+            1 => Self::Rank,
+            other => Self::Unknown(other),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for HanabiLiveClueType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        u8::deserialize(deserializer).map(Self::from_code)
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -122,7 +150,7 @@ pub struct HanabiLiveActionCommand {
     #[serde(rename = "tableID")]
     pub table_id: u64,
     #[serde(rename = "type")]
-    pub action_type: u8,
+    pub action_type: HanabiLiveActionType,
     pub target: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<u8>,
@@ -263,20 +291,20 @@ impl HanabiLiveActionCommand {
         match action {
             Action::Play(card) => Self {
                 table_id,
-                action_type: 0,
+                action_type: HanabiLiveActionType::Play,
                 target: card.index(),
                 value: None,
             },
             Action::Discard(card) => Self {
                 table_id,
-                action_type: 1,
+                action_type: HanabiLiveActionType::Discard,
                 target: card.index(),
                 value: None,
             },
             Action::Clue { target, clue } => match clue {
                 Clue::Suit(suit) => Self {
                     table_id,
-                    action_type: 2,
+                    action_type: HanabiLiveActionType::SuitClue,
                     target: target.index(),
                     value: Some(match suit {
                         Suit::Red => 0,
@@ -288,7 +316,7 @@ impl HanabiLiveActionCommand {
                 },
                 Clue::Rank(rank) => Self {
                     table_id,
-                    action_type: 3,
+                    action_type: HanabiLiveActionType::RankClue,
                     target: target.index(),
                     value: Some(rank.number()),
                 },
@@ -709,9 +737,9 @@ fn parse_rank(value: i16) -> Result<Rank, LiveSnapshotError> {
 
 fn parse_clue(clue: HanabiLiveOnlineClue) -> Result<Clue, LiveSnapshotError> {
     match clue.clue_type {
-        0 => parse_suit(clue.value).map(Clue::Suit),
-        1 => parse_rank(clue.value).map(Clue::Rank),
-        other => Err(LiveSnapshotError::InvalidClueType(other)),
+        HanabiLiveClueType::Suit => parse_suit(clue.value).map(Clue::Suit),
+        HanabiLiveClueType::Rank => parse_rank(clue.value).map(Clue::Rank),
+        HanabiLiveClueType::Unknown(other) => Err(LiveSnapshotError::InvalidClueType(other)),
     }
 }
 
@@ -920,6 +948,18 @@ mod tests {
     }
 
     #[test]
+    fn unknown_clue_type_retains_its_domain_error() {
+        let clue = HanabiLiveOnlineClue {
+            clue_type: HanabiLiveClueType::Unknown(7),
+            value: 0,
+        };
+        assert!(matches!(
+            parse_clue(clue),
+            Err(LiveSnapshotError::InvalidClueType(7))
+        ));
+    }
+
+    #[test]
     fn reconstructs_a_player_safe_live_view() {
         let snapshot = HanabiLiveSnapshot::from_json(&snapshot_json()).unwrap();
         let view = snapshot.player_view().unwrap();
@@ -1030,7 +1070,7 @@ mod tests {
             ),
             HanabiLiveActionCommand {
                 table_id: 9,
-                action_type: 2,
+                action_type: HanabiLiveActionType::SuitClue,
                 target: 1,
                 value: Some(4),
             }
@@ -1039,7 +1079,7 @@ mod tests {
             HanabiLiveActionCommand::from_engine_action(9, Action::Play(CardId::new(12))),
             HanabiLiveActionCommand {
                 table_id: 9,
-                action_type: 0,
+                action_type: HanabiLiveActionType::Play,
                 target: 12,
                 value: None,
             }

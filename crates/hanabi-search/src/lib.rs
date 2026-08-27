@@ -26,5 +26,6 @@ pub use information_set::{
 };
 pub use planner::{
     ExactActionValue, ParsePlanningObjectiveError, PlannerActionEvaluation, PlannerConfig,
-    PlannerError, PlannerPhase, PlannerResult, PlanningObjective, SymbolicLineOutcome, plan_move,
+    PlannerError, PlannerPhase, PlannerResult, PlanningObjective, SymbolicLineOutcome,
+    SymbolicStopReason, plan_move,
 };

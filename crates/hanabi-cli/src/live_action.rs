@@ -252,8 +252,8 @@ fn planner_details_json(
             hanabi_search::PlannerPhase::Symbolic => "symbolic",
             hanabi_search::PlannerPhase::Exact => "exact",
         },
-        "consideredWorlds": result.considered_worlds,
-        "worldCountExact": result.world_count_exact,
+        "consideredWorlds": result.world_count.worlds(),
+        "worldCountExact": result.world_count.is_exact(),
         "exactNodes": result.exact_nodes,
         "rootActions": result.root_actions.iter().map(|evaluation| json!({
             "action": HanabiLiveActionCommand::from_engine_action(table_id, evaluation.action),
@@ -272,8 +272,14 @@ fn planner_details_json(
                 "cluesSpent": evaluation.symbolic_line.clues_spent,
                 "cluesGained": evaluation.symbolic_line.clues_gained,
                 "strikes": evaluation.symbolic_line.strikes,
-                "identityBranch": evaluation.symbolic_line.identity_branch,
-                "reachedLimit": evaluation.symbolic_line.reached_limit,
+                "identityBranch": matches!(
+                    evaluation.symbolic_line.stop_reason,
+                    hanabi_search::SymbolicStopReason::UnknownIdentity
+                ),
+                "reachedLimit": matches!(
+                    evaluation.symbolic_line.stop_reason,
+                    hanabi_search::SymbolicStopReason::Limit
+                ),
             },
             "exact": evaluation.exact.map(|exact| json!({
                 "worlds": exact.worlds,

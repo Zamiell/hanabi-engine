@@ -1,7 +1,9 @@
 use std::{fs, path::PathBuf};
 
 use hanabi_core::{CardId, Clue, EndReason, GameEvent, GameStatus, Suit, standard_deck};
-use hanabi_protocol::{HanabiLiveReplay, ReplayError, hanabi_live::HanabiLiveCard};
+use hanabi_protocol::{
+    HanabiLiveActionType, HanabiLiveReplay, ReplayError, hanabi_live::HanabiLiveCard,
+};
 
 #[test]
 fn no_options_default_to_no_variant() {
@@ -113,7 +115,9 @@ fn reconstructs_actionable_replay_prefixes_by_game_turn() {
     let purple_clue_turn = replay
         .actions
         .iter()
-        .position(|action| action.action_type == 2 && action.value == 4)
+        .position(|action| {
+            action.action_type == HanabiLiveActionType::SuitClue && action.value == 4
+        })
         .unwrap();
     let after_purple_clue = replay
         .state_at_turn(u32::try_from(purple_clue_turn + 1).unwrap())

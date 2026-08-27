@@ -38,22 +38,43 @@ pub struct LogicalDeductions {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct IdentitySet(u32);
 
+/// Why deterministic own-hand assignment traversal ended.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum HandAssignmentVisitEnd {
+    Exhausted,
+    LimitReached,
+    VisitorStopped,
+}
+
 /// Result of deterministically visiting complete, card-count-consistent own
 /// hand assignments for nested perspective analysis.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct HandAssignmentVisit {
-    pub(crate) examined: usize,
-    pub(crate) complete: bool,
-    pub(crate) stopped: bool,
+    examined: usize,
+    pub(crate) end: HandAssignmentVisitEnd,
 }
 
-/// Result of counting complete identity assignments up to a caller-supplied
-/// limit. `exact` is false when traversal stopped after proving that more than
-/// `limit` worlds exist.
+/// Bounded count of complete identity assignments.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct WorldCount {
-    pub worlds: u64,
-    pub exact: bool,
+pub enum WorldCount {
+    Exact(u64),
+    /// At least this many worlds exist; counting stopped at the configured
+    /// bound.
+    LowerBound(u64),
+}
+
+impl WorldCount {
+    #[must_use]
+    pub const fn worlds(self) -> u64 {
+        match self {
+            Self::Exact(worlds) | Self::LowerBound(worlds) => worlds,
+        }
+    }
+
+    #[must_use]
+    pub const fn is_exact(self) -> bool {
+        matches!(self, Self::Exact(_))
+    }
 }
 
 /// Convention-derived restrictions on the root belief state.
@@ -239,8 +260,7 @@ impl LogicalDeductions {
         let mut assignment = Vec::with_capacity(self.unknown_hand_cards.len());
         let mut result = HandAssignmentVisit {
             examined: 0,
-            complete: true,
-            stopped: false,
+            end: HandAssignmentVisitEnd::Exhausted,
         };
         visit_assignments(
             &self.unknown_hand_cards,
@@ -267,16 +287,18 @@ fn visit_assignments(
     visitor: &mut impl FnMut(&[(CardId, Card)]) -> bool,
     result: &mut HandAssignmentVisit,
 ) {
-    if result.stopped || !result.complete {
+    if result.end != HandAssignmentVisitEnd::Exhausted {
         return;
     }
     if slot == cards.len() {
         if result.examined == limit {
-            result.complete = false;
+            result.end = HandAssignmentVisitEnd::LimitReached;
             return;
         }
         result.examined += 1;
-        result.stopped = visitor(assignment);
+        if visitor(assignment) {
+            result.end = HandAssignmentVisitEnd::VisitorStopped;
+        }
         return;
     }
     let card = cards[slot];
@@ -303,7 +325,7 @@ fn visit_assignments(
         );
         assignment.pop();
         remaining[identity_index(identity)] += 1;
-        if result.stopped || !result.complete {
+        if result.end != HandAssignmentVisitEnd::Exhausted {
             return;
         }
     }
@@ -443,9 +465,10 @@ impl InformationSet {
             );
             worlds < stop_after
         });
-        WorldCount {
-            worlds: worlds.min(stop_after),
-            exact: worlds <= limit,
+        if worlds <= limit {
+            WorldCount::Exact(worlds)
+        } else {
+            WorldCount::LowerBound(stop_after)
         }
     }
 
@@ -465,12 +488,12 @@ impl InformationSet {
         visitor: impl FnMut(FullState),
     ) -> Result<u64, EnumerateWorldsError> {
         let count = self.world_count_up_to(belief, limit);
-        if !count.exact {
+        let WorldCount::Exact(_) = count else {
             return Err(EnumerateWorldsError::LimitExceeded {
                 limit,
-                at_least: count.worlds,
+                at_least: count.worlds(),
             });
-        }
+        };
 
         self.visit_worlds_after_count(belief, visitor)
     }
@@ -870,11 +893,28 @@ mod tests {
         let information = InformationSet::new(&state.view_for(PlayerId::new(0)).unwrap()).unwrap();
         assert_eq!(
             information.world_count_up_to(&BeliefConstraints::default(), 32),
-            WorldCount {
-                worlds: 33,
-                exact: false,
-            }
+            WorldCount::LowerBound(33)
         );
+    }
+
+    #[test]
+    fn hand_assignment_visit_has_one_exhaustive_stop_reason() {
+        let state = FullState::new_standard(2, standard_deck()).unwrap();
+        let mut deductions =
+            LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+
+        let limited = deductions.visit_hand_assignments(0, |_| false);
+        assert_eq!(limited.examined, 0);
+        assert_eq!(limited.end, HandAssignmentVisitEnd::LimitReached);
+
+        let stopped = deductions.visit_hand_assignments(1, |_| true);
+        assert_eq!(stopped.examined, 1);
+        assert_eq!(stopped.end, HandAssignmentVisitEnd::VisitorStopped);
+
+        deductions.unknown_hand_cards.clear();
+        let exhausted = deductions.visit_hand_assignments(1, |_| false);
+        assert_eq!(exhausted.examined, 1);
+        assert_eq!(exhausted.end, HandAssignmentVisitEnd::Exhausted);
     }
 
     #[test]
@@ -915,8 +955,8 @@ mod tests {
         let information = InformationSet::new(&view.clone()).unwrap();
         let belief = BeliefConstraints::default();
         let count = information.world_count_up_to(&belief, 100_000);
-        assert!(count.exact);
-        assert!(count.worlds > 1);
+        assert!(count.is_exact());
+        assert!(count.worlds() > 1);
 
         let mut unique = HashSet::new();
         let visited = information
@@ -925,7 +965,7 @@ mod tests {
                 assert!(unique.insert(format!("{world:?}")));
             })
             .unwrap();
-        assert_eq!(visited, count.worlds);
-        assert_eq!(u64::try_from(unique.len()).unwrap(), count.worlds);
+        assert_eq!(visited, count.worlds());
+        assert_eq!(u64::try_from(unique.len()).unwrap(), count.worlds());
     }
 }
