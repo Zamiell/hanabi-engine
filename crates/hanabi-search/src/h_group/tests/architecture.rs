@@ -3,7 +3,7 @@ use crate::SupportedConvention;
 
 fn expert_replays() -> [(&'static str, HanabiLiveReplay); 2] {
     [
-        ("game-194321", expert_replay_194321()),
+        ("game-p4v0s415", expert_replay_p4v0s415()),
         ("game-p4v0s9", expert_replay_p4v0s9()),
     ]
 }
@@ -275,7 +275,7 @@ fn generated_legal_histories_preserve_knowledge_and_state_invariants() {
 
 #[test]
 fn transition_proposals_are_a_unique_causal_partition_of_post_event_signals() {
-    let fixture = expert_replay_194321();
+    let fixture = expert_replay_p4v0s415();
     for turn in 0..=u32::try_from(fixture.actions.len()).expect("replay fits in u32") {
         let state = fixture.state_at_turn(turn).expect("turn exists");
         let observer = state.current_player();
@@ -305,7 +305,7 @@ fn transition_proposals_are_a_unique_causal_partition_of_post_event_signals() {
 
 #[test]
 fn every_legal_replay_clue_is_either_admitted_or_explained() {
-    let fixture = expert_replay_194321();
+    let fixture = expert_replay_p4v0s415();
     for turn in 0..u32::try_from(fixture.actions.len()).expect("replay fits in u32") {
         let state = fixture.state_at_turn(turn).expect("turn exists");
         let actor = state.current_player();
@@ -337,7 +337,7 @@ fn every_legal_replay_clue_is_either_admitted_or_explained() {
 
 #[test]
 fn every_replay_clue_uses_the_same_hypothetical_and_recipient_interpretation() {
-    let fixture = expert_replay_194321();
+    let fixture = expert_replay_p4v0s415();
     for turn in 0..u32::try_from(fixture.actions.len()).expect("replay fits in u32") {
         let action = replay_action_at_turn(&fixture, turn);
         let Action::Clue { target, clue } = action else {
@@ -419,7 +419,7 @@ fn every_replay_clue_uses_the_same_hypothetical_and_recipient_interpretation() {
 
 #[test]
 fn observer_epistemic_state_is_invariant_to_leaked_own_hand_truth() {
-    let fixture = expert_replay_194321();
+    let fixture = expert_replay_p4v0s415();
     for turn in 0..=u32::try_from(fixture.actions.len()).expect("replay fits in u32") {
         let state = fixture.state_at_turn(turn).expect("turn exists");
         for player in 0..state.num_players() {
@@ -493,7 +493,7 @@ fn cancelling_a_promise_atomically_retracts_its_materialized_effects() {
 
 #[test]
 fn production_transition_delta_records_exact_clue_cards() {
-    let fixture = expert_replay_194321();
+    let fixture = expert_replay_p4v0s415();
     let state = fixture.state_at_turn(1).expect("first move is legal");
     let observer = state.current_player();
     let deductions = LogicalDeductions::new(state.view_for(observer).expect("observer exists"))

@@ -190,7 +190,7 @@ inspection share one prospective convention snapshot. They also run both expert
 replays through every observer, prove canonical focus domains cannot be widened
 by owner projection, and exercise generated legal histories.
 
-The `game-194321.json` expert replay regression runs these checks for every
+The `game-p4v0s415.json` expert replay regression runs these checks for every
 prefix and every observer. Temporal tests separately assert that future
 own-card reveals and future draws cannot affect an earlier interpretation.
 Perspective tests should construct hypotheses through `PerspectiveProjector`

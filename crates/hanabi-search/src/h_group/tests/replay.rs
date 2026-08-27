@@ -34,7 +34,7 @@ fn assert_expert_replay_matches_engine(replay: &HanabiLiveReplay) {
 /// must select its corresponding optimal action.
 #[test]
 fn optimized_expert_replay_matches_engine() {
-    assert_expert_replay_matches_engine(&expert_replay_194321());
+    assert_expert_replay_matches_engine(&expert_replay_p4v0s415());
 }
 
 #[test]

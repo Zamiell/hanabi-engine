@@ -10,7 +10,7 @@ const UPDATE_ENVIRONMENT_VARIABLE: &str = "HANABI_UPDATE_SUPERPOSITIONS";
 
 #[test]
 fn focus_is_cleared_after_the_action_following_its_clue() {
-    let replay = expert_replay_194321();
+    let replay = expert_replay_p4v0s415();
     for (turn, focused) in [(1, true), (2, false)] {
         let state = replay.state_at_turn(turn).expect("fixture prefix is legal");
         let view = state.view_for(PlayerId::new(2)).expect("Cathy has a view");
@@ -49,7 +49,7 @@ fn finesse_separates_its_exact_promise_from_successful_play_contingencies() {
     });
 
     for turn in [2, 3] {
-        let state = expert_replay_194321()
+        let state = expert_replay_p4v0s415()
             .state_at_turn(turn)
             .expect("fixture prefix is legal");
         let view = state.view_for(PlayerId::new(3)).expect("Donald has a view");
@@ -76,7 +76,7 @@ fn finesse_separates_its_exact_promise_from_successful_play_contingencies() {
 
 #[test]
 fn good_touch_does_not_narrow_unclued_connection_suffix_cards() {
-    let state = expert_replay_194321()
+    let state = expert_replay_p4v0s415()
         .state_at_turn(5)
         .expect("fixture prefix is legal");
     let view = state.view_for(PlayerId::new(3)).expect("Donald has a view");
@@ -102,7 +102,7 @@ fn good_touch_does_not_narrow_unclued_connection_suffix_cards() {
 
 #[test]
 fn deterministic_future_connection_steps_are_known_before_they_are_actionable() {
-    let state = expert_replay_194321()
+    let state = expert_replay_p4v0s415()
         .state_at_turn(6)
         .expect("fixture prefix is legal");
     let view = state.view_for(PlayerId::new(2)).expect("Cathy has a view");
@@ -438,7 +438,7 @@ impl From<HGroupConnectionKind> for SnapshotConnectionKind {
 
 #[test]
 fn optimized_expert_replay_owner_superpositions_match_snapshot() {
-    let replay = expert_replay_194321();
+    let replay = expert_replay_p4v0s415();
     let actual = render_snapshot(&replay);
     let path = snapshot_path();
 
@@ -462,7 +462,7 @@ fn optimized_expert_replay_owner_superpositions_match_snapshot() {
 
 #[test]
 fn superposition_deltas_reconstruct_every_replay_position() {
-    let replay = expert_replay_194321();
+    let replay = expert_replay_p4v0s415();
     let action_count = u32::try_from(replay.actions.len()).expect("replay length fits in u32");
     let mut reconstructed = player_states(&replay, 0);
 
@@ -479,7 +479,7 @@ fn superposition_deltas_reconstruct_every_replay_position() {
 
 #[test]
 fn snapshot_turns_match_hanabi_live_display_numbers() {
-    let replay = expert_replay_194321();
+    let replay = expert_replay_p4v0s415();
     let snapshot: serde_json::Value = serde_json::from_str(&render_snapshot(&replay)).unwrap();
     let deltas = snapshot["turnDeltas"].as_array().unwrap();
 
@@ -597,7 +597,7 @@ fn render_snapshot(replay: &HanabiLiveReplay) -> String {
         .collect();
     let snapshot = ReplayEpistemicSnapshot {
         schema_version: SNAPSHOT_SCHEMA_VERSION,
-        source: "game-194321.json",
+        source: "game-p4v0s415.json",
         convention: "H-Group max",
         initial,
         turn_deltas,
@@ -796,5 +796,5 @@ fn identity_label(identity: Card) -> String {
 
 fn snapshot_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src/h_group/tests/fixtures/game-194321-superpositions.json")
+        .join("src/h_group/tests/fixtures/game-p4v0s415-superpositions.json")
 }

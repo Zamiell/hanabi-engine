@@ -258,7 +258,7 @@ overflow checks. The repository pins cargo-nextest 0.9.143 for fail-fast test
 scheduling; nextest's missing rustdoc support is covered by the separate
 `cargo test --doc` command.
 
-The curated `game-194321.json` replay is an active golden oracle: the planner
+The curated `game-p4v0s415.json` replay is an active golden oracle: the planner
 must choose the fixture action at every position. Full parity for
 `game-p4v0s9.json` remains ignored pending expert review of move 28; its
 settled convention behaviors are still covered by focused active regressions.
