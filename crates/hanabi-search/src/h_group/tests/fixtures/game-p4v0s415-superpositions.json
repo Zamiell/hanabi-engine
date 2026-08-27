@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 12,
+  "schemaVersion": 13,
   "source": "game-p4v0s415.json",
   "convention": "H-Group max",
   "initial": [
@@ -166,14 +166,7 @@
     },
     {
       "turn": 4,
-      "changes": [
-        {
-          "player": 2,
-          "removedCards": [
-            8
-          ]
-        }
-      ]
+      "changes": []
     },
     {
       "turn": 5,
@@ -198,9 +191,6 @@
                 "finessed"
               ]
             }
-          ],
-          "removedCards": [
-            15
           ],
           "connection": {
             "card": 14
@@ -334,9 +324,6 @@
               ]
             }
           ],
-          "removedCards": [
-            14
-          ],
           "connection": {
             "card": 13
           }
@@ -348,9 +335,6 @@
       "changes": [
         {
           "player": 0,
-          "removedCards": [
-            1
-          ],
           "connection": null
         },
         {
@@ -422,9 +406,6 @@
               ]
             }
           ],
-          "removedCards": [
-            11
-          ],
           "connection": {
             "card": 9,
             "identity": "r3"
@@ -454,12 +435,6 @@
                 "playable"
               ]
             }
-          ]
-        },
-        {
-          "player": 3,
-          "removedCards": [
-            18
           ]
         }
       ]
@@ -500,23 +475,13 @@
     },
     {
       "turn": 15,
-      "changes": [
-        {
-          "player": 1,
-          "removedCards": [
-            4
-          ]
-        }
-      ]
+      "changes": []
     },
     {
       "turn": 16,
       "changes": [
         {
           "player": 2,
-          "removedCards": [
-            9
-          ],
           "connection": null
         },
         {
@@ -579,9 +544,6 @@
                 "chop"
               ]
             }
-          ],
-          "removedCards": [
-            0
           ]
         }
       ]
@@ -600,9 +562,6 @@
                 "finessed"
               ]
             }
-          ],
-          "removedCards": [
-            22
           ],
           "connection": {
             "card": 7,
@@ -650,12 +609,6 @@
               ]
             }
           ]
-        },
-        {
-          "player": 3,
-          "removedCards": [
-            17
-          ]
         }
       ]
     },
@@ -671,9 +624,6 @@
                 "chop"
               ]
             }
-          ],
-          "removedCards": [
-            19
           ]
         },
         {
@@ -703,9 +653,6 @@
         },
         {
           "player": 1,
-          "removedCards": [
-            7
-          ],
           "connection": null
         },
         {
@@ -730,12 +677,6 @@
               "convention": null
             }
           ]
-        },
-        {
-          "player": 2,
-          "removedCards": [
-            23
-          ]
         }
       ]
     },
@@ -755,9 +696,6 @@
         },
         {
           "player": 3,
-          "removedCards": [
-            13
-          ],
           "connection": null
         }
       ]
@@ -765,12 +703,6 @@
     {
       "turn": 26,
       "changes": [
-        {
-          "player": 0,
-          "removedCards": [
-            2
-          ]
-        },
         {
           "player": 2,
           "cards": [
@@ -831,9 +763,6 @@
         },
         {
           "player": 2,
-          "removedCards": [
-            16
-          ],
           "connection": null
         }
       ]
@@ -850,9 +779,6 @@
                 "chop"
               ]
             }
-          ],
-          "removedCards": [
-            12
           ]
         }
       ]
@@ -860,12 +786,6 @@
     {
       "turn": 30,
       "changes": [
-        {
-          "player": 0,
-          "removedCards": [
-            31
-          ]
-        },
         {
           "player": 2,
           "cards": [
@@ -908,14 +828,7 @@
     },
     {
       "turn": 32,
-      "changes": [
-        {
-          "player": 2,
-          "removedCards": [
-            10
-          ]
-        }
-      ]
+      "changes": []
     },
     {
       "turn": 33,
@@ -929,23 +842,13 @@
                 "chop"
               ]
             }
-          ],
-          "removedCards": [
-            21
           ]
         }
       ]
     },
     {
       "turn": 34,
-      "changes": [
-        {
-          "player": 0,
-          "removedCards": [
-            27
-          ]
-        }
-      ]
+      "changes": []
     },
     {
       "turn": 35,
@@ -968,9 +871,6 @@
                 "chop"
               ]
             }
-          ],
-          "removedCards": [
-            5
           ]
         }
       ]
@@ -1048,14 +948,7 @@
     },
     {
       "turn": 38,
-      "changes": [
-        {
-          "player": 0,
-          "removedCards": [
-            3
-          ]
-        }
-      ]
+      "changes": []
     },
     {
       "turn": 39,
@@ -1071,9 +964,6 @@
         },
         {
           "player": 1,
-          "removedCards": [
-            6
-          ],
           "connection": null
         },
         {
@@ -1101,9 +991,6 @@
                 "chop"
               ]
             }
-          ],
-          "removedCards": [
-            20
           ]
         }
       ]
@@ -1122,12 +1009,6 @@
               ]
             }
           ]
-        },
-        {
-          "player": 3,
-          "removedCards": [
-            33
-          ]
         }
       ]
     },
@@ -1144,9 +1025,6 @@
                 "playable"
               ]
             }
-          ],
-          "removedCards": [
-            34
           ]
         }
       ]
@@ -1174,9 +1052,6 @@
                 "chop"
               ]
             }
-          ],
-          "removedCards": [
-            25
           ]
         },
         {
@@ -1294,9 +1169,6 @@
                 "trash"
               ]
             }
-          ],
-          "removedCards": [
-            26
           ]
         }
       ]
@@ -1325,9 +1197,6 @@
                 "trash"
               ]
             }
-          ],
-          "removedCards": [
-            24
           ]
         }
       ]
@@ -1342,9 +1211,6 @@
               "card": 40,
               "convention": null
             }
-          ],
-          "removedCards": [
-            44
           ]
         }
       ]

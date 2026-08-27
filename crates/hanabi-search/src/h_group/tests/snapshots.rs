@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use super::*;
 
-const SNAPSHOT_SCHEMA_VERSION: u8 = 12;
+const SNAPSHOT_SCHEMA_VERSION: u8 = 13;
 const UPDATE_ENVIRONMENT_VARIABLE: &str = "HANABI_UPDATE_SUPERPOSITIONS";
 
 #[test]
@@ -174,8 +174,6 @@ struct PlayerDelta {
     /// the source replay and appear here only if they immediately gain state.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     cards: Vec<CardDelta>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    removed_cards: Vec<usize>,
     /// Absent means unchanged, an object contains only changed connection
     /// fields, and `null` means that the previous connection was cleared.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -184,7 +182,7 @@ struct PlayerDelta {
 
 impl PlayerDelta {
     fn is_empty(&self) -> bool {
-        self.cards.is_empty() && self.removed_cards.is_empty() && self.connection.is_none()
+        self.cards.is_empty() && self.connection.is_none()
     }
 }
 
@@ -509,6 +507,41 @@ fn card_draws_are_implicit_unless_they_gain_superposition_state() {
 }
 
 #[test]
+fn ordinary_card_removals_and_draws_are_implicit() {
+    let departing = CardSnapshot {
+        card: 8,
+        actual: "g1".to_owned(),
+        convention: None,
+        flags: Vec::new(),
+    };
+    let retained = CardSnapshot {
+        card: 9,
+        actual: "r3".to_owned(),
+        convention: None,
+        flags: Vec::new(),
+    };
+    let drawn = CardSnapshot {
+        card: 16,
+        actual: "y3".to_owned(),
+        convention: None,
+        flags: Vec::new(),
+    };
+    let before = [PlayerStateSnapshot {
+        hand: vec![departing, retained.clone()],
+        connection: None,
+    }];
+    let after = [PlayerStateSnapshot {
+        hand: vec![retained, drawn],
+        connection: None,
+    }];
+
+    assert!(position_delta(&before, &after).is_empty());
+    let mut reconstructed = before;
+    apply_position_delta(&mut reconstructed, &[], &after);
+    assert_eq!(reconstructed, after);
+}
+
+#[test]
 fn card_deltas_distinguish_unchanged_changed_and_cleared_conventions() {
     let original = CardSnapshot {
         card: 17,
@@ -638,18 +671,11 @@ fn position_delta(
                     )
                 })
                 .collect();
-            let removed_cards = before
-                .hand
-                .iter()
-                .filter(|card| !after.hand.iter().any(|current| current.card == card.card))
-                .map(|card| card.card)
-                .collect();
             let connection =
                 ConnectionDelta::between(before.connection.as_ref(), after.connection.as_ref());
             let delta = PlayerDelta {
                 player,
                 cards,
-                removed_cards,
                 connection,
             };
             (!delta.is_empty()).then_some(delta)
@@ -664,6 +690,12 @@ fn apply_position_delta(
 ) {
     assert_eq!(states.len(), expected.len(), "player count remains stable");
     for (state, expected) in states.iter_mut().zip(expected) {
+        state.hand.retain(|card| {
+            expected
+                .hand
+                .iter()
+                .any(|current| current.card == card.card)
+        });
         for drawn in &expected.hand {
             if !state.hand.iter().any(|card| card.card == drawn.card) {
                 state.hand.push(CardSnapshot {
@@ -682,9 +714,6 @@ fn apply_position_delta(
     }
     for change in changes {
         let state = &mut states[change.player];
-        state
-            .hand
-            .retain(|card| !change.removed_cards.contains(&card.card));
         for changed_card in &change.cards {
             if let Some(card) = state
                 .hand
