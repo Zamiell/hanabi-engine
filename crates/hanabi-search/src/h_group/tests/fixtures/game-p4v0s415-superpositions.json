@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 13,
+  "schemaVersion": 14,
   "source": "game-p4v0s415.json",
   "convention": "H-Group max",
   "initial": [
@@ -163,10 +163,6 @@
           }
         }
       ]
-    },
-    {
-      "turn": 4,
-      "changes": []
     },
     {
       "turn": 5,
@@ -472,10 +468,6 @@
           ]
         }
       ]
-    },
-    {
-      "turn": 15,
-      "changes": []
     },
     {
       "turn": 16,
@@ -827,10 +819,6 @@
       ]
     },
     {
-      "turn": 32,
-      "changes": []
-    },
-    {
       "turn": 33,
       "changes": [
         {
@@ -845,10 +833,6 @@
           ]
         }
       ]
-    },
-    {
-      "turn": 34,
-      "changes": []
     },
     {
       "turn": 35,
@@ -945,10 +929,6 @@
           ]
         }
       ]
-    },
-    {
-      "turn": 38,
-      "changes": []
     },
     {
       "turn": 39,

@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use super::*;
 
-const SNAPSHOT_SCHEMA_VERSION: u8 = 13;
+const SNAPSHOT_SCHEMA_VERSION: u8 = 14;
 const UPDATE_ENVIRONMENT_VARIABLE: &str = "HANABI_UPDATE_SUPERPOSITIONS";
 
 #[test]
@@ -460,6 +460,20 @@ fn snapshot_turns_match_hanabi_live_display_numbers() {
 }
 
 #[test]
+fn snapshot_omits_turns_without_epistemic_changes() {
+    let replay = expert_replay_p4v0s415();
+    let snapshot: serde_json::Value = serde_json::from_str(&render_snapshot(&replay)).unwrap();
+    let deltas = snapshot["turnDeltas"].as_array().unwrap();
+
+    assert!(deltas.iter().all(|delta| {
+        delta["changes"]
+            .as_array()
+            .is_some_and(|changes| !changes.is_empty())
+    }));
+    assert!(deltas.iter().all(|delta| delta["turn"] != 15));
+}
+
+#[test]
 fn card_deltas_report_only_flag_changes() {
     let before = CardSnapshot {
         card: 11,
@@ -617,9 +631,12 @@ fn render_snapshot(replay: &HanabiLiveReplay) -> String {
     let turn_deltas = states
         .windows(2)
         .enumerate()
-        .map(|(index, positions)| TurnDelta {
-            turn: u32::try_from(index + 2).expect("replay length fits in u32"),
-            changes: position_delta(&positions[0], &positions[1]),
+        .filter_map(|(index, positions)| {
+            let changes = position_delta(&positions[0], &positions[1]);
+            (!changes.is_empty()).then(|| TurnDelta {
+                turn: u32::try_from(index + 2).expect("replay length fits in u32"),
+                changes,
+            })
         })
         .collect();
     let snapshot = ReplayEpistemicSnapshot {
