@@ -1,4 +1,4 @@
-use super::super::blind_reverse_finesse_is_eligible;
+use super::super::{HGroupIdentityStatus, blind_reverse_finesse_is_eligible};
 use super::{
     Card, CardId, CardSet, Clue, ClueFacts, ConnectionObligation, ConventionFacts,
     HGroupCardInference, HGroupConnection, HGroupConnectionKind, HGroupMoveKind, HGroupProfile,
@@ -117,6 +117,7 @@ pub(in crate::h_group) fn convention_card_inferences(
                 .map(|identities| HGroupCardInference {
                     card: card.id,
                     identities,
+                    identity_status: HGroupIdentityStatus::Settled,
                     focused: false,
                     saved: false,
                     // Invisible touch also covers passive transfer-discard
@@ -153,6 +154,7 @@ pub(in crate::h_group) fn convention_card_inferences(
             });
         if !replay.cards.invalidated_focuses.contains(&clue.focus) {
             if let Some(card) = cards.iter_mut().find(|card| card.card == clue.focus) {
+                card.identity_status = HGroupIdentityStatus::Settled;
                 let resolved_bluff = replay.signals.of_kind(HGroupMoveKind::Bluff).any(|signal| {
                     signal.cards.len() >= 2
                         && signal.turn >= clue.turn
@@ -172,12 +174,53 @@ pub(in crate::h_group) fn convention_card_inferences(
                     // reaches the stack later, the old focus becomes known trash;
                     // it does not silently migrate to the next still-live rank.
                     // Only an explicit Fix may reinterpret that promise.
-                    let mut narrowed = card.identities.intersection(clue_time);
-                    if let Some(promised) = replay
+                    let direct_at_clue =
+                        identities_at_distance_at(card.identities, clue.stack_heights, 0);
+                    let delayed_plan = !clue.play_identities.is_empty()
+                        && clue.play_identities.iter().all(|identity| {
+                            identity.rank.number() > clue.stack_heights[identity.suit.index()] + 1
+                        });
+                    let focus_has_active_connection = replay
                         .pending_connections
                         .iter()
-                        .find(|pending| pending.focus == clue.focus)
-                        .map(|pending| pending.focus_identity)
+                        .any(|connection| connection.focus == clue.focus);
+                    let delayed_plan_was_demonstrated =
+                        clue.play_identities.iter().any(|identity| {
+                            if view.play_stacks[identity.suit.index()].len()
+                                > usize::from(clue.stack_heights[identity.suit.index()])
+                            {
+                                return true;
+                            }
+                            let Some(previous) = identity.rank.index().checked_sub(1) else {
+                                return false;
+                            };
+                            replay.pending_connections.identity_was_demonstrated_after(
+                                Card::new(identity.suit, Rank::ALL[previous]),
+                                clue.turn,
+                            )
+                        });
+                    // A queued clue can have a delayed strategic plan while
+                    // the recipient provisionally writes its direct meaning.
+                    // Keep those two facts separate until a post-clue blind
+                    // play (or a later Fix) demonstrates the delayed branch.
+                    let provisional_direct = matches!(clue.clue, Clue::Suit(_))
+                        && delayed_plan
+                        && !focus_has_active_connection
+                        && !delayed_plan_was_demonstrated
+                        && !direct_at_clue.is_empty();
+                    let mut narrowed = if provisional_direct {
+                        direct_at_clue
+                    } else {
+                        card.identities.intersection(clue_time)
+                    };
+                    card.identity_status = if provisional_direct {
+                        HGroupIdentityStatus::Provisional
+                    } else {
+                        HGroupIdentityStatus::Settled
+                    };
+                    if let Some(promised) = replay
+                        .pending_connections
+                        .demonstrated_focus_identity(clue.focus)
                     {
                         let demonstrated = narrowed.intersection(IdentitySet::singleton(promised));
                         if !demonstrated.is_empty() {
@@ -198,6 +241,25 @@ pub(in crate::h_group) fn convention_card_inferences(
                                 .any(|signal| !signal.cards.contains(&clue.focus))
                         })
                     {
+                        let active_focus_connection = replay
+                            .pending_connections
+                            .iter()
+                            .any(|connection| connection.focus == clue.focus);
+                        let demonstrated_queued_identity = IdentitySet::from_mask(
+                            narrowed
+                                .iter()
+                                .filter(|identity| {
+                                    let rank = usize::from(identity.rank.number());
+                                    if rank <= 1 {
+                                        return false;
+                                    }
+                                    replay.pending_connections.identity_was_demonstrated_after(
+                                        Card::new(identity.suit, Rank::ALL[rank - 2]),
+                                        clue.turn,
+                                    )
+                                })
+                                .fold(0, |mask, identity| mask | (1 << identity.index())),
+                        );
                         let has_queued_delayed_identity = narrowed.iter().any(|identity| {
                             let height = usize::from(clue.stack_heights[identity.suit.index()]);
                             let rank = usize::from(identity.rank.number());
@@ -210,7 +272,12 @@ pub(in crate::h_group) fn convention_card_inferences(
                                     )
                                 })
                         });
-                        if !has_queued_delayed_identity && !has_existing_prompt_for_delayed_identity
+                        let queued_interpretation_is_live = has_queued_delayed_identity
+                            && (!matches!(clue.clue, Clue::Suit(_)) || active_focus_connection);
+                        if !demonstrated_queued_identity.is_empty() {
+                            narrowed = demonstrated_queued_identity;
+                        } else if !queued_interpretation_is_live
+                            && !has_existing_prompt_for_delayed_identity
                         {
                             // Without an actual Prompt/Finesse obligation or
                             // an existing clued Prompt candidate, an

@@ -1,7 +1,7 @@
 use super::{
-    Card, CardId, CardSet, Clue, HGroupCardInference, HGroupProfile, HGroupState, IdentitySet,
-    PlayerId, PlayerView, Rank, is_critical, pending_is_active, prospective_clue_view,
-    subjective_convention_cards,
+    Card, CardId, CardSet, Clue, HGroupCardInference, HGroupIdentityStatus, HGroupProfile,
+    HGroupState, IdentitySet, PlayerId, PlayerView, Rank, is_critical, pending_is_active,
+    prospective_clue_view, subjective_convention_cards,
 };
 
 /// Convention-aware value of the negative information supplied by a clue.
@@ -70,6 +70,7 @@ fn direct_card_inferences(source: &PlayerView, target: PlayerId) -> Vec<HGroupCa
         .map(|card| HGroupCardInference {
             card: card.id,
             identities: IdentitySet::from_mask(card.clues.identity_mask()),
+            identity_status: HGroupIdentityStatus::Settled,
             focused: false,
             saved: false,
             finessed: false,
@@ -208,6 +209,7 @@ mod tests {
         let before = HGroupCardInference {
             card: CardId::new(0),
             identities,
+            identity_status: HGroupIdentityStatus::Settled,
             focused: false,
             saved: false,
             finessed: false,

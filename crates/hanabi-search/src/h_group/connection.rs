@@ -76,6 +76,7 @@ pub(super) struct ConnectionTransition {
     pub(super) focus: CardId,
     pub(super) actor: PlayerId,
     pub(super) expected: Card,
+    pub(super) focus_identity: Card,
     pub(super) from: ConnectionStatus,
     pub(super) to: ConnectionStatus,
     pub(super) reason: ConnectionTransitionReason,
@@ -117,6 +118,45 @@ impl ConnectionManager {
             .iter()
             .copied()
             .find(|origin| origin.id == id)
+    }
+
+    /// Returns the focus identity only after an earlier blind play has
+    /// demonstrated that the still-active layered connection is real.
+    /// Scheduling a connection is not evidence by itself: until a layer
+    /// actually plays, the focus may remain in a direct/delayed
+    /// superposition.
+    pub(super) fn demonstrated_focus_identity(&self, focus: CardId) -> Option<Card> {
+        self.active.iter().find_map(|connection| {
+            (connection.focus == focus
+                && self.promise_was_demonstrated_after(connection.promise, 0))
+            .then_some(connection.focus_identity)
+        })
+    }
+
+    /// Whether a queued promise for this identity was publicly demonstrated
+    /// after a later clue was given. This is what lets a recipient upgrade a
+    /// new direct interpretation to one queued behind an older connection.
+    pub(super) fn identity_was_demonstrated_after(&self, identity: Card, turn: u32) -> bool {
+        self.transitions.iter().any(|transition| {
+            transition.focus_identity == identity
+                && transition.turn > turn
+                && transition.from == ConnectionStatus::Pending
+                && matches!(
+                    transition.reason,
+                    ConnectionTransitionReason::PlayedAlternative
+                        | ConnectionTransitionReason::PlayedExpectedCard
+                )
+        })
+    }
+
+    fn promise_was_demonstrated_after(&self, promise: PromiseId, turn: u32) -> bool {
+        self.transitions.iter().any(|transition| {
+            transition.promise == promise
+                && transition.turn > turn
+                && transition.from == ConnectionStatus::Pending
+                && transition.to == ConnectionStatus::Pending
+                && transition.reason == ConnectionTransitionReason::PlayedAlternative
+        })
     }
 
     pub(super) fn validate(&self) -> Result<(), String> {
@@ -397,6 +437,17 @@ impl ConnectionManager {
                     ConnectionStatus::Invalidated,
                     ConnectionTransitionReason::PlayedAlternative,
                 ));
+            } else {
+                // A successful alternative is the public demonstration of a
+                // layered connection. The promise remains pending on its next
+                // candidate, but this state change must still be journaled:
+                // convention knowledge may now rule out a simultaneous direct
+                // interpretation of the focus.
+                transitions.push((
+                    obligation,
+                    ConnectionStatus::Pending,
+                    ConnectionTransitionReason::PlayedAlternative,
+                ));
             }
         }
         for (obligation, status, reason) in transitions {
@@ -432,6 +483,7 @@ impl ConnectionManager {
             focus: obligation.focus,
             actor: obligation.actor,
             expected: obligation.expected,
+            focus_identity: obligation.focus_identity,
             from,
             to,
             reason,
@@ -504,6 +556,33 @@ mod tests {
         assert!(manager.transitions().iter().any(|transition| {
             transition.reason == ConnectionTransitionReason::Superseded
                 && transition.to == ConnectionStatus::Cancelled
+        }));
+    }
+
+    #[test]
+    fn a_successful_layer_records_demonstration_without_completing_the_promise() {
+        let mut manager = ConnectionManager::default();
+        let focus = CardId::new(9);
+        manager.start(3, obligation(vec![CardId::new(5), CardId::new(7)]));
+
+        manager.advance_play(
+            4,
+            PlayerId::new(1),
+            CardId::new(5),
+            Card::new(Suit::Blue, Rank::One),
+            true,
+        );
+
+        assert_eq!(manager.len(), 1);
+        assert_eq!(manager[0].cards, [CardId::new(7)]);
+        assert_eq!(
+            manager.demonstrated_focus_identity(focus),
+            Some(Card::new(Suit::Red, Rank::Three))
+        );
+        assert!(manager.transitions().iter().any(|transition| {
+            transition.reason == ConnectionTransitionReason::PlayedAlternative
+                && transition.from == ConnectionStatus::Pending
+                && transition.to == ConnectionStatus::Pending
         }));
     }
 }

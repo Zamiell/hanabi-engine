@@ -144,13 +144,18 @@ fn player_snapshot(state: &FullState, player: PlayerId, name: &str) -> PlayerSna
                 .find(|visible| visible.id == observed.id)
                 .and_then(|visible| visible.identity)
                 .expect("another player sees the card identity");
-            let trash = !note.identities.is_empty()
+            let trash = note.identity_status != HGroupIdentityStatus::Provisional
+                && !note.identities.is_empty()
                 && note
                     .identities
                     .iter()
                     .all(|identity| is_convention_trash(&view, identity, &gotten, &inferred.cards));
             let mut flags = Vec::new();
             flags.extend(note.focused.then_some("focused"));
+            flags.extend(
+                (note.identity_status == HGroupIdentityStatus::Provisional)
+                    .then_some("provisional"),
+            );
             flags.extend(
                 inferred
                     .playable_now

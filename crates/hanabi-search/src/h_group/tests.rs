@@ -50,6 +50,97 @@ fn replay_action_at_turn(replay: &HanabiLiveReplay, turn: u32) -> Action {
 }
 
 #[test]
+fn opening_delayed_play_clue_stays_in_superposition_until_the_finesse_is_demonstrated() {
+    let yellow_one = Card::new(Suit::Yellow, Rank::One);
+    let yellow_two = Card::new(Suit::Yellow, Rank::Two);
+    let unresolved = IdentitySet::singleton(yellow_one).union(IdentitySet::singleton(yellow_two));
+
+    for turn in [2, 3] {
+        let state = expert_replay_194321()
+            .state_at_turn(turn)
+            .expect("fixture prefix is legal");
+        let view = state.view_for(PlayerId::new(0)).expect("Alice has a view");
+        let deductions = LogicalDeductions::new(view).expect("valid deductions");
+        let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+        let focus = inferred
+            .cards
+            .iter()
+            .find(|note| note.card == CardId::new(2))
+            .expect("Alice's yellow-clued focus has a convention note");
+
+        assert_eq!(
+            focus.identities, unresolved,
+            "before Donald blind-plays, the clue can still mean direct yellow 1 or delayed yellow 2 at turn {turn}"
+        );
+    }
+
+    let demonstrated = expert_replay_194321()
+        .state_at_turn(4)
+        .expect("fixture prefix is legal");
+    let view = demonstrated
+        .view_for(PlayerId::new(0))
+        .expect("Alice has a view");
+    let deductions = LogicalDeductions::new(view).expect("valid deductions");
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    let focus = inferred
+        .cards
+        .iter()
+        .find(|note| note.card == CardId::new(2))
+        .expect("Alice's yellow-clued focus has a convention note");
+
+    assert_eq!(focus.identities, IdentitySet::singleton(yellow_two));
+}
+
+#[test]
+fn queued_yellow_three_is_known_as_yellow_one_until_the_connection_is_demonstrated() {
+    let expected = IdentitySet::singleton(Card::new(Suit::Yellow, Rank::One));
+
+    for turn in [5, 6, 7] {
+        let state = expert_replay_194321()
+            .state_at_turn(turn)
+            .expect("fixture prefix is legal");
+        let view = state.view_for(PlayerId::new(2)).expect("Cathy has a view");
+        let deductions = LogicalDeductions::new(view).expect("valid deductions");
+        let replay = replay_h_group(&deductions, HGroupProfile::Max);
+        let inferred = infer_h_group_from_replay(&deductions, replay.clone(), HGroupProfile::Max);
+        let focus = inferred
+            .cards
+            .iter()
+            .find(|note| note.card == CardId::new(16))
+            .expect("Cathy's yellow-clued focus has a convention note");
+
+        assert_eq!(
+            focus.identities, expected,
+            "no blind play or Fix has demonstrated yellow 3 at turn {turn}; replay={replay:#?}"
+        );
+        assert!(
+            !inferred.playable_now.contains(&CardId::new(16)),
+            "the provisional y1 note must wait for its queued line to be demonstrated at turn {turn}; clues={:#?}",
+            replay.clues
+        );
+    }
+
+    let demonstrated = expert_replay_194321()
+        .state_at_turn(8)
+        .expect("fixture prefix is legal");
+    let view = demonstrated
+        .view_for(PlayerId::new(2))
+        .expect("Cathy has a view");
+    let deductions = LogicalDeductions::new(view).expect("valid deductions");
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    let focus = inferred
+        .cards
+        .iter()
+        .find(|note| note.card == CardId::new(16))
+        .expect("Cathy's yellow-clued focus has a convention note");
+
+    assert_eq!(
+        focus.identities,
+        IdentitySet::singleton(Card::new(Suit::Yellow, Rank::Three))
+    );
+}
+
+#[test]
 fn move_33_does_not_treat_an_ungotten_card_as_a_green_five() {
     let state = expert_replay_194321()
         .state_at_turn(32)
@@ -510,7 +601,18 @@ fn recognizes_expert_replay_queued_yellow_three() {
         &[CardId::new(10), CardId::new(16)],
         true,
     );
-    assert_eq!(hazard, None);
+    assert_eq!(
+        hazard,
+        None,
+        "signals={:?}",
+        prospective_clue_signal_kinds(
+            &view,
+            HGroupProfile::Max,
+            PlayerId::new(2),
+            Clue::Suit(Suit::Yellow),
+            &[CardId::new(10), CardId::new(16)],
+        )
+    );
 
     let deductions = LogicalDeductions::new(view).expect("valid deductions");
     assert_eq!(

@@ -17,8 +17,8 @@ pub use convention::{
 pub use h_group::{
     H_GROUP_DOCUMENTATION_SECTIONS, H_GROUP_LEVELS, HGroupCardInference, HGroupClueInterpretation,
     HGroupClueKind, HGroupConnection, HGroupConnectionKind, HGroupConnectionPromise,
-    HGroupDocumentationSection, HGroupInferences, HGroupLevelDescriptor, HGroupMoveKind,
-    HGroupPhase, HGroupSaveKind, HGroupSignal, infer_h_group,
+    HGroupDocumentationSection, HGroupIdentityStatus, HGroupInferences, HGroupLevelDescriptor,
+    HGroupMoveKind, HGroupPhase, HGroupSaveKind, HGroupSignal, infer_h_group,
 };
 pub use information_set::{
     BeliefConstraints, EnumerateWorldsError, IdentitySet, InformationSet, InformationSetError,

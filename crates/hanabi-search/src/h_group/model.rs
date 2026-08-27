@@ -149,10 +149,21 @@ pub struct HGroupConnectionPromise {
 }
 
 /// Convention knowledge attached to one card in the observer's hand.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum HGroupIdentityStatus {
+    #[default]
+    Settled,
+    /// A direct identity written while a different queued suit plan remains
+    /// unresolved. It is knowledge, but not yet a play or discard permission.
+    Provisional,
+}
+
+/// Convention knowledge attached to one card in the observer's hand.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HGroupCardInference {
     pub card: CardId,
     pub identities: IdentitySet,
+    pub identity_status: HGroupIdentityStatus,
     pub focused: bool,
     pub saved: bool,
     pub finessed: bool,

@@ -2,14 +2,14 @@ use super::{
     Action, Card, CardId, CardSet, Clue, ClueCandidate, CluePurpose, ClueRecognition, ClueValue,
     ConstraintReason, ConventionActionReason, ConventionConstraints, HGroupActionKind,
     HGroupActionSet, HGroupAnalyzedAction, HGroupClueKind, HGroupConnection, HGroupConnectionKind,
-    HGroupConnectionPromise, HGroupInferences, HGroupMoveKind, HGroupPhase, HGroupProfile,
-    HGroupRuleId, HGroupState, IdentitySet, LogicalDeductions, MAX_CLUE_TOKENS, ObservedCard,
-    OnceLock, PerspectiveDepth, PerspectiveProjector, PlayerId, PlayerView, ProspectiveTransition,
-    Rank, RejectedConventionAction, Suit, TeamConventionSnapshot, chop, convention_card_inferences,
-    creates_false_anxiety, focus, h_group_clue_candidates_from_replay, h_group_phase,
-    h_group_rejected_clues_from_replay, identity_of, infer_clue_to_self, is_convention_trash,
-    is_critical, is_playable_at, is_playable_now, next_player, pending_is_active,
-    projected_h_group_replay, prospective_clue_has_unsafe_connection,
+    HGroupConnectionPromise, HGroupIdentityStatus, HGroupInferences, HGroupMoveKind, HGroupPhase,
+    HGroupProfile, HGroupRuleId, HGroupState, IdentitySet, LogicalDeductions, MAX_CLUE_TOKENS,
+    ObservedCard, OnceLock, PerspectiveDepth, PerspectiveProjector, PlayerId, PlayerView,
+    ProspectiveTransition, Rank, RejectedConventionAction, Suit, TeamConventionSnapshot, chop,
+    convention_card_inferences, creates_false_anxiety, focus, h_group_clue_candidates_from_replay,
+    h_group_phase, h_group_rejected_clues_from_replay, identity_of, infer_clue_to_self,
+    is_convention_trash, is_critical, is_playable_at, is_playable_now, next_player,
+    pending_is_active, projected_h_group_replay, prospective_clue_has_unsafe_connection,
     prospective_clue_marks_focus_saved, prospective_clue_view,
     prospective_play_has_unsafe_inference, replay_h_group, rule_enabled,
 };
@@ -164,6 +164,7 @@ pub(super) fn infer_h_group_from_replay(
             && !replay.cards.invalidated_focuses.contains(&card.card)
             && !replay.cards.declined_direct_plays.contains(&card.card)
             && !blocked_connection_cards.contains(&card.card)
+            && card.identity_status != HGroupIdentityStatus::Provisional
             && (!held_save_collateral.contains(&card.card) || logically_playable)
             && !card.identities.is_empty()
             && card

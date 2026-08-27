@@ -94,8 +94,8 @@ use model::{
 };
 pub use model::{
     HGroupCardInference, HGroupClueInterpretation, HGroupClueKind, HGroupConnection,
-    HGroupConnectionKind, HGroupConnectionPromise, HGroupInferences, HGroupPhase, HGroupSaveKind,
-    HGroupSignal,
+    HGroupConnectionKind, HGroupConnectionPromise, HGroupIdentityStatus, HGroupInferences,
+    HGroupPhase, HGroupSaveKind, HGroupSignal,
 };
 use outcome::{ActionCommitment, CluedCardSuperposition, LineOutcome};
 use perspective::{PerspectiveProjector, ProspectiveTransition};

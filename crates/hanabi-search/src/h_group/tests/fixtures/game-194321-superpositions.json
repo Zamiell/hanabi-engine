@@ -239,7 +239,7 @@
             {
               "card": 2,
               "actual": "y2",
-              "convention": "y2",
+              "convention": "y1 y2",
               "flags": [
                 "focused"
               ]
@@ -361,7 +361,7 @@
             {
               "card": 2,
               "actual": "y2",
-              "convention": "y2",
+              "convention": "y1 y2",
               "flags": [
                 "focused"
               ]
@@ -657,9 +657,10 @@
             {
               "card": 16,
               "actual": "y3",
-              "convention": "y3",
+              "convention": "y1",
               "flags": [
-                "focused"
+                "focused",
+                "provisional"
               ]
             }
           ]
@@ -792,9 +793,10 @@
             {
               "card": 16,
               "actual": "y3",
-              "convention": "y3",
+              "convention": "y1",
               "flags": [
-                "focused"
+                "focused",
+                "provisional"
               ]
             }
           ]
@@ -825,7 +827,7 @@
             {
               "card": 17,
               "actual": "r4",
-              "convention": "r4",
+              "convention": "r1 r2 r3 r4",
               "flags": [
                 "focused"
               ]
@@ -931,9 +933,10 @@
             {
               "card": 16,
               "actual": "y3",
-              "convention": "y3",
+              "convention": "y1",
               "flags": [
-                "focused"
+                "focused",
+                "provisional"
               ]
             }
           ]
@@ -964,7 +967,7 @@
             {
               "card": 17,
               "actual": "r4",
-              "convention": "r4",
+              "convention": "r1 r2 r3 r4",
               "flags": [
                 "focused"
               ]
@@ -1098,7 +1101,7 @@
             {
               "card": 17,
               "actual": "r4",
-              "convention": "r4",
+              "convention": "r1 r2 r3 r4",
               "flags": [
                 "focused"
               ]
@@ -1239,7 +1242,7 @@
             {
               "card": 17,
               "actual": "r4",
-              "convention": "r4",
+              "convention": "r2 r3 r4",
               "flags": [
                 "focused"
               ]
@@ -1380,7 +1383,7 @@
             {
               "card": 17,
               "actual": "r4",
-              "convention": "r4",
+              "convention": "r2 r4",
               "flags": [
                 "focused"
               ]
@@ -4964,7 +4967,7 @@
             {
               "card": 34,
               "actual": "p4",
-              "convention": "p4 p5",
+              "convention": "p4",
               "flags": [
                 "focused"
               ]
@@ -5079,7 +5082,7 @@
             {
               "card": 34,
               "actual": "p4",
-              "convention": "p4 p5",
+              "convention": "p4",
               "flags": [
                 "focused"
               ]
