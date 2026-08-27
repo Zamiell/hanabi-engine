@@ -1,15 +1,16 @@
 use super::{
-    Action, Card, CardId, CardSet, Clue, ClueCandidate, CluePurpose, ClueRecognition, ClueValue,
-    ConstraintReason, ConventionActionReason, ConventionConstraints, HGroupActionKind,
-    HGroupActionSet, HGroupAnalyzedAction, HGroupClueKind, HGroupConnection, HGroupConnectionKind,
-    HGroupConnectionPromise, HGroupIdentityStatus, HGroupInferences, HGroupMoveKind, HGroupPhase,
-    HGroupProfile, HGroupRuleId, HGroupState, IdentitySet, LogicalDeductions, MAX_CLUE_TOKENS,
-    ObservedCard, OnceLock, PerspectiveDepth, PerspectiveProjector, PlayerId, PlayerView,
-    ProspectiveTransition, Rank, RejectedConventionAction, Suit, TeamConventionSnapshot, chop,
-    convention_card_inferences, creates_false_anxiety, focus, h_group_clue_candidates_from_replay,
-    h_group_phase, h_group_rejected_clues_from_replay, identity_of, infer_clue_to_self,
-    is_convention_trash, is_critical, is_playable_at, is_playable_now, next_player,
-    pending_is_active, projected_h_group_replay, prospective_clue_has_unsafe_connection,
+    Action, ActionSchedule, Card, CardId, CardSet, Clue, ClueCandidate, CluePurpose,
+    ClueRecognition, ClueValue, ConstraintReason, ConventionActionReason, ConventionConstraints,
+    HGroupActionKind, HGroupActionSet, HGroupAnalyzedAction, HGroupClueKind, HGroupConnection,
+    HGroupConnectionKind, HGroupConnectionPromise, HGroupIdentityStatus, HGroupInferences,
+    HGroupMoveKind, HGroupPhase, HGroupPlayObligation, HGroupProfile, HGroupRuleId, HGroupState,
+    IdentitySet, LogicalDeductions, MAX_CLUE_TOKENS, ObservedCard, OnceLock, PerspectiveDepth,
+    PerspectiveProjector, PlayerId, PlayerView, ProspectiveTransition, Rank,
+    RejectedConventionAction, Suit, TeamConventionSnapshot, chop, convention_card_inferences,
+    creates_false_anxiety, focus, h_group_clue_candidates_from_replay, h_group_phase,
+    h_group_rejected_clues_from_replay, identity_of, infer_clue_to_self, is_convention_trash,
+    is_critical, is_playable_at, is_playable_now, next_player, pending_is_active,
+    projected_h_group_replay, prospective_clue_has_unsafe_connection,
     prospective_clue_marks_focus_saved, prospective_clue_view,
     prospective_play_has_unsafe_inference, replay_h_group, rule_enabled,
 };
@@ -67,6 +68,7 @@ pub(super) fn infer_h_group_from_replay(
     profile: HGroupProfile,
 ) -> HGroupInferences {
     let view = deductions.view();
+    let action_schedule = ActionSchedule::from_replay(view, &replay);
     let blocked_connection_cards = replay
         .pending_connections
         .iter()
@@ -99,12 +101,8 @@ pub(super) fn infer_h_group_from_replay(
         .collect::<Vec<_>>();
     let cards = convention_card_inferences(deductions, &replay);
     let fixed_cards = replay.cards.facts.fixed_cards();
-    let own_required_discards = replay
-        .cards
-        .discard_now
-        .iter()
-        .copied()
-        .filter(|card| replay.hands[view.observer.index()].contains(card))
+    let own_required_discards = action_schedule
+        .required_discards_for(view.observer)
         .collect();
     let mut held_save_collateral = CardSet::default();
     for (index, clue) in replay.clues.iter().enumerate() {
@@ -231,7 +229,7 @@ pub(super) fn infer_h_group_from_replay(
             if let Some((card, _, _)) = best {
                 inferred.playable_now.push(card);
                 if let Some(note) = inferred.cards.iter_mut().find(|note| note.card == card) {
-                    note.finessed = true;
+                    note.play_obligation = Some(HGroupPlayObligation::Anxiety);
                 }
             }
         }
@@ -1584,7 +1582,7 @@ fn playable_order_key(context: &PlayableOrderContext<'_>, card: CardId) -> Playa
     let saved_five_focus = context.inferred.clues.iter().any(|clue| {
         clue.focus == card && clue.focus_was_chop && clue.clue == Clue::Rank(Rank::Five)
     });
-    let blind = note.is_some_and(|note| note.finessed);
+    let blind = note.is_some_and(|note| note.play_obligation.is_some());
     if !rule_enabled(context.profile, HGroupRuleId::Priority)
         || context.inferred.phase == HGroupPhase::EndGame
     {

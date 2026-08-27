@@ -8,12 +8,13 @@
 use super::decision::{analysis_clue_candidates, build_h_group_analysis};
 use super::{
     Action, BluffTargetKind, Card, CardId, CardSet, Clue, ClueCandidate, ClueFacts, CluePurpose,
-    ClueRecognition, ClueValue, ConnectionObligation, ConventionFacts, ConventionRejectionReason,
-    HGroupCardInference, HGroupClueInterpretation, HGroupClueKind, HGroupConnection,
-    HGroupConnectionKind, HGroupInferences, HGroupMoveKind, HGroupProfile, HGroupRuleId,
-    HGroupState, HistoricalView, IdentitySet, KNOWN_TRASH_COLLATERAL_BONUS, LogicalDeductions,
-    MAX_CLUE_TOKENS, ObservedCard, ObservedEvent, PlayerId, PlayerSet, PlayerView, Rank,
-    RejectedConventionAction, RequiredFix, SemanticallyAdmittedCandidates, bluff_play_connects,
+    ClueRecognition, ClueValue, ConnectionObligation, ConventionFacts, ConventionKnowledge,
+    ConventionRejectionReason, HGroupCardInference, HGroupClueInterpretation, HGroupClueKind,
+    HGroupConnection, HGroupConnectionKind, HGroupInferences, HGroupMoveKind, HGroupPlayObligation,
+    HGroupProfile, HGroupRuleId, HGroupState, HistoricalView, IdentityClaims, IdentitySet,
+    KNOWN_TRASH_COLLATERAL_BONUS, LogicalDeductions, MAX_CLUE_TOKENS, MaterializedCardFact,
+    ObservedCard, ObservedEvent, PlayerId, PlayerSet, PlayerView, Rank, RejectedConventionAction,
+    RequiredFix, SemanticallyAdmittedCandidates, StackTimeline, bluff_play_connects,
     bluff_target_order_is_legal, card_is_trash, chop, convention_information_value,
     finesse_position, five_chop_moved_card, five_pulled_card, focus,
     identity_is_queued_before_target, identity_of, identity_set, infer_h_group_from_replay,
@@ -32,9 +33,10 @@ pub(super) use candidate_validation::{
     h_group_rejected_clues_from_replay, recipient_replay_recognizes_candidate,
 };
 pub(super) use knowledge::{
-    convention_card_inferences, convention_playable, delayed_focus_identities, find_prompt,
-    identities_at_distance_at, snapshot_good_touch_identities, snapshot_play_identities,
-    snapshot_save_identities, two_save_allowed,
+    build_convention_knowledge, convention_card_inferences, convention_playable,
+    delayed_focus_identities, find_prompt, identities_at_distance_at,
+    snapshot_good_touch_identities, snapshot_play_identities, snapshot_save_identities,
+    two_save_allowed,
 };
 
 #[cfg(test)]

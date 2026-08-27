@@ -146,7 +146,7 @@ fn h_group_inferences_json(inferences: &HGroupInferences) -> Value {
                 "possibleIdentities": identity_set_json(card.identities),
                 "focused": card.focused,
                 "saved": card.saved,
-                "finessed": card.finessed,
+                "finessed": card.play_obligation.is_some(),
             })
         })
         .collect::<Vec<_>>();

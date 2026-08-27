@@ -19,9 +19,11 @@ use crate::{
 };
 
 mod action_analysis;
+mod action_schedule;
 mod bluff;
 mod candidate;
 mod candidate_pipeline;
+mod claims;
 mod connection;
 mod constraints;
 mod coverage;
@@ -33,6 +35,7 @@ mod hand;
 mod identity;
 mod information_value;
 mod interpretation;
+mod knowledge_effects;
 mod ledger;
 mod model;
 mod outcome;
@@ -48,11 +51,13 @@ mod transition;
 mod turn_context;
 
 use action_analysis::{HGroupActionKind, HGroupActionSet, HGroupAnalyzedAction};
+use action_schedule::{ActionSchedule, StackTimeline};
 use bluff::{
     BluffTargetKind, bluff_play_connects, bluff_target_kind_at, bluff_target_order_is_legal,
 };
 use candidate::{ClueCandidate, CluePurpose, ClueRecognition, ClueValue};
 use candidate_pipeline::SemanticallyAdmittedCandidates;
+use claims::{IdentityClaims, claimed_identities_at_clue};
 use connection::{ConnectionManager, ConnectionObligation, ConnectionTransitionReason, PromiseId};
 use constraints::{ConstraintReason, ConventionConstraints};
 pub use coverage::{H_GROUP_DOCUMENTATION_SECTIONS, HGroupDocumentationSection};
@@ -79,11 +84,13 @@ use information_value::convention_information_value;
 #[cfg(test)]
 use interpretation::h_group_clue_candidates;
 use interpretation::{
-    convention_card_inferences, creates_false_anxiety, elimination_finesse_connection,
-    h_group_clue_candidates_from_replay, h_group_rejected_clues_from_replay, infer_clue_to_self,
-    loaded_connection_plan, recipient_replay_recognizes_candidate, snapshot_good_touch_identities,
+    build_convention_knowledge, convention_card_inferences, creates_false_anxiety,
+    elimination_finesse_connection, h_group_clue_candidates_from_replay,
+    h_group_rejected_clues_from_replay, infer_clue_to_self, loaded_connection_plan,
+    recipient_replay_recognizes_candidate, snapshot_good_touch_identities,
     snapshot_play_identities, snapshot_save_identities,
 };
+use knowledge_effects::{CardKnowledgeEffect, ConventionKnowledge, KnowledgeSource};
 use ledger::{
     ConventionCardSetSnapshot, EffectSource, ProvenancedCardSet,
     reconcile_connection_fact_lifecycles,
@@ -95,7 +102,7 @@ use model::{
 pub use model::{
     HGroupCardInference, HGroupClueInterpretation, HGroupClueKind, HGroupConnection,
     HGroupConnectionKind, HGroupConnectionPromise, HGroupIdentityStatus, HGroupInferences,
-    HGroupPhase, HGroupSaveKind, HGroupSignal,
+    HGroupPhase, HGroupPlayObligation, HGroupSaveKind, HGroupSignal,
 };
 use outcome::{ActionCommitment, CluedCardSuperposition, LineOutcome};
 use perspective::{PerspectiveProjector, ProspectiveTransition};
@@ -114,12 +121,12 @@ use rule_engine::apply_post_event_rules;
 use rules::{HGroupRuleId, RulePhase, rule_enabled};
 use strategic_value::apply_strategic_clue_values;
 pub(crate) use symbolic_line::project_h_group_line;
-use transition::{
-    ConventionTransitionDelta, ConventionTransitionResult, MutationDomain, MutationSet,
-    RuleProposal,
-};
 #[cfg(test)]
-use transition::{FactChangeKind, MaterializedCardFact};
+use transition::FactChangeKind;
+use transition::{
+    ConventionTransitionDelta, ConventionTransitionResult, MaterializedCardFact, MutationDomain,
+    MutationSet, RuleProposal,
+};
 use turn_context::{HGroupTurnContext, HGroupTurnSnapshot, HGroupTurnView, HistoricalView};
 
 const KNOWN_TRASH_COLLATERAL_BONUS: u16 = 80;
@@ -1086,40 +1093,16 @@ fn replay_h_group_inner(
                         // elimination to the whole focus domain, including
                         // Save possibilities: a newly touched 2 beside an
                         // existing saved Red 2 cannot itself be Red 2.
-                        let live_cards = hands.iter().flatten().copied().collect::<CardSet>();
-                        let fixed_cards = signals.facts().fixed_cards();
-                        let claimed = gotten
-                            .iter()
-                            .copied()
-                            .filter(|card| {
-                                *card != focus
-                                    && live_cards.contains(card)
-                                    && !fixed_cards.contains(card)
-                            })
-                            .fold(IdentitySet::default(), |claimed, card| {
-                                let giver_holds_card = hands[giver.index()].contains(&card);
-                                let identity = (!giver_holds_card)
-                                    .then(|| historical.identity(card))
-                                    .flatten()
-                                    .or_else(|| {
-                                        let logical = IdentitySet::from_mask(
-                                            facts[card.index()].identity_mask(),
-                                        );
-                                        (logical.len() == 1)
-                                            .then(|| logical.iter().next())
-                                            .flatten()
-                                    })
-                                    .or_else(|| {
-                                        let prior =
-                                            clues.iter().rev().find(|prior| prior.focus == card)?;
-                                        (prior.play_identities.len() == 1)
-                                            .then(|| prior.play_identities.iter().next())
-                                            .flatten()
-                                    });
-                                identity.map_or(claimed, |identity| {
-                                    claimed.union(IdentitySet::singleton(identity))
-                                })
-                            });
+                        let claimed = claimed_identities_at_clue(
+                            focus,
+                            *giver,
+                            &hands,
+                            &historical,
+                            &facts,
+                            signals.facts(),
+                            &clues,
+                            &gotten,
+                        );
                         focus_identities = focus_identities.without(claimed);
                     }
                     let mut play_identities = snapshot_play_identities(
@@ -1875,6 +1858,7 @@ fn replay_h_group_inner(
         );
         transition.delta = ConventionTransitionDelta {
             card_changes: event_card_snapshot.changes_to(&event_after),
+            knowledge_changes: Vec::new(),
         };
         if !transition.proposals.is_empty() || !transition.delta.is_empty() {
             transitions.push(transition);
@@ -1920,7 +1904,7 @@ fn replay_h_group_inner(
             })
     });
     let (signals, convention_facts) = signals.into_parts();
-    let state = HGroupState {
+    let mut state = HGroupState {
         hands,
         cards: ConventionCardState {
             explicitly_clued,
@@ -1941,7 +1925,29 @@ fn replay_h_group_inner(
         implicit_saves,
         required_fix,
         transitions,
+        knowledge: ConventionKnowledge::default(),
     };
+    state.knowledge = build_convention_knowledge(deductions, &state);
+    for effect in state.knowledge.effects().iter().copied() {
+        let turn = effect.source().turn();
+        if let Some(transition) = state
+            .transitions
+            .iter_mut()
+            .find(|transition| transition.turn == turn)
+        {
+            transition.delta.knowledge_changes.push(effect);
+        } else {
+            state.transitions.push(ConventionTransitionResult {
+                turn,
+                proposals: Vec::new(),
+                delta: ConventionTransitionDelta {
+                    card_changes: Vec::new(),
+                    knowledge_changes: vec![effect],
+                },
+            });
+        }
+    }
+    state.transitions.sort_by_key(|transition| transition.turn);
     debug_assert!(
         state.validate().is_ok(),
         "invalid H-Group replay state: {:?}",

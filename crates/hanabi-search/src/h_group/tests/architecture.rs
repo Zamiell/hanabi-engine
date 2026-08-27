@@ -1,6 +1,13 @@
 use super::*;
 use crate::SupportedConvention;
 
+fn expert_replays() -> [(&'static str, HanabiLiveReplay); 2] {
+    [
+        ("game-194321", expert_replay_194321()),
+        ("game-p4v0s9", expert_replay_p4v0s9()),
+    ]
+}
+
 #[test]
 fn every_semantic_move_links_to_its_documented_rule() {
     let source = include_str!("../../h_group.rs");
@@ -48,9 +55,11 @@ fn every_semantic_move_has_a_production_implementation_reference() {
         .0;
     let production = [
         root,
+        include_str!("../action_schedule.rs"),
         include_str!("../bluff.rs"),
         include_str!("../candidate.rs"),
         include_str!("../candidate_pipeline.rs"),
+        include_str!("../claims.rs"),
         include_str!("../connection.rs"),
         include_str!("../decision.rs"),
         include_str!("../effects.rs"),
@@ -62,6 +71,7 @@ fn every_semantic_move_has_a_production_implementation_reference() {
         include_str!("../interpretation.rs"),
         include_str!("../interpretation/candidate_validation.rs"),
         include_str!("../interpretation/knowledge.rs"),
+        include_str!("../knowledge_effects.rs"),
         include_str!("../model.rs"),
         include_str!("../outcome.rs"),
         include_str!("../perspective.rs"),
@@ -112,30 +122,153 @@ fn every_semantic_move_has_a_production_implementation_reference() {
 
 #[test]
 fn every_expert_replay_prefix_satisfies_h_group_state_invariants() {
-    let fixture = expert_replay_194321();
-    for turn in 0..=u32::try_from(fixture.actions.len()).expect("replay fits in u32") {
-        let state = fixture.state_at_turn(turn).expect("turn exists");
-        for observer in 0..state.num_players() {
-            let observer = PlayerId::new(observer);
-            let deductions =
-                LogicalDeductions::new(state.view_for(observer).expect("observer exists"))
-                    .expect("valid deductions");
-            let replay = replay_h_group_inner(
-                &deductions,
-                HGroupProfile::Max,
-                PerspectiveDepth::ObserverOnly,
-                false,
-            );
-            assert_eq!(
-                replay.validate(),
-                Ok(()),
-                "invalid replay at turn {turn} for {observer:?}"
-            );
-            assert_eq!(
-                replay.cards.facts,
-                ConventionFacts::from_signals(&replay.signals),
-                "incremental facts differ from a complete journal reduction at turn {turn} for {observer:?}"
-            );
+    for (fixture_name, fixture) in expert_replays() {
+        for turn in 0..=u32::try_from(fixture.actions.len()).expect("replay fits in u32") {
+            let state = fixture.state_at_turn(turn).expect("turn exists");
+            for observer in 0..state.num_players() {
+                let observer = PlayerId::new(observer);
+                let deductions =
+                    LogicalDeductions::new(state.view_for(observer).expect("observer exists"))
+                        .expect("valid deductions");
+                let replay = replay_h_group_inner(
+                    &deductions,
+                    HGroupProfile::Max,
+                    PerspectiveDepth::ObserverOnly,
+                    false,
+                );
+                assert_eq!(
+                    replay.validate(),
+                    Ok(()),
+                    "invalid {fixture_name} replay at turn {turn} for {observer:?}"
+                );
+                assert_eq!(
+                    replay.cards.facts,
+                    ConventionFacts::from_signals(&replay.signals),
+                    "incremental facts differ from a complete journal reduction in {fixture_name} at turn {turn} for {observer:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn canonical_knowledge_program_is_stable_for_every_expert_prefix() {
+    for (fixture_name, fixture) in expert_replays() {
+        for turn in 0..=u32::try_from(fixture.actions.len()).expect("replay fits in u32") {
+            let state = fixture.state_at_turn(turn).expect("turn exists");
+            for observer in 0..state.num_players() {
+                let observer = PlayerId::new(observer);
+                let deductions =
+                    LogicalDeductions::new(state.view_for(observer).expect("observer exists"))
+                        .expect("valid deductions");
+                let replay = replay_h_group_inner(
+                    &deductions,
+                    HGroupProfile::Max,
+                    PerspectiveDepth::ObserverOnly,
+                    false,
+                );
+                let rebuilt = build_convention_knowledge(&deductions, &replay);
+                assert_eq!(
+                    rebuilt.effects(),
+                    replay.knowledge.effects(),
+                    "incremental knowledge changed after rebuilding {fixture_name} at turn {turn} for {observer:?}"
+                );
+                assert_eq!(
+                    rebuilt.project(&deductions),
+                    convention_card_inferences(&deductions, &replay),
+                    "pure owner projection diverged in {fixture_name} at turn {turn} for {observer:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn owner_projection_cannot_resurrect_an_identity_rejected_by_canonical_focus() {
+    for (fixture_name, fixture) in expert_replays() {
+        for turn in 0..=u32::try_from(fixture.actions.len()).expect("replay fits in u32") {
+            let state = fixture.state_at_turn(turn).expect("turn exists");
+            for observer_index in 0..state.num_players() {
+                let observer = PlayerId::new(observer_index);
+                let deductions =
+                    LogicalDeductions::new(state.view_for(observer).expect("observer exists"))
+                        .expect("valid deductions");
+                let replay = replay_h_group_inner(
+                    &deductions,
+                    HGroupProfile::Max,
+                    PerspectiveDepth::ObserverOnly,
+                    false,
+                );
+                for effect in replay.knowledge.effects() {
+                    let CardKnowledgeEffect::RestrictDomain {
+                        card,
+                        allowed,
+                        source:
+                            KnowledgeSource::Clue(clue_turn) | KnowledgeSource::CurrentFocus(clue_turn),
+                    } = effect
+                    else {
+                        continue;
+                    };
+                    let Some(clue) = replay
+                        .clues
+                        .iter()
+                        .rev()
+                        .find(|clue| clue.turn == *clue_turn && clue.focus == *card)
+                    else {
+                        continue;
+                    };
+                    assert!(
+                        allowed.without(clue.focus_identities).is_empty(),
+                        "owner projection resurrected identities rejected by canonical focus in {fixture_name}, turn {turn}, observer {observer:?}: clue={clue:?}, effect={effect:?}"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn generated_legal_histories_preserve_knowledge_and_state_invariants() {
+    for seed in 0..4_usize {
+        let mut deck = standard_deck();
+        let deck_len = deck.len();
+        deck.rotate_left((seed * 7) % deck_len);
+        let mut state = FullState::new_standard(4, deck).expect("generated deal is valid");
+        let mut selector = u64::try_from(seed + 1).expect("small seed");
+        for turn in 0..12_u32 {
+            for observer_index in 0..state.num_players() {
+                let observer = PlayerId::new(observer_index);
+                let deductions =
+                    LogicalDeductions::new(state.view_for(observer).expect("observer exists"))
+                        .expect("generated logical state is valid");
+                let replay = replay_h_group_inner(
+                    &deductions,
+                    HGroupProfile::Max,
+                    PerspectiveDepth::ObserverOnly,
+                    false,
+                );
+                assert_eq!(
+                    replay.validate(),
+                    Ok(()),
+                    "generated seed {seed}, turn {turn}, observer {observer:?}"
+                );
+                let rebuilt = build_convention_knowledge(&deductions, &replay);
+                assert_eq!(rebuilt.effects(), replay.knowledge.effects());
+            }
+            if state.is_terminal() {
+                break;
+            }
+            let view = state
+                .view_for(state.current_player())
+                .expect("current player exists");
+            let legal = view.legal_actions();
+            selector = selector
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1);
+            let index =
+                usize::try_from(selector % u64::try_from(legal.len()).expect("legal count"))
+                    .expect("selected action index fits");
+            state.apply(legal[index]).expect("selected action is legal");
         }
     }
 }
@@ -273,7 +406,7 @@ fn every_replay_clue_uses_the_same_hypothetical_and_recipient_interpretation() {
             assert_eq!(predicted.card, actual.card);
             assert_eq!(predicted.focused, actual.focused);
             assert_eq!(predicted.saved, actual.saved);
-            assert_eq!(predicted.finessed, actual.finessed);
+            assert_eq!(predicted.play_obligation, actual.play_obligation);
             assert!(
                 actual.identities.without(predicted.identities).is_empty(),
                 "the recipient may eliminate identities by seeing the giver's physical hand, but may not gain convention meaning the giver failed to predict after move {}: predicted={predicted:?}, actual={actual:?}",

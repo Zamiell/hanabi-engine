@@ -1,11 +1,15 @@
 use super::super::{HGroupIdentityStatus, blind_reverse_finesse_is_eligible};
 use super::{
     Card, CardId, CardSet, Clue, ClueFacts, ConnectionObligation, ConventionFacts,
-    HGroupCardInference, HGroupConnection, HGroupConnectionKind, HGroupMoveKind, HGroupProfile,
-    HGroupRuleId, HGroupState, HistoricalView, IdentitySet, LogicalDeductions, ObservedEvent,
-    PlayerId, PlayerView, Rank, chop, elimination_finesse_connection, identity_of,
-    is_eventually_useful, is_playable_at, loaded_connection_plan, next_player,
-    pending_identity_is_queued, pending_is_active, replay_identity_is_queued, rule_enabled,
+    ConventionKnowledge, HGroupCardInference, HGroupConnection, HGroupConnectionKind,
+    HGroupMoveKind, HGroupPlayObligation, HGroupProfile, HGroupRuleId, HGroupState, HistoricalView,
+    IdentityClaims, IdentitySet, LogicalDeductions, MaterializedCardFact, ObservedEvent, PlayerId,
+    PlayerView, Rank, StackTimeline, chop, elimination_finesse_connection, identity_of,
+    is_eventually_useful, is_playable_at, loaded_connection_plan, pending_identity_is_queued,
+    pending_is_active, replay_identity_is_queued, rule_enabled,
+};
+use crate::h_group::knowledge_effects::{
+    KnowledgeSource, effects_from_projection, initial_card_inferences,
 };
 
 pub(in crate::h_group) fn delayed_focus_identities(
@@ -103,58 +107,15 @@ pub(in crate::h_group) fn identities_at_distance_at(
     IdentitySet::from_mask(mask)
 }
 
-/// Stack heights that are forced before the observer's next action.
-///
-/// Only another player's uniquely available promised play is projected. If a
-/// player has multiple promised cards that could play, their choice is not
-/// deterministic and this deliberately leaves the stacks unchanged.
-fn predictable_stack_heights_at_observer_turn(view: &PlayerView, replay: &HGroupState) -> [u8; 5] {
-    let mut stack_heights = std::array::from_fn(|index| {
-        u8::try_from(view.play_stacks[index].len())
-            .expect("a standard stack has at most five cards")
-    });
-    let mut player = view.current_player;
-    while player != view.observer {
-        let playable = view.hands[player.index()]
-            .iter()
-            .filter(|card| replay.cards.already_playing.contains(&card.id))
-            .filter_map(|card| card.identity)
-            .filter(|identity| is_playable_at(stack_heights, *identity))
-            .collect::<Vec<_>>();
-        if let [identity] = playable.as_slice() {
-            stack_heights[identity.suit.index()] += 1;
-        }
-        player = next_player(player, view.hands.len());
-    }
-    stack_heights
-}
-
 #[allow(clippy::too_many_lines)]
-pub(in crate::h_group) fn convention_card_inferences(
+fn compile_convention_card_inferences(
     deductions: &LogicalDeductions,
     replay: &HGroupState,
 ) -> Vec<HGroupCardInference> {
     let view = deductions.view();
-    let observer_turn_stack_heights = predictable_stack_heights_at_observer_turn(view, replay);
-    let mut cards = view.hands[view.observer.index()]
-        .iter()
-        .filter_map(|card| {
-            deductions
-                .possible_identities(card.id)
-                .map(|identities| HGroupCardInference {
-                    card: card.id,
-                    identities,
-                    promised_identity: None,
-                    identity_status: HGroupIdentityStatus::Settled,
-                    focused: false,
-                    saved: false,
-                    // Invisible touch also covers passive transfer-discard
-                    // knowledge. Only an active pending connection (handled
-                    // below) or a forced-play effect creates a play promise.
-                    finessed: false,
-                })
-        })
-        .collect::<Vec<_>>();
+    let observer_turn_stack_heights =
+        StackTimeline::before_player_turn(view, replay, view.observer).heights();
+    let mut cards = initial_card_inferences(deductions);
     for card in &mut cards {
         let narrowed = card
             .identities
@@ -165,6 +126,7 @@ pub(in crate::h_group) fn convention_card_inferences(
     }
 
     for clue in &replay.clues {
+        let clue_stack_heights = StackTimeline::at_clue(clue.turn, clue.stack_heights).heights();
         let has_existing_prompt_for_delayed_identity = clue.clue == Clue::Rank(Rank::Two)
             && clue.play_identities.iter().any(|identity| {
                 let height = usize::from(clue.stack_heights[identity.suit.index()]);
@@ -202,7 +164,7 @@ pub(in crate::h_group) fn convention_card_inferences(
                     // it does not silently migrate to the next still-live rank.
                     // Only an explicit Fix may reinterpret that promise.
                     let direct_at_clue =
-                        identities_at_distance_at(card.identities, clue.stack_heights, 0);
+                        identities_at_distance_at(card.identities, clue_stack_heights, 0);
                     let delayed_plan = !clue.play_identities.is_empty()
                         && clue.play_identities.iter().all(|identity| {
                             identity.rank.number() > clue.stack_heights[identity.suit.index()] + 1
@@ -468,26 +430,11 @@ pub(in crate::h_group) fn convention_card_inferences(
             // Finesse card cannot independently be another green 1. Preserve
             // the explicit expected connector even though this connection
             // itself makes that identity appear queued.
+            let claims = IdentityClaims::new(view, replay);
             let unclaimed_playables = IdentitySet::from_mask(
                 identities_at_distance_at(card.identities, observer_turn_stack_heights, 0)
                     .iter()
-                    .filter(|identity| {
-                        !replay.cards.already_playing.iter().any(|claimed_card| {
-                            *claimed_card != card.card
-                                && identity_of(view, *claimed_card).or_else(|| {
-                                    replay
-                                        .clues
-                                        .iter()
-                                        .rev()
-                                        .find(|clue| clue.focus == *claimed_card)
-                                        .and_then(|clue| {
-                                            (clue.focus_identities.len() == 1)
-                                                .then(|| clue.focus_identities.iter().next())
-                                                .flatten()
-                                        })
-                                }) == Some(*identity)
-                        })
-                    })
+                    .filter(|identity| !claims.identity_claimed_elsewhere(card.card, *identity))
                     .fold(0, |mask, identity| mask | (1 << identity.index())),
             );
             expected.union(unclaimed_playables)
@@ -497,7 +444,7 @@ pub(in crate::h_group) fn convention_card_inferences(
             card.identities = narrowed;
         }
         card.promised_identity = Some(pending.expected);
-        card.finessed = true;
+        card.play_obligation = Some(HGroupPlayObligation::Connection(pending.kind));
     }
     for forced in &replay.cards.forced_playable {
         let Some(card) = cards.iter_mut().find(|card| card.card == *forced) else {
@@ -507,7 +454,7 @@ pub(in crate::h_group) fn convention_card_inferences(
         if !playable.is_empty() {
             card.identities = playable;
         }
-        card.finessed = true;
+        card.play_obligation = Some(HGroupPlayObligation::Forced);
     }
     for (saved, identities) in &replay.implicit_saves {
         let Some(card) = cards.iter_mut().find(|card| card.card == *saved) else {
@@ -520,6 +467,93 @@ pub(in crate::h_group) fn convention_card_inferences(
         card.saved = true;
     }
     cards
+}
+
+/// Compiles convention semantics once into replay-owned typed epistemic
+/// effects. This is the only path that derives owner notes from clue history.
+pub(in crate::h_group) fn build_convention_knowledge(
+    deductions: &LogicalDeductions,
+    replay: &HGroupState,
+) -> ConventionKnowledge {
+    let view = deductions.view();
+    let projected = compile_convention_card_inferences(deductions, replay);
+    let effects = effects_from_projection(deductions, &projected, |card| {
+        if let Some(connection) = replay.pending_connections.iter().find(|connection| {
+            connection.cards.first() == Some(&card)
+                && pending_is_active(connection, &replay.pending_connections)
+        }) {
+            let turn = replay
+                .pending_connections
+                .provenance(connection.promise)
+                .map_or(view.turn, |origin| origin.created_turn);
+            return KnowledgeSource::Promise {
+                id: connection.promise,
+                turn,
+            };
+        }
+        if replay.cards.forced_playable.contains(&card) {
+            let turn = replay
+                .transitions
+                .iter()
+                .rev()
+                .find(|transition| {
+                    transition.delta.card_changes.iter().any(|change| {
+                        change.card == card && change.fact == MaterializedCardFact::ForcedPlayable
+                    })
+                })
+                .map_or(view.turn, |transition| transition.turn);
+            return KnowledgeSource::ForcedPlay(turn);
+        }
+        if replay
+            .implicit_saves
+            .iter()
+            .any(|(saved, _)| *saved == card)
+        {
+            let turn = replay
+                .clues
+                .iter()
+                .rev()
+                .find(|clue| clue.focus == card || clue.new_non_focus.contains(&card))
+                .map_or(view.turn, |clue| clue.turn);
+            return KnowledgeSource::ImplicitSave(turn);
+        }
+        if let Some(clue) = replay.clues.iter().rev().find(|clue| {
+            clue.focus == card
+                || clue.new_non_focus.contains(&card)
+                || clue
+                    .non_focus_trash_identities
+                    .iter()
+                    .any(|(trash, _)| *trash == card)
+        }) {
+            if projected
+                .iter()
+                .find(|inference| inference.card == card)
+                .is_some_and(|inference| inference.focused)
+            {
+                return KnowledgeSource::CurrentFocus(clue.turn);
+            }
+            if replay
+                .signals
+                .at_turn(clue.turn, HGroupMoveKind::FixClue)
+                .any(|signal| signal.cards.contains(&card))
+            {
+                return KnowledgeSource::Reinterpretation(clue.turn);
+            }
+            return KnowledgeSource::Clue(clue.turn);
+        }
+        KnowledgeSource::ReplayClosure(view.history.last().map_or(0, |entry| entry.turn))
+    });
+    let knowledge = ConventionKnowledge::new(effects);
+    debug_assert_eq!(knowledge.project(deductions), projected);
+    knowledge
+}
+
+/// Pure owner projection over the canonical knowledge program.
+pub(in crate::h_group) fn convention_card_inferences(
+    deductions: &LogicalDeductions,
+    replay: &HGroupState,
+) -> Vec<HGroupCardInference> {
+    replay.knowledge.project(deductions)
 }
 
 pub(in crate::h_group) fn convention_playable(

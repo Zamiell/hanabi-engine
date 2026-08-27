@@ -117,6 +117,15 @@ H-Group uses shared internal boundaries to keep these answers consistent:
   in the same semantic order; rule phases and dependencies are validated.
 - `ConventionCardState` exposes compact materialized indexes backed by the
   provenance ledger rather than independently maintained truth sets.
+- owner knowledge is compiled once into typed `CardKnowledgeEffect` values and
+  projected by a pure reducer. Identity restrictions, exact promises, transient
+  focus, saves, and typed blind-play obligations remain separate facts.
+- `ActionSchedule` joins direct plays, connection responses, forced plays, and
+  required discards behind one read boundary. `StackTimeline` distinguishes
+  clue-time, current, and before-player playability.
+- `IdentityClaims` is the common observer-safe Good Touch closure boundary;
+  exact and relational `OneOf` claims cannot be conflated by individual
+  consumers.
 - shared identity and hand modules give clue givers, recipients, hypothetical
   projection, and planning one definition of playability, trash, focus, chop,
   and finesse position.
@@ -133,8 +142,9 @@ H-Group uses shared internal boundaries to keep these answers consistent:
   strategic comparison reuse a lazy `TeamConventionSnapshot` for one coherent
   hypothetical public position.
 - every production transition retains an exact compact delta of added and
-  removed materialized card facts. Per-rule proposals cover explanation
-  signals, promise transitions, and exact card replacements.
+  removed materialized card facts plus owner-knowledge effects. Per-rule
+  proposals cover explanation signals, promise transitions, and exact card
+  replacements.
 - connection promises have stable IDs and durable origin metadata rather than
   being inferred later from whichever card sets survived.
 - clue selection has explicit semantic-admission, recipient-replay, and causal

@@ -70,7 +70,7 @@ fn finesse_separates_its_exact_promise_from_successful_play_contingencies() {
             Some(Card::new(Suit::Yellow, Rank::One)),
             "the successful-play contingencies must not dilute the exact yellow-1 Finesse promise"
         );
-        assert!(finesse.finessed);
+        assert!(finesse.play_obligation.is_some());
     }
 }
 
@@ -415,7 +415,7 @@ fn player_snapshot(state: &FullState, player: PlayerId) -> PlayerStateSnapshot {
             flags.extend(has_play_obligation.then_some("playable"));
             flags.extend(trash.then_some("trash"));
             flags.extend(note.saved.then_some("saved"));
-            flags.extend(note.finessed.then_some("finessed"));
+            flags.extend(note.play_obligation.is_some().then_some("finessed"));
             flags.extend((inferred.chops[player.index()] == Some(observed.id)).then_some("chop"));
             flags.extend(
                 inferred

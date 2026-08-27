@@ -19,12 +19,16 @@ H-Group history reducer
    |-- RuleSpec               phase and dependency metadata
    |-- RuleProposal           typed per-rule transition output
    |-- ConventionTransitionResult  causal record for one public event
-   |-- ConventionTransitionDelta   exact materialized card-fact changes
+   |-- ConventionTransitionDelta   exact card-fact and epistemic changes
    |-- ConventionJournal      incremental facts plus explanation history
    |-- ProvenancedCardSet     source-owned materialized card facts
    |-- ConnectionManager      Prompt/Finesse lifecycle state machine
    |-- HGroupSignal           append-only explanation log
    |-- ConventionFacts        relational current convention truth
+   |-- CardKnowledgeEffect    typed identity/promise/status change
+   |-- ConventionKnowledge   immutable owner-knowledge program
+   |-- ActionSchedule         unified live play/discard commitments
+   |-- StackTimeline          clue/current/before-player stack horizons
    |-- ClueInterpretationPlan one Play/Save/Fix/5CM/Stall precedence result
    `-- TeamConventionSnapshot coherent lazy per-player epistemic overlays
    |
@@ -53,6 +57,13 @@ recipient modeling.
 
 - `turn_context.rs` owns temporal access. A historical rule cannot ask for an
   identity revealed by a future play, discard, or draw.
+- `action_schedule.rs` is the unified read model for direct plays, active
+  connections, forced plays, and required discards. `StackTimeline` labels
+  stack heights as clue-time, current, or before a named player's turn; code
+  projecting a future forced play cannot silently use current stack heights.
+- `claims.rs` is the observer-safe exact-identity and Good Touch claim
+  boundary. Relational `OneOf` claims never become exact claims on every
+  candidate card.
 - `connection.rs` is the sole mutation boundary for delayed connections. It
   records starts, completions, invalidations, fixes, displacement, and
   supersession with a turn and reason. Every lifecycle has a stable
@@ -82,6 +93,12 @@ recipient modeling.
   obligations remain in the canonical convention state instead of being
   copied into a second, independently mutable status aggregate. It deliberately
   exposes neither deck order nor simulator truth.
+- `knowledge_effects.rs` owns the immutable `ConventionKnowledge` program and
+  its pure reducer. Convention recognition compiles `RestrictDomain`, explicit
+  reinterpretation, promise, save, focus, and play-obligation effects once per
+  replay. Owner projection applies those effects to logical domains and does
+  not recognize convention moves a second time. Ordinary inference cannot
+  widen a domain; only a typed Fix/reinterpretation may replace it.
 - `outcome.rs` retains clue consequences before strategy converts genuine
   preferences to numeric ordering. Giver-visible team coverage and
   owner-relative promised-action and clued-card-superposition equivalence for
@@ -131,8 +148,9 @@ recipient modeling.
   retains history reduction and connection scheduling.
 - `transition.rs` is the production causal boundary. Every retained public
   event has an exact compact `ConventionTransitionDelta` of materialized card
-  facts; rule proposals also retain exact card replacements rather than
-  comparing collection lengths. Strategic evaluation consumes these deltas.
+  facts and owner-knowledge effects; rule proposals also retain exact card
+  replacements rather than comparing collection lengths. Strategic evaluation
+  consumes these deltas.
   Human-readable signals remain explanations rather than an alternative
   causality source.
 - `strategic_value.rs` compares structured `LineOutcome` values. It may use
@@ -159,10 +177,18 @@ Every completed replay reduction validates that:
 - every promise-sourced retraction names registered promise provenance; and
 - proposals are phase ordered, non-empty, tied to the event turn, and form a
   unique partition of post-event signals.
+- every owner-knowledge effect references a live card and occurs in exactly one
+  public transition delta;
+- ordinary knowledge effects only narrow identity domains; replacement requires
+  explicit reinterpretation provenance; and
+- pure owner projection reproduces the convention compiler's result without
+  recognizing clue meaning again.
 
 Architecture properties additionally require that leaked own-hand truth does
 not change an observer's `EpistemicState`, and that candidate signal and hazard
-inspection share one prospective convention snapshot.
+inspection share one prospective convention snapshot. They also run both expert
+replays through every observer, prove canonical focus domains cannot be widened
+by owner projection, and exercise generated legal histories.
 
 The `game-194321.json` expert replay regression runs these checks for every
 prefix and every observer. Temporal tests separately assert that future

@@ -2,7 +2,7 @@ use core::ops::Range;
 
 use hanabi_core::CardId;
 
-use super::{HGroupRuleId, RulePhase};
+use super::{CardKnowledgeEffect, HGroupRuleId, RulePhase};
 
 /// Convention-state domains changed by one rule proposal.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -96,11 +96,12 @@ pub(super) struct CardFactChange {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(super) struct ConventionTransitionDelta {
     pub(super) card_changes: Vec<CardFactChange>,
+    pub(super) knowledge_changes: Vec<CardKnowledgeEffect>,
 }
 
 impl ConventionTransitionDelta {
     pub(super) fn is_empty(&self) -> bool {
-        self.card_changes.is_empty()
+        self.card_changes.is_empty() && self.knowledge_changes.is_empty()
     }
 
     pub(super) fn added_cards(&self) -> impl Iterator<Item = CardId> + '_ {

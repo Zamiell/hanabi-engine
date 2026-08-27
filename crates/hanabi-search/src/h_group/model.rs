@@ -5,6 +5,8 @@ use hanabi_core::{Card, CardId, Clue, PlayerId};
 
 use crate::IdentitySet;
 
+use super::{CardKnowledgeEffect, ConventionKnowledge, KnowledgeSource};
+
 /// Card and player identifiers are already compact, collision-free keys in a
 /// standard game. Using the general-purpose randomized hasher for the many
 /// small convention sets adds work without improving their safety.
@@ -158,6 +160,14 @@ pub enum HGroupIdentityStatus {
     Provisional,
 }
 
+/// Why convention knowledge requires a card to be played blindly.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HGroupPlayObligation {
+    Connection(HGroupConnectionKind),
+    Forced,
+    Anxiety,
+}
+
 /// Convention knowledge attached to one card in the observer's hand.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct HGroupCardInference {
@@ -176,7 +186,7 @@ pub struct HGroupCardInference {
     /// marker is cleared as soon as another action occurs.
     pub focused: bool,
     pub saved: bool,
-    pub finessed: bool,
+    pub play_obligation: Option<HGroupPlayObligation>,
 }
 
 /// H-Group-specific conclusions for the player owning the view.
@@ -276,6 +286,9 @@ pub(super) struct HGroupState {
     pub(super) implicit_saves: Vec<(CardId, IdentitySet)>,
     pub(super) required_fix: Option<RequiredFix>,
     pub(super) transitions: Vec<ConventionTransitionResult>,
+    /// Canonical owner-relative epistemic program compiled once from this
+    /// replay. Consumers reduce typed effects instead of reinterpreting clues.
+    pub(super) knowledge: ConventionKnowledge,
 }
 
 impl HGroupState {
@@ -393,6 +406,48 @@ impl HGroupState {
             if self.pending_connections.provenance(promise).is_none() {
                 return Err("retracted convention fact has no promise provenance".to_owned());
             }
+        }
+        self.validate_knowledge()
+    }
+
+    fn validate_knowledge(&self) -> Result<(), String> {
+        if self.knowledge.effects().iter().any(|effect| {
+            !self
+                .hands
+                .iter()
+                .flatten()
+                .any(|card| *card == effect.card())
+        }) {
+            return Err(
+                "owner-knowledge effect references a card outside the live hands".to_owned(),
+            );
+        }
+        if self.knowledge.effects().iter().any(|effect| {
+            matches!(
+                effect,
+                CardKnowledgeEffect::ReplaceDomain { source, .. }
+                    if !matches!(source, KnowledgeSource::Reinterpretation(_))
+            )
+        }) {
+            return Err("ordinary owner-knowledge inference widened an identity domain".to_owned());
+        }
+        let transition_effects = self
+            .transitions
+            .iter()
+            .flat_map(|transition| transition.delta.knowledge_changes.iter())
+            .collect::<Vec<_>>();
+        if transition_effects.len() != self.knowledge.effects().len()
+            || self.knowledge.effects().iter().any(|effect| {
+                transition_effects
+                    .iter()
+                    .filter(|candidate| ***candidate == *effect)
+                    .count()
+                    != 1
+            })
+        {
+            return Err(
+                "transition knowledge deltas do not partition canonical knowledge".to_owned(),
+            );
         }
         Ok(())
     }

@@ -74,7 +74,7 @@ fn direct_card_inferences(source: &PlayerView, target: PlayerId) -> Vec<HGroupCa
             identity_status: HGroupIdentityStatus::Settled,
             focused: false,
             saved: false,
-            finessed: false,
+            play_obligation: None,
         })
         .collect()
 }
@@ -107,10 +107,11 @@ fn information_for_card(
     }
 
     let convention_weight = 1
-        + u16::from(explicitly_promised || before.finessed) * 2
+        + u16::from(explicitly_promised || before.play_obligation.is_some()) * 2
         + u16::from(before.focused)
         + u16::from(before.saved);
-    let promised = explicitly_promised || before.finessed || before.focused || before.saved;
+    let promised =
+        explicitly_promised || before.play_obligation.is_some() || before.focused || before.saved;
     let became_action_certain = action_classes(source, before.identities).count_ones() > 1
         && action_classes(source, after.identities).is_power_of_two();
     let future_clue_savings = description_certainty(after.identities)
@@ -214,7 +215,7 @@ mod tests {
             identity_status: HGroupIdentityStatus::Settled,
             focused: false,
             saved: false,
-            finessed: false,
+            play_obligation: None,
         };
         let after_rank = HGroupCardInference {
             identities: identities.without(
