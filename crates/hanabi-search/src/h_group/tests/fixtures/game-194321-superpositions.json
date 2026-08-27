@@ -270,10 +270,9 @@
             {
               "card": 16,
               "actual": "y3",
-              "convention": "y1",
+              "convention": "y3",
               "flags": [
-                "focused",
-                "provisional"
+                "focused"
               ]
             }
           ]
@@ -334,10 +333,7 @@
             {
               "card": 16,
               "actual": "y3",
-              "convention": "y1",
-              "flags": [
-                "provisional"
-              ],
+              "convention": "y3",
               "removedFlags": [
                 "focused"
               ]
@@ -432,19 +428,6 @@
               "actual": "g4",
               "removedFlags": [
                 "focused"
-              ]
-            }
-          ]
-        },
-        {
-          "player": 2,
-          "cards": [
-            {
-              "card": 16,
-              "actual": "y3",
-              "convention": "y3",
-              "removedFlags": [
-                "provisional"
               ]
             }
           ]

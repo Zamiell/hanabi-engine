@@ -92,10 +92,10 @@ fn opening_delayed_play_clue_stays_in_superposition_until_the_finesse_is_demonst
 }
 
 #[test]
-fn queued_yellow_three_is_known_as_yellow_one_until_the_connection_is_demonstrated() {
-    let expected = IdentitySet::singleton(Card::new(Suit::Yellow, Rank::One));
+fn proven_layered_yellow_line_eliminates_yellow_one_from_the_new_focus() {
+    let expected = IdentitySet::singleton(Card::new(Suit::Yellow, Rank::Three));
 
-    for turn in [5, 6, 7] {
+    for turn in [5, 6, 7, 8] {
         let state = expert_replay_194321()
             .state_at_turn(turn)
             .expect("fixture prefix is legal");
@@ -111,33 +111,15 @@ fn queued_yellow_three_is_known_as_yellow_one_until_the_connection_is_demonstrat
 
         assert_eq!(
             focus.identities, expected,
-            "no blind play or Fix has demonstrated yellow 3 at turn {turn}; replay={replay:#?}"
+            "Donald already owns the demonstrated yellow-1 promise and Alice owns yellow 2, so Good Touch makes Cathy's new yellow focus exactly yellow 3 at turn {turn}; replay={replay:#?}"
         );
+        assert_eq!(focus.identity_status, HGroupIdentityStatus::Settled);
         assert!(
             !inferred.playable_now.contains(&CardId::new(16)),
-            "the provisional y1 note must wait for its queued line to be demonstrated at turn {turn}; clues={:#?}",
+            "yellow 3 remains delayed until its promised predecessors play at turn {turn}; clues={:#?}",
             replay.clues
         );
     }
-
-    let demonstrated = expert_replay_194321()
-        .state_at_turn(8)
-        .expect("fixture prefix is legal");
-    let view = demonstrated
-        .view_for(PlayerId::new(2))
-        .expect("Cathy has a view");
-    let deductions = LogicalDeductions::new(view).expect("valid deductions");
-    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
-    let focus = inferred
-        .cards
-        .iter()
-        .find(|note| note.card == CardId::new(16))
-        .expect("Cathy's yellow-clued focus has a convention note");
-
-    assert_eq!(
-        focus.identities,
-        IdentitySet::singleton(Card::new(Suit::Yellow, Rank::Three))
-    );
 }
 
 #[test]

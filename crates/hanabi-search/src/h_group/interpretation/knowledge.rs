@@ -230,10 +230,20 @@ pub(in crate::h_group) fn convention_card_inferences(
                     // the recipient provisionally writes its direct meaning.
                     // Keep those two facts separate until a post-clue blind
                     // play (or a later Fix) demonstrates the delayed branch.
+                    // Do not manufacture a direct branch that the canonical
+                    // clue interpretation already eliminated through Good
+                    // Touch. In the expert yellow line, Donald's demonstrated
+                    // Layered Finesse owns yellow 1 and Alice owns yellow 2, so
+                    // Cathy's newly focused yellow card is immediately yellow
+                    // 3 rather than a provisional yellow 1.
+                    let direct_interpretation_is_live = !direct_at_clue
+                        .intersection(clue.focus_identities)
+                        .is_empty();
                     let provisional_direct = matches!(clue.clue, Clue::Suit(_))
                         && delayed_plan
                         && !focus_has_active_connection
                         && !delayed_plan_was_demonstrated
+                        && direct_interpretation_is_live
                         && !direct_at_clue.is_empty();
                     let mut narrowed = if provisional_direct {
                         direct_at_clue
