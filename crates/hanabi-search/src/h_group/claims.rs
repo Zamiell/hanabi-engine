@@ -44,6 +44,23 @@ impl<'a> IdentityClaims<'a> {
             .already_playing
             .iter()
             .any(|card| *card != excluded && self.exact_identity(*card) == Some(identity))
+            || self.replay.pending_connections.iter().any(|connection| {
+                connection.expected == identity && !connection.cards.contains(&excluded)
+            })
+            || self.replay.hands.iter().flatten().copied().any(|card| {
+                card != excluded
+                    && !self.replay.cards.facts.fixed_cards().contains(&card)
+                    && !self.replay.cards.invalidated_focuses.contains(&card)
+                    && self
+                        .replay
+                        .clues
+                        .iter()
+                        .rev()
+                        .find(|clue| clue.focus == card)
+                        .is_some_and(|clue| {
+                            clue.play_identities == IdentitySet::singleton(identity)
+                        })
+            })
     }
 }
 

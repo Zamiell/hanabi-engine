@@ -426,7 +426,7 @@
           "cards": [
             {
               "card": 7,
-              "convention": "r3 y1 g2 b4 p1",
+              "convention": "g2 b4 p1",
               "addedFlags": [
                 "playable"
               ]
@@ -600,7 +600,7 @@
           "cards": [
             {
               "card": 23,
-              "convention": "r5 y1 g3 b5 p1",
+              "convention": "r5 b5",
               "addedFlags": [
                 "playable"
               ]
@@ -628,7 +628,7 @@
           "cards": [
             {
               "card": 23,
-              "convention": "r5 y1 g3"
+              "convention": "r5"
             }
           ]
         }
@@ -651,15 +651,6 @@
         {
           "player": 1,
           "connection": null
-        },
-        {
-          "player": 2,
-          "cards": [
-            {
-              "card": 23,
-              "convention": "r5 y1 g4"
-            }
-          ]
         }
       ]
     },

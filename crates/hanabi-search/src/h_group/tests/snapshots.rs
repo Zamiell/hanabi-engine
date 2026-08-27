@@ -160,6 +160,32 @@ fn queued_ordered_connection_marks_its_first_candidate_before_activation() {
     }
 }
 
+#[test]
+fn priority_play_contingencies_exclude_identities_promised_elsewhere() {
+    let replay = expert_replay_p4v0s415();
+    for (turn, expected) in [
+        (
+            20,
+            IdentitySet::singleton(Card::new(Suit::Red, Rank::Five))
+                .union(IdentitySet::singleton(Card::new(Suit::Blue, Rank::Five))),
+        ),
+        (22, IdentitySet::singleton(Card::new(Suit::Red, Rank::Five))),
+    ] {
+        let state = replay.state_at_turn(turn).expect("fixture prefix is legal");
+        let view = state.view_for(PlayerId::new(2)).expect("Cathy has a view");
+        let deductions = LogicalDeductions::new(view).expect("valid deductions");
+        let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+        let priority_finesse = inferred
+            .cards
+            .iter()
+            .find(|note| note.card == CardId::new(23))
+            .expect("Cathy holds the Priority Finesse card");
+
+        assert_eq!(priority_finesse.identities, expected, "turn {turn}");
+        assert!(priority_finesse.play_obligation.is_some());
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ReplayEpistemicSnapshot {

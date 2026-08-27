@@ -495,7 +495,17 @@ fn compile_convention_card_inferences(
         let Some(card) = cards.iter_mut().find(|card| card.card == *forced) else {
             continue;
         };
-        let playable = identities_at_distance(card.identities, view, 0);
+        // Forced and Priority plays can physically be any identity that would
+        // succeed now, but Good Touch still excludes identities already
+        // promised on another live card, just as it does for an ordinary
+        // Finesse's successful-play contingencies.
+        let claims = IdentityClaims::new(view, replay);
+        let playable = IdentitySet::from_mask(
+            identities_at_distance(card.identities, view, 0)
+                .iter()
+                .filter(|identity| !claims.identity_claimed_elsewhere(card.card, *identity))
+                .fold(0, |mask, identity| mask | (1 << identity.index())),
+        );
         if !playable.is_empty() {
             card.identities = playable;
         }
