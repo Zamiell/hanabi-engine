@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 7,
+  "schemaVersion": 8,
   "source": "game-194321.json",
   "convention": "H-Group max",
   "initial": [
@@ -111,7 +111,7 @@
               "card": 8,
               "actual": "g1",
               "convention": "g1",
-              "flags": [
+              "addedFlags": [
                 "focused",
                 "playable"
               ],
@@ -122,7 +122,7 @@
             {
               "card": 9,
               "actual": "r3",
-              "flags": [
+              "addedFlags": [
                 "chop"
               ]
             }
@@ -140,7 +140,7 @@
               "card": 2,
               "actual": "y2",
               "convention": "y1 y2",
-              "flags": [
+              "addedFlags": [
                 "focused"
               ]
             }
@@ -153,9 +153,6 @@
               "card": 8,
               "actual": "g1",
               "convention": "g1",
-              "flags": [
-                "playable"
-              ],
               "removedFlags": [
                 "focused"
               ]
@@ -169,7 +166,7 @@
               "card": 15,
               "actual": "b1",
               "convention": "y1",
-              "flags": [
+              "addedFlags": [
                 "playable",
                 "finessed"
               ]
@@ -234,7 +231,7 @@
               "card": 14,
               "actual": "b2",
               "convention": "y1",
-              "flags": [
+              "addedFlags": [
                 "playable",
                 "finessed"
               ]
@@ -268,7 +265,7 @@
               "card": 16,
               "actual": "y3",
               "convention": "y3",
-              "flags": [
+              "addedFlags": [
                 "focused"
               ]
             }
@@ -286,7 +283,7 @@
               "card": 3,
               "actual": "g4",
               "convention": "r1",
-              "flags": [
+              "addedFlags": [
                 "playable",
                 "finessed"
               ]
@@ -306,7 +303,7 @@
               "card": 9,
               "actual": "r3",
               "convention": "r3",
-              "flags": [
+              "addedFlags": [
                 "finessed"
               ],
               "removedFlags": [
@@ -317,7 +314,7 @@
               "card": 11,
               "actual": "r2",
               "convention": "r2",
-              "flags": [
+              "addedFlags": [
                 "finessed"
               ]
             },
@@ -338,7 +335,7 @@
               "card": 17,
               "actual": "r4",
               "convention": "r1 r2 r3 r4",
-              "flags": [
+              "addedFlags": [
                 "focused"
               ]
             }
@@ -356,7 +353,7 @@
               "card": 1,
               "actual": "r1",
               "convention": "r1",
-              "flags": [
+              "addedFlags": [
                 "playable",
                 "finessed"
               ]
@@ -364,7 +361,7 @@
             {
               "card": 3,
               "actual": "g4",
-              "flags": [
+              "addedFlags": [
                 "focused"
               ],
               "removedFlags": [
@@ -414,7 +411,7 @@
               "card": 13,
               "actual": "y1",
               "convention": "y1",
-              "flags": [
+              "addedFlags": [
                 "playable",
                 "finessed"
               ]
@@ -456,9 +453,8 @@
               "card": 11,
               "actual": "r2",
               "convention": "r2",
-              "flags": [
-                "playable",
-                "finessed"
+              "addedFlags": [
+                "playable"
               ]
             }
           ],
@@ -496,7 +492,7 @@
               "card": 18,
               "actual": "b3",
               "convention": "b3",
-              "flags": [
+              "addedFlags": [
                 "focused",
                 "playable"
               ]
@@ -515,15 +511,14 @@
               "card": 9,
               "actual": "r3",
               "convention": "r3",
-              "flags": [
-                "playable",
-                "finessed"
+              "addedFlags": [
+                "playable"
               ]
             },
             {
               "card": 20,
               "actual": "b3",
-              "flags": [
+              "addedFlags": [
                 "chop"
               ]
             }
@@ -548,9 +543,6 @@
               "card": 18,
               "actual": "b3",
               "convention": "b3",
-              "flags": [
-                "playable"
-              ],
               "removedFlags": [
                 "focused"
               ]
@@ -569,7 +561,7 @@
               "card": 7,
               "actual": "g3",
               "convention": "r3 y1 g2 b4 p1",
-              "flags": [
+              "addedFlags": [
                 "playable"
               ]
             }
@@ -599,7 +591,7 @@
               "card": 4,
               "actual": "b4",
               "convention": "b4",
-              "flags": [
+              "addedFlags": [
                 "focused",
                 "playable"
               ],
@@ -610,7 +602,7 @@
             {
               "card": 5,
               "actual": "p2",
-              "flags": [
+              "addedFlags": [
                 "chop"
               ]
             },
@@ -665,7 +657,7 @@
               "card": 17,
               "actual": "r4",
               "convention": "r4",
-              "flags": [
+              "addedFlags": [
                 "playable"
               ]
             }
@@ -682,7 +674,7 @@
             {
               "card": 3,
               "actual": "g4",
-              "flags": [
+              "addedFlags": [
                 "focused"
               ]
             }
@@ -695,7 +687,7 @@
               "card": 22,
               "actual": "g2",
               "convention": "g2",
-              "flags": [
+              "addedFlags": [
                 "playable",
                 "finessed"
               ]
@@ -726,7 +718,7 @@
             {
               "card": 19,
               "actual": "p1",
-              "flags": [
+              "addedFlags": [
                 "chop"
               ]
             },
@@ -751,7 +743,7 @@
               "card": 7,
               "actual": "g3",
               "convention": "g3",
-              "flags": [
+              "addedFlags": [
                 "playable",
                 "finessed"
               ]
@@ -781,7 +773,7 @@
               "card": 19,
               "actual": "p1",
               "convention": "p1",
-              "flags": [
+              "addedFlags": [
                 "focused",
                 "playable"
               ],
@@ -808,9 +800,6 @@
               "card": 19,
               "actual": "p1",
               "convention": "p1",
-              "flags": [
-                "playable"
-              ],
               "removedFlags": [
                 "focused"
               ]
@@ -824,7 +813,7 @@
               "card": 23,
               "actual": "r5",
               "convention": "r5 y1 g3 b5 p1",
-              "flags": [
+              "addedFlags": [
                 "playable"
               ]
             }
@@ -853,7 +842,7 @@
             {
               "card": 27,
               "actual": "b5",
-              "flags": [
+              "addedFlags": [
                 "chop"
               ]
             }
@@ -868,10 +857,7 @@
             {
               "card": 23,
               "actual": "r5",
-              "convention": "r5 y1 g3",
-              "flags": [
-                "playable"
-              ]
+              "convention": "r5 y1 g3"
             }
           ]
         }
@@ -886,7 +872,7 @@
             {
               "card": 3,
               "actual": "g4",
-              "flags": [
+              "addedFlags": [
                 "playable"
               ]
             }
@@ -911,10 +897,7 @@
             {
               "card": 23,
               "actual": "r5",
-              "convention": "r5 y1 g4",
-              "flags": [
-                "playable"
-              ]
+              "convention": "r5 y1 g4"
             }
           ]
         }
@@ -955,7 +938,7 @@
             {
               "card": 2,
               "actual": "y2",
-              "flags": [
+              "addedFlags": [
                 "playable"
               ]
             }
@@ -998,7 +981,7 @@
               "card": 16,
               "actual": "y3",
               "convention": "y3",
-              "flags": [
+              "addedFlags": [
                 "playable"
               ]
             }
@@ -1015,7 +998,7 @@
             {
               "card": 31,
               "actual": "y4",
-              "flags": [
+              "addedFlags": [
                 "focused"
               ]
             }
@@ -1048,7 +1031,7 @@
             {
               "card": 31,
               "actual": "y4",
-              "flags": [
+              "addedFlags": [
                 "playable"
               ],
               "removedFlags": [
@@ -1081,7 +1064,7 @@
             {
               "card": 21,
               "actual": "y1",
-              "flags": [
+              "addedFlags": [
                 "chop"
               ]
             },
@@ -1118,7 +1101,7 @@
               "card": 10,
               "actual": "y5",
               "convention": "y5",
-              "flags": [
+              "addedFlags": [
                 "playable"
               ]
             }
@@ -1136,7 +1119,7 @@
               "card": 27,
               "actual": "b5",
               "convention": "b5",
-              "flags": [
+              "addedFlags": [
                 "focused",
                 "playable"
               ],
@@ -1147,7 +1130,7 @@
             {
               "card": 34,
               "actual": "p4",
-              "flags": [
+              "addedFlags": [
                 "chop"
               ]
             }
@@ -1165,9 +1148,6 @@
               "card": 27,
               "actual": "b5",
               "convention": "b5",
-              "flags": [
-                "playable"
-              ],
               "removedFlags": [
                 "focused"
               ]
@@ -1197,7 +1177,7 @@
             {
               "card": 26,
               "actual": "p1",
-              "flags": [
+              "addedFlags": [
                 "chop"
               ]
             },
@@ -1248,7 +1228,7 @@
             {
               "card": 6,
               "actual": "p2",
-              "flags": [
+              "addedFlags": [
                 "chop"
               ]
             },
@@ -1273,7 +1253,7 @@
               "card": 6,
               "actual": "p2",
               "convention": "p2",
-              "flags": [
+              "addedFlags": [
                 "playable",
                 "finessed"
               ],
@@ -1284,7 +1264,7 @@
             {
               "card": 25,
               "actual": "y2",
-              "flags": [
+              "addedFlags": [
                 "chop"
               ]
             }
@@ -1303,7 +1283,7 @@
               "card": 33,
               "actual": "p3",
               "convention": "p3",
-              "flags": [
+              "addedFlags": [
                 "focused"
               ]
             }
@@ -1321,7 +1301,7 @@
               "card": 34,
               "actual": "p4",
               "convention": "p4 p5",
-              "flags": [
+              "addedFlags": [
                 "focused"
               ],
               "removedFlags": [
@@ -1331,7 +1311,7 @@
             {
               "card": 37,
               "actual": "r1",
-              "flags": [
+              "addedFlags": [
                 "chop"
               ]
             }
@@ -1410,7 +1390,7 @@
               "card": 33,
               "actual": "p3",
               "convention": "p3",
-              "flags": [
+              "addedFlags": [
                 "playable"
               ]
             }
@@ -1427,7 +1407,7 @@
             {
               "card": 29,
               "actual": "y1",
-              "flags": [
+              "addedFlags": [
                 "chop"
               ]
             },
@@ -1452,7 +1432,7 @@
               "card": 34,
               "actual": "p4",
               "convention": "p4 p5",
-              "flags": [
+              "addedFlags": [
                 "playable"
               ]
             }
@@ -1482,7 +1462,7 @@
               "card": 24,
               "actual": "p5",
               "convention": "p5",
-              "flags": [
+              "addedFlags": [
                 "playable"
               ]
             },
@@ -1506,9 +1486,8 @@
             {
               "card": 37,
               "actual": "r1",
-              "flags": [
-                "trash",
-                "chop"
+              "addedFlags": [
+                "trash"
               ]
             }
           ]
@@ -1519,7 +1498,7 @@
             {
               "card": 28,
               "actual": "y3",
-              "flags": [
+              "addedFlags": [
                 "chop"
               ]
             },
@@ -1538,29 +1517,28 @@
             {
               "card": 29,
               "actual": "y1",
-              "flags": [
-                "trash",
-                "chop"
+              "addedFlags": [
+                "trash"
               ]
             },
             {
               "card": 32,
               "actual": "g4",
-              "flags": [
+              "addedFlags": [
                 "trash"
               ]
             },
             {
               "card": 35,
               "actual": "r4",
-              "flags": [
+              "addedFlags": [
                 "trash"
               ]
             },
             {
               "card": 41,
               "actual": "b4",
-              "flags": [
+              "addedFlags": [
                 "trash"
               ]
             }
@@ -1572,29 +1550,28 @@
             {
               "card": 26,
               "actual": "p1",
-              "flags": [
-                "trash",
-                "chop"
+              "addedFlags": [
+                "trash"
               ]
             },
             {
               "card": 30,
               "actual": "g2",
-              "flags": [
+              "addedFlags": [
                 "trash"
               ]
             },
             {
               "card": 36,
               "actual": "y4",
-              "flags": [
+              "addedFlags": [
                 "trash"
               ]
             },
             {
               "card": 42,
               "actual": "r3",
-              "flags": [
+              "addedFlags": [
                 "trash"
               ]
             }
@@ -1611,15 +1588,14 @@
             {
               "card": 28,
               "actual": "y3",
-              "flags": [
-                "trash",
-                "chop"
+              "addedFlags": [
+                "trash"
               ]
             },
             {
               "card": 38,
               "actual": "p3",
-              "flags": [
+              "addedFlags": [
                 "trash"
               ]
             },
@@ -1627,7 +1603,7 @@
               "card": 40,
               "actual": "g1",
               "convention": "g1",
-              "flags": [
+              "addedFlags": [
                 "trash"
               ]
             },
@@ -1635,7 +1611,7 @@
               "card": 44,
               "actual": "g5",
               "convention": "g5",
-              "flags": [
+              "addedFlags": [
                 "focused",
                 "playable"
               ]
@@ -1654,9 +1630,6 @@
               "card": 44,
               "actual": "g5",
               "convention": "g5",
-              "flags": [
-                "playable"
-              ],
               "removedFlags": [
                 "focused"
               ]
@@ -1669,15 +1642,14 @@
             {
               "card": 30,
               "actual": "g2",
-              "flags": [
-                "trash",
+              "addedFlags": [
                 "chop"
               ]
             },
             {
               "card": 45,
               "actual": "p4",
-              "flags": [
+              "addedFlags": [
                 "trash"
               ]
             }
@@ -1697,21 +1669,21 @@
             {
               "card": 39,
               "actual": "g3",
-              "flags": [
+              "addedFlags": [
                 "trash"
               ]
             },
             {
               "card": 43,
               "actual": "r1",
-              "flags": [
+              "addedFlags": [
                 "trash"
               ]
             },
             {
               "card": 46,
               "actual": "b1",
-              "flags": [
+              "addedFlags": [
                 "trash"
               ]
             }
@@ -1730,10 +1702,7 @@
           "cards": [
             {
               "card": 40,
-              "actual": "g1",
-              "flags": [
-                "trash"
-              ]
+              "actual": "g1"
             }
           ],
           "removedCards": [

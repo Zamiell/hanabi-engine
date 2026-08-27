@@ -5,7 +5,7 @@ use serde::Serialize;
 
 use super::*;
 
-const SNAPSHOT_SCHEMA_VERSION: u8 = 7;
+const SNAPSHOT_SCHEMA_VERSION: u8 = 8;
 const UPDATE_ENVIRONMENT_VARIABLE: &str = "HANABI_UPDATE_SUPERPOSITIONS";
 
 #[test]
@@ -271,9 +271,9 @@ struct CardDelta {
     actual: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     convention: Option<String>,
-    /// Complete current flag set after this turn.
+    /// Flags absent before this turn that are present after it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    flags: Vec<&'static str>,
+    added_flags: Vec<&'static str>,
     /// Flags present before this turn that are no longer present.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     removed_flags: Vec<&'static str>,
@@ -292,11 +292,22 @@ impl CardDelta {
                 .filter(|flag| !after.flags.contains(flag))
                 .collect()
         });
+        let added_flags = before.map_or_else(
+            || after.flags.clone(),
+            |before| {
+                after
+                    .flags
+                    .iter()
+                    .copied()
+                    .filter(|flag| !before.flags.contains(flag))
+                    .collect()
+            },
+        );
         Some(Self {
             card: after.card,
             actual: after.actual.clone(),
             convention: after.convention.clone(),
-            flags: after.flags.clone(),
+            added_flags,
             removed_flags,
         })
     }
@@ -306,8 +317,31 @@ impl CardDelta {
             card: self.card,
             actual: self.actual.clone(),
             convention: self.convention.clone(),
-            flags: self.flags.clone(),
+            flags: self.added_flags.clone(),
         }
+    }
+
+    fn apply(&self, card: &mut CardSnapshot) {
+        card.actual.clone_from(&self.actual);
+        card.convention.clone_from(&self.convention);
+        card.flags.retain(|flag| !self.removed_flags.contains(flag));
+        card.flags.extend(self.added_flags.iter().copied());
+        card.flags.sort_by_key(|flag| flag_order(flag));
+    }
+}
+
+fn flag_order(flag: &str) -> usize {
+    match flag {
+        "focused" => 0,
+        "provisional" => 1,
+        "playable" => 2,
+        "trash" => 3,
+        "saved" => 4,
+        "finessed" => 5,
+        "chop" => 6,
+        "chop-moved" => 7,
+        "discard-now" => 8,
+        _ => usize::MAX,
     }
 }
 
@@ -373,6 +407,28 @@ fn superposition_deltas_reconstruct_every_replay_position() {
             "delta after turn {turn} reconstructs the complete position"
         );
     }
+}
+
+#[test]
+fn card_deltas_report_only_flag_changes() {
+    let before = CardSnapshot {
+        card: 11,
+        actual: "r2".to_owned(),
+        convention: Some("r2".to_owned()),
+        flags: vec!["finessed"],
+    };
+    let after = CardSnapshot {
+        flags: vec!["playable", "finessed"],
+        ..before.clone()
+    };
+
+    let delta = CardDelta::between(Some(&before), &after).expect("the card gained a flag");
+    assert_eq!(delta.added_flags, ["playable"]);
+    assert!(delta.removed_flags.is_empty());
+
+    let mut reconstructed = before;
+    delta.apply(&mut reconstructed);
+    assert_eq!(reconstructed, after);
 }
 
 fn render_snapshot(replay: &HanabiLiveReplay) -> String {
@@ -478,7 +534,7 @@ fn apply_position_delta(states: &mut [PlayerStateSnapshot], changes: &[PlayerDel
                 .iter_mut()
                 .find(|card| card.card == changed_card.card)
             {
-                *card = changed_card.state();
+                changed_card.apply(card);
             } else {
                 state.hand.push(changed_card.state());
             }
