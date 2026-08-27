@@ -187,6 +187,10 @@ pub struct HGroupCardInference {
     /// marker is cleared as soon as another action occurs.
     pub focused: bool,
     pub saved: bool,
+    /// Whether this card is a deterministic member of a live Finesse chain.
+    /// This remains true while the card is queued behind earlier connectors;
+    /// `play_obligation` separately records when the card must act now.
+    pub finessed: bool,
     pub play_obligation: Option<HGroupPlayObligation>,
 }
 

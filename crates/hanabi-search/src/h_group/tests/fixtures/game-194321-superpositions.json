@@ -306,6 +306,9 @@
               "card": 9,
               "actual": "r3",
               "convention": "r3",
+              "flags": [
+                "finessed"
+              ],
               "removedFlags": [
                 "chop"
               ]
@@ -313,7 +316,10 @@
             {
               "card": 11,
               "actual": "r2",
-              "convention": "r2"
+              "convention": "r2",
+              "flags": [
+                "finessed"
+              ]
             },
             {
               "card": 16,
@@ -564,8 +570,7 @@
               "actual": "g3",
               "convention": "r3 y1 g2 b4 p1",
               "flags": [
-                "playable",
-                "finessed"
+                "playable"
               ]
             }
           ]
@@ -613,8 +618,7 @@
               "card": 7,
               "actual": "g3",
               "removedFlags": [
-                "playable",
-                "finessed"
+                "playable"
               ]
             }
           ]
@@ -821,8 +825,7 @@
               "actual": "r5",
               "convention": "r5 y1 g3 b5 p1",
               "flags": [
-                "playable",
-                "finessed"
+                "playable"
               ]
             }
           ]
@@ -867,8 +870,7 @@
               "actual": "r5",
               "convention": "r5 y1 g3",
               "flags": [
-                "playable",
-                "finessed"
+                "playable"
               ]
             }
           ]
@@ -911,8 +913,7 @@
               "actual": "r5",
               "convention": "r5 y1 g4",
               "flags": [
-                "playable",
-                "finessed"
+                "playable"
               ]
             }
           ]
@@ -1027,15 +1028,6 @@
               "card": 10,
               "actual": "y5",
               "convention": "y5"
-            },
-            {
-              "card": 16,
-              "actual": "y3",
-              "convention": "y3",
-              "flags": [
-                "playable",
-                "finessed"
-              ]
             }
           ],
           "connection": {

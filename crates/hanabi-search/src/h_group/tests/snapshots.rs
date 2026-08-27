@@ -120,6 +120,10 @@ fn deterministic_future_connection_steps_are_known_before_they_are_actionable() 
             .expect("Cathy has a convention note for the future connector");
         assert_eq!(note.identities, IdentitySet::singleton(identity));
         assert_eq!(note.promised_identity, Some(identity));
+        assert!(
+            note.finessed,
+            "a queued deterministic Finesse remains marked"
+        );
         assert_eq!(
             note.play_obligation, None,
             "a future connection identity is known before its play is due"
@@ -532,7 +536,7 @@ fn player_snapshot(state: &FullState, player: PlayerId) -> PlayerStateSnapshot {
             flags.extend(has_play_obligation.then_some("playable"));
             flags.extend(trash.then_some("trash"));
             flags.extend(note.saved.then_some("saved"));
-            flags.extend(note.play_obligation.is_some().then_some("finessed"));
+            flags.extend(note.finessed.then_some("finessed"));
             flags.extend((inferred.chops[player.index()] == Some(observed.id)).then_some("chop"));
             flags.extend(
                 inferred

@@ -68,6 +68,11 @@ pub(super) enum CardKnowledgeEffect {
         saved: bool,
         source: KnowledgeSource,
     },
+    SetFinessed {
+        card: CardId,
+        finessed: bool,
+        source: KnowledgeSource,
+    },
     SetPlayObligation {
         card: CardId,
         obligation: Option<HGroupPlayObligation>,
@@ -84,6 +89,7 @@ impl CardKnowledgeEffect {
             | Self::SetIdentityStatus { card, .. }
             | Self::SetFocused { card, .. }
             | Self::SetSaved { card, .. }
+            | Self::SetFinessed { card, .. }
             | Self::SetPlayObligation { card, .. } => card,
         }
     }
@@ -96,6 +102,7 @@ impl CardKnowledgeEffect {
             | Self::SetIdentityStatus { source, .. }
             | Self::SetFocused { source, .. }
             | Self::SetSaved { source, .. }
+            | Self::SetFinessed { source, .. }
             | Self::SetPlayObligation { source, .. } => source,
         }
     }
@@ -152,6 +159,9 @@ impl CardKnowledgeReducer {
                 }
                 CardKnowledgeEffect::SetFocused { focused, .. } => card.focused = focused,
                 CardKnowledgeEffect::SetSaved { saved, .. } => card.saved = saved,
+                CardKnowledgeEffect::SetFinessed { finessed, .. } => {
+                    card.finessed = finessed;
+                }
                 CardKnowledgeEffect::SetPlayObligation { obligation, .. } => {
                     card.play_obligation = obligation;
                 }
@@ -174,6 +184,7 @@ pub(super) fn initial_card_inferences(deductions: &LogicalDeductions) -> Vec<HGr
                     identity_status: HGroupIdentityStatus::Settled,
                     focused: false,
                     saved: false,
+                    finessed: false,
                     play_obligation: None,
                 })
         })
@@ -237,6 +248,13 @@ pub(super) fn effects_from_projection(
                 source,
             });
         }
+        if before.finessed != after.finessed {
+            effects.push(CardKnowledgeEffect::SetFinessed {
+                card: after.card,
+                finessed: after.finessed,
+                source,
+            });
+        }
         if before.play_obligation != after.play_obligation {
             effects.push(CardKnowledgeEffect::SetPlayObligation {
                 card: after.card,
@@ -264,6 +282,7 @@ mod tests {
             identity_status: HGroupIdentityStatus::Settled,
             focused: false,
             saved: false,
+            finessed: false,
             play_obligation: None,
         };
         let yellow_one = Card::new(Suit::Yellow, Rank::One);

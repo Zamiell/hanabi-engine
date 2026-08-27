@@ -406,6 +406,7 @@ fn every_replay_clue_uses_the_same_hypothetical_and_recipient_interpretation() {
             assert_eq!(predicted.card, actual.card);
             assert_eq!(predicted.focused, actual.focused);
             assert_eq!(predicted.saved, actual.saved);
+            assert_eq!(predicted.finessed, actual.finessed);
             assert_eq!(predicted.play_obligation, actual.play_obligation);
             assert!(
                 actual.identities.without(predicted.identities).is_empty(),

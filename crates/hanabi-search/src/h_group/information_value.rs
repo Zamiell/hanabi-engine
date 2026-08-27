@@ -74,6 +74,7 @@ fn direct_card_inferences(source: &PlayerView, target: PlayerId) -> Vec<HGroupCa
             identity_status: HGroupIdentityStatus::Settled,
             focused: false,
             saved: false,
+            finessed: false,
             play_obligation: None,
         })
         .collect()
@@ -215,6 +216,7 @@ mod tests {
             identity_status: HGroupIdentityStatus::Settled,
             focused: false,
             saved: false,
+            finessed: false,
             play_obligation: None,
         };
         let after_rank = HGroupCardInference {

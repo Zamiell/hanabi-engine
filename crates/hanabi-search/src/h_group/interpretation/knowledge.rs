@@ -439,6 +439,7 @@ fn compile_convention_card_inferences(
         if !narrowed.is_empty() {
             card.identities = narrowed;
             card.promised_identity = Some(pending.expected);
+            card.finessed = pending.kind == HGroupConnectionKind::Finesse;
         }
     }
 
@@ -481,6 +482,7 @@ fn compile_convention_card_inferences(
             card.identities = narrowed;
         }
         card.promised_identity = Some(pending.expected);
+        card.finessed = pending.kind == HGroupConnectionKind::Finesse;
         card.play_obligation = Some(HGroupPlayObligation::Connection(pending.kind));
     }
     for forced in &replay.cards.forced_playable {
