@@ -23,8 +23,9 @@ use super::{
     pending_is_active, positional_discard_candidate, projected_h_group_replay,
     prospective_clue_has_unsafe_connection, prospective_clue_marks_focus_saved,
     prospective_clue_primary_kind, prospective_clue_signal_kinds, prospective_clue_view,
-    prospective_play_view, replay_identity_is_queued, rule_enabled, subjective_convention_cards,
-    subjective_playable_cards, was_clued_before, with_prospective_analysis_cache,
+    prospective_play_view, prospective_team_clue_signal_kinds, replay_identity_is_queued,
+    rule_enabled, subjective_convention_cards, subjective_playable_cards, was_clued_before,
+    with_prospective_analysis_cache,
 };
 
 mod candidate_validation;
@@ -137,6 +138,8 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                             immediate_play: false,
                             connection_steps: 0,
                             action_coverage: 0,
+                            convention_action_count: None,
+                            convention_connection_steps: None,
                             recognition: ClueRecognition::GeneratorProof,
                         },
                         touched,
@@ -328,6 +331,8 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 immediate_play: is_playable_now(view, focus_identity),
                 connection_steps: 0,
                 action_coverage: 0,
+                convention_action_count: None,
+                convention_connection_steps: None,
                 recognition: ClueRecognition::GeneratorProof,
             });
             continue;
@@ -659,6 +664,8 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 )
                 .expect("a standard connection has at most four steps"),
                 action_coverage: 0,
+                convention_action_count: None,
+                convention_connection_steps: None,
                 recognition: ClueRecognition::GeneratorProof,
             });
         } else if let Some(score) = save_score {
@@ -677,6 +684,8 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                     immediate_play: false,
                     connection_steps: 0,
                     action_coverage: 0,
+                    convention_action_count: None,
+                    convention_connection_steps: None,
                     recognition: ClueRecognition::GeneratorProof,
                 });
             }
@@ -694,9 +703,16 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             // This raises the clue's value when the actor is free, but
             // `urgent_save` separately controls whether it may preempt an
             // already-promised play.
+            let color_tie_break = u16::from(matches!(
+                candidate.action,
+                Action::Clue {
+                    clue: Clue::Suit(_),
+                    ..
+                }
+            ));
             candidate
                 .value
-                .set_base(if candidate.immediate_play { 550 } else { 540 });
+                .set_base(if candidate.immediate_play { 550 } else { 540 } + color_tie_break);
         }
     }
 
@@ -708,10 +724,31 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 .position(|existing| existing.action == candidate.action)
             {
                 // One physical clue can have several convention roles. Basic
-                // Play/Save interpretation keeps precedence over optional
-                // advanced labels, but a Fix must replace it because it
-                // repairs an active false promise.
-                if candidate.purpose == CluePurpose::Fix {
+                // Play/Save interpretation normally keeps precedence over
+                // optional advanced labels. A Fix replaces it because it
+                // repairs an active false promise. A Bluff also replaces a
+                // delayed Play interpretation: from Bluff Seat, H-Group gives
+                // the Bluff precedence over a Layered Finesse, so retaining
+                // the latter would score connection steps the clue does not
+                // promise.
+                // Sources:
+                // - https://hanabi.github.io/level-3/#the-fix-clue
+                // - https://hanabi.github.io/level-11/#mistaking-a-layered-finesse-for-a-bluff
+                let bluff_has_precedence = if candidate.purpose == CluePurpose::Advanced {
+                    let Action::Clue { target, clue } = candidate.action else {
+                        unreachable!("clue candidates always contain clues");
+                    };
+                    let touched = view.hands[target.index()]
+                        .iter()
+                        .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
+                        .map(|card| card.id)
+                        .collect::<Vec<_>>();
+                    prospective_team_clue_signal_kinds(view, profile, target, clue, &touched)
+                        .contains(&HGroupMoveKind::Bluff)
+                } else {
+                    false
+                };
+                if candidate.purpose == CluePurpose::Fix || bluff_has_precedence {
                     candidates[existing] = candidate;
                 }
             } else {
@@ -1630,6 +1667,8 @@ pub(super) fn advanced_clue_candidates(
             immediate_play: playable > 0,
             connection_steps: 0,
             action_coverage: 0,
+            convention_action_count: None,
+            convention_connection_steps: None,
             recognition: ClueRecognition::GeneratorProof,
         });
     }
@@ -2438,6 +2477,8 @@ pub(super) fn tempo_clue_candidates(
                 immediate_play: true,
                 connection_steps: 0,
                 action_coverage: 0,
+                convention_action_count: None,
+                convention_connection_steps: None,
                 recognition: ClueRecognition::GeneratorProof,
             });
         }

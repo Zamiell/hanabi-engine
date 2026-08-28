@@ -3,7 +3,7 @@ use super::{
     CluedCardSuperposition, EpistemicState, HGroupConnection, HGroupMoveKind, HGroupProfile,
     HGroupRuleId, IdentitySet, LineOutcome, LogicalDeductions, PlayerId, PlayerView, Rank,
     TeamConventionSnapshot, card_is_trash, identity_of, is_eventually_useful, is_playable_now,
-    prospective_clue_signal_kinds, prospective_clue_view, rule_enabled,
+    prospective_clue_view, prospective_team_clue_signal_kinds, rule_enabled,
 };
 
 const TEAM_ACTION_COVERAGE_PENALTY: u16 = 80;
@@ -11,6 +11,7 @@ const TEAM_ACTION_COUNT_PENALTY: u16 = 100;
 const TEAM_MULTI_CARD_PROTECTION_BONUS: u16 = 80;
 const TEAM_ACTION_DELAY_PENALTY: u16 = 2;
 const INDIRECT_CONNECTION_PENALTY: u16 = 24;
+const STALLED_MULTI_STEP_CONNECTION_PENALTY: u16 = 280;
 
 /// Compares whole clue outcomes after ordinary legality and convention
 /// interpretation have produced the candidate set.
@@ -94,6 +95,33 @@ pub(super) fn apply_strategic_clue_values(
         };
         let action_coverage = value.action_coverage;
         candidate.action_coverage = u8::try_from(action_coverage).unwrap_or(u8::MAX);
+        candidate.convention_action_count = value
+            .convention_action_count
+            .map(|count| u8::try_from(count).unwrap_or(u8::MAX));
+        candidate.convention_connection_steps = value
+            .convention_connection_steps
+            .map(|count| u8::try_from(count).unwrap_or(u8::MAX));
+        let extends_existing_owner_promise = match candidate.action {
+            Action::Clue { target, clue } => source.hands[target.index()].iter().any(|card| {
+                card.identity.is_some_and(|identity| clue.matches(identity))
+                    && baselines[target.index()]
+                        .owner_promises
+                        .iter()
+                        .any(|(promised, _)| *promised == card.id)
+            }),
+            Action::Play(_) | Action::Discard(_) => false,
+        };
+        if candidate.purpose == super::CluePurpose::Play
+            && !candidate.immediate_play
+            && source.turn > 0
+            && !extends_existing_owner_promise
+            && clue_establishes_actor_recognized_action(source, profile, candidate.action)
+                != Some(true)
+        {
+            candidate
+                .value
+                .penalize_teamwork(STALLED_MULTI_STEP_CONNECTION_PENALTY);
+        }
         let candidate_is_opening_bluff =
             source.turn == 0 && clue_is_bluff(source, profile, candidate.action);
         // An opening Bluff has no established team action to displace, so do
@@ -174,7 +202,7 @@ fn clue_is_bluff(source: &PlayerView, profile: HGroupProfile, action: Action) ->
         .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
         .map(|card| card.id)
         .collect::<Vec<_>>();
-    prospective_clue_signal_kinds(source, profile, target, clue, &touched)
+    prospective_team_clue_signal_kinds(source, profile, target, clue, &touched)
         .into_iter()
         .any(|kind| {
             matches!(
@@ -182,6 +210,50 @@ fn clue_is_bluff(source: &PlayerView, profile: HGroupProfile, action: Action) ->
                 HGroupMoveKind::Bluff | HGroupMoveKind::SelfBluff | HGroupMoveKind::DoubleBluff
             )
         })
+}
+
+fn clue_establishes_actor_recognized_action(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    action: Action,
+) -> Option<bool> {
+    let Action::Clue { target, clue } = action else {
+        return Some(false);
+    };
+    let touched = source.hands[target.index()]
+        .iter()
+        .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
+        .map(|card| card.id)
+        .collect::<Vec<_>>();
+    let after = prospective_clue_view(source, target, clue, &touched);
+    let baseline_team = TeamConventionSnapshot::new(source.clone(), profile);
+    let after_team = TeamConventionSnapshot::new(after, profile);
+    for player in 0..source.hands.len() {
+        let observer =
+            PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
+        let baseline = baseline_team.projection(observer)?;
+        let projected = after_team.projection(observer)?;
+        let gained_play = projected
+            .inferred
+            .playable_now
+            .iter()
+            .any(|card| !baseline.inferred.playable_now.contains(card));
+        let gained_connection = projected.inferred.connection.is_some_and(|connection| {
+            baseline
+                .inferred
+                .connection
+                .is_none_or(|prior| prior != connection)
+        });
+        let gained_connection_promise = projected
+            .inferred
+            .connection_promises
+            .iter()
+            .any(|promise| !baseline.inferred.connection_promises.contains(promise));
+        if gained_play || gained_connection || gained_connection_promise {
+            return Some(true);
+        }
+    }
+    Some(false)
 }
 
 #[derive(Clone)]
@@ -450,6 +522,7 @@ fn clue_line_value(
     let after_clue = prospective_clue_view(source, target, clue, &touched);
     let after_team = TeamConventionSnapshot::new(after_clue.clone(), profile);
     let mut value = LineOutcome::default();
+    let named_line = canonical_named_line_metrics(source, &after_team);
     let mut giver_public_actions = Vec::new();
     let caused_by_clue = |card: CardId, identity: Card| {
         touched.contains(&card)
@@ -468,7 +541,6 @@ fn clue_line_value(
             })
         })
     };
-
     for (player, baseline) in baselines.iter().enumerate() {
         let observer =
             PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
@@ -612,8 +684,67 @@ fn clue_line_value(
         .sort_unstable_by_key(|commitment| (commitment.card.index(), commitment.owner.index()));
     giver_public_actions.dedup();
     value.action_coverage = giver_public_actions.len();
+    if let Some((action_count, connection_steps)) = named_line {
+        value.convention_action_count = Some(action_count);
+        value.convention_connection_steps = Some(connection_steps);
+    }
     value.normalize();
     Some(value)
+}
+
+/// Returns the action count and blind-play depth of the canonical named line.
+///
+/// Different observers can retain provisional alternatives for the same
+/// clue. In Bluff Seat, a recognized Bluff takes precedence over an apparent
+/// Layered Finesse. A Clandestine Finesse, meanwhile, includes every layered
+/// blind play plus the clued focus. Keeping this precedence here prevents the
+/// outcome comparison from adding mutually exclusive observer projections.
+fn canonical_named_line_metrics(
+    source: &PlayerView,
+    team: &TeamConventionSnapshot,
+) -> Option<(usize, usize)> {
+    let mut bluff = None;
+    let mut clandestine = None;
+    let mut layered = None;
+    for player in 0..source.hands.len() {
+        let observer =
+            PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
+        let projection = team.projection(observer)?;
+        for signal in projection
+            .replay
+            .signals
+            .iter()
+            .filter(|signal| signal.turn == source.turn)
+        {
+            match signal.kind {
+                HGroupMoveKind::Bluff => {
+                    let blind_plays = signal.cards.len().saturating_sub(1);
+                    let focus_is_secured = signal.cards.last().is_some_and(|focus| {
+                        identity_of(source, *focus).is_some_and(|identity| {
+                            view_distance_from_playable(source, identity) == 1
+                        })
+                    });
+                    bluff = Some((blind_plays + usize::from(focus_is_secured), blind_plays));
+                }
+                HGroupMoveKind::ClandestineFinesse => {
+                    clandestine = Some((signal.cards.len() + 1, signal.cards.len()));
+                }
+                HGroupMoveKind::LayeredFinesse
+                | HGroupMoveKind::HiddenFinesse
+                | HGroupMoveKind::QueuedFinesse
+                | HGroupMoveKind::AmbiguousFinesse => {
+                    layered = Some((signal.cards.len() + 1, signal.cards.len()));
+                }
+                _ => {}
+            }
+        }
+    }
+    bluff.or(clandestine).or(layered)
+}
+
+fn view_distance_from_playable(source: &PlayerView, identity: Card) -> usize {
+    usize::from(identity.rank.number())
+        .saturating_sub(source.play_stacks[identity.suit.index()].len() + 1)
 }
 
 fn record_clued_superpositions(

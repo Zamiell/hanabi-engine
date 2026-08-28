@@ -101,6 +101,10 @@ pub(super) struct ClueCandidate {
     pub(super) immediate_play: bool,
     pub(super) connection_steps: u8,
     pub(super) action_coverage: u8,
+    /// Total cards secured by the canonical named convention line.
+    pub(super) convention_action_count: Option<u8>,
+    /// Blind plays required by that named line, including off-suit layers.
+    pub(super) convention_connection_steps: Option<u8>,
     pub(super) recognition: ClueRecognition,
 }
 

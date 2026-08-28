@@ -117,8 +117,9 @@ use prospective::{
     CachedProspectiveProjection, TeamConventionSnapshot, projected_h_group_replay,
     prospective_clue_has_unsafe_connection, prospective_clue_marks_focus_saved,
     prospective_clue_primary_kind, prospective_clue_signal_kinds, prospective_clue_view,
-    prospective_play_has_unsafe_inference, prospective_play_view, subjective_chop_before_action,
-    subjective_convention_cards, subjective_playable_cards, with_prospective_analysis_cache,
+    prospective_play_has_unsafe_inference, prospective_play_view,
+    prospective_team_clue_signal_kinds, subjective_chop_before_action, subjective_convention_cards,
+    subjective_playable_cards, with_prospective_analysis_cache,
 };
 use recognition::apply_resolved_bluff_effects;
 use rule_engine::{RuleExecutionContext, apply_post_event_rules};
@@ -1564,7 +1565,9 @@ fn replay_h_group_inner(
                                 } else if matching_finesse_positions > 1 {
                                     Some(HGroupMoveKind::AmbiguousFinesse)
                                 } else if connection.cards.len() > 1
-                                    && first_actual.is_some_and(|identity| clue.matches(identity))
+                                    && first_actual.is_some_and(|identity| {
+                                        bluff_play_connects(*clue, identity)
+                                    })
                                 {
                                     Some(HGroupMoveKind::ClandestineFinesse)
                                 } else if connection.cards.len() > 1 {
@@ -1632,6 +1635,66 @@ fn replay_h_group_inner(
                 identity,
                 successful,
             } => {
+                // A successful off-suit blind play can demonstrate that a
+                // visible, later Finesse connector was only one branch of an
+                // Ambiguous Layered Finesse. The player immediately after the
+                // blind play must then test their own Finesse Position before
+                // the visible connector acts. This refinement is necessarily
+                // observer-relative: everyone else can see that hidden card
+                // and scheduled it from the original clue, while the possible
+                // blind player initially had to trust the later visible copy.
+                //
+                // Sources:
+                // - https://hanabi.github.io/level-5/#the-layered-finesse
+                // - https://hanabi.github.io/level-5/#the-ambiguous-finesse
+                let demonstrated_layer = (*successful
+                    && rule_enabled(profile, HGroupRuleId::SpecialFinesses)
+                    && next_player(*player, hands.len()) == view.observer
+                    && !was_clued_before(view, entry.turn, *card)
+                    && !pending_connections.iter().any(|connection| {
+                        connection.actor == *player
+                            && connection.cards.first() == Some(card)
+                            && pending_is_active(connection, &pending_connections)
+                    }))
+                .then(|| {
+                    pending_connections
+                        .iter()
+                        .find(|connection| {
+                            connection.kind == HGroupConnectionKind::Finesse
+                                && connection.actor != *player
+                                && connection.actor != view.observer
+                                && connection.actor == next_player(view.observer, hands.len())
+                                && connection.expected != *identity
+                                && pending_is_active(connection, &pending_connections)
+                        })
+                        .cloned()
+                })
+                .flatten();
+                if let Some(prior) = demonstrated_layer {
+                    let mut gotten =
+                        protected_cards(&explicitly_clued, &invisibly_clued, &chop_moved);
+                    gotten.extend(already_playing.iter().copied());
+                    if let Some(next_card) =
+                        finesse_position_id(&hands[view.observer.index()], &gotten, 0)
+                    {
+                        let promise = pending_connections.start(
+                            entry.turn,
+                            ConnectionObligation {
+                                promise: PromiseId::UNASSIGNED,
+                                actor: view.observer,
+                                cards: vec![next_card],
+                                expected: prior.expected,
+                                focus_identity: prior.focus_identity,
+                                kind: HGroupConnectionKind::Finesse,
+                                focus: prior.focus,
+                                step: prior.step,
+                            },
+                        );
+                        if promise != PromiseId::UNASSIGNED {
+                            invisibly_clued.insert_from(EffectSource::Promise(promise), next_card);
+                        }
+                    }
+                }
                 let advance = pending_connections.advance_play(
                     entry.turn,
                     *player,

@@ -924,6 +924,7 @@ pub(in crate::h_group) fn apply_priority_effects(
     context: &HGroupTurnContext<'_>,
     view: &PlayerView,
     explicitly_clued: &CardSet,
+    pending: &ConnectionManager,
     forced_playable: &mut CardSet,
     signals: &mut ConventionJournal,
 ) {
@@ -999,7 +1000,30 @@ pub(in crate::h_group) fn apply_priority_effects(
     let fixed_cards = convention_facts.fixed_cards();
     let played_is_known = played_possibilities == IdentitySet::singleton(*identity)
         || convention_facts.known_identity(*card) == Some(*identity);
-    if !played_is_known || fixed_cards.contains(card) {
+    let advances_existing_connection = signals.iter().any(|signal| {
+        signal.turn < entry.turn
+            && signal.cards.first() == Some(card)
+            && signal.target == Some(*player)
+            && pending.iter().any(|connection| {
+                connection.actor == *player && signal.identity == Some(connection.expected)
+            })
+            && matches!(
+                signal.kind,
+                HGroupMoveKind::Prompt
+                    | HGroupMoveKind::Finesse
+                    | HGroupMoveKind::ReverseFinesse
+                    | HGroupMoveKind::LayeredFinesse
+                    | HGroupMoveKind::ClandestineFinesse
+                    | HGroupMoveKind::QueuedFinesse
+                    | HGroupMoveKind::AmbiguousFinesse
+            )
+    });
+    if !played_is_known || fixed_cards.contains(card) || advances_existing_connection {
+        // Priority communicates a deliberate choice between otherwise-free
+        // plays. Playing the first card of an existing connection is already
+        // explained by that connection and cannot create an unrelated
+        // Priority Finesse in the next player's hidden hand.
+        // Source: https://hanabi.github.io/level-25/#the-priority-prompt--the-priority-finesse
         return;
     }
 

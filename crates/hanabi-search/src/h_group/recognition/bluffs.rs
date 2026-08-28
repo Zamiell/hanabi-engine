@@ -134,7 +134,13 @@ pub(in crate::h_group) fn apply_bluff_effects(
         return;
     }
     let expected_connector = Card::new(focus_identity.suit, Rank::ALL[stack_height]);
-    if bluff_identity == expected_connector {
+    if bluff_identity == expected_connector || bluff_play_connects(*clue, bluff_identity) {
+        // Cathy's Connecting Principle applies to rank clues as well as suit
+        // clues. Any 1 connects to a rank-2 clue, so an off-suit 1 proves a
+        // (possibly Layered) Finesse rather than a Bluff. The old check only
+        // rejected the same-suit connector and incorrectly collapsed the
+        // rank-2 superposition into a one-play Bluff.
+        // Source: https://hanabi.github.io/level-11/#cathys-connecting-principle-part-2
         return;
     }
     pending.start(

@@ -99,6 +99,9 @@ pub(super) fn claimed_identities_at_clue(
                         .flatten()
                 })
                 .or_else(|| {
+                    if giver_holds_card {
+                        return None;
+                    }
                     let prior = clues.iter().rev().find(|prior| prior.focus == card)?;
                     // Good Touch reserves exact playing promises. A Save is
                     // protection, not an assertion that another clue cannot

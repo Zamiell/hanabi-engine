@@ -49,6 +49,12 @@ pub(super) struct LineOutcome {
     /// Other observer projections remain useful for owner knowledge, but must
     /// not inflate Teamwork coverage with mutually incompatible readings.
     pub(super) action_coverage: usize,
+    /// Total cards secured by the canonical named convention line.
+    pub(super) convention_action_count: Option<usize>,
+    /// Blind-play steps established by the canonical named interpretation.
+    /// This differs from a focus card's raw distance from its stack when a
+    /// Layered or Clandestine Finesse crosses suits.
+    pub(super) convention_connection_steps: Option<usize>,
 }
 
 impl LineOutcome {

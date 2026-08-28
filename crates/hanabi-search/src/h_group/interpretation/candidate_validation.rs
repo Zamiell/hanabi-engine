@@ -1,7 +1,7 @@
 use super::{
     Action, ClueCandidate, CluePurpose, ConventionRejectionReason, HGroupClueKind, HGroupMoveKind,
     HGroupProfile, HGroupState, LogicalDeductions, PlayerView, RejectedConventionAction, chop,
-    focus, identity_of, prospective_clue_primary_kind, prospective_clue_signal_kinds,
+    focus, identity_of, prospective_clue_primary_kind, prospective_team_clue_signal_kinds,
 };
 
 /// Classifies every legal clue excluded from the convention action set.
@@ -78,7 +78,7 @@ pub(in crate::h_group) fn recipient_replay_recognizes_candidate(
         .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
         .map(|card| card.id)
         .collect::<Vec<_>>();
-    let signals = prospective_clue_signal_kinds(view, profile, target, clue, &touched);
+    let signals = prospective_team_clue_signal_kinds(view, profile, target, clue, &touched);
     let primary = prospective_clue_primary_kind(view, profile, target, clue, &touched);
     match candidate.purpose {
         CluePurpose::Play => matches!(

@@ -1,6 +1,6 @@
 use super::{
     Arc, Card, CardId, Clue, ClueFacts, ConnectionObligation, GameStatus, HGroupCardInference,
-    HGroupInferences, HGroupMoveKind, HGroupProfile, HGroupState, LogicalDeductions,
+    HGroupInferences, HGroupMoveKind, HGroupProfile, HGroupState, IdentitySet, LogicalDeductions,
     MAX_CLUE_TOKENS, ObservedCard, ObservedEvent, ObservedHistoryEntry, PerspectiveDepth,
     PerspectiveProjector, PlayerId, PlayerView, ProspectiveTransition, Rank, RefCell, chop,
     convention_card_inferences, identity_of, infer_h_group, infer_h_group_from_replay,
@@ -451,6 +451,45 @@ pub(super) fn prospective_clue_signal_kinds(
         .collect()
 }
 
+/// Convention names recognized anywhere on the team after a hypothetical
+/// clue. Some moves are deliberately hidden from the clue receiver: the
+/// Bluff actor recognizes a Bluff, while observers who can see a layered
+/// connector recognize a Clandestine Finesse. Candidate classification must
+/// retain those signals even when the recipient can only write the ordinary
+/// delayed Play interpretation.
+pub(super) fn prospective_team_clue_signal_kinds(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    target: PlayerId,
+    clue: Clue,
+    touched: &[CardId],
+) -> Vec<HGroupMoveKind> {
+    let turn = source.turn;
+    let Some(snapshot) = prospective_clue_snapshot(source, profile, target, clue, touched) else {
+        return Vec::new();
+    };
+    let mut kinds = Vec::new();
+    for player in 0..source.hands.len() {
+        let observer =
+            PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
+        let Some(projection) = snapshot.team.projection(observer) else {
+            continue;
+        };
+        for kind in projection
+            .replay
+            .signals
+            .iter()
+            .filter(|signal| signal.turn == turn)
+            .map(|signal| signal.kind)
+        {
+            if !kinds.contains(&kind) {
+                kinds.push(kind);
+            }
+        }
+    }
+    kinds
+}
+
 /// Primary meaning assigned by the same replay reducer that handles a real
 /// clue. Candidate admission uses this instead of maintaining a second
 /// Play/Save/Fix precedence ladder.
@@ -502,7 +541,56 @@ pub(super) enum ProspectiveClueHazard {
     RecipientWrongPlay,
     RecipientWrongConnection,
     OtherPlayerWrongPromise,
+    DuplicateGoodTouchPromise,
     FalseConnectionIdentity,
+}
+
+fn duplicates_good_touch_superposition(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    focus: CardId,
+    new_play_identities: IdentitySet,
+) -> Option<bool> {
+    let giver_hand = source.hands[source.observer.index()]
+        .iter()
+        .map(|card| card.id)
+        .collect::<Vec<_>>();
+    let baseline_team = TeamConventionSnapshot::new(source.clone(), profile);
+    let mut baseline_possible_promises = IdentitySet::default();
+    for player in 0..source.hands.len() {
+        let observer =
+            PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
+        let projection = baseline_team.projection(observer)?;
+        for interpretation in &projection.replay.clues {
+            let focus_is_live = source.hands.iter().flatten().any(|card| {
+                card.id == interpretation.focus
+                    && !projection
+                        .replay
+                        .cards
+                        .invalidated_focuses
+                        .contains(&card.id)
+            });
+            if focus_is_live
+                && interpretation.focus != focus
+                && !giver_hand.contains(&interpretation.focus)
+            {
+                let reserved = interpretation.play_identities.iter().filter(|identity| {
+                    interpretation.play_identities.len() == 1
+                        || usize::from(identity.rank.number())
+                            > usize::from(interpretation.stack_heights[identity.suit.index()]) + 1
+                });
+                for identity in reserved {
+                    baseline_possible_promises =
+                        baseline_possible_promises.union(IdentitySet::singleton(identity));
+                }
+            }
+        }
+    }
+    Some(
+        new_play_identities
+            .iter()
+            .any(|identity| baseline_possible_promises.contains(identity)),
+    )
 }
 
 pub(super) fn prospective_clue_hazard(
@@ -536,6 +624,32 @@ pub(super) fn prospective_clue_hazard(
         &baseline.inferred,
     ) {
         return Some(hazard);
+    }
+    let new_play_identities = replay
+        .clues
+        .iter()
+        .rev()
+        .find(|interpretation| {
+            interpretation.turn == source.turn
+                && interpretation.target == target
+                && interpretation.focus == focus
+        })
+        .map_or_else(IdentitySet::default, |interpretation| {
+            interpretation.play_identities
+        });
+    let Some(duplicates_existing_promise) =
+        duplicates_good_touch_superposition(source, profile, focus, new_play_identities)
+    else {
+        return Some(ProspectiveClueHazard::ProjectionFailed);
+    };
+    if duplicates_existing_promise {
+        // Good Touch reserves every delayed branch of a clue's convention
+        // superposition, not just the focus card's visible face in the
+        // giver's hand. Immediate multi-1 alternatives are not independent
+        // identity promises. A promise in the giver's own hand is also exempt
+        // because the recipient sees that card and resolves the correlation.
+        // Source: https://hanabi.github.io/level-1/#good-touch-principle
+        return Some(ProspectiveClueHazard::DuplicateGoodTouchPromise);
     }
     if expect_immediate_focus
         && identity_of(source, focus).is_some_and(|identity| is_playable_now(source, identity))

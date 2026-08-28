@@ -982,6 +982,8 @@ fn fallback_clue_score(
         immediate_play: !save,
         connection_steps: 0,
         action_coverage: 0,
+        convention_action_count: None,
+        convention_connection_steps: None,
         recognition: ClueRecognition::GeneratorProof,
     };
     if prospective_clue_has_unsafe_connection(view, profile, target, focus, clue, &touched, !save) {
@@ -1326,7 +1328,14 @@ fn raw_h_group_action_priority(
         // A semantically strong setup clue can occupy several teammates while
         // the giver's exact play remains safely parked. Treating every known
         // play as forced made this multi-play line disappear from planning.
-        clue_priority.max(550)
+        let color_tie_break = i32::from(matches!(
+            action,
+            Action::Clue {
+                clue: Clue::Suit(_),
+                ..
+            }
+        ));
+        clue_priority.max(550 + color_tie_break)
     } else if !inferred.playable_now.is_empty()
         && clue_candidate.is_some_and(|candidate| {
             !clue_preempts_play_obligation(deductions.view(), &analysis.replay, candidate)
@@ -1531,6 +1540,19 @@ fn hard_clue_obligation(
         return true;
     }
     let player_count = view.hands.len();
+    let target_is_occupied = replay.pending_connections.iter().any(|connection| {
+        connection.actor == candidate.target
+            && pending_is_active(connection, &replay.pending_connections)
+    }) || replay.hands[candidate.target.index()]
+        .iter()
+        .any(|card| replay.cards.already_playing.contains(card));
+    if target_is_occupied {
+        // An urgent Save preempts only a discard that can actually happen on
+        // the target's next turn. A player already bound to play cannot
+        // discard their chop, leaving another full turn cycle to save it.
+        // Source: https://hanabi.github.io/level-1/#save-principle
+        return false;
+    }
     let target_distance =
         (candidate.target.index() + player_count - view.current_player.index()) % player_count;
     let every_intervening_player_is_occupied = (1..target_distance).all(|distance| {

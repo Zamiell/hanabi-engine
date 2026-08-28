@@ -211,6 +211,7 @@ fn apply_rule(
                     context,
                     view,
                     effects.explicitly_clued,
+                    effects.pending,
                     effects.forced_playable,
                     effects.signals,
                 );
