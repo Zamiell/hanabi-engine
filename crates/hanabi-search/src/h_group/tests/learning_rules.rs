@@ -3286,7 +3286,7 @@ fn five_save_does_not_also_pull_the_adjacent_purple_four() {
     let inferred = infer_h_group(&deductions, HGroupProfile::Max);
 
     assert!(
-        inferred.saved.contains(&CardId::new(19)),
+        inferred.is_saved(CardId::new(19)),
         "inference: {inferred:#?}"
     );
     assert!(!inferred.playable_now.contains(&CardId::new(4)));

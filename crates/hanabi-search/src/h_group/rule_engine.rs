@@ -26,15 +26,37 @@ use super::{
     h_group_phase_at, rule_enabled,
 };
 
+/// Capability bundle for one rule-engine pass. Callers cannot accidentally
+/// pair a historical turn context with a different observer view or profile.
+pub(super) struct RuleExecutionContext<'a> {
+    turn: &'a HGroupTurnContext<'a>,
+    view: &'a PlayerView,
+    profile: HGroupProfile,
+}
+
+impl<'a> RuleExecutionContext<'a> {
+    pub(super) const fn new(
+        turn: &'a HGroupTurnContext<'a>,
+        view: &'a PlayerView,
+        profile: HGroupProfile,
+    ) -> Self {
+        Self {
+            turn,
+            view,
+            profile,
+        }
+    }
+}
+
 /// Semantic execution order. It is intentionally not numerical level order:
 /// refinements such as Elimination and Phantom Playable must run before the
 /// lower-level rule whose provisional meaning they replace.
 pub(super) fn apply_post_event_rules(
-    context: &HGroupTurnContext<'_>,
-    view: &PlayerView,
-    profile: HGroupProfile,
+    execution: &RuleExecutionContext<'_>,
     effects: &mut HGroupRuleEffects<'_>,
 ) -> ConventionTransitionResult {
+    let context = execution.turn;
+    let profile = execution.profile;
     debug_assert!(registry_is_valid());
     let mut proposals = Vec::new();
     for spec in POST_EVENT_RULES {
@@ -43,7 +65,7 @@ pub(super) fn apply_post_event_rules(
             let card_before = effects.card_snapshot();
             let signal_start = effects.signals.len();
             let promise_start = effects.pending.transitions().len();
-            apply_rule(spec.id, context, view, profile, effects);
+            apply_rule(spec.id, execution, effects);
             effects.reconcile_connection_lifecycles(promise_start);
             effects.reconcile_card_sources(
                 &card_before,
@@ -170,11 +192,12 @@ fn registry_is_valid() -> bool {
 #[allow(clippy::too_many_lines)]
 fn apply_rule(
     rule: HGroupRuleId,
-    context: &HGroupTurnContext<'_>,
-    view: &PlayerView,
-    profile: HGroupProfile,
+    execution: &RuleExecutionContext<'_>,
     effects: &mut HGroupRuleEffects<'_>,
 ) {
+    let context = execution.turn;
+    let view = execution.view;
+    let profile = execution.profile;
     match rule {
         HGroupRuleId::Priority => {
             if h_group_phase_at(

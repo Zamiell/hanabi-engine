@@ -202,8 +202,6 @@ pub struct HGroupInferences {
     pub chops: Vec<Option<CardId>>,
     /// Own cards promised playable now by an H-Group interpretation.
     pub playable_now: Vec<CardId>,
-    /// Own cards protected by a Save interpretation.
-    pub saved: Vec<CardId>,
     /// An immediate Prompt or Finesse obligation for the acting player.
     pub connection: Option<HGroupConnection>,
     /// Convention-narrowed notes for cards in the observer's own hand.
@@ -228,6 +226,19 @@ pub struct HGroupInferences {
 }
 
 impl HGroupInferences {
+    #[must_use]
+    pub fn is_saved(&self, card: CardId) -> bool {
+        self.cards
+            .iter()
+            .any(|inference| inference.card == card && inference.saved)
+    }
+
+    pub fn saved_cards(&self) -> impl Iterator<Item = CardId> + '_ {
+        self.cards
+            .iter()
+            .filter_map(|inference| inference.saved.then_some(inference.card))
+    }
+
     /// Cards protected from ordinary chop by any recognized clue or movement.
     pub(super) fn gotten(&self) -> CardSet {
         self.clues
@@ -441,6 +452,17 @@ impl HGroupState {
             .iter()
             .flat_map(|transition| transition.delta.knowledge_changes.iter())
             .collect::<Vec<_>>();
+        if self.transitions.iter().any(|transition| {
+            transition
+                .delta
+                .knowledge_changes
+                .iter()
+                .any(|effect| effect.source().turn() != transition.turn)
+        }) {
+            return Err(
+                "owner-knowledge effect was attached to a non-causal transition".to_owned(),
+            );
+        }
         if transition_effects.len() != self.knowledge.effects().len()
             || self.knowledge.effects().iter().any(|effect| {
                 transition_effects

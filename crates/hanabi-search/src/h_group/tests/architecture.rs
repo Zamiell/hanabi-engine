@@ -1,5 +1,5 @@
 use super::*;
-use crate::SupportedConvention;
+use crate::{InformationSet, SupportedConvention};
 
 fn expert_replays() -> [(&'static str, HanabiLiveReplay); 2] {
     [
@@ -178,9 +178,52 @@ fn canonical_knowledge_program_is_stable_for_every_expert_prefix() {
                     convention_card_inferences(&deductions, &replay),
                     "pure owner projection diverged in {fixture_name} at turn {turn} for {observer:?}"
                 );
+                for transition in &replay.transitions {
+                    assert!(
+                        transition
+                            .delta
+                            .knowledge_changes
+                            .iter()
+                            .all(|effect| effect.source().turn() == transition.turn)
+                    );
+                }
+                for card in &deductions.view().hands[observer.index()] {
+                    assert_eq!(
+                        replay.knowledge.effects_for(card.id).collect::<Vec<_>>(),
+                        replay
+                            .knowledge
+                            .effects()
+                            .iter()
+                            .filter(|effect| effect.card() == card.id)
+                            .collect::<Vec<_>>()
+                    );
+                }
             }
         }
     }
+}
+
+#[test]
+fn demonstrated_relational_claims_leave_a_nonempty_exact_belief() {
+    // By this position an earlier Purple-2 OneOf claim has been demonstrated
+    // by a card that left the hand. The surviving candidates must be excluded
+    // from Purple 2, not incorrectly forced to become it.
+    let state = expert_replay_p4v0s415()
+        .state_at_turn(42)
+        .expect("fixture prefix is legal");
+    let view = state
+        .view_for(state.current_player())
+        .expect("current player has a view");
+    let deductions = LogicalDeductions::new(view.clone()).expect("logical position");
+    let analysis = SupportedConvention::HGroup(HGroupProfile::Max).analyze(&deductions);
+    let information = InformationSet::new(&view).expect("information set is valid");
+    assert!(
+        information
+            .world_count_up_to(&analysis.belief_constraints, 1)
+            .worlds()
+            > 0,
+        "resolved OneOf claims must not contradict the logical information set"
+    );
 }
 
 #[test]
@@ -388,7 +431,10 @@ fn every_replay_clue_uses_the_same_hypothetical_and_recipient_interpretation() {
             "play obligations diverged after move {}",
             turn + 1
         );
-        assert_eq!(hypothetical_inferences.saved, actual_inferences.saved);
+        assert_eq!(
+            hypothetical_inferences.saved_cards().collect::<Vec<_>>(),
+            actual_inferences.saved_cards().collect::<Vec<_>>()
+        );
         assert_eq!(
             hypothetical_inferences.connection,
             actual_inferences.connection

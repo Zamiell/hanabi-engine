@@ -874,8 +874,9 @@ fn apply_position_delta(
 fn player_snapshot(state: &FullState, player: PlayerId) -> PlayerStateSnapshot {
     let view = state.view_for(player).expect("fixture player has a view");
     let deductions = LogicalDeductions::new(view.clone()).expect("fixture view is logical");
-    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
-    let gotten = inferred.gotten();
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
+    let inferred = infer_h_group_from_replay(&deductions, replay.clone(), HGroupProfile::Max);
+    let owner_knowledge = owner_knowledge_read_model(&deductions, &replay.knowledge, &inferred);
     let visible_player = PlayerId::new(
         u8::try_from((player.index() + 1) % view.hands.len())
             .expect("standard Hanabi has at most five players"),
@@ -886,66 +887,53 @@ fn player_snapshot(state: &FullState, player: PlayerId) -> PlayerStateSnapshot {
     let hand = view.hands[player.index()]
         .iter()
         .map(|observed| {
-            let note = inferred
-                .cards
+            let knowledge = owner_knowledge
                 .iter()
-                .find(|note| note.card == observed.id)
-                .expect("every own card has convention inference");
-            let logical = deductions
-                .possible_identities(observed.id)
-                .expect("every own card has a logical domain");
+                .find(|knowledge| knowledge.card == observed.id)
+                .expect("every own card has an epistemic read model");
             let actual = truth_view.hands[player.index()]
                 .iter()
                 .find(|visible| visible.id == observed.id)
                 .and_then(|visible| visible.identity)
                 .expect("another player sees the card identity");
-            let logically_trash = !logical.is_empty()
-                && logical
-                    .iter()
-                    .all(|identity| !is_eventually_useful(&view, identity));
-            let convention_trash = note.identity_status != HGroupIdentityStatus::Provisional
-                && !note.identities.is_empty()
-                && note
-                    .identities
-                    .iter()
-                    .all(|identity| is_convention_trash(&view, identity, &gotten, &inferred.cards));
             let mut flags = Vec::new();
-            flags.extend(note.focused.then_some(SnapshotFlag::Focused));
+            flags.extend(knowledge.facts.focused.then_some(SnapshotFlag::Focused));
             flags.extend(
-                (note.identity_status == HGroupIdentityStatus::Provisional)
+                (knowledge.identity_status == HGroupIdentityStatus::Provisional)
                     .then_some(SnapshotFlag::Provisional),
             );
-            let has_play_obligation = inferred.playable_now.contains(&observed.id)
-                || inferred
-                    .connection
-                    .is_some_and(|connection| connection.card == observed.id);
-            flags.extend(has_play_obligation.then_some(SnapshotFlag::Playable));
-            flags.extend((convention_trash && !logically_trash).then_some(SnapshotFlag::Trash));
-            flags.extend(note.saved.then_some(SnapshotFlag::Saved));
-            flags.extend(note.finessed.then_some(SnapshotFlag::Finessed));
             flags.extend(
-                (inferred.chops[player.index()] == Some(observed.id)).then_some(SnapshotFlag::Chop),
+                knowledge
+                    .classifications
+                    .playable
+                    .then_some(SnapshotFlag::Playable),
             );
             flags.extend(
-                inferred
+                knowledge
+                    .classifications
+                    .convention_only_trash
+                    .then_some(SnapshotFlag::Trash),
+            );
+            flags.extend(knowledge.facts.saved.then_some(SnapshotFlag::Saved));
+            flags.extend(knowledge.facts.finessed.then_some(SnapshotFlag::Finessed));
+            flags.extend(knowledge.position.chop.then_some(SnapshotFlag::Chop));
+            flags.extend(
+                knowledge
+                    .position
                     .chop_moved
-                    .contains(&observed.id)
                     .then_some(SnapshotFlag::ChopMoved),
             );
             flags.extend(
-                inferred
+                knowledge
+                    .classifications
                     .discard_now
-                    .contains(&observed.id)
                     .then_some(SnapshotFlag::DiscardNow),
             );
-            let convention_identities = note
-                .promised_identity
-                .map_or(note.identities, IdentitySet::singleton);
             CardSnapshot {
                 card: observed.id.index(),
                 actual: identity_label(actual),
-                convention: (convention_identities != logical)
-                    .then(|| identity_labels(convention_identities)),
+                convention: (knowledge.convention_identities != knowledge.logical_identities)
+                    .then(|| identity_labels(knowledge.convention_identities)),
                 flags,
             }
         })

@@ -1,6 +1,109 @@
 use hanabi_core::{Card, CardId, PlayerId};
 
-use super::{HGroupInferences, IdentitySet, LogicalDeductions};
+use super::{
+    ConventionKnowledge, HGroupIdentityStatus, HGroupInferences, HGroupPlayObligation, IdentitySet,
+    KnowledgeSource, LogicalDeductions, is_convention_trash, is_eventually_useful,
+};
+
+/// Canonical owner-relative read model used by diagnostics and regressions.
+///
+/// It keeps the logical base, effective convention result, provenance, and
+/// derived action classifications separate. Serializers must consume this
+/// model instead of independently reimplementing convention semantics.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct OwnerCardKnowledge {
+    pub(super) card: CardId,
+    pub(super) logical_identities: IdentitySet,
+    pub(super) convention_identities: IdentitySet,
+    pub(super) sources: Vec<KnowledgeSource>,
+    pub(super) identity_status: HGroupIdentityStatus,
+    pub(super) facts: OwnerConventionFacts,
+    pub(super) classifications: OwnerCardClassifications,
+    pub(super) play_obligation: Option<HGroupPlayObligation>,
+    pub(super) position: OwnerCardPosition,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct OwnerConventionFacts {
+    pub(super) focused: bool,
+    pub(super) saved: bool,
+    pub(super) finessed: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct OwnerCardClassifications {
+    pub(super) playable: bool,
+    pub(super) convention_only_trash: bool,
+    pub(super) discard_now: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct OwnerCardPosition {
+    pub(super) chop: bool,
+    pub(super) chop_moved: bool,
+}
+
+pub(super) fn owner_knowledge_read_model(
+    deductions: &LogicalDeductions,
+    knowledge: &ConventionKnowledge,
+    inferred: &HGroupInferences,
+) -> Vec<OwnerCardKnowledge> {
+    let view = deductions.view();
+    let gotten = inferred.gotten();
+    view.hands[view.observer.index()]
+        .iter()
+        .filter_map(|observed| {
+            let logical = deductions.possible_identities(observed.id)?;
+            let note = inferred
+                .cards
+                .iter()
+                .find(|note| note.card == observed.id)?;
+            let convention = note
+                .promised_identity
+                .map_or(note.identities, IdentitySet::singleton);
+            let logically_trash = !logical.is_empty()
+                && logical
+                    .iter()
+                    .all(|identity| !is_eventually_useful(view, identity));
+            let convention_trash = note.identity_status != HGroupIdentityStatus::Provisional
+                && !note.identities.is_empty()
+                && note
+                    .identities
+                    .iter()
+                    .all(|identity| is_convention_trash(view, identity, &gotten, &inferred.cards));
+            let playable = inferred.playable_now.contains(&observed.id)
+                || inferred
+                    .connection
+                    .is_some_and(|connection| connection.card == observed.id);
+            let sources = knowledge
+                .effects_for(observed.id)
+                .map(|effect| effect.source())
+                .collect();
+            Some(OwnerCardKnowledge {
+                card: observed.id,
+                logical_identities: logical,
+                convention_identities: convention,
+                sources,
+                identity_status: note.identity_status,
+                facts: OwnerConventionFacts {
+                    focused: note.focused,
+                    saved: note.saved,
+                    finessed: note.finessed,
+                },
+                classifications: OwnerCardClassifications {
+                    playable,
+                    convention_only_trash: convention_trash && !logically_trash,
+                    discard_now: inferred.discard_now.contains(&observed.id),
+                },
+                play_obligation: note.play_obligation,
+                position: OwnerCardPosition {
+                    chop: inferred.chops[view.observer.index()] == Some(observed.id),
+                    chop_moved: inferred.chop_moved.contains(&observed.id),
+                },
+            })
+        })
+        .collect::<Vec<_>>()
+}
 
 /// Why an observer is allowed to retain a card identity domain.
 ///

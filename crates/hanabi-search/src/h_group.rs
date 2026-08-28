@@ -14,8 +14,8 @@ use hanabi_core::{
 };
 
 use crate::{
-    ConventionActionReason, ConventionRejectionReason, HGroupLevel, HGroupProfile, IdentitySet,
-    LogicalDeductions, RejectedConventionAction,
+    BeliefConstraints, ConventionActionReason, ConventionRejectionReason, HGroupLevel,
+    HGroupProfile, IdentitySet, LogicalDeductions, RejectedConventionAction,
 };
 
 mod action_analysis;
@@ -25,11 +25,13 @@ mod candidate;
 mod candidate_pipeline;
 mod claims;
 mod connection;
+mod constraint_graph;
 mod constraints;
 mod coverage;
 mod decision;
 mod effects;
 mod epistemic;
+mod event_reducer;
 mod facts;
 mod hand;
 mod identity;
@@ -59,6 +61,7 @@ use candidate::{ClueCandidate, CluePurpose, ClueRecognition, ClueValue};
 use candidate_pipeline::SemanticallyAdmittedCandidates;
 use claims::{IdentityClaims, claimed_identities_at_clue};
 use connection::{ConnectionManager, ConnectionObligation, ConnectionTransitionReason, PromiseId};
+use constraint_graph::ConventionConstraintGraph;
 use constraints::{ConstraintReason, ConventionConstraints};
 pub use coverage::{H_GROUP_DOCUMENTATION_SECTIONS, HGroupDocumentationSection};
 pub(crate) use decision::analyze_h_group_convention;
@@ -70,8 +73,9 @@ use decision::{
 #[cfg(test)]
 use decision::{ordered_h_group_actions, select_h_group_action};
 use effects::{ConventionJournal, ConventionReducer, EffectBatch, SignalHistory};
-use epistemic::EpistemicState;
-use facts::ConventionFacts;
+use epistemic::{EpistemicState, owner_knowledge_read_model};
+use event_reducer::HGroupRuleEffects;
+use facts::{ConventionFacts, IdentityClaimRelation};
 use hand::{
     chop, finesse_position, finesse_position_id, five_chop_moved_card, five_pulled_card, focus,
     is_critical, remove_card,
@@ -117,7 +121,7 @@ use prospective::{
     subjective_convention_cards, subjective_playable_cards, with_prospective_analysis_cache,
 };
 use recognition::apply_resolved_bluff_effects;
-use rule_engine::apply_post_event_rules;
+use rule_engine::{RuleExecutionContext, apply_post_event_rules};
 use rules::{HGroupRuleId, RulePhase, rule_enabled};
 use strategic_value::apply_strategic_clue_values;
 pub(crate) use symbolic_line::project_h_group_line;
@@ -784,60 +788,6 @@ pub const H_GROUP_LEVELS: [HGroupLevelDescriptor; 26] = [
 /// satisfy Good Touch and either play now or create exactly one valid Prompt
 /// or Finesse connection. Save clues are restricted to the Level 1 5, 2, and
 /// critical-card forms.
-/// Mutable convention effects shared by the level rules for one event.
-///
-/// Keeping this façade separate from the public before/after turn context
-/// makes rule inputs uniform and prevents giver-side and recipient-side rules
-/// from rebuilding subtly different slices of replay state.
-pub(super) struct HGroupRuleEffects<'a> {
-    explicitly_clued: &'a ProvenancedCardSet,
-    invisibly_clued: &'a mut ProvenancedCardSet,
-    clues: &'a [HGroupClueInterpretation],
-    already_playing: &'a mut ProvenancedCardSet,
-    pending: &'a mut ConnectionManager,
-    chop_moved: &'a mut ProvenancedCardSet,
-    must_clue: &'a mut PlayerSet,
-    forced_playable: &'a mut ProvenancedCardSet,
-    discard_now: &'a mut Vec<CardId>,
-    implicit_saves: &'a mut Vec<(CardId, IdentitySet)>,
-    required_fix: &'a mut Option<RequiredFix>,
-    signals: &'a mut ConventionJournal,
-}
-
-impl HGroupRuleEffects<'_> {
-    fn card_snapshot(&self) -> ConventionCardSetSnapshot {
-        ConventionCardSetSnapshot::capture(
-            self.explicitly_clued,
-            self.invisibly_clued,
-            self.already_playing,
-            self.chop_moved,
-            self.forced_playable,
-        )
-    }
-
-    fn reconcile_card_sources(&mut self, before: &ConventionCardSetSnapshot, source: EffectSource) {
-        self.invisibly_clued
-            .reconcile_mask(before.invisibly_clued, source);
-        self.already_playing
-            .reconcile_mask(before.already_playing, source);
-        self.chop_moved.reconcile_mask(before.chop_moved, source);
-        self.forced_playable
-            .reconcile_mask(before.forced_playable, source);
-    }
-
-    /// Attaches connection-created facts to the promise that owns them and
-    /// retracts all such facts when that promise leaves the pending state.
-    fn reconcile_connection_lifecycles(&mut self, transition_start: usize) {
-        reconcile_connection_fact_lifecycles(
-            self.pending,
-            transition_start,
-            self.invisibly_clued,
-            self.already_playing,
-            self.forced_playable,
-        );
-    }
-}
-
 #[allow(clippy::too_many_lines)]
 fn replay_h_group(deductions: &LogicalDeductions, profile: HGroupProfile) -> HGroupState {
     let ordinary = replay_h_group_inner(
@@ -1851,7 +1801,8 @@ fn replay_h_group_inner(
             required_fix: &mut required_fix,
             signals: &mut signals,
         };
-        let mut transition = apply_post_event_rules(&context, view, profile, &mut effects);
+        let execution = RuleExecutionContext::new(&context, view, profile);
+        let mut transition = apply_post_event_rules(&execution, &mut effects);
         if action_is_settled {
             if let Some(actor) = declined_with_clue {
                 let recognized_deferral = clue_permits_direct_play_deferral(&signals, entry.turn);
@@ -1982,26 +1933,9 @@ fn replay_h_group_inner(
         knowledge: ConventionKnowledge::default(),
     };
     state.knowledge = build_convention_knowledge(deductions, &state);
-    for effect in state.knowledge.effects().iter().copied() {
-        let turn = effect.source().turn();
-        if let Some(transition) = state
-            .transitions
-            .iter_mut()
-            .find(|transition| transition.turn == turn)
-        {
-            transition.delta.knowledge_changes.push(effect);
-        } else {
-            state.transitions.push(ConventionTransitionResult {
-                turn,
-                proposals: Vec::new(),
-                delta: ConventionTransitionDelta {
-                    card_changes: Vec::new(),
-                    knowledge_changes: vec![effect],
-                },
-            });
-        }
-    }
-    state.transitions.sort_by_key(|transition| transition.turn);
+    state
+        .knowledge
+        .attach_to_transitions(&mut state.transitions);
     debug_assert!(
         state.validate().is_ok(),
         "invalid H-Group replay state: {:?}",

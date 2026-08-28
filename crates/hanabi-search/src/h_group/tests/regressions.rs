@@ -1924,7 +1924,7 @@ fn paired_sample_five_treats_a_number_two_on_chop_as_a_save() {
         Some(Action::Discard(CardId::new(22))),
         "the number 2 clue on chop was incorrectly treated as a direct play: {inferred:#?}"
     );
-    assert!(inferred.saved.contains(&CardId::new(20)));
+    assert!(inferred.is_saved(CardId::new(20)));
 }
 
 #[test]
@@ -3032,7 +3032,7 @@ fn five_on_chop_is_a_save_and_is_not_played() {
         inferred.clues[0].kind,
         HGroupClueKind::Save(HGroupSaveKind::Five)
     );
-    assert_eq!(inferred.saved, vec![CardId::new(5)]);
+    assert_eq!(inferred.saved_cards().collect::<Vec<_>>(), vec![CardId::new(5)]);
     assert!(inferred.playable_now.is_empty());
 }
 

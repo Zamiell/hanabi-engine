@@ -129,6 +129,7 @@ fn convention_inferences_json(inferences: ConventionInferences) -> Value {
 }
 
 fn h_group_inferences_json(inferences: &HGroupInferences) -> Value {
+    let saved = inferences.saved_cards().collect::<Vec<_>>();
     let connection = inferences.connection.map(|connection| {
         json!({
             "card": connection.card.index(),
@@ -202,7 +203,7 @@ fn h_group_inferences_json(inferences: &HGroupInferences) -> Value {
             .map(|card| card.map(hanabi_core::CardId::index))
             .collect::<Vec<_>>(),
         "playableNow": card_ids_json(&inferences.playable_now),
-        "saved": card_ids_json(&inferences.saved),
+        "saved": card_ids_json(&saved),
         "discardNow": card_ids_json(&inferences.discard_now),
         "invisiblyClued": card_ids_json(&inferences.invisibly_clued),
         "chopMoved": card_ids_json(&inferences.chop_moved),

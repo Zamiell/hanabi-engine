@@ -2566,7 +2566,7 @@ pub(super) fn infer_clue_to_self(
     }
     let allow_direct_play = match clue.kind {
         HGroupClueKind::Save(_) => return,
-        HGroupClueKind::PlayOrSave if inferred.saved.contains(&clue.focus) => return,
+        HGroupClueKind::PlayOrSave if inferred.is_saved(clue.focus) => return,
         HGroupClueKind::Play | HGroupClueKind::PlayOrSave => true,
         HGroupClueKind::Unrecognized => false,
     };

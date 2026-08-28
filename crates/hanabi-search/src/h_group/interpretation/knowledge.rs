@@ -9,8 +9,45 @@ use super::{
     pending_is_active, replay_identity_is_queued, rule_enabled, was_clued_before,
 };
 use crate::h_group::knowledge_effects::{
-    KnowledgeSource, effects_from_projection, initial_card_inferences,
+    CardKnowledgeEffect, KnowledgeSource, effects_between, initial_card_inferences,
 };
+
+/// Event-sourced compiler for one observer's card knowledge.
+///
+/// Every semantic mutation is recorded with the event or promise that caused
+/// it. The materialized cards exist only as a convenient read model while the
+/// program is compiled; they are reproduced by `ConventionKnowledge::project`.
+struct OwnerKnowledgeBuilder {
+    cards: Vec<HGroupCardInference>,
+    effects: Vec<CardKnowledgeEffect>,
+}
+
+impl OwnerKnowledgeBuilder {
+    fn new(deductions: &LogicalDeductions) -> Self {
+        Self {
+            cards: initial_card_inferences(deductions),
+            effects: Vec::new(),
+        }
+    }
+
+    fn update(
+        &mut self,
+        card: CardId,
+        source: KnowledgeSource,
+        update: impl FnOnce(&mut HGroupCardInference),
+    ) {
+        let Some(note) = self.cards.iter_mut().find(|note| note.card == card) else {
+            return;
+        };
+        let before = *note;
+        update(note);
+        self.effects.extend(effects_between(before, *note, source));
+    }
+
+    fn finish(self) -> (Vec<HGroupCardInference>, Vec<CardKnowledgeEffect>) {
+        (self.cards, self.effects)
+    }
+}
 
 pub(in crate::h_group) fn delayed_focus_identities(
     identities: IdentitySet,
@@ -111,18 +148,24 @@ pub(in crate::h_group) fn identities_at_distance_at(
 fn compile_convention_card_inferences(
     deductions: &LogicalDeductions,
     replay: &HGroupState,
-) -> Vec<HGroupCardInference> {
+) -> (Vec<HGroupCardInference>, Vec<CardKnowledgeEffect>) {
     let view = deductions.view();
     let observer_turn_stack_heights =
         StackTimeline::before_player_turn(view, replay, view.observer).heights();
-    let mut cards = initial_card_inferences(deductions);
-    for card in &mut cards {
-        let narrowed = card
-            .identities
-            .without(replay.cards.facts.excluded_identities(card.card));
-        if !narrowed.is_empty() {
-            card.identities = narrowed;
-        }
+    let mut knowledge = OwnerKnowledgeBuilder::new(deductions);
+    let closure_turn = view.history.last().map_or(0, |entry| entry.turn);
+    for card in knowledge.cards.clone() {
+        let excluded = replay.cards.facts.excluded_identities(card.card);
+        knowledge.update(
+            card.card,
+            KnowledgeSource::ReplayClosure(closure_turn),
+            |note| {
+                let narrowed = note.identities.without(excluded);
+                if !narrowed.is_empty() {
+                    note.identities = narrowed;
+                }
+            },
+        );
     }
 
     for clue in &replay.clues {
@@ -136,14 +179,23 @@ fn compile_convention_card_inferences(
                 }
                 let connector = Card::new(identity.suit, Rank::ALL[height]);
                 clue.previously_gotten.iter().any(|prior| {
-                    cards
+                    knowledge
+                        .cards
                         .iter()
                         .find(|card| card.card == *prior)
                         .is_some_and(|card| card.identities.contains(connector))
                 })
             });
         if !replay.cards.invalidated_focuses.contains(&clue.focus) {
-            if let Some(card) = cards.iter_mut().find(|card| card.card == clue.focus) {
+            let source = if replay
+                .signals
+                .has_at_turn(clue.turn, HGroupMoveKind::FixClue)
+            {
+                KnowledgeSource::Reinterpretation(clue.turn)
+            } else {
+                KnowledgeSource::Clue(clue.turn)
+            };
+            knowledge.update(clue.focus, source, |card| {
                 card.identity_status = HGroupIdentityStatus::Settled;
                 let resolved_bluff = replay.signals.of_kind(HGroupMoveKind::Bluff).any(|signal| {
                     signal.cards.len() >= 2
@@ -324,7 +376,7 @@ fn compile_convention_card_inferences(
                         .intersection(clue.save_identities)
                         .is_empty();
                 }
-            }
+            });
         }
         let intentionally_duplicates = [HGroupMoveKind::FixClue, HGroupMoveKind::Duplication]
             .into_iter()
@@ -338,7 +390,7 @@ fn compile_convention_card_inferences(
                 if !was_clued_before(view, clue.turn, *previous) {
                     continue;
                 }
-                let Some(card) = cards.iter_mut().find(|card| card.card == *previous) else {
+                let Some(card) = knowledge.cards.iter().find(|card| card.card == *previous) else {
                     continue;
                 };
                 if clue.giver == view.observer && card.identities.len() > 1 {
@@ -349,19 +401,22 @@ fn compile_convention_card_inferences(
                     continue;
                 }
                 let narrowed = card.identities.without(clue.focus_identities);
-                if !narrowed.is_empty() {
-                    card.identities = narrowed;
-                }
+                knowledge.update(*previous, KnowledgeSource::Clue(clue.turn), |card| {
+                    if !narrowed.is_empty() {
+                        card.identities = narrowed;
+                    }
+                });
             }
         }
         for (non_focus, good_touch) in &clue.non_focus_identities {
-            let convention_dupes = cards
+            let convention_dupes = knowledge
+                .cards
                 .iter()
                 .filter(|other| other.card != *non_focus && other.identities.len() == 1)
                 .fold(IdentitySet::default(), |duplicates, other| {
                     duplicates.union(other.identities)
                 });
-            if let Some(card) = cards.iter_mut().find(|card| card.card == *non_focus) {
+            if let Some(card) = knowledge.cards.iter().find(|card| card.card == *non_focus) {
                 // Good Touch is a continuing promise that the non-focus card
                 // will eventually play, not a mask frozen at clue time. As
                 // the stack advances, identities that have become trash fall
@@ -378,17 +433,21 @@ fn compile_convention_card_inferences(
                 let narrowed = card
                     .identities
                     .intersection(still_useful.without(convention_dupes));
-                if !narrowed.is_empty() {
-                    card.identities = narrowed;
-                }
+                knowledge.update(*non_focus, KnowledgeSource::Clue(clue.turn), |card| {
+                    if !narrowed.is_empty() {
+                        card.identities = narrowed;
+                    }
+                });
             }
         }
         for (non_focus, trash) in &clue.non_focus_trash_identities {
-            if let Some(card) = cards.iter_mut().find(|card| card.card == *non_focus) {
+            if let Some(card) = knowledge.cards.iter().find(|card| card.card == *non_focus) {
                 let narrowed = card.identities.intersection(*trash);
-                if !narrowed.is_empty() {
-                    card.identities = narrowed;
-                }
+                knowledge.update(*non_focus, KnowledgeSource::Clue(clue.turn), |card| {
+                    if !narrowed.is_empty() {
+                        card.identities = narrowed;
+                    }
+                });
             }
         }
     }
@@ -408,8 +467,11 @@ fn compile_convention_card_inferences(
             })
             .flatten()
     });
-    for card in &mut cards {
-        card.focused = active_focus == Some(card.card);
+    if let Some(active_focus) = active_focus {
+        let turn = view.history.last().map_or(view.turn, |entry| entry.turn);
+        knowledge.update(active_focus, KnowledgeSource::CurrentFocus(turn), |card| {
+            card.focused = true;
+        });
     }
 
     // A deterministic later step in a connection chain is known immediately,
@@ -434,19 +496,40 @@ fn compile_convention_card_inferences(
         if conflicting_promise {
             continue;
         }
-        let Some(card) = cards.iter_mut().find(|card| card.card == pending_card) else {
+        let Some(card) = knowledge
+            .cards
+            .iter()
+            .find(|card| card.card == pending_card)
+        else {
             continue;
         };
+        let current_identities = card.identities;
         if pending.cards.len() == 1 {
             let promised = IdentitySet::singleton(pending.expected);
-            let narrowed = card.identities.intersection(promised);
+            let narrowed = current_identities.intersection(promised);
             if narrowed.is_empty() {
                 continue;
             }
-            card.identities = narrowed;
         }
-        card.promised_identity = Some(pending.expected);
-        card.finessed = pending.kind == HGroupConnectionKind::Finesse;
+        let turn = replay
+            .pending_connections
+            .provenance(pending.promise)
+            .map_or(view.turn, |origin| origin.created_turn);
+        knowledge.update(
+            pending_card,
+            KnowledgeSource::Promise {
+                id: pending.promise,
+                turn,
+            },
+            |card| {
+                if pending.cards.len() == 1 {
+                    card.identities =
+                        current_identities.intersection(IdentitySet::singleton(pending.expected));
+                }
+                card.promised_identity = Some(pending.expected);
+                card.finessed = pending.kind == HGroupConnectionKind::Finesse;
+            },
+        );
     }
 
     for pending in replay.pending_connections.iter().filter(|pending| {
@@ -461,7 +544,11 @@ fn compile_convention_card_inferences(
         let Some(pending_card) = pending.cards.first() else {
             continue;
         };
-        let Some(card) = cards.iter_mut().find(|card| card.card == *pending_card) else {
+        let Some(card) = knowledge
+            .cards
+            .iter()
+            .find(|card| card.card == *pending_card)
+        else {
             continue;
         };
         let expected = IdentitySet::singleton(pending.expected);
@@ -484,15 +571,28 @@ fn compile_convention_card_inferences(
             expected.union(unclaimed_playables)
         };
         let narrowed = card.identities.intersection(allowed);
-        if !narrowed.is_empty() {
-            card.identities = narrowed;
-        }
-        card.promised_identity = Some(pending.expected);
-        card.finessed = pending.kind == HGroupConnectionKind::Finesse;
-        card.play_obligation = Some(HGroupPlayObligation::Connection(pending.kind));
+        let turn = replay
+            .pending_connections
+            .provenance(pending.promise)
+            .map_or(view.turn, |origin| origin.created_turn);
+        knowledge.update(
+            *pending_card,
+            KnowledgeSource::Promise {
+                id: pending.promise,
+                turn,
+            },
+            |card| {
+                if !narrowed.is_empty() {
+                    card.identities = narrowed;
+                }
+                card.promised_identity = Some(pending.expected);
+                card.finessed = pending.kind == HGroupConnectionKind::Finesse;
+                card.play_obligation = Some(HGroupPlayObligation::Connection(pending.kind));
+            },
+        );
     }
     for forced in &replay.cards.forced_playable {
-        let Some(card) = cards.iter_mut().find(|card| card.card == *forced) else {
+        let Some(card) = knowledge.cards.iter().find(|card| card.card == *forced) else {
             continue;
         };
         // Forced and Priority plays can physically be any identity that would
@@ -506,22 +606,42 @@ fn compile_convention_card_inferences(
                 .filter(|identity| !claims.identity_claimed_elsewhere(card.card, *identity))
                 .fold(0, |mask, identity| mask | (1 << identity.index())),
         );
-        if !playable.is_empty() {
-            card.identities = playable;
-        }
-        card.play_obligation = Some(HGroupPlayObligation::Forced);
+        let turn = replay
+            .transitions
+            .iter()
+            .rev()
+            .find(|transition| {
+                transition.delta.card_changes.iter().any(|change| {
+                    change.card == *forced && change.fact == MaterializedCardFact::ForcedPlayable
+                })
+            })
+            .map_or(view.turn, |transition| transition.turn);
+        knowledge.update(*forced, KnowledgeSource::ForcedPlay(turn), |card| {
+            if !playable.is_empty() {
+                card.identities = playable;
+            }
+            card.play_obligation = Some(HGroupPlayObligation::Forced);
+        });
     }
     for (saved, identities) in &replay.implicit_saves {
-        let Some(card) = cards.iter_mut().find(|card| card.card == *saved) else {
+        let Some(card) = knowledge.cards.iter().find(|card| card.card == *saved) else {
             continue;
         };
         let narrowed = card.identities.intersection(*identities);
-        if !narrowed.is_empty() {
-            card.identities = narrowed;
-        }
-        card.saved = true;
+        let turn = replay
+            .clues
+            .iter()
+            .rev()
+            .find(|clue| clue.focus == *saved || clue.new_non_focus.contains(saved))
+            .map_or(view.turn, |clue| clue.turn);
+        knowledge.update(*saved, KnowledgeSource::ImplicitSave(turn), |card| {
+            if !narrowed.is_empty() {
+                card.identities = narrowed;
+            }
+            card.saved = true;
+        });
     }
-    cards
+    knowledge.finish()
 }
 
 /// Compiles convention semantics once into replay-owned typed epistemic
@@ -530,75 +650,7 @@ pub(in crate::h_group) fn build_convention_knowledge(
     deductions: &LogicalDeductions,
     replay: &HGroupState,
 ) -> ConventionKnowledge {
-    let view = deductions.view();
-    let projected = compile_convention_card_inferences(deductions, replay);
-    let effects = effects_from_projection(deductions, &projected, |card| {
-        if let Some(connection) = replay.pending_connections.iter().find(|connection| {
-            connection.cards.first() == Some(&card)
-                && (connection.cards.len() == 1
-                    || pending_is_active(connection, &replay.pending_connections))
-        }) {
-            let turn = replay
-                .pending_connections
-                .provenance(connection.promise)
-                .map_or(view.turn, |origin| origin.created_turn);
-            return KnowledgeSource::Promise {
-                id: connection.promise,
-                turn,
-            };
-        }
-        if replay.cards.forced_playable.contains(&card) {
-            let turn = replay
-                .transitions
-                .iter()
-                .rev()
-                .find(|transition| {
-                    transition.delta.card_changes.iter().any(|change| {
-                        change.card == card && change.fact == MaterializedCardFact::ForcedPlayable
-                    })
-                })
-                .map_or(view.turn, |transition| transition.turn);
-            return KnowledgeSource::ForcedPlay(turn);
-        }
-        if replay
-            .implicit_saves
-            .iter()
-            .any(|(saved, _)| *saved == card)
-        {
-            let turn = replay
-                .clues
-                .iter()
-                .rev()
-                .find(|clue| clue.focus == card || clue.new_non_focus.contains(&card))
-                .map_or(view.turn, |clue| clue.turn);
-            return KnowledgeSource::ImplicitSave(turn);
-        }
-        if let Some(clue) = replay.clues.iter().rev().find(|clue| {
-            clue.focus == card
-                || clue.new_non_focus.contains(&card)
-                || clue
-                    .non_focus_trash_identities
-                    .iter()
-                    .any(|(trash, _)| *trash == card)
-        }) {
-            if projected
-                .iter()
-                .find(|inference| inference.card == card)
-                .is_some_and(|inference| inference.focused)
-            {
-                return KnowledgeSource::CurrentFocus(clue.turn);
-            }
-            if replay
-                .signals
-                .at_turn(clue.turn, HGroupMoveKind::FixClue)
-                .any(|signal| signal.cards.contains(&card))
-            {
-                return KnowledgeSource::Reinterpretation(clue.turn);
-            }
-            return KnowledgeSource::Clue(clue.turn);
-        }
-        KnowledgeSource::ReplayClosure(view.history.last().map_or(0, |entry| entry.turn))
-    });
+    let (projected, effects) = compile_convention_card_inferences(deductions, replay);
     let knowledge = ConventionKnowledge::new(effects);
     debug_assert_eq!(knowledge.project(deductions), projected);
     knowledge

@@ -39,8 +39,10 @@ Only Hanabi Live `No Variant` games are currently supported.
 Hidden simulator truth is never passed to an action-selection policy.
 
 Logical feasibility uses compact 25-bit identity sets and Hall-capacity
-matching. Convention constraints are intersected with those domains, including
-mutually exclusive branches for ambiguous connections.
+matching. A canonical convention constraint graph intersects per-card domains
+and retains mutually exclusive branches for both ambiguous connections and
+relational `OneOf` claims. Demonstrated branches are resolved against public
+history before the graph reaches exact world enumeration.
 
 ## Deterministic planning
 
@@ -117,9 +119,14 @@ H-Group uses shared internal boundaries to keep these answers consistent:
   in the same semantic order; rule phases and dependencies are validated.
 - `ConventionCardState` exposes compact materialized indexes backed by the
   provenance ledger rather than independently maintained truth sets.
-- owner knowledge is compiled once into typed `CardKnowledgeEffect` values and
-  projected by a pure reducer. Identity restrictions, exact promises, transient
-  focus, saves, and typed blind-play obligations remain separate facts.
+- owner knowledge is compiled into an ordered, provenance-indexed
+  `CardKnowledgeEffect` program. Effects are attributed when each semantic
+  mutation occurs and partitioned into their causal public transitions. A pure
+  reducer projects identity restrictions, exact promises, typed fact changes,
+  and blind-play obligations; no final-note source guessing remains.
+- one canonical owner epistemic read model separates logical identities from
+  convention identities and derived classifications. Production diagnostics
+  and the expert superposition regression consume that model directly.
 - `ActionSchedule` joins direct plays, connection responses, forced plays, and
   required discards behind one read boundary. `StackTimeline` distinguishes
   clue-time, current, and before-player playability.

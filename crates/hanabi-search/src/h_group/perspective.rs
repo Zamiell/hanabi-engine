@@ -448,7 +448,10 @@ mod tests {
             hypothetical_inferences.playable_now,
             actual_inferences.playable_now
         );
-        assert_eq!(hypothetical_inferences.saved, actual_inferences.saved);
+        assert_eq!(
+            hypothetical_inferences.saved_cards().collect::<Vec<_>>(),
+            actual_inferences.saved_cards().collect::<Vec<_>>()
+        );
         assert_eq!(
             hypothetical_inferences.connection,
             actual_inferences.connection

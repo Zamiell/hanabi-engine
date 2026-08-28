@@ -1,8 +1,6 @@
 use core::{fmt, str::FromStr};
 
-use crate::{
-    BeliefConstraints, ConventionAgnosticPolicy, HGroupInferences, IdentitySet, LogicalDeductions,
-};
+use crate::{BeliefConstraints, ConventionAgnosticPolicy, HGroupInferences, LogicalDeductions};
 
 /// H-Group documentation revision implemented by this engine.
 ///
@@ -321,15 +319,13 @@ impl SupportedConvention {
                         reason,
                     })
                     .collect();
-                let belief_constraints =
-                    h_group_belief_constraints(deductions, &decision.inferences);
                 ConventionAnalysis {
                     inferences: ConventionInferences::HGroup(Box::new(decision.inferences)),
                     actions,
                     rejected_actions: decision.rejected_actions,
                     preferred_action: decision.preferred,
                     forced_action: decision.forced,
-                    belief_constraints,
+                    belief_constraints: decision.belief_constraints,
                 }
             }
         }
@@ -347,70 +343,6 @@ impl SupportedConvention {
                 crate::h_group::project_h_group_line(view, profile, root, limit)
             }
         }
-    }
-}
-
-fn h_group_belief_constraints(
-    deductions: &LogicalDeductions,
-    inferred: &HGroupInferences,
-) -> BeliefConstraints {
-    let constraints = inferred
-        .cards
-        .iter()
-        .map(|card| (card.card, card.identities))
-        .collect::<Vec<_>>();
-    if inferred.connection_promises.is_empty() {
-        return BeliefConstraints {
-            constraints,
-            branches: Vec::new(),
-        };
-    }
-
-    let view = deductions.view();
-    let immediately_playable = IdentitySet::from_mask(
-        IdentitySet::all()
-            .iter()
-            .filter(|identity| {
-                identity.rank.number()
-                    == u8::try_from(view.play_stacks[identity.suit.index()].len())
-                        .expect("a standard stack has at most five cards")
-                        + 1
-            })
-            .fold(0, |mask, identity| mask | (1 << identity.index())),
-    );
-    let mut branches = vec![Vec::new()];
-    for promise in &inferred.connection_promises {
-        let expected = IdentitySet::singleton(promise.identity);
-        let wrong_success = immediately_playable.without(expected);
-        let alternatives = promise
-            .cards
-            .iter()
-            .enumerate()
-            .map(|(correct, card)| {
-                promise.cards[..correct]
-                    .iter()
-                    .copied()
-                    .map(|prior| (prior, wrong_success))
-                    .chain(core::iter::once((*card, expected)))
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-        branches = branches
-            .into_iter()
-            .flat_map(|branch| {
-                alternatives.iter().map(move |alternative| {
-                    branch
-                        .iter()
-                        .copied()
-                        .chain(alternative.iter().copied())
-                        .collect()
-                })
-            })
-            .collect();
-    }
-    BeliefConstraints {
-        constraints,
-        branches,
     }
 }
 

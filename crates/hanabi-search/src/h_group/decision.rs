@@ -1,15 +1,16 @@
 use super::{
-    Action, ActionSchedule, Card, CardId, CardSet, Clue, ClueCandidate, CluePurpose,
-    ClueRecognition, ClueValue, ConstraintReason, ConventionActionReason, ConventionConstraints,
-    HGroupActionKind, HGroupActionSet, HGroupAnalyzedAction, HGroupClueKind, HGroupConnection,
-    HGroupConnectionKind, HGroupConnectionPromise, HGroupIdentityStatus, HGroupInferences,
-    HGroupMoveKind, HGroupPhase, HGroupPlayObligation, HGroupProfile, HGroupRuleId, HGroupState,
-    IdentitySet, LogicalDeductions, MAX_CLUE_TOKENS, ObservedCard, OnceLock, PerspectiveDepth,
-    PerspectiveProjector, PlayerId, PlayerView, ProspectiveTransition, Rank,
-    RejectedConventionAction, Suit, TeamConventionSnapshot, chop, convention_card_inferences,
-    creates_false_anxiety, focus, h_group_clue_candidates_from_replay, h_group_phase,
-    h_group_rejected_clues_from_replay, identity_of, infer_clue_to_self, is_convention_trash,
-    is_critical, is_playable_at, is_playable_now, next_player, pending_is_active,
+    Action, ActionSchedule, BeliefConstraints, Card, CardId, CardSet, Clue, ClueCandidate,
+    CluePurpose, ClueRecognition, ClueValue, ConstraintReason, ConventionActionReason,
+    ConventionConstraintGraph, ConventionConstraints, HGroupActionKind, HGroupActionSet,
+    HGroupAnalyzedAction, HGroupClueKind, HGroupConnection, HGroupConnectionKind,
+    HGroupConnectionPromise, HGroupIdentityStatus, HGroupInferences, HGroupMoveKind, HGroupPhase,
+    HGroupPlayObligation, HGroupProfile, HGroupRuleId, HGroupState, IdentitySet, LogicalDeductions,
+    MAX_CLUE_TOKENS, ObservedCard, OnceLock, PerspectiveDepth, PerspectiveProjector, PlayerId,
+    PlayerView, ProspectiveTransition, Rank, RejectedConventionAction, Suit,
+    TeamConventionSnapshot, chop, convention_card_inferences, creates_false_anxiety, focus,
+    h_group_clue_candidates_from_replay, h_group_phase, h_group_rejected_clues_from_replay,
+    identity_of, infer_clue_to_self, is_convention_trash, is_critical, is_playable_at,
+    is_playable_now, next_player, owner_knowledge_read_model, pending_is_active,
     projected_h_group_replay, prospective_clue_has_unsafe_connection,
     prospective_clue_marks_focus_saved, prospective_clue_view,
     prospective_play_has_unsafe_inference, replay_h_group, rule_enabled,
@@ -146,9 +147,6 @@ pub(super) fn infer_h_group_from_replay(
         .collect();
 
     for card in &inferred.cards {
-        if card.saved {
-            inferred.saved.push(card.card);
-        }
         let logically_playable =
             deductions
                 .possible_identities(card.card)
@@ -306,6 +304,33 @@ pub(super) fn infer_h_group_from_replay(
             }
         }
     }
+    // Build the canonical owner read model in production, not only in the
+    // snapshot tests. Public convenience collections are materialized from
+    // the same state so they cannot drift from per-card knowledge.
+    let owner_knowledge = owner_knowledge_read_model(deductions, &replay.knowledge, &inferred);
+    let _convention_only_trash_count = owner_knowledge
+        .iter()
+        .filter(|card| card.classifications.convention_only_trash)
+        .count();
+    debug_assert!(owner_knowledge.iter().all(|card| {
+        let note = inferred.cards.iter().find(|note| note.card == card.card);
+        note.is_some_and(|note| {
+            note.play_obligation == card.play_obligation
+                && note.focused == card.facts.focused
+                && note.saved == card.facts.saved
+                && note.finessed == card.facts.finessed
+                && card.classifications.playable
+                    == (inferred.playable_now.contains(&card.card)
+                        || inferred
+                            .connection
+                            .is_some_and(|connection| connection.card == card.card))
+                && card.position.chop == (inferred.chops[view.observer.index()] == Some(card.card))
+                && card.position.chop_moved == inferred.chop_moved.contains(&card.card)
+                && card.classifications.discard_now == inferred.discard_now.contains(&card.card)
+                && (card.sources.is_empty()
+                    || card.sources.iter().all(|source| source.turn() <= view.turn))
+        })
+    }));
     inferred
 }
 
@@ -471,7 +496,7 @@ fn ordered_h_group_actions_from_analysis(
     }
     if view.clue_tokens < MAX_CLUE_TOKENS {
         if let Some(chop) = inferred.chops[view.observer.index()] {
-            if !inferred.saved.contains(&chop) {
+            if !inferred.is_saved(chop) {
                 return vec![Action::Discard(chop)];
             }
         }
@@ -479,7 +504,7 @@ fn ordered_h_group_actions_from_analysis(
     if view.clue_tokens < MAX_CLUE_TOKENS && view.deck_size <= view.hands.len() {
         if let Some(forced) = own_hand.iter().find(|card| {
             !gotten.contains(&card.id)
-                && !inferred.saved.contains(&card.id)
+                && !inferred.is_saved(card.id)
                 && positional_discard_is_valid(view, card.id)
         }) {
             return vec![Action::Discard(forced.id)];
@@ -513,7 +538,7 @@ fn ordered_h_group_actions_from_analysis(
     }
     if view.clue_tokens < MAX_CLUE_TOKENS {
         if let Some(chop) = inferred.chops[view.observer.index()] {
-            if !inferred.saved.contains(&chop) {
+            if !inferred.is_saved(chop) {
                 return vec![Action::Discard(chop)];
             }
         }
@@ -673,6 +698,7 @@ pub(crate) struct HGroupConventionDecision {
     pub(crate) rejected_actions: Vec<RejectedConventionAction>,
     pub(crate) preferred: Option<Action>,
     pub(crate) forced: Option<Action>,
+    pub(crate) belief_constraints: BeliefConstraints,
 }
 
 pub(crate) fn analyze_h_group_convention(
@@ -705,12 +731,16 @@ pub(crate) fn analyze_h_group_convention(
         .collect();
     let preferred = select_h_group_action_from_analysis(deductions, profile, &analysis);
     let forced = h_group_predictable_action_from_analysis(deductions, profile, &analysis);
+    let belief_constraints =
+        ConventionConstraintGraph::from_replay(deductions, &analysis.replay, &analysis.inferences)
+            .into_belief_constraints();
     HGroupConventionDecision {
         inferences: analysis.inferences.clone(),
         actions: ranked,
         rejected_actions,
         preferred,
         forced,
+        belief_constraints,
     }
 }
 
@@ -1096,7 +1126,7 @@ fn scored_discard_candidate(
         return Some((card, 410));
     }
     if let Some(card) =
-        inferred.chops[view.observer.index()].filter(|card| !inferred.saved.contains(card))
+        inferred.chops[view.observer.index()].filter(|card| !inferred.is_saved(*card))
     {
         // Spending a chop is preferable to a low-value tempo/stall clue, but
         // a useful direct Play Clue still takes priority.
@@ -1106,7 +1136,7 @@ fn scored_discard_candidate(
         .then(|| {
             own_hand.iter().map(|card| card.id).find(|card| {
                 !gotten.contains(card)
-                    && !inferred.saved.contains(card)
+                    && !inferred.is_saved(*card)
                     && positional_discard_is_valid(view, *card)
             })
         })
@@ -1737,21 +1767,20 @@ fn select_h_group_action_from_analysis(
             });
             if let Some(discard) = known_trash
                 .or_else(|| {
-                    inferred.chops[view.observer.index()]
-                        .filter(|card| !inferred.saved.contains(card))
+                    inferred.chops[view.observer.index()].filter(|card| !inferred.is_saved(*card))
                 })
-                .filter(|card| !inferred.saved.contains(card))
+                .filter(|card| !inferred.is_saved(*card))
                 .or_else(|| {
                     own_hand
                         .iter()
                         .map(|card| card.id)
-                        .find(|card| !gotten.contains(card) && !inferred.saved.contains(card))
+                        .find(|card| !gotten.contains(card) && !inferred.is_saved(*card))
                 })
                 .or_else(|| {
                     own_hand
                         .iter()
                         .map(|card| card.id)
-                        .find(|card| !inferred.saved.contains(card))
+                        .find(|card| !inferred.is_saved(*card))
                 })
             {
                 return Some(Action::Discard(discard));

@@ -26,7 +26,8 @@ H-Group history reducer
    |-- HGroupSignal           append-only explanation log
    |-- ConventionFacts        relational current convention truth
    |-- CardKnowledgeEffect    typed identity/promise/status change
-   |-- ConventionKnowledge   immutable owner-knowledge program
+   |-- ConventionKnowledge   event-sourced owner-knowledge program and provenance index
+   |-- ConventionConstraintGraph relational OneOf/connection constraints
    |-- ActionSchedule         unified live play/discard commitments
    |-- StackTimeline          clue/current/before-player stack horizons
    |-- ClueInterpretationPlan one Play/Save/Fix/5CM/Stall precedence result
@@ -93,12 +94,25 @@ recipient modeling.
   obligations remain in the canonical convention state instead of being
   copied into a second, independently mutable status aggregate. It deliberately
   exposes neither deck order nor simulator truth.
-- `knowledge_effects.rs` owns the immutable `ConventionKnowledge` program and
-  its pure reducer. Convention recognition compiles `RestrictDomain`, explicit
-  reinterpretation, promise, save, focus, and play-obligation effects once per
-  replay. Owner projection applies those effects to logical domains and does
-  not recognize convention moves a second time. Ordinary inference cannot
-  widen a domain; only a typed Fix/reinterpretation may replace it.
+- `knowledge_effects.rs` owns the immutable, event-sourced
+  `ConventionKnowledge` program, its per-card provenance index, and its pure
+  reducer. The owner-knowledge compiler records each identity restriction,
+  reinterpretation, promise, typed fact change, and play obligation at the
+  semantic mutation that caused it. It no longer diffs one final card note and
+  guesses a source afterward. Owner projection applies the ordered effects to
+  logical domains without recognizing convention moves a second time.
+  Ordinary inference cannot widen a domain; only a typed
+  Fix/reinterpretation may replace it.
+- `epistemic.rs` owns the canonical owner card read model used by production
+  analysis and regression serialization. It keeps logical identities,
+  convention identities, provenance, obligations, positional state, and
+  computed convention-only trash separate. Serializers do not recalculate
+  these semantics.
+- `constraint_graph.rs` is the single bridge from convention state to exact
+  world constraints. Per-card domains, unresolved relational `OneOf` claims,
+  and ordered connection alternatives are retained symbolically. A claim
+  demonstrated by a revealed card excludes that identity from its surviving
+  candidates instead of incorrectly forcing one of them to inherit it.
 - `outcome.rs` retains clue consequences before strategy converts genuine
   preferences to numeric ordering. Giver-visible team coverage and
   owner-relative promised-action and clued-card-superposition equivalence for
@@ -109,6 +123,10 @@ recipient modeling.
   diagnostic reductions retain every non-empty contribution as a
   `RuleProposal` in the event's `ConventionTransitionResult`; `rules.rs` proves
   every level has exactly one valid execution path.
+- `event_reducer.rs` owns the mutable capability passed to recognizers.
+  `RuleExecutionContext` binds an immutable turn context, observer view, and
+  profile into one value, preventing mismatched temporal or perspective
+  arguments at the dispatch boundary.
 - `identity.rs` and `hand.rs` own the shared identity, trash, playability,
   focus, chop, and finesse-position semantics used by giver, recipient, and
   planner paths.
@@ -179,6 +197,9 @@ Every completed replay reduction validates that:
   unique partition of post-event signals.
 - every owner-knowledge effect references a live card and occurs in exactly one
   public transition delta;
+- every owner-knowledge effect is attached to the transition named by its
+  provenance turn, and the per-card provenance index exactly matches the
+  ordered effect program;
 - ordinary knowledge effects only narrow identity domains; replacement requires
   explicit reinterpretation provenance; and
 - pure owner projection reproduces the convention compiler's result without
@@ -207,8 +228,9 @@ behavior, architecture properties, and golden replay parity.
 1. Identify the documented level and add or reuse its `HGroupRuleId` gate.
 2. Read only the required side of `HGroupTurnContext`; use `HistoricalView` for
    old identity questions.
-3. Register the family with the executable rule engine, emit a typed effect,
-   and use `ConnectionManager` for connection changes.
+3. Register the family with the executable rule engine, emit typed public and
+   owner-knowledge effects with their causal source, and use
+   `ConnectionManager` for connection changes.
 4. Add current query state to `ConventionFacts` rather than searching the
    signal log at decision time.
 5. Express mandatory behavior as a `ConventionConstraints` rule. Use a numeric

@@ -401,7 +401,7 @@ pub(super) fn prospective_clue_marks_focus_saved(
         let after_clue = prospective_clue_view(world, target, clue, touched);
         projected_h_group_replay(&after_clue, profile, target)
             .map(|(deductions, replay)| infer_h_group_from_replay(&deductions, replay, profile))
-            .is_some_and(|inferred| inferred.saved.contains(&focus))
+            .is_some_and(|inferred| inferred.is_saved(focus))
     };
     if !focus_is_saved(source) {
         return false;
@@ -418,9 +418,7 @@ pub(super) fn prospective_clue_marks_focus_saved(
         PerspectiveProjector::project_resolved_owned(after_clue, profile, target).is_none_or(
             |(deductions, replay)| {
                 replay.cards.chop_moved.contains(&focus)
-                    || !infer_h_group_from_replay(&deductions, replay, profile)
-                        .saved
-                        .contains(&focus)
+                    || !infer_h_group_from_replay(&deductions, replay, profile).is_saved(focus)
             },
         )
     });

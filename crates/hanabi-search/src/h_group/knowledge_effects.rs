@@ -1,13 +1,15 @@
+use std::collections::HashMap;
+use std::hash::BuildHasherDefault;
 use std::sync::Arc;
 
 use hanabi_core::{Card, CardId};
 
 use super::{
-    HGroupCardInference, HGroupIdentityStatus, HGroupPlayObligation, IdentitySet,
-    LogicalDeductions, PromiseId,
+    CompactIdHasher, ConventionTransitionDelta, ConventionTransitionResult, HGroupCardInference,
+    HGroupIdentityStatus, HGroupPlayObligation, IdentitySet, LogicalDeductions, PromiseId,
 };
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) enum KnowledgeSource {
     Clue(u32),
     Reinterpretation(u32),
@@ -58,19 +60,10 @@ pub(super) enum CardKnowledgeEffect {
         status: HGroupIdentityStatus,
         source: KnowledgeSource,
     },
-    SetFocused {
+    SetFact {
         card: CardId,
-        focused: bool,
-        source: KnowledgeSource,
-    },
-    SetSaved {
-        card: CardId,
-        saved: bool,
-        source: KnowledgeSource,
-    },
-    SetFinessed {
-        card: CardId,
-        finessed: bool,
+        fact: OwnerKnowledgeFact,
+        change: KnowledgeFactChange,
         source: KnowledgeSource,
     },
     SetPlayObligation {
@@ -80,6 +73,22 @@ pub(super) enum CardKnowledgeEffect {
     },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum OwnerKnowledgeFact {
+    /// Event-local annotation for the latest clue only.
+    Focus,
+    /// Persistent protection established by a Save interpretation.
+    Save,
+    /// Membership in a live deterministic Finesse chain.
+    Finesse,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum KnowledgeFactChange {
+    Added,
+    Removed,
+}
+
 impl CardKnowledgeEffect {
     pub(super) const fn card(self) -> CardId {
         match self {
@@ -87,9 +96,7 @@ impl CardKnowledgeEffect {
             | Self::ReplaceDomain { card, .. }
             | Self::SetPromise { card, .. }
             | Self::SetIdentityStatus { card, .. }
-            | Self::SetFocused { card, .. }
-            | Self::SetSaved { card, .. }
-            | Self::SetFinessed { card, .. }
+            | Self::SetFact { card, .. }
             | Self::SetPlayObligation { card, .. } => card,
         }
     }
@@ -100,9 +107,7 @@ impl CardKnowledgeEffect {
             | Self::ReplaceDomain { source, .. }
             | Self::SetPromise { source, .. }
             | Self::SetIdentityStatus { source, .. }
-            | Self::SetFocused { source, .. }
-            | Self::SetSaved { source, .. }
-            | Self::SetFinessed { source, .. }
+            | Self::SetFact { source, .. }
             | Self::SetPlayObligation { source, .. } => source,
         }
     }
@@ -111,12 +116,25 @@ impl CardKnowledgeEffect {
 #[derive(Clone, Debug, Default)]
 pub(super) struct ConventionKnowledge {
     effects: Arc<[CardKnowledgeEffect]>,
+    /// Source index for explanation, retraction, and transition validation.
+    /// Projection deliberately consumes the ordered program; consumers that
+    /// need provenance must not reverse-engineer it from the materialized
+    /// card note.
+    by_card: Arc<HashMap<CardId, Vec<usize>, BuildHasherDefault<CompactIdHasher>>>,
 }
 
 impl ConventionKnowledge {
     pub(super) fn new(effects: Vec<CardKnowledgeEffect>) -> Self {
+        let mut by_card = HashMap::default();
+        for (index, effect) in effects.iter().enumerate() {
+            by_card
+                .entry(effect.card())
+                .or_insert_with(Vec::new)
+                .push(index);
+        }
         Self {
             effects: effects.into(),
+            by_card: Arc::new(by_card),
         }
     }
 
@@ -124,10 +142,43 @@ impl ConventionKnowledge {
         &self.effects
     }
 
+    pub(super) fn effects_for(&self, card: CardId) -> impl Iterator<Item = &CardKnowledgeEffect> {
+        self.by_card
+            .get(&card)
+            .into_iter()
+            .flatten()
+            .filter_map(|index| self.effects.get(*index))
+    }
+
     pub(super) fn project(&self, deductions: &LogicalDeductions) -> Vec<HGroupCardInference> {
         let mut cards = initial_card_inferences(deductions);
         CardKnowledgeReducer::apply(&mut cards, &self.effects);
         cards
+    }
+
+    /// Partitions the canonical knowledge program by its causal event turn.
+    /// The replay orchestrator delegates this operation instead of guessing a
+    /// source for a final materialized card note.
+    pub(super) fn attach_to_transitions(&self, transitions: &mut Vec<ConventionTransitionResult>) {
+        for effect in self.effects.iter().copied() {
+            let turn = effect.source().turn();
+            if let Some(transition) = transitions
+                .iter_mut()
+                .find(|transition| transition.turn == turn)
+            {
+                transition.delta.knowledge_changes.push(effect);
+            } else {
+                transitions.push(ConventionTransitionResult {
+                    turn,
+                    proposals: Vec::new(),
+                    delta: ConventionTransitionDelta {
+                        card_changes: Vec::new(),
+                        knowledge_changes: vec![effect],
+                    },
+                });
+            }
+        }
+        transitions.sort_by_key(|transition| transition.turn);
     }
 }
 
@@ -157,10 +208,13 @@ impl CardKnowledgeReducer {
                 CardKnowledgeEffect::SetIdentityStatus { status, .. } => {
                     card.identity_status = status;
                 }
-                CardKnowledgeEffect::SetFocused { focused, .. } => card.focused = focused,
-                CardKnowledgeEffect::SetSaved { saved, .. } => card.saved = saved,
-                CardKnowledgeEffect::SetFinessed { finessed, .. } => {
-                    card.finessed = finessed;
+                CardKnowledgeEffect::SetFact { fact, change, .. } => {
+                    let active = change == KnowledgeFactChange::Added;
+                    match fact {
+                        OwnerKnowledgeFact::Focus => card.focused = active,
+                        OwnerKnowledgeFact::Save => card.saved = active,
+                        OwnerKnowledgeFact::Finesse => card.finessed = active,
+                    }
                 }
                 CardKnowledgeEffect::SetPlayObligation { obligation, .. } => {
                     card.play_obligation = obligation;
@@ -193,77 +247,81 @@ pub(super) fn initial_card_inferences(deductions: &LogicalDeductions) -> Vec<HGr
 
 /// Turns one completed semantic projection into a typed replay-owned program.
 /// A non-subset is surfaced as `ReplaceDomain`, never hidden in a restriction.
-pub(super) fn effects_from_projection(
-    deductions: &LogicalDeductions,
-    projected: &[HGroupCardInference],
-    source_for: impl Fn(CardId) -> KnowledgeSource,
+pub(super) fn effects_between(
+    before: HGroupCardInference,
+    after: HGroupCardInference,
+    source: KnowledgeSource,
 ) -> Vec<CardKnowledgeEffect> {
-    let initial = initial_card_inferences(deductions);
     let mut effects = Vec::new();
-    for after in projected {
-        let Some(before) = initial.iter().find(|before| before.card == after.card) else {
-            continue;
-        };
-        let source = source_for(after.card);
-        if before.identities != after.identities {
-            if after.identities.without(before.identities).is_empty() {
-                effects.push(CardKnowledgeEffect::RestrictDomain {
-                    card: after.card,
-                    allowed: after.identities,
-                    source,
-                });
-            } else {
-                effects.push(CardKnowledgeEffect::ReplaceDomain {
-                    card: after.card,
-                    identities: after.identities,
-                    source,
-                });
-            }
-        }
-        if before.promised_identity != after.promised_identity {
-            effects.push(CardKnowledgeEffect::SetPromise {
+    if before.identities != after.identities {
+        if after.identities.without(before.identities).is_empty() {
+            effects.push(CardKnowledgeEffect::RestrictDomain {
                 card: after.card,
-                identity: after.promised_identity,
+                allowed: after.identities,
                 source,
             });
-        }
-        if before.identity_status != after.identity_status {
-            effects.push(CardKnowledgeEffect::SetIdentityStatus {
+        } else {
+            effects.push(CardKnowledgeEffect::ReplaceDomain {
                 card: after.card,
-                status: after.identity_status,
-                source,
-            });
-        }
-        if before.focused != after.focused {
-            effects.push(CardKnowledgeEffect::SetFocused {
-                card: after.card,
-                focused: after.focused,
-                source,
-            });
-        }
-        if before.saved != after.saved {
-            effects.push(CardKnowledgeEffect::SetSaved {
-                card: after.card,
-                saved: after.saved,
-                source,
-            });
-        }
-        if before.finessed != after.finessed {
-            effects.push(CardKnowledgeEffect::SetFinessed {
-                card: after.card,
-                finessed: after.finessed,
-                source,
-            });
-        }
-        if before.play_obligation != after.play_obligation {
-            effects.push(CardKnowledgeEffect::SetPlayObligation {
-                card: after.card,
-                obligation: after.play_obligation,
+                identities: after.identities,
                 source,
             });
         }
     }
+    if before.promised_identity != after.promised_identity {
+        effects.push(CardKnowledgeEffect::SetPromise {
+            card: after.card,
+            identity: after.promised_identity,
+            source,
+        });
+    }
+    if before.identity_status != after.identity_status {
+        effects.push(CardKnowledgeEffect::SetIdentityStatus {
+            card: after.card,
+            status: after.identity_status,
+            source,
+        });
+    }
+    if before.focused != after.focused {
+        effects.push(CardKnowledgeEffect::SetFact {
+            card: after.card,
+            fact: OwnerKnowledgeFact::Focus,
+            change: fact_change(after.focused),
+            source,
+        });
+    }
+    if before.saved != after.saved {
+        effects.push(CardKnowledgeEffect::SetFact {
+            card: after.card,
+            fact: OwnerKnowledgeFact::Save,
+            change: fact_change(after.saved),
+            source,
+        });
+    }
+    if before.finessed != after.finessed {
+        effects.push(CardKnowledgeEffect::SetFact {
+            card: after.card,
+            fact: OwnerKnowledgeFact::Finesse,
+            change: fact_change(after.finessed),
+            source,
+        });
+    }
+    if before.play_obligation != after.play_obligation {
+        effects.push(CardKnowledgeEffect::SetPlayObligation {
+            card: after.card,
+            obligation: after.play_obligation,
+            source,
+        });
+    }
     effects
+}
+
+const fn fact_change(active: bool) -> KnowledgeFactChange {
+    if active {
+        KnowledgeFactChange::Added
+    } else {
+        KnowledgeFactChange::Removed
+    }
 }
 
 #[cfg(test)]
