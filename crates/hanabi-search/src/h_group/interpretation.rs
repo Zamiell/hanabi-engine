@@ -9,14 +9,15 @@ use super::decision::{analysis_clue_candidates, build_h_group_analysis};
 use super::{
     Action, BluffTargetKind, Card, CardId, CardSet, Clue, ClueCandidate, ClueFacts, CluePurpose,
     ClueRecognition, ClueSchedule, ClueValue, ConnectionObligation, ConventionFacts,
-    ConventionKnowledge, ConventionRejectionReason, HGroupCardInference, HGroupClueInterpretation,
-    HGroupClueKind, HGroupConnection, HGroupConnectionKind, HGroupInferences, HGroupMoveKind,
-    HGroupPlayObligation, HGroupProfile, HGroupRuleId, HGroupState, HistoricalView, IdentityClaims,
-    IdentitySet, KNOWN_TRASH_COLLATERAL_BONUS, LogicalDeductions, MAX_CLUE_TOKENS,
-    MaterializedCardFact, ObservedCard, ObservedEvent, PlayerId, PlayerSet, PlayerView, Rank,
-    RejectedConventionAction, RequiredFix, SemanticallyAdmittedCandidates, StackTimeline,
-    bluff_play_connects, bluff_target_order_is_legal, card_is_trash, chop,
-    convention_information_value, finesse_position, five_chop_moved_card, five_pulled_card, focus,
+    ConventionKnowledge, ConventionRejectionReason, FixCondition, HGroupCardInference,
+    HGroupClueInterpretation, HGroupClueKind, HGroupConnection, HGroupConnectionKind,
+    HGroupInferences, HGroupMoveKind, HGroupPlayObligation, HGroupProfile, HGroupRuleId,
+    HGroupState, HistoricalView, IdentityClaims, IdentitySet, KNOWN_TRASH_COLLATERAL_BONUS,
+    LogicalDeductions, MAX_CLUE_TOKENS, MaterializedCardFact, ObservedCard, ObservedEvent,
+    PlayerId, PlayerSet, PlayerView, Rank, RejectedConventionAction, RequiredFix,
+    SemanticallyAdmittedCandidates, StackTimeline, bluff_play_connects,
+    bluff_target_order_is_legal, card_is_trash, chop, convention_information_value,
+    finesse_position, five_chop_moved_card, five_pulled_card, focus,
     identity_is_queued_before_target, identity_of, identity_set, infer_h_group_from_replay,
     is_convention_trash, is_critical, is_eventually_useful, is_playable_at, is_playable_now,
     is_unique_visible, next_player, ordered_playable_cards, pending_card_allows_identity,
@@ -73,8 +74,13 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
         return Vec::new();
     }
     if let Some(required) = replay
-        .required_fix
-        .filter(|required| required.actor == view.observer)
+        .required_fixes
+        .iter()
+        .find(|obligation| {
+            obligation.required.actor == view.observer
+                && fix_condition_is_live(view, obligation.condition)
+        })
+        .map(|obligation| obligation.required)
     {
         let target_hand = &view.hands[required.target.index()];
         let required_focus_card = target_hand.iter().find(|card| card.id == required.focus);
@@ -285,8 +291,10 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
         let five_chop_move = rule_enabled(profile, HGroupRuleId::ChopMoves)
             && clue == Clue::Rank(Rank::Five)
             && five_chop_moved_card(layout, &touched, &gotten).is_some();
-        let repairs_required_fix = replay.required_fix.is_some_and(|required| {
+        let repairs_required_fix = replay.required_fixes.iter().any(|obligation| {
+            let required = obligation.required;
             required.actor == view.current_player
+                && fix_condition_is_live(view, obligation.condition)
                 && required.target == target
                 && touched.contains(&required.focus)
                 && clue.matches(required.identity)
@@ -851,6 +859,15 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
         });
     }
     SemanticallyAdmittedCandidates::new(candidates).finalize(deductions, profile)
+}
+
+fn fix_condition_is_live(view: &PlayerView, condition: FixCondition) -> bool {
+    match condition {
+        FixCondition::Unconditional => true,
+        FixCondition::FocusIdentity {
+            focus, identity, ..
+        } => identity_of(view, focus) == Some(identity),
+    }
 }
 
 pub(super) fn creates_false_anxiety_after_forced_play(

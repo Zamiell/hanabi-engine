@@ -126,7 +126,10 @@ H-Group uses shared internal boundaries to keep these answers consistent:
   `CardKnowledgeEffect` program. Effects are attributed when each semantic
   mutation occurs and partitioned into their causal public transitions. A pure
   reducer projects identity restrictions, exact promises, typed fact changes,
-  and blind-play obligations; no final-note source guessing remains.
+  and blind-play obligations; no final-note source guessing remains. Named
+  compiler passes make precedence explicit and keep Good Touch, transfer,
+  connection, focus, forced-play, and save inference from mutating the same
+  card through unrelated ad hoc loops.
 - Declined-alternative inference handles a constrained form of retrospective
   reasoning: when a direct one-for-one clue is chosen over a uniquely stronger
   legal Finesse, Good Touch and Efficiency can prove which identity made the
@@ -163,6 +166,10 @@ H-Group uses shared internal boundaries to keep these answers consistent:
   replacements.
 - connection promises have stable IDs and durable origin metadata rather than
   being inferred later from whichever card sets survived.
+- every possible Play identity of a clue retains its own connection steps and
+  conditional Fix obligation until an observer can resolve the branch. The
+  immutable connection planner distinguishes pre-clue Prompt candidates from
+  cards newly touched by the clue, then commits one canonical action schedule.
 - clue selection has explicit semantic-admission, recipient-assessment, and
   causal outcome-ranking stages.
 - Convention-admissible Fix alternatives compare recipient-visible negative

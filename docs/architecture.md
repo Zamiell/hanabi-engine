@@ -31,6 +31,8 @@ H-Group history reducer
    |-- ActionSchedule         unified live play/discard commitments
    |-- StackTimeline          clue/current/before-player stack horizons
    |-- ClueInterpretationPlan one Play/Save/Fix/5CM/Stall precedence result
+   |-- ClueInterpretationHypothesis identity-correlated connection/fix branch
+   |-- FixObligations         conditional and unconditional repair duties
    |-- TeamConventionSnapshot coherent lazy per-player epistemic overlays
    |-- InterpretationHypotheses correlated whole-state alternatives
    `-- ActorBeliefBefore      acting player's pre-event knowledge
@@ -78,6 +80,17 @@ recipient modeling.
   `PromiseId` and immutable provenance, including its creation turn, actor,
   focus, expected identity, and connection kind. It also removes stale
   candidates from blocked later layers and rejects duplicate obligations.
+- `ConnectionPlanningContext` in `h_group.rs` is the shared read-only planner
+  for a clue's delayed connection. It distinguishes cards promptable before
+  the clue from cards touched by the current clue, simulates every focus
+  identity without mutation, and commits the selected branch exactly once. Its
+  event turn is explicit rather than inferred from a partially updated clue
+  list.
+- Every clue retains a `ClueInterpretationHypothesis` for each possible Play
+  identity. Connection steps and required Fixes stay attached to that identity
+  instead of being flattened into independent unions. `FixObligations` may
+  retain several conditional repairs; action selection activates only the
+  conditions visible in its observer's state.
 - `ledger.rs` owns provenance for materialized card facts through
   `ProvenancedCardSet`. A fact can have independent event, rule, and
   `PromiseId` sources; retracting a promise removes only the consequences it
@@ -102,7 +115,11 @@ recipient modeling.
   named observer may retain, including the provenance of each domain. Action
   obligations remain in the canonical convention state instead of being
   copied into a second, independently mutable status aggregate. It deliberately
-  exposes neither deck order nor simulator truth.
+  exposes neither deck order nor simulator truth. This canonical owner card
+  read model is shared by production analysis and regression serialization;
+  serializers do not recalculate its logical identities, convention
+  identities, provenance, obligations, positional state, or derived
+  convention-only trash.
 - `knowledge_effects.rs` owns the immutable, event-sourced
   `ConventionKnowledge` program, its per-card provenance index, and its pure
   reducer. The owner-knowledge compiler records each identity restriction,
@@ -112,11 +129,11 @@ recipient modeling.
   logical domains without recognizing convention moves a second time.
   Ordinary inference cannot widen a domain; only a typed
   Fix/reinterpretation may replace it.
-- `epistemic.rs` owns the canonical owner card read model used by production
-  analysis and regression serialization. It keeps logical identities,
-  convention identities, provenance, obligations, positional state, and
-  computed convention-only trash separate. Serializers do not recalculate
-  these semantics.
+- `ConventionKnowledgeCompiler` in `interpretation/knowledge.rs` applies owner
+  knowledge in named, ordered passes: replay closure, declined alternatives,
+  established and promised Good Touch, transfer/ejection reinterpretations,
+  connection promises, current focus, forced plays, and implicit saves. A new
+  inference belongs in one pass rather than an unstructured final-note sweep.
 - `constraint_graph.rs` is the single bridge from convention state to exact
   world constraints. Per-card domains, unresolved relational `OneOf` claims,
   and ordered connection alternatives are retained symbolically. A claim
@@ -216,6 +233,10 @@ Every completed replay reduction validates that:
 - every connection candidate is still in the promised actor's hand;
 - every discard-now entry is unique;
 - every relational identity claim has at least one candidate card;
+- every clue has exactly one hypothesis for each Play identity, no duplicate
+  identity branch, and no empty connection step;
+- every conditional Fix points back to the clue identity hypothesis that
+  created it;
 - exact transferred knowledge is materialized in current facts rather than
   reconstructed from the diagnostic signal log;
 - every active connection has registered promise provenance; and

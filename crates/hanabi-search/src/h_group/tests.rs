@@ -1,3 +1,4 @@
+use super::model::FixObligation;
 use super::*;
 use hanabi_core::{
     Action, FullState, GameEvent, GameStatus, ObservedCard, ObservedHistoryEntry, PlayerView,
@@ -1232,13 +1233,51 @@ fn fixer_understands_expert_red_four_lie() {
         "{clue:#?}"
     );
     assert_eq!(
-        replay.required_fix,
-        Some(RequiredFix {
-            actor: PlayerId::new(2),
-            target: PlayerId::new(0),
-            focus: CardId::new(3),
-            identity: Card::new(Suit::Green, Rank::Four),
-        }),
+        replay.required_fixes.iter().collect::<Vec<_>>(),
+        vec![FixObligation {
+            condition: FixCondition::Unconditional,
+            required: RequiredFix {
+                actor: PlayerId::new(2),
+                target: PlayerId::new(0),
+                focus: CardId::new(3),
+                identity: Card::new(Suit::Green, Rank::Four),
+            },
+        }],
         "{replay:#?}",
+    );
+}
+
+#[test]
+fn recipient_keeps_the_red_four_repair_branch_conditional() {
+    let state = expert_replay_p4v0s415()
+        .state_at_turn(6)
+        .expect("turn exists");
+    let deductions =
+        LogicalDeductions::new(state.view_for(PlayerId::new(3)).expect("recipient exists"))
+            .expect("valid deductions");
+    let replay = replay_h_group_inner(
+        &deductions,
+        HGroupProfile::Max,
+        PerspectiveDepth::ObserverOnly,
+        false,
+    );
+
+    assert!(
+        replay.required_fixes.iter().any(|obligation| {
+            obligation.required
+                == RequiredFix {
+                    actor: PlayerId::new(2),
+                    target: PlayerId::new(0),
+                    focus: CardId::new(3),
+                    identity: Card::new(Suit::Green, Rank::Four),
+                }
+                && obligation.condition
+                    == FixCondition::FocusIdentity {
+                        clue_turn: 5,
+                        focus: CardId::new(17),
+                        identity: Card::new(Suit::Red, Rank::Four),
+                    }
+        }),
+        "{replay:#?}"
     );
 }

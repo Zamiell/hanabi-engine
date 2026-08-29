@@ -16,3 +16,17 @@ scripts/check.sh
 ```
 
 If the full suite cannot be run, report which checks were skipped and why.
+
+## Version control
+
+After every user prompt that changes this repository:
+
+1. Run the relevant checks, including `scripts/check.sh` before completing the
+   prompt.
+2. Commit all in-scope changes with a descriptive commit message.
+3. Push the commit to the current branch's configured upstream.
+
+Do not create empty commits for prompts that make no repository changes. Do not
+include unrelated pre-existing worktree changes in the commit. If validation,
+the commit, or the push fails, report the failure instead of claiming the task
+is complete.

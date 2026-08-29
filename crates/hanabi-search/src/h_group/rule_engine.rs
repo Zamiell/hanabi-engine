@@ -7,6 +7,7 @@
 
 use hanabi_core::PlayerView;
 
+use super::model::FixObligation;
 use super::recognition::{
     apply_bluff_effects, apply_charm_effects, apply_chop_move_effects, apply_context_effects,
     apply_double_bluff_effects, apply_duplication_effects, apply_ejection_discharge_effects,
@@ -108,7 +109,7 @@ struct RuleStateFingerprint {
     must_clue: usize,
     required_discards: usize,
     implicit_saves: usize,
-    required_fix: Option<(usize, usize, usize, usize)>,
+    required_fixes: Vec<FixObligation>,
 }
 
 impl RuleStateFingerprint {
@@ -119,14 +120,7 @@ impl RuleStateFingerprint {
             must_clue: effects.must_clue.len(),
             required_discards: effects.discard_now.len(),
             implicit_saves: effects.implicit_saves.len(),
-            required_fix: effects.required_fix.map(|fix| {
-                (
-                    fix.actor.index(),
-                    fix.target.index(),
-                    fix.focus.index(),
-                    fix.identity.index(),
-                )
-            }),
+            required_fixes: effects.required_fixes.iter().collect(),
         }
     }
 
@@ -162,7 +156,7 @@ impl RuleStateFingerprint {
                 MutationDomain::ImplicitSaves,
             ),
             (
-                self.required_fix != after.required_fix,
+                self.required_fixes != after.required_fixes,
                 MutationDomain::RequiredFix,
             ),
         ];
@@ -336,7 +330,7 @@ fn apply_rule(
             context.after.stack_heights,
             effects.pending,
             effects.forced_playable,
-            effects.required_fix,
+            effects.required_fixes,
             effects.signals,
         ),
         HGroupRuleId::Ignition => apply_ignition_effects(context, view, effects),

@@ -131,6 +131,27 @@ pub struct HGroupClueInterpretation {
     pub non_focus_trash_identities: Vec<(CardId, IdentitySet)>,
     /// Explicit and invisible clues that existed before this clue.
     pub previously_gotten: Vec<CardId>,
+    /// Correlated identity readings retained before one canonical branch is
+    /// selected for immediate action scheduling. Each reading owns its
+    /// connection steps and conditional repair instead of flattening those
+    /// consequences into the focus card's identity union.
+    pub(super) hypotheses: Vec<ClueInterpretationHypothesis>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct ClueConnectionStep {
+    pub(super) actor: PlayerId,
+    pub(super) cards: Vec<CardId>,
+    pub(super) expected: Card,
+    pub(super) kind: HGroupConnectionKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct ClueInterpretationHypothesis {
+    pub(super) focus_identity: Card,
+    pub(super) connection_steps: Vec<ClueConnectionStep>,
+    pub(super) required_fix: Option<RequiredFix>,
+    pub(super) loaded: bool,
 }
 
 /// A card promised to be the next card in a delayed Play clue.
@@ -300,7 +321,7 @@ pub(super) struct HGroupState {
     pub(super) signals: SignalHistory,
     pub(super) must_clue: PlayerSet,
     pub(super) implicit_saves: Vec<(CardId, IdentitySet)>,
-    pub(super) required_fix: Option<RequiredFix>,
+    pub(super) required_fixes: FixObligations,
     pub(super) transitions: Vec<ConventionTransitionResult>,
     /// Canonical owner-relative epistemic program compiled once from this
     /// replay. Consumers reduce typed effects instead of reinterpreting clues.
@@ -366,6 +387,7 @@ impl HGroupState {
     pub(super) fn validate(&self) -> Result<(), String> {
         self.cards.validate()?;
         self.pending_connections.validate()?;
+        self.validate_clue_hypotheses()?;
         for connection in self.pending_connections.iter() {
             if let Some(card) = connection
                 .cards
@@ -436,6 +458,55 @@ impl HGroupState {
             }
         }
         self.validate_knowledge()
+    }
+
+    fn validate_clue_hypotheses(&self) -> Result<(), String> {
+        for clue in &self.clues {
+            let mut seen_identities = HashSet::new();
+            for hypothesis in &clue.hypotheses {
+                if !clue.play_identities.contains(hypothesis.focus_identity) {
+                    return Err(format!(
+                        "clue hypothesis {:?} is outside the clue's Play domain {:?}",
+                        hypothesis.focus_identity, clue.play_identities
+                    ));
+                }
+                if !seen_identities.insert(hypothesis.focus_identity) {
+                    return Err("clue has duplicate identity hypotheses".to_owned());
+                }
+                if hypothesis
+                    .connection_steps
+                    .iter()
+                    .any(|step| step.cards.is_empty())
+                {
+                    return Err("clue hypothesis has an empty connection step".to_owned());
+                }
+            }
+            if seen_identities.len() != clue.play_identities.len() {
+                return Err("clue hypotheses do not cover its Play domain".to_owned());
+            }
+        }
+        for obligation in self.required_fixes.iter() {
+            let FixCondition::FocusIdentity {
+                clue_turn,
+                focus,
+                identity,
+            } = obligation.condition
+            else {
+                continue;
+            };
+            let branch_exists = self.clues.iter().any(|clue| {
+                clue.turn == clue_turn
+                    && clue.focus == focus
+                    && clue.hypotheses.iter().any(|hypothesis| {
+                        hypothesis.focus_identity == identity
+                            && hypothesis.required_fix == Some(obligation.required)
+                    })
+            });
+            if !branch_exists {
+                return Err("conditional Fix has no originating clue hypothesis".to_owned());
+            }
+        }
+        Ok(())
     }
 
     fn validate_knowledge(&self) -> Result<(), String> {
@@ -542,4 +613,72 @@ pub(super) struct RequiredFix {
     pub(super) target: PlayerId,
     pub(super) focus: CardId,
     pub(super) identity: Card,
+}
+
+/// The interpretation branch under which a repair is required.
+///
+/// A visible exact focus makes the repair unconditional. When the recipient
+/// still has several clue identities in superposition, the repair remains
+/// attached to the identity branch that created the lie instead of leaking
+/// into every interpretation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum FixCondition {
+    Unconditional,
+    FocusIdentity {
+        clue_turn: u32,
+        focus: CardId,
+        identity: Card,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct FixObligation {
+    pub(super) required: RequiredFix,
+    pub(super) condition: FixCondition,
+}
+
+/// Branch-aware repair obligations retained by the public-history reducer.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(super) struct FixObligations {
+    entries: Vec<FixObligation>,
+}
+
+impl FixObligations {
+    pub(super) fn insert_unconditional(&mut self, required: RequiredFix) {
+        self.insert(FixObligation {
+            required,
+            condition: FixCondition::Unconditional,
+        });
+    }
+
+    pub(super) fn insert_conditional(
+        &mut self,
+        clue_turn: u32,
+        focus: CardId,
+        identity: Card,
+        required: RequiredFix,
+    ) {
+        self.insert(FixObligation {
+            required,
+            condition: FixCondition::FocusIdentity {
+                clue_turn,
+                focus,
+                identity,
+            },
+        });
+    }
+
+    fn insert(&mut self, obligation: FixObligation) {
+        if !self.entries.contains(&obligation) {
+            self.entries.push(obligation);
+        }
+    }
+
+    pub(super) fn iter(&self) -> impl Iterator<Item = FixObligation> + '_ {
+        self.entries.iter().copied()
+    }
+
+    pub(super) fn retain(&mut self, retain: impl FnMut(&FixObligation) -> bool) {
+        self.entries.retain(retain);
+    }
 }

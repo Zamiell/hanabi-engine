@@ -1,8 +1,8 @@
 use hanabi_core::CardId;
 
 use super::{
-    ConnectionManager, ConventionCardSetSnapshot, ConventionJournal, EffectSource,
-    HGroupClueInterpretation, IdentitySet, PlayerSet, ProvenancedCardSet, RequiredFix,
+    ConnectionManager, ConventionCardSetSnapshot, ConventionJournal, EffectSource, FixObligations,
+    HGroupClueInterpretation, IdentitySet, PlayerSet, ProvenancedCardSet,
     reconcile_connection_fact_lifecycles,
 };
 
@@ -22,7 +22,7 @@ pub(super) struct HGroupRuleEffects<'a> {
     pub(super) forced_playable: &'a mut ProvenancedCardSet,
     pub(super) discard_now: &'a mut Vec<CardId>,
     pub(super) implicit_saves: &'a mut Vec<(CardId, IdentitySet)>,
-    pub(super) required_fix: &'a mut Option<RequiredFix>,
+    pub(super) required_fixes: &'a mut FixObligations,
     pub(super) signals: &'a mut ConventionJournal,
 }
 

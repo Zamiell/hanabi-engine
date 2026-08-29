@@ -6,6 +6,7 @@ use super::{
     finesse_position_id, five_pulled_card, identity_of, is_playable_at, is_trash_at, next_player,
     protected_cards, push_signal, same_turn_signal, was_clued_before,
 };
+use crate::h_group::model::FixObligations;
 
 pub(in crate::h_group) fn apply_elimination_effects(
     entry: &ObservedHistoryEntry,
@@ -446,7 +447,7 @@ pub(in crate::h_group) fn apply_out_of_order_effects(
     stack_heights: [u8; 5],
     pending: &mut ConnectionManager,
     _forced_playable: &mut CardSet,
-    required_fix: &mut Option<RequiredFix>,
+    required_fixes: &mut FixObligations,
     signals: &mut ConventionJournal,
 ) {
     // Sources: https://hanabi.github.io/level-20/#the-occupied-play-clue--the-occupied-finesse-opc
@@ -490,7 +491,7 @@ pub(in crate::h_group) fn apply_out_of_order_effects(
         let focus = card;
         let focus_identity = identity_of(view, focus);
         if let Some(identity) = focus_identity {
-            *required_fix = Some(RequiredFix {
+            required_fixes.insert_unconditional(RequiredFix {
                 actor: next_player(*giver, view.hands.len()),
                 target: *target,
                 focus,

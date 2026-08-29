@@ -52,7 +52,7 @@ fn level_thirteen_admits_the_opening_hard_three_self_bluff() {
             .expect("valid Cathy deductions");
     let cathy_replay = replay_h_group(&cathy_deductions, HGroupProfile::Max);
     assert!(
-        cathy_replay.required_fix.is_none(),
+        cathy_replay.required_fixes.iter().next().is_none(),
         "a resolved Bluff must not leave an ordinary-connection Fix obligation"
     );
     let cathy_candidates = h_group_clue_candidates(&cathy_deductions, HGroupProfile::Max);

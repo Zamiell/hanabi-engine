@@ -52,6 +52,464 @@ impl OwnerKnowledgeBuilder {
     }
 }
 
+/// Ordered compiler for owner-relative convention knowledge.
+///
+/// Each method is one semantic pass. Later passes may refine facts produced
+/// by earlier ones, but no pass recognizes clue meaning a second time or
+/// mutates the replay. This makes pass ordering explicit without creating a
+/// parallel knowledge representation.
+struct ConventionKnowledgeCompiler<'a> {
+    deductions: &'a LogicalDeductions,
+    replay: &'a HGroupState,
+    knowledge: OwnerKnowledgeBuilder,
+    closure_turn: u32,
+}
+
+impl<'a> ConventionKnowledgeCompiler<'a> {
+    fn new(deductions: &'a LogicalDeductions, replay: &'a HGroupState) -> Self {
+        Self {
+            deductions,
+            replay,
+            knowledge: OwnerKnowledgeBuilder::new(deductions),
+            closure_turn: deductions
+                .view()
+                .history
+                .last()
+                .map_or(0, |entry| entry.turn),
+        }
+    }
+
+    fn apply_replay_closure(&mut self) {
+        for card in self.knowledge.cards.clone() {
+            let excluded = self.replay.cards.facts.excluded_identities(card.card);
+            self.knowledge.update(
+                card.card,
+                KnowledgeSource::ReplayClosure(self.closure_turn),
+                |note| {
+                    let narrowed = note.identities.without(excluded);
+                    if !narrowed.is_empty() {
+                        note.identities = narrowed;
+                    }
+                },
+            );
+        }
+    }
+
+    fn apply_declined_alternatives(&mut self) {
+        for inference in self.replay.cards.facts.declined_alternatives() {
+            let allowed = IdentitySet::singleton(inference.identity);
+            if self
+                .knowledge
+                .cards
+                .iter()
+                .find(|card| card.card == inference.card)
+                .is_none_or(|card| !card.identities.contains(inference.identity))
+            {
+                continue;
+            }
+            self.knowledge.update(
+                inference.card,
+                KnowledgeSource::DeclinedAlternative {
+                    turn: inference.turn,
+                    chosen: inference.chosen,
+                    superior: inference.superior,
+                },
+                |card| card.identities = card.identities.intersection(allowed),
+            );
+        }
+    }
+
+    /// Applies Good Touch from identities that have become exact through a
+    /// direct Play clue or a demonstrated connection.
+    ///
+    /// <https://hanabi.github.io/level-1/#good-touch-principle>
+    fn apply_established_good_touch(&mut self) {
+        let view = self.deductions.view();
+        for claim in self
+            .replay
+            .cards
+            .facts
+            .identity_claims()
+            .iter()
+            .filter(|claim| {
+                let connection_was_demonstrated = claim.cards.iter().any(|claimed| {
+                    view.history.iter().any(|entry| {
+                        matches!(
+                            entry.event,
+                            ObservedEvent::Played {
+                                card,
+                                identity,
+                                successful: true,
+                                ..
+                            } if card == *claimed && identity == claim.identity
+                        )
+                    })
+                });
+                claim.relation == IdentityClaimRelation::Each
+                    && (claim.source == HGroupMoveKind::PlayClue || connection_was_demonstrated)
+                    && matches!(
+                        claim.source,
+                        HGroupMoveKind::PlayClue
+                            | HGroupMoveKind::Prompt
+                            | HGroupMoveKind::Finesse
+                            | HGroupMoveKind::ReverseFinesse
+                            | HGroupMoveKind::SelfFinesse
+                            | HGroupMoveKind::LayeredFinesse
+                            | HGroupMoveKind::HiddenFinesse
+                            | HGroupMoveKind::ClandestineFinesse
+                            | HGroupMoveKind::QueuedFinesse
+                            | HGroupMoveKind::AmbiguousFinesse
+                    )
+            })
+        {
+            let claimed = IdentitySet::singleton(claim.identity);
+            for card in self.knowledge.cards.clone() {
+                if claim.cards.contains(&card.card)
+                    || !was_clued_before(view, claim.turn, card.card)
+                {
+                    continue;
+                }
+                let narrowed = card.identities.without(claimed);
+                if narrowed.is_empty() || narrowed == card.identities {
+                    continue;
+                }
+                self.knowledge
+                    .update(card.card, KnowledgeSource::Clue(claim.turn), |card| {
+                        card.identities = narrowed;
+                    });
+            }
+        }
+    }
+
+    /// Applies Good Touch from live connection promises. These claims remain
+    /// relational until demonstrated and therefore cannot be flattened into
+    /// an unconditional per-card identity.
+    ///
+    /// <https://hanabi.github.io/level-1/#good-touch-principle>
+    fn apply_promised_good_touch(&mut self) {
+        for pending in self.replay.pending_connections.iter() {
+            if !self
+                .replay
+                .pending_connections
+                .promise_was_demonstrated_after(pending.promise, 0)
+            {
+                continue;
+            }
+            let claimed = IdentitySet::singleton(pending.expected);
+            for card in self.knowledge.cards.clone() {
+                if card.card == pending.focus
+                    || pending.cards.contains(&card.card)
+                    || !self.replay.cards.explicitly_clued.contains(&card.card)
+                {
+                    continue;
+                }
+                let narrowed = card.identities.without(claimed);
+                if narrowed.is_empty() || narrowed == card.identities {
+                    continue;
+                }
+                let turn = self
+                    .replay
+                    .pending_connections
+                    .provenance(pending.promise)
+                    .map_or(self.closure_turn, |origin| origin.created_turn);
+                self.knowledge
+                    .update(card.card, KnowledgeSource::Clue(turn), |card| {
+                        card.identities = narrowed;
+                    });
+            }
+        }
+    }
+
+    /// <https://hanabi.github.io/level-10/#the-gentlemans-discard-gd>
+    /// <https://hanabi.github.io/level-10/#the-baton-discard-bd>
+    fn apply_transfer_claims(&mut self) {
+        for claim in self
+            .replay
+            .cards
+            .facts
+            .identity_claims()
+            .iter()
+            .filter(|claim| {
+                claim.relation == IdentityClaimRelation::Each
+                    && matches!(
+                        claim.source,
+                        HGroupMoveKind::TransferDiscard
+                            | HGroupMoveKind::GentlemansDiscard
+                            | HGroupMoveKind::LayeredGentlemansDiscard
+                            | HGroupMoveKind::BatonDiscard
+                    )
+            })
+        {
+            for card in claim.cards.iter().copied() {
+                if self
+                    .deductions
+                    .possible_identities(card)
+                    .is_none_or(|logical| !logical.contains(claim.identity))
+                {
+                    continue;
+                }
+                self.knowledge.update(
+                    card,
+                    KnowledgeSource::Reinterpretation(claim.turn),
+                    |card| card.identities = IdentitySet::singleton(claim.identity),
+                );
+            }
+        }
+    }
+
+    /// <https://hanabi.github.io/level-16/#the-5-color-ejection-5ce>
+    fn apply_resolved_ejections(&mut self) {
+        for card in self.knowledge.cards.clone() {
+            let Some(identity) = self
+                .replay
+                .cards
+                .facts
+                .identity_claims()
+                .iter()
+                .rev()
+                .find(|claim| {
+                    claim.source == HGroupMoveKind::FiveColorEjection && claim.cards == [card.card]
+                })
+                .map(|claim| claim.identity)
+            else {
+                continue;
+            };
+            if self
+                .deductions
+                .possible_identities(card.card)
+                .is_none_or(|logical| !logical.contains(identity))
+            {
+                continue;
+            }
+            self.knowledge.update(
+                card.card,
+                KnowledgeSource::Reinterpretation(self.closure_turn),
+                |card| card.identities = IdentitySet::singleton(identity),
+            );
+        }
+    }
+
+    fn apply_current_focus(&mut self) {
+        let view = self.deductions.view();
+        let active_focus = view.history.last().and_then(|entry| {
+            matches!(&entry.event, ObservedEvent::Clued { .. })
+                .then(|| {
+                    self.replay
+                        .clues
+                        .iter()
+                        .rev()
+                        .find(|clue| clue.turn == entry.turn)
+                        .map(|clue| clue.focus)
+                })
+                .flatten()
+        });
+        if let Some(active_focus) = active_focus {
+            let turn = view.history.last().map_or(view.turn, |entry| entry.turn);
+            self.knowledge
+                .update(active_focus, KnowledgeSource::CurrentFocus(turn), |card| {
+                    card.focused = true;
+                });
+        }
+    }
+
+    fn apply_connection_promises(&mut self) {
+        self.apply_queued_connection_promises();
+        self.apply_active_connection_promises();
+    }
+
+    fn apply_queued_connection_promises(&mut self) {
+        let view = self.deductions.view();
+
+        // Deterministic later steps are epistemic promises immediately, but
+        // only the active head receives an action obligation.
+        for pending in self.replay.pending_connections.iter().filter(|pending| {
+            pending.actor == view.observer
+                && (pending.cards.len() == 1
+                    || !pending_is_active(pending, &self.replay.pending_connections))
+        }) {
+            let Some(pending_card) = pending.cards.first().copied() else {
+                continue;
+            };
+            let conflicting_promise = self.replay.pending_connections.iter().any(|other| {
+                other.actor == view.observer
+                    && other.cards.first() == Some(&pending_card)
+                    && other.expected != pending.expected
+            });
+            if conflicting_promise {
+                continue;
+            }
+            let Some(card) = self
+                .knowledge
+                .cards
+                .iter()
+                .find(|card| card.card == pending_card)
+            else {
+                continue;
+            };
+            let current_identities = card.identities;
+            if pending.cards.len() == 1 {
+                let narrowed =
+                    current_identities.intersection(IdentitySet::singleton(pending.expected));
+                if narrowed.is_empty() {
+                    continue;
+                }
+            }
+            let turn = self
+                .replay
+                .pending_connections
+                .provenance(pending.promise)
+                .map_or(view.turn, |origin| origin.created_turn);
+            self.knowledge.update(
+                pending_card,
+                KnowledgeSource::Promise {
+                    id: pending.promise,
+                    turn,
+                },
+                |card| {
+                    if pending.cards.len() == 1 {
+                        card.identities = current_identities
+                            .intersection(IdentitySet::singleton(pending.expected));
+                    }
+                    card.promised_identity = Some(pending.expected);
+                    card.finessed = pending.kind == HGroupConnectionKind::Finesse;
+                },
+            );
+        }
+    }
+
+    fn apply_active_connection_promises(&mut self) {
+        let view = self.deductions.view();
+        let observer_turn_stack_heights =
+            StackTimeline::before_player_turn(view, self.replay, view.observer).heights();
+        for pending in self.replay.pending_connections.iter().filter(|pending| {
+            pending.actor == view.observer
+                && pending_is_active(pending, &self.replay.pending_connections)
+        }) {
+            let Some(pending_card) = pending.cards.first() else {
+                continue;
+            };
+            let Some(card) = self
+                .knowledge
+                .cards
+                .iter()
+                .find(|card| card.card == *pending_card)
+            else {
+                continue;
+            };
+            let expected = IdentitySet::singleton(pending.expected);
+            let allowed = if pending.cards.len() == 1 {
+                expected
+            } else {
+                let claims = IdentityClaims::new(view, self.replay);
+                let unclaimed_playables = IdentitySet::from_mask(
+                    identities_at_distance_at(card.identities, observer_turn_stack_heights, 0)
+                        .iter()
+                        .filter(|identity| !claims.identity_claimed_elsewhere(card.card, *identity))
+                        .fold(0, |mask, identity| mask | (1 << identity.index())),
+                );
+                expected.union(unclaimed_playables)
+            };
+            let narrowed = card.identities.intersection(allowed);
+            let turn = self
+                .replay
+                .pending_connections
+                .provenance(pending.promise)
+                .map_or(view.turn, |origin| origin.created_turn);
+            self.knowledge.update(
+                *pending_card,
+                KnowledgeSource::Promise {
+                    id: pending.promise,
+                    turn,
+                },
+                |card| {
+                    if !narrowed.is_empty() {
+                        card.identities = narrowed;
+                    }
+                    card.promised_identity = Some(pending.expected);
+                    if self
+                        .replay
+                        .is_exact_transfer(*pending_card, pending.expected)
+                    {
+                        card.finessed = false;
+                        card.play_obligation = None;
+                    } else {
+                        card.finessed = pending.kind == HGroupConnectionKind::Finesse;
+                        card.play_obligation = Some(HGroupPlayObligation::Connection(pending.kind));
+                    }
+                },
+            );
+        }
+    }
+
+    fn apply_forced_plays(&mut self) {
+        let view = self.deductions.view();
+        for forced in &self.replay.cards.forced_playable {
+            let Some(card) = self
+                .knowledge
+                .cards
+                .iter()
+                .find(|card| card.card == *forced)
+            else {
+                continue;
+            };
+            let claims = IdentityClaims::new(view, self.replay);
+            let playable = IdentitySet::from_mask(
+                identities_at_distance(card.identities, view, 0)
+                    .iter()
+                    .filter(|identity| !claims.identity_claimed_elsewhere(card.card, *identity))
+                    .fold(0, |mask, identity| mask | (1 << identity.index())),
+            );
+            let turn = self
+                .replay
+                .transitions
+                .iter()
+                .rev()
+                .find(|transition| {
+                    transition.delta.card_changes.iter().any(|change| {
+                        change.card == *forced
+                            && change.fact == MaterializedCardFact::ForcedPlayable
+                    })
+                })
+                .map_or(view.turn, |transition| transition.turn);
+            self.knowledge
+                .update(*forced, KnowledgeSource::ForcedPlay(turn), |card| {
+                    if !playable.is_empty() {
+                        card.identities = playable;
+                    }
+                    card.play_obligation = Some(HGroupPlayObligation::Forced);
+                });
+        }
+    }
+
+    fn apply_implicit_saves(&mut self) {
+        let view = self.deductions.view();
+        for (saved, identities) in &self.replay.implicit_saves {
+            let Some(card) = self.knowledge.cards.iter().find(|card| card.card == *saved) else {
+                continue;
+            };
+            let narrowed = card.identities.intersection(*identities);
+            let turn = self
+                .replay
+                .clues
+                .iter()
+                .rev()
+                .find(|clue| clue.focus == *saved || clue.new_non_focus.contains(saved))
+                .map_or(view.turn, |clue| clue.turn);
+            self.knowledge
+                .update(*saved, KnowledgeSource::ImplicitSave(turn), |card| {
+                    if !narrowed.is_empty() {
+                        card.identities = narrowed;
+                    }
+                    card.saved = true;
+                });
+        }
+    }
+
+    fn finish(self) -> (Vec<HGroupCardInference>, Vec<CardKnowledgeEffect>) {
+        self.knowledge.finish()
+    }
+}
+
 pub(in crate::h_group) fn delayed_focus_identities(
     identities: IdentitySet,
     stack_heights: [u8; 5],
@@ -153,44 +611,10 @@ fn compile_convention_card_inferences(
     replay: &HGroupState,
 ) -> (Vec<HGroupCardInference>, Vec<CardKnowledgeEffect>) {
     let view = deductions.view();
-    let observer_turn_stack_heights =
-        StackTimeline::before_player_turn(view, replay, view.observer).heights();
-    let mut knowledge = OwnerKnowledgeBuilder::new(deductions);
-    let closure_turn = view.history.last().map_or(0, |entry| entry.turn);
-    for card in knowledge.cards.clone() {
-        let excluded = replay.cards.facts.excluded_identities(card.card);
-        knowledge.update(
-            card.card,
-            KnowledgeSource::ReplayClosure(closure_turn),
-            |note| {
-                let narrowed = note.identities.without(excluded);
-                if !narrowed.is_empty() {
-                    note.identities = narrowed;
-                }
-            },
-        );
-    }
-
-    for inference in replay.cards.facts.declined_alternatives() {
-        let allowed = IdentitySet::singleton(inference.identity);
-        if knowledge
-            .cards
-            .iter()
-            .find(|card| card.card == inference.card)
-            .is_none_or(|card| !card.identities.contains(inference.identity))
-        {
-            continue;
-        }
-        knowledge.update(
-            inference.card,
-            KnowledgeSource::DeclinedAlternative {
-                turn: inference.turn,
-                chosen: inference.chosen,
-                superior: inference.superior,
-            },
-            |card| card.identities = card.identities.intersection(allowed),
-        );
-    }
+    let mut compiler = ConventionKnowledgeCompiler::new(deductions, replay);
+    compiler.apply_replay_closure();
+    compiler.apply_declined_alternatives();
+    let knowledge = &mut compiler.knowledge;
 
     for clue in &replay.clues {
         let clue_stack_heights = StackTimeline::at_clue(clue.turn, clue.stack_heights).heights();
@@ -549,354 +973,15 @@ fn compile_convention_card_inferences(
         }
     }
 
-    // Good Touch applies when a later clue establishes an exact Play or
-    // connection identity, not only when that identity is the clue's focus.
-    // Preserve that negative information on every card that was already
-    // physically clued. The demonstrated connector may have left the hand by
-    // the time this projection is built, but the information learned when the
-    // promise was made remains valid.
-    // https://hanabi.github.io/level-1/#good-touch-principle
-    for claim in replay.cards.facts.identity_claims().iter().filter(|claim| {
-        let connection_was_demonstrated = claim.cards.iter().any(|claimed| {
-            view.history.iter().any(|entry| {
-                matches!(
-                    entry.event,
-                    ObservedEvent::Played {
-                        card,
-                        identity,
-                        successful: true,
-                        ..
-                    } if card == *claimed && identity == claim.identity
-                )
-            })
-        });
-        claim.relation == IdentityClaimRelation::Each
-            && (claim.source == HGroupMoveKind::PlayClue || connection_was_demonstrated)
-            && matches!(
-                claim.source,
-                HGroupMoveKind::PlayClue
-                    | HGroupMoveKind::Prompt
-                    | HGroupMoveKind::Finesse
-                    | HGroupMoveKind::ReverseFinesse
-                    | HGroupMoveKind::SelfFinesse
-                    | HGroupMoveKind::LayeredFinesse
-                    | HGroupMoveKind::HiddenFinesse
-                    | HGroupMoveKind::ClandestineFinesse
-                    | HGroupMoveKind::QueuedFinesse
-                    | HGroupMoveKind::AmbiguousFinesse
-            )
-    }) {
-        let claimed = IdentitySet::singleton(claim.identity);
-        for card in knowledge.cards.clone() {
-            if claim.cards.contains(&card.card) || !was_clued_before(view, claim.turn, card.card) {
-                continue;
-            }
-            let narrowed = card.identities.without(claimed);
-            if narrowed.is_empty() || narrowed == card.identities {
-                continue;
-            }
-            knowledge.update(card.card, KnowledgeSource::Clue(claim.turn), |card| {
-                card.identities = narrowed;
-            });
-        }
-    }
-
-    // A live Prompt/Finesse promise claims its expected identity before the
-    // physical card is revealed. Good Touch therefore removes that identity
-    // from every other physically clued card, including cards first touched
-    // after the connection began. In p4v0s415, Donald's ongoing Layered
-    // Finesse owns yellow 1 when Cathy later receives the yellow clue.
-    // https://hanabi.github.io/level-1/#good-touch-principle
-    for pending in replay.pending_connections.iter() {
-        if !replay
-            .pending_connections
-            .promise_was_demonstrated_after(pending.promise, 0)
-        {
-            continue;
-        }
-        let claimed = IdentitySet::singleton(pending.expected);
-        for card in knowledge.cards.clone() {
-            if card.card == pending.focus
-                || pending.cards.contains(&card.card)
-                || !replay.cards.explicitly_clued.contains(&card.card)
-            {
-                continue;
-            }
-            let narrowed = card.identities.without(claimed);
-            if narrowed.is_empty() || narrowed == card.identities {
-                continue;
-            }
-            let turn = replay
-                .pending_connections
-                .provenance(pending.promise)
-                .map_or(closure_turn, |origin| origin.created_turn);
-            knowledge.update(card.card, KnowledgeSource::Clue(turn), |card| {
-                card.identities = narrowed;
-            });
-        }
-    }
-
-    // Transfer discards identify the matching card exactly even when a Baton
-    // Discard transfers an identity that is not playable yet. Unlike an active
-    // Gentleman's-Discard play obligation, that epistemic fact outlives the
-    // connection and must remain available to later Prompt/Finesse searches.
-    // https://hanabi.github.io/level-10/#the-gentlemans-discard-gd
-    // https://hanabi.github.io/level-10/#the-baton-discard-bd
-    for claim in replay.cards.facts.identity_claims().iter().filter(|claim| {
-        claim.relation == IdentityClaimRelation::Each
-            && matches!(
-                claim.source,
-                HGroupMoveKind::TransferDiscard
-                    | HGroupMoveKind::GentlemansDiscard
-                    | HGroupMoveKind::LayeredGentlemansDiscard
-                    | HGroupMoveKind::BatonDiscard
-            )
-    }) {
-        for card in claim.cards.iter().copied() {
-            if deductions
-                .possible_identities(card)
-                .is_none_or(|logical| !logical.contains(claim.identity))
-            {
-                continue;
-            }
-            knowledge.update(
-                card,
-                KnowledgeSource::Reinterpretation(claim.turn),
-                |card| card.identities = IdentitySet::singleton(claim.identity),
-            );
-        }
-    }
-
-    // A resolved 5 Color Ejection replaces the focus's apparent ordinary
-    // Play interpretation with an exact 5. Apply that precedence after the
-    // original clue history. Other relational identity claims have dedicated
-    // projection paths below and must not be flattened into unconditional
-    // per-card replacements here.
-    for card in knowledge.cards.clone() {
-        let Some(identity) = replay
-            .cards
-            .facts
-            .identity_claims()
-            .iter()
-            .rev()
-            .find(|claim| {
-                claim.source == HGroupMoveKind::FiveColorEjection && claim.cards == [card.card]
-            })
-            .map(|claim| claim.identity)
-        else {
-            continue;
-        };
-        if deductions
-            .possible_identities(card.card)
-            .is_none_or(|logical| !logical.contains(identity))
-        {
-            continue;
-        }
-        knowledge.update(
-            card.card,
-            KnowledgeSource::Reinterpretation(closure_turn),
-            |card| card.identities = IdentitySet::singleton(identity),
-        );
-    }
-
-    // Focus identifies how the latest clue is interpreted; it is not a
-    // persistent card property. The clue history above has already locked in
-    // every resulting identity, save, and play deduction.
-    let active_focus = view.history.last().and_then(|entry| {
-        matches!(&entry.event, ObservedEvent::Clued { .. })
-            .then(|| {
-                replay
-                    .clues
-                    .iter()
-                    .rev()
-                    .find(|clue| clue.turn == entry.turn)
-                    .map(|clue| clue.focus)
-            })
-            .flatten()
-    });
-    if let Some(active_focus) = active_focus {
-        let turn = view.history.last().map_or(view.turn, |entry| entry.turn);
-        knowledge.update(active_focus, KnowledgeSource::CurrentFocus(turn), |card| {
-            card.focused = true;
-        });
-    }
-
-    // A deterministic later step in a connection chain is known immediately,
-    // even though it is not yet actionable. Keep that epistemic promise
-    // separate from the play obligation assigned to the chain's active head
-    // below. For a queued ordered step, its first candidate receives the
-    // promise immediately, but its physical domain remains broad until the
-    // preceding step resolves; later fallback candidates remain unmarked.
-    for pending in replay.pending_connections.iter().filter(|pending| {
-        pending.actor == view.observer
-            && (pending.cards.len() == 1
-                || !pending_is_active(pending, &replay.pending_connections))
-    }) {
-        let Some(pending_card) = pending.cards.first().copied() else {
-            continue;
-        };
-        let conflicting_promise = replay.pending_connections.iter().any(|other| {
-            other.actor == view.observer
-                && other.cards.first() == Some(&pending_card)
-                && other.expected != pending.expected
-        });
-        if conflicting_promise {
-            continue;
-        }
-        let Some(card) = knowledge
-            .cards
-            .iter()
-            .find(|card| card.card == pending_card)
-        else {
-            continue;
-        };
-        let current_identities = card.identities;
-        if pending.cards.len() == 1 {
-            let promised = IdentitySet::singleton(pending.expected);
-            let narrowed = current_identities.intersection(promised);
-            if narrowed.is_empty() {
-                continue;
-            }
-        }
-        let turn = replay
-            .pending_connections
-            .provenance(pending.promise)
-            .map_or(view.turn, |origin| origin.created_turn);
-        knowledge.update(
-            pending_card,
-            KnowledgeSource::Promise {
-                id: pending.promise,
-                turn,
-            },
-            |card| {
-                if pending.cards.len() == 1 {
-                    card.identities =
-                        current_identities.intersection(IdentitySet::singleton(pending.expected));
-                }
-                card.promised_identity = Some(pending.expected);
-                card.finessed = pending.kind == HGroupConnectionKind::Finesse;
-            },
-        );
-    }
-
-    for pending in replay.pending_connections.iter().filter(|pending| {
-        pending.actor == view.observer && pending_is_active(pending, &replay.pending_connections)
-    }) {
-        // Ordered alternatives are conditional. Only the first card is
-        // currently constrained to be either the expected connector or a
-        // successful alternative. If it is the connector, every later card
-        // is unrelated and may have any logical identity; if it is a wrong
-        // successful play, replay advances the promise and constrains the new
-        // first card on the following turn.
-        let Some(pending_card) = pending.cards.first() else {
-            continue;
-        };
-        let Some(card) = knowledge
-            .cards
-            .iter()
-            .find(|card| card.card == *pending_card)
-        else {
-            continue;
-        };
-        let expected = IdentitySet::singleton(pending.expected);
-        let allowed = if pending.cards.len() == 1 {
-            expected
-        } else {
-            // A wrong Finesse play can be any identity that succeeds now, but
-            // Good Touch still applies across the team's live promises. If a
-            // visible card is already scheduled as (for example) green 1, the
-            // Finesse card cannot independently be another green 1. Preserve
-            // the explicit expected connector even though this connection
-            // itself makes that identity appear queued.
-            let claims = IdentityClaims::new(view, replay);
-            let unclaimed_playables = IdentitySet::from_mask(
-                identities_at_distance_at(card.identities, observer_turn_stack_heights, 0)
-                    .iter()
-                    .filter(|identity| !claims.identity_claimed_elsewhere(card.card, *identity))
-                    .fold(0, |mask, identity| mask | (1 << identity.index())),
-            );
-            expected.union(unclaimed_playables)
-        };
-        let narrowed = card.identities.intersection(allowed);
-        let turn = replay
-            .pending_connections
-            .provenance(pending.promise)
-            .map_or(view.turn, |origin| origin.created_turn);
-        knowledge.update(
-            *pending_card,
-            KnowledgeSource::Promise {
-                id: pending.promise,
-                turn,
-            },
-            |card| {
-                if !narrowed.is_empty() {
-                    card.identities = narrowed;
-                }
-                card.promised_identity = Some(pending.expected);
-                if replay.is_exact_transfer(*pending_card, pending.expected) {
-                    // A Gentleman's Discard produces an exact, globally known
-                    // note. It is ordered like a clued play, rather than an
-                    // unproven Finesse that must be demonstrated immediately.
-                    card.finessed = false;
-                    card.play_obligation = None;
-                } else {
-                    card.finessed = pending.kind == HGroupConnectionKind::Finesse;
-                    card.play_obligation = Some(HGroupPlayObligation::Connection(pending.kind));
-                }
-            },
-        );
-    }
-    for forced in &replay.cards.forced_playable {
-        let Some(card) = knowledge.cards.iter().find(|card| card.card == *forced) else {
-            continue;
-        };
-        // Forced and Priority plays can physically be any identity that would
-        // succeed now, but Good Touch still excludes identities already
-        // promised on another live card, just as it does for an ordinary
-        // Finesse's successful-play contingencies.
-        let claims = IdentityClaims::new(view, replay);
-        let playable = IdentitySet::from_mask(
-            identities_at_distance(card.identities, view, 0)
-                .iter()
-                .filter(|identity| !claims.identity_claimed_elsewhere(card.card, *identity))
-                .fold(0, |mask, identity| mask | (1 << identity.index())),
-        );
-        let turn = replay
-            .transitions
-            .iter()
-            .rev()
-            .find(|transition| {
-                transition.delta.card_changes.iter().any(|change| {
-                    change.card == *forced && change.fact == MaterializedCardFact::ForcedPlayable
-                })
-            })
-            .map_or(view.turn, |transition| transition.turn);
-        knowledge.update(*forced, KnowledgeSource::ForcedPlay(turn), |card| {
-            if !playable.is_empty() {
-                card.identities = playable;
-            }
-            card.play_obligation = Some(HGroupPlayObligation::Forced);
-        });
-    }
-    for (saved, identities) in &replay.implicit_saves {
-        let Some(card) = knowledge.cards.iter().find(|card| card.card == *saved) else {
-            continue;
-        };
-        let narrowed = card.identities.intersection(*identities);
-        let turn = replay
-            .clues
-            .iter()
-            .rev()
-            .find(|clue| clue.focus == *saved || clue.new_non_focus.contains(saved))
-            .map_or(view.turn, |clue| clue.turn);
-        knowledge.update(*saved, KnowledgeSource::ImplicitSave(turn), |card| {
-            if !narrowed.is_empty() {
-                card.identities = narrowed;
-            }
-            card.saved = true;
-        });
-    }
-    knowledge.finish()
+    compiler.apply_established_good_touch();
+    compiler.apply_promised_good_touch();
+    compiler.apply_transfer_claims();
+    compiler.apply_resolved_ejections();
+    compiler.apply_connection_promises();
+    compiler.apply_current_focus();
+    compiler.apply_forced_plays();
+    compiler.apply_implicit_saves();
+    compiler.finish()
 }
 
 /// Compiles convention semantics once into replay-owned typed epistemic
