@@ -22,9 +22,9 @@ use super::{
     is_unique_visible, next_player, ordered_playable_cards, pending_card_allows_identity,
     pending_identity_is_queued, pending_is_active, positional_discard_candidate,
     preferred_due_play_card, projected_h_group_replay, prospective_clue_has_unsafe_connection,
-    prospective_clue_marks_focus_saved, prospective_clue_primary_kind,
-    prospective_clue_signal_kinds, prospective_clue_view, prospective_play_view,
-    prospective_stacked_ejection_card, prospective_team_clue_signal_kinds,
+    prospective_clue_marks_focus_saved, prospective_clue_primary_interpretation,
+    prospective_clue_primary_kind, prospective_clue_signal_kinds, prospective_clue_view,
+    prospective_play_view, prospective_stacked_ejection_card, prospective_team_clue_signal_kinds,
     replay_identity_is_queued, rule_enabled, subjective_convention_cards,
     subjective_playable_cards, was_clued_before, with_prospective_analysis_cache,
 };
@@ -504,6 +504,32 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 // a direct clue that concentrates both plays in one hand.
                 .map(|_| 500)
         });
+        if play_score.is_none()
+            && save_score.is_none()
+            && prospective_team_clue_signal_kinds(view, profile, target, clue, &touched)
+                .contains(&HGroupMoveKind::FocusInversion)
+            && prospective_clue_primary_interpretation(view, profile, target, clue, &touched)
+                .is_some_and(|interpretation| {
+                    interpretation.focus == focus
+                        && matches!(
+                            interpretation.kind,
+                            HGroupClueKind::Play | HGroupClueKind::PlayOrSave
+                        )
+                        && interpretation.play_identities.contains(focus_identity)
+                })
+        {
+            // A Focus Inversion can recognize a delayed line whose
+            // intermediate promises depend on observer-relative knowledge
+            // that the giver-side structural connection search cannot
+            // reconstruct. Admit that same safe Play interpretation only
+            // when the recipient-side interpretation retains that focus and
+            // identity. Hazard validation below still rejects an unsafe
+            // recipient action.
+            play_score = Some(
+                390 + 2 * u16::try_from(newly_informed.len()).unwrap_or(0)
+                    + u16::from(matches!(clue, Clue::Suit(_))),
+            );
+        }
         if five_chop_move {
             // A number-5 clue whose rightmost 5 is exactly one unclued card
             // from chop is a 5CM, not a Play Clue. In particular, it cannot
@@ -514,14 +540,17 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
         if save_score.is_some()
             && matches!(
                 (clue, focus_identity.rank),
-                (Clue::Rank(Rank::Two), Rank::Two)
+                (Clue::Rank(Rank::Two), Rank::Two) | (Clue::Rank(Rank::Five), Rank::Five)
             )
         {
-            // A number-2 clue to an unclued chop 2 is a 2 Save by
-            // definition, even when that particular 2 is already playable.
-            // Candidate generation must use the same Save precedence as
-            // replay interpretation; otherwise an unsafe ordinary-Play
-            // reading rejects a convention-valid 2 Save altogether.
+            // A number-2 or number-5 clue to an unclued chop card is a Save
+            // by definition. Candidate generation must use the same Save
+            // precedence as replay interpretation; otherwise a visible
+            // delayed connection can incorrectly turn the Save into a Play
+            // clue and receive play-line bonuses it does not earn.
+            // Sources:
+            // - https://hanabi.github.io/level-1/#the-save-principle
+            // - https://hanabi.github.io/level-1/#the-2-save
             play_score = None;
         }
         if play_score.is_some()

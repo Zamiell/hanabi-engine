@@ -46,6 +46,7 @@ mod perspective;
 mod plan;
 mod primary;
 mod prospective;
+mod rationality;
 mod recognition;
 mod rule_engine;
 mod rules;
@@ -77,7 +78,7 @@ use decision::{ordered_h_group_actions, select_h_group_action};
 use effects::{ConventionJournal, ConventionReducer, EffectBatch, SignalHistory};
 use epistemic::{EpistemicState, owner_knowledge_read_model};
 use event_reducer::HGroupRuleEffects;
-use facts::{ConventionFacts, IdentityClaimRelation};
+use facts::{ConventionFacts, DeclinedAlternativeInference, IdentityClaimRelation};
 use hand::{
     chop, finesse_position, finesse_position_id, five_chop_moved_card, five_pulled_card, focus,
     is_critical, remove_card,
@@ -120,12 +121,14 @@ use prospective::prospective_clue_hazard;
 use prospective::{
     CachedProspectiveProjection, SubjectiveReplayRequest, TeamConventionSnapshot,
     projected_h_group_replay, prospective_clue_has_unsafe_connection,
-    prospective_clue_marks_focus_saved, prospective_clue_primary_kind,
-    prospective_clue_signal_kinds, prospective_clue_view, prospective_play_has_unsafe_inference,
-    prospective_play_view, prospective_stacked_ejection_card, prospective_team_clue_signal_kinds,
+    prospective_clue_marks_focus_saved, prospective_clue_primary_interpretation,
+    prospective_clue_primary_kind, prospective_clue_signal_kinds, prospective_clue_view,
+    prospective_play_has_unsafe_inference, prospective_play_view,
+    prospective_stacked_ejection_card, prospective_team_clue_signal_kinds,
     subjective_action_context_before, subjective_convention_cards, subjective_playable_cards,
     with_prospective_analysis_cache,
 };
+use rationality::{DeclinedAlternativeContext, declined_superior_clue_inferences};
 use rule_engine::{RuleExecutionContext, apply_post_event_rules};
 use rules::{HGroupRuleId, RulePhase, rule_enabled};
 use strategic_value::apply_strategic_clue_values;
@@ -1137,11 +1140,6 @@ fn replay_h_group_inner(
                                 && pending_is_active(connection, &pending_connections)
                         })
                         .map(|connection| connection.expected);
-                    let clue_gotten = gotten
-                        .iter()
-                        .copied()
-                        .chain(touched.iter().copied())
-                        .collect::<CardSet>();
                     let clue_promptable = previously_promptable
                         .iter()
                         .copied()
@@ -1158,7 +1156,7 @@ fn replay_h_group_inner(
                                 view,
                                 &hands,
                                 &facts,
-                                &clue_gotten,
+                                &previously_promptable,
                                 &already_playing,
                                 &pending_connections,
                                 signals.facts(),
@@ -1203,7 +1201,7 @@ fn replay_h_group_inner(
                             view,
                             &hands,
                             &facts,
-                            &clue_gotten,
+                            &previously_promptable,
                             &already_playing,
                             &pending_connections,
                             signals.facts(),
@@ -1556,6 +1554,31 @@ fn replay_h_group_inner(
                         // Prompted merely because it was moved.
                         previously_gotten: previously_promptable.iter().copied().collect(),
                     });
+                    let current_clue = clues
+                        .last()
+                        .expect("the current clue was just appended")
+                        .clone();
+                    let declined_alternatives =
+                        declined_superior_clue_inferences(&DeclinedAlternativeContext {
+                            view,
+                            profile,
+                            clue: &current_clue,
+                            hands: &hands,
+                            clue_facts: &facts,
+                            historical,
+                            gotten: &gotten,
+                            promptable_before: &previously_promptable,
+                            already_playing: already_playing.materialized(),
+                            pending: &pending_connections,
+                            convention_facts: signals.facts(),
+                            chop_moved: chop_moved.materialized(),
+                        });
+                    for inference in declined_alternatives {
+                        ConventionReducer::apply(
+                            EffectBatch::declined_alternative(inference),
+                            &mut signals,
+                        );
+                    }
                     let signal_kind = match kind {
                         HGroupClueKind::Play | HGroupClueKind::PlayOrSave => {
                             Some(HGroupMoveKind::PlayClue)

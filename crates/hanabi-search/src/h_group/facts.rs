@@ -1,4 +1,4 @@
-use hanabi_core::{Card, CardId, PlayerId};
+use hanabi_core::{Action, Card, CardId, PlayerId};
 
 use super::{CardSet, HGroupMoveKind, HGroupSignal, IdentitySet};
 
@@ -24,6 +24,23 @@ pub(super) struct ConventionIdentityClaim {
     pub(super) relation: IdentityClaimRelation,
 }
 
+/// Observer-relative identity information obtained by inverse planning.
+///
+/// The observer knows the giver could see this card. If the card had not been
+/// `identity`, the `superior` clue would have been convention-valid and
+/// strictly more efficient than `chosen`; observing the chosen clue therefore
+/// identifies the card. Keeping both actions makes this deduction auditable
+/// instead of hiding it in a replay-specific domain rewrite.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct DeclinedAlternativeInference {
+    pub(super) turn: u32,
+    pub(super) actor: PlayerId,
+    pub(super) card: CardId,
+    pub(super) identity: Card,
+    pub(super) chosen: Action,
+    pub(super) superior: Action,
+}
+
 /// Current convention facts derived from the append-only explanation log.
 ///
 /// `HGroupSignal` answers "why did we infer this?"; this type answers "what is
@@ -42,6 +59,7 @@ pub(super) struct ConventionFacts {
     /// live semantic fact, not something consumers should reconstruct from
     /// the explanation journal.
     exact_transfers: Vec<(CardId, Card)>,
+    declined_alternatives: Vec<DeclinedAlternativeInference>,
     identity_claims: Vec<ConventionIdentityClaim>,
 }
 
@@ -56,6 +74,7 @@ impl Default for ConventionFacts {
             layer_conflicts: [false; 50],
             active_priority: CardSet::default(),
             exact_transfers: Vec::new(),
+            declined_alternatives: Vec::new(),
             identity_claims: Vec::new(),
         }
     }
@@ -238,6 +257,23 @@ impl ConventionFacts {
         self.exact_transfers.contains(&(card, identity))
     }
 
+    pub(super) fn add_declined_alternative(&mut self, inference: DeclinedAlternativeInference) {
+        if !self.declined_alternatives.contains(&inference) {
+            self.declined_alternatives.push(inference);
+        }
+    }
+
+    pub(super) fn declined_alternatives(&self) -> &[DeclinedAlternativeInference] {
+        &self.declined_alternatives
+    }
+
+    #[cfg(test)]
+    pub(super) fn signal_reducible_subset(&self) -> Self {
+        let mut subset = self.clone();
+        subset.declined_alternatives.clear();
+        subset
+    }
+
     pub(super) fn identity_claims(&self) -> &[ConventionIdentityClaim] {
         &self.identity_claims
     }
@@ -249,6 +285,13 @@ impl ConventionFacts {
             .any(|claim| claim.cards.is_empty())
         {
             return Err("convention identity claim has no candidate cards".to_owned());
+        }
+        if self
+            .declined_alternatives
+            .iter()
+            .any(|inference| inference.chosen == inference.superior)
+        {
+            return Err("declined alternative repeats the chosen action".to_owned());
         }
         Ok(())
     }

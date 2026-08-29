@@ -171,6 +171,27 @@ fn compile_convention_card_inferences(
         );
     }
 
+    for inference in replay.cards.facts.declined_alternatives() {
+        let allowed = IdentitySet::singleton(inference.identity);
+        if knowledge
+            .cards
+            .iter()
+            .find(|card| card.card == inference.card)
+            .is_none_or(|card| !card.identities.contains(inference.identity))
+        {
+            continue;
+        }
+        knowledge.update(
+            inference.card,
+            KnowledgeSource::DeclinedAlternative {
+                turn: inference.turn,
+                chosen: inference.chosen,
+                superior: inference.superior,
+            },
+            |card| card.identities = card.identities.intersection(allowed),
+        );
+    }
+
     for clue in &replay.clues {
         let clue_stack_heights = StackTimeline::at_clue(clue.turn, clue.stack_heights).heights();
         let first_connector_was_played_before_target = |identity: Card| {
@@ -357,21 +378,18 @@ fn compile_convention_card_inferences(
                         });
                         let queued_interpretation_is_live = has_queued_delayed_identity
                             && (!matches!(clue.clue, Clue::Suit(_)) || active_focus_connection);
-                        if !demonstrated_queued_identity.is_empty() {
+                        let direct_focus_is_live = !direct_at_clue
+                            .intersection(clue.focus_identities)
+                            .is_empty();
+                        if !demonstrated_queued_identity.is_empty() && !direct_focus_is_live {
                             narrowed = demonstrated_queued_identity;
                         } else if !queued_interpretation_is_live
                             && !has_existing_prompt_for_delayed_identity
                             && !loaded_color_clue_remains_ambiguous
                         {
-                            // Without an actual Prompt/Finesse obligation or
-                            // an existing clued Prompt candidate, an
-                            // immediately playable identity has precedence
-                            // over a merely hypothetical delayed
-                            // interpretation. An existing Prompt candidate
-                            // keeps the delayed identity semantically valid,
-                            // but a simultaneous direct-play possibility means
-                            // that the Prompt is not yet actionable; the focus
-                            // remains a superposition instead.
+                            // A direct Play promise is fixed at clue time. A
+                            // lower card demonstrated later cannot migrate an
+                            // already-settled direct focus to a delayed suit.
                             let direct = identities_at_distance_at(narrowed, clue.stack_heights, 0);
                             if !direct.is_empty() {
                                 narrowed = direct;
@@ -401,6 +419,40 @@ fn compile_convention_card_inferences(
                             narrowed = live;
                         }
                     }
+                    if matches!(clue.clue, Clue::Suit(_))
+                        && clue.touched.len() > 1
+                        && narrowed.len() > 1
+                    {
+                        // Directness assigns the focus the earliest identity
+                        // reachable without using another card touched by the
+                        // same clue as a connector. Otherwise a loaded color
+                        // clue can needlessly route through its older touched
+                        // card. In p4v0s415, the queued purple 2 and 3 reach
+                        // the focused purple 4; the older card is purple 5.
+                        // https://hanabi.github.io/level-10/#directness-principle
+                        let external_gotten = clue
+                            .previously_gotten
+                            .iter()
+                            .copied()
+                            .filter(|card| !clue.touched.contains(card))
+                            .collect::<CardSet>();
+                        let direct = IdentitySet::from_mask(
+                            narrowed
+                                .iter()
+                                .filter(|identity| {
+                                    convention_playable(
+                                        view,
+                                        &external_gotten,
+                                        clue.focus,
+                                        *identity,
+                                    )
+                                })
+                                .fold(0, |mask, identity| mask | (1 << identity.index())),
+                        );
+                        if !direct.is_empty() {
+                            narrowed = direct;
+                        }
+                    }
                     if !narrowed.is_empty() {
                         card.identities = narrowed;
                     }
@@ -414,7 +466,19 @@ fn compile_convention_card_inferences(
         let intentionally_duplicates = [HGroupMoveKind::FixClue, HGroupMoveKind::Duplication]
             .into_iter()
             .any(|kind| replay.signals.has_at_turn(clue.turn, kind));
-        if !intentionally_duplicates && clue.focus_identities.len() == 1 {
+        let directness_resolved_focus = matches!(clue.clue, Clue::Suit(_))
+            && clue.touched.len() > 1
+            && clue.focus_identities.len() > 1;
+        let effective_focus_identities = if directness_resolved_focus {
+            knowledge
+                .cards
+                .iter()
+                .find(|card| card.card == clue.focus)
+                .map_or(clue.focus_identities, |card| card.identities)
+        } else {
+            clue.focus_identities
+        };
+        if !intentionally_duplicates && effective_focus_identities.len() == 1 {
             for previous in &clue.previously_gotten {
                 // Good Touch narrows identities only on cards that already
                 // carry physical clue information. A Layered Finesse reserves
@@ -433,7 +497,7 @@ fn compile_convention_card_inferences(
                     // the giver's perspective.
                     continue;
                 }
-                let narrowed = card.identities.without(clue.focus_identities);
+                let narrowed = card.identities.without(effective_focus_identities);
                 knowledge.update(*previous, KnowledgeSource::Clue(clue.turn), |card| {
                     if !narrowed.is_empty() {
                         card.identities = narrowed;
@@ -532,6 +596,41 @@ fn compile_convention_card_inferences(
                 continue;
             }
             knowledge.update(card.card, KnowledgeSource::Clue(claim.turn), |card| {
+                card.identities = narrowed;
+            });
+        }
+    }
+
+    // A live Prompt/Finesse promise claims its expected identity before the
+    // physical card is revealed. Good Touch therefore removes that identity
+    // from every other physically clued card, including cards first touched
+    // after the connection began. In p4v0s415, Donald's ongoing Layered
+    // Finesse owns yellow 1 when Cathy later receives the yellow clue.
+    // https://hanabi.github.io/level-1/#good-touch-principle
+    for pending in replay.pending_connections.iter() {
+        if !replay
+            .pending_connections
+            .promise_was_demonstrated_after(pending.promise, 0)
+        {
+            continue;
+        }
+        let claimed = IdentitySet::singleton(pending.expected);
+        for card in knowledge.cards.clone() {
+            if card.card == pending.focus
+                || pending.cards.contains(&card.card)
+                || !replay.cards.explicitly_clued.contains(&card.card)
+            {
+                continue;
+            }
+            let narrowed = card.identities.without(claimed);
+            if narrowed.is_empty() || narrowed == card.identities {
+                continue;
+            }
+            let turn = replay
+                .pending_connections
+                .provenance(pending.promise)
+                .map_or(closure_turn, |origin| origin.created_turn);
+            knowledge.update(card.card, KnowledgeSource::Clue(turn), |card| {
                 card.identities = narrowed;
             });
         }
@@ -880,6 +979,10 @@ pub(in crate::h_group) fn snapshot_play_identities(
     historical_turn: u32,
     allow_blind_reverse_empathy: bool,
 ) -> IdentitySet {
+    // `gotten` must describe the pre-clue Promptable cards. Cards first
+    // touched by the clue being interpreted cannot simultaneously serve as
+    // lower connectors for its focus: a Prompt must have been clued already.
+    // https://hanabi.github.io/level-1/#the-prompt
     let mask = identities
         .iter()
         .filter(|identity| {

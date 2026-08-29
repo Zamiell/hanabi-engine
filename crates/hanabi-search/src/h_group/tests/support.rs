@@ -3,17 +3,9 @@ struct TestOutcome {
 }
 
 impl TestOutcome {
-    fn actions(&self) -> &[Action] {
-        &self.actions
-    }
-
     fn turns(&self) -> usize {
         self.actions.len()
     }
-}
-
-struct TestContinuationReport {
-    outcome: TestOutcome,
 }
 
 fn continuation_to_terminal(
@@ -47,13 +39,6 @@ fn continuation_to_terminal(
         return Err("H-Group continuation exceeded its test turn limit".to_owned());
     }
     Ok(TestOutcome { actions })
-}
-
-fn continuation_for_search(
-    state: FullState,
-    convention: crate::SupportedConvention,
-) -> Result<TestContinuationReport, String> {
-    continuation_to_terminal(state, convention).map(|outcome| TestContinuationReport { outcome })
 }
 
 fn state_with_prefix(num_players: u8, prefix: &[Card]) -> FullState {

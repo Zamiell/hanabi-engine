@@ -220,7 +220,7 @@ impl ConnectionManager {
             })
     }
 
-    fn promise_was_demonstrated_after(&self, promise: PromiseId, turn: u32) -> bool {
+    pub(super) fn promise_was_demonstrated_after(&self, promise: PromiseId, turn: u32) -> bool {
         self.transitions.iter().any(|transition| {
             transition.promise == promise
                 && transition.turn > turn

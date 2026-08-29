@@ -4,7 +4,9 @@ use std::hash::BuildHasherDefault;
 
 use hanabi_core::CardId;
 
-use super::{CompactIdHasher, ConventionFacts, HGroupMoveKind, HGroupSignal};
+use super::{
+    CompactIdHasher, ConventionFacts, DeclinedAlternativeInference, HGroupMoveKind, HGroupSignal,
+};
 
 /// Indexed, append-only explanation history.
 ///
@@ -87,6 +89,7 @@ pub(super) enum ConventionEffect {
         active: bool,
     },
     ClaimIdentity(HGroupSignal),
+    RecordDeclinedAlternative(DeclinedAlternativeInference),
 }
 
 #[derive(Clone, Debug, Default)]
@@ -121,6 +124,12 @@ impl EffectBatch {
         }
         effects.push(ConventionEffect::RecordSignal(signal));
         Self { effects }
+    }
+
+    pub(super) fn declined_alternative(inference: DeclinedAlternativeInference) -> Self {
+        Self {
+            effects: vec![ConventionEffect::RecordDeclinedAlternative(inference)],
+        }
     }
 }
 
@@ -183,6 +192,9 @@ impl ConventionReducer {
                 }
                 ConventionEffect::ClaimIdentity(signal) => {
                     journal.facts.apply_identity_effect(&signal);
+                }
+                ConventionEffect::RecordDeclinedAlternative(inference) => {
+                    journal.facts.add_declined_alternative(inference);
                 }
                 ConventionEffect::RecordSignal(signal) => {
                     let duplicate =

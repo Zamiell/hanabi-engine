@@ -249,6 +249,116 @@ fn third_replay_move_thirty_two_resolves_the_demonstrated_bluff() {
 }
 
 #[test]
+fn third_replay_green_four_counterfactual_prefers_rank_four_to_bob() {
+    let mut fixture = expert_replay_p4v0s2();
+    // Preserve the deck multiset while making Alice's ambiguous rank-4 card
+    // green rather than yellow.
+    fixture.deck.swap(2, 39);
+    let state = fixture.state_at_turn(30).expect("fixture prefix is legal");
+    let view = state.view_for(PlayerId::new(2)).expect("Cathy has a view");
+    let deductions = LogicalDeductions::new(view).expect("logical view");
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let rank_two = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Rank(Rank::Two),
+    };
+    let rank_four = Action::Clue {
+        target: PlayerId::new(1),
+        clue: Clue::Rank(Rank::Four),
+    };
+    let candidate = |action| {
+        candidates
+            .iter()
+            .find(|candidate| candidate.action == action)
+            .expect("both comparison clues are convention-valid")
+    };
+
+    assert!(candidate(rank_four).action_coverage > candidate(rank_two).action_coverage);
+    assert!(candidate(rank_four).score() > candidate(rank_two).score());
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(rank_four),
+    );
+}
+
+#[test]
+fn third_replay_declined_rank_four_resolves_alices_card_as_yellow_four() {
+    let fixture = expert_replay_p4v0s2();
+    let state = fixture.state_at_turn(36).expect("fixture prefix is legal");
+    let view = state
+        .view_for(state.current_player())
+        .expect("current player has a view");
+    let deductions = LogicalDeductions::new(view).expect("logical view");
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
+    let inferred = infer_h_group_from_replay(&deductions, replay.clone(), HGroupProfile::Max);
+    let yellow_four = Card::new(Suit::Yellow, Rank::Four);
+    let card = inferred
+        .cards
+        .iter()
+        .find(|card| card.card == CardId::new(2))
+        .expect("Alice still holds card #2");
+
+    assert_eq!(card.identities, IdentitySet::singleton(yellow_four));
+    assert!(inferred.playable_now.contains(&CardId::new(2)));
+    assert!(
+        replay
+            .cards
+            .facts
+            .declined_alternatives()
+            .iter()
+            .any(|inference| {
+                inference.turn == 30
+                    && inference.actor == PlayerId::new(2)
+                    && inference.card == CardId::new(2)
+                    && inference.identity == yellow_four
+                    && inference.chosen
+                        == Action::Clue {
+                            target: PlayerId::new(0),
+                            clue: Clue::Rank(Rank::Two),
+                        }
+                    && inference.superior
+                        == Action::Clue {
+                            target: PlayerId::new(1),
+                            clue: Clue::Rank(Rank::Four),
+                        }
+            })
+    );
+    assert!(
+        replay
+            .knowledge
+            .effects_for(CardId::new(2))
+            .any(|effect| matches!(
+                effect.source(),
+                KnowledgeSource::DeclinedAlternative { turn: 30, .. }
+            )),
+        "the exact identity retains the declined-alternative provenance",
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(2))),
+    );
+}
+
+#[test]
+fn third_replay_move_thirty_one_does_not_defer_a_one_for_one_play_clue() {
+    let fixture = expert_replay_p4v0s2();
+    let state = fixture.state_at_turn(30).expect("fixture prefix is legal");
+    let view = state
+        .view_for(state.current_player())
+        .expect("Cathy has a view");
+    let deductions = LogicalDeductions::new(view).expect("logical view");
+
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Two),
+        }),
+        "an ordinary direct Play Clue must not be treated as a multi-action line merely because later inverse planning can resolve Alice's old rank-4 clue",
+    );
+}
+
+#[test]
 fn third_replay_move_thirty_six_prefers_occupying_play_over_save() {
     let fixture = expert_replay_p4v0s2();
     let state = fixture.state_at_turn(35).expect("fixture prefix is legal");
@@ -288,6 +398,122 @@ fn third_replay_move_thirty_six_prefers_occupying_play_over_save() {
         "red occupies Bob with red 5, postponing any discard of his green-5 chop; red={:#?}; five={:#?}",
         candidate(red),
         candidate(five),
+    );
+}
+
+#[test]
+fn third_replay_move_forty_uses_green_to_advance_the_final_stack() {
+    let fixture = expert_replay_p4v0s2();
+    let state = fixture.state_at_turn(39).expect("fixture prefix is legal");
+    let view = state
+        .view_for(state.current_player())
+        .expect("Donald has a view");
+    let target = PlayerId::new(1);
+    let clue = Clue::Suit(Suit::Green);
+    let touched = view.hands[target.index()]
+        .iter()
+        .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
+        .map(|card| card.id)
+        .collect::<Vec<_>>();
+    let interpretation =
+        prospective_clue_primary_interpretation(&view, HGroupProfile::Max, target, clue, &touched);
+    let interpretation = interpretation.expect("recipient recognizes the green clue");
+    assert_eq!(interpretation.kind, HGroupClueKind::Play);
+    assert_eq!(interpretation.focus, CardId::new(23));
+    let deductions = LogicalDeductions::new(view).expect("logical view");
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Clue { target, clue }),
+        "green advances the remaining green-3/4/5 stack; candidates={candidates:#?}",
+    );
+}
+
+#[test]
+fn third_replay_final_green_line_remains_committed_before_the_last_clue() {
+    let fixture = expert_replay_p4v0s2();
+    let after_clue = fixture.state_at_turn(40).expect("green clue is legal");
+    let after_clue_view = after_clue
+        .view_for(PlayerId::new(0))
+        .expect("Alice has a view after the clue");
+    let after_clue_deductions =
+        LogicalDeductions::new(after_clue_view).expect("Alice's view is logical");
+    let after_clue_replay = replay_h_group(&after_clue_deductions, HGroupProfile::Max);
+    let clue_turn = after_clue_deductions
+        .view()
+        .history
+        .last()
+        .expect("green clue is the latest event")
+        .turn;
+    let green_clue = after_clue_replay
+        .clues
+        .iter()
+        .find(|clue| clue.turn == clue_turn)
+        .expect("the green clue has an interpretation");
+    assert_eq!(green_clue.focus, CardId::new(23));
+    assert!(
+        green_clue
+            .play_identities
+            .contains(Card::new(Suit::Green, Rank::Five)),
+        "Bob's green 5 remains the focus: {green_clue:#?}",
+    );
+    assert!(
+        !after_clue_replay.signals.iter().any(|signal| {
+            signal.turn == clue_turn && signal.kind == HGroupMoveKind::FocusInversion
+        }),
+        "green 3 is the first play in the line; it does not invert focus away from green 5: {:#?}",
+        after_clue_replay.signals,
+    );
+    assert!(
+        after_clue_replay.pending_connections.iter().any(|pending| {
+            pending.actor == PlayerId::new(0)
+                && pending.cards.first() == Some(&CardId::new(39))
+                && pending.expected == Card::new(Suit::Green, Rank::Four)
+        }),
+        "the green clue must initially schedule Alice's green 4: {:#?}",
+        after_clue_replay.pending_connections,
+    );
+    let state = fixture.state_at_turn(43).expect("fixture prefix is legal");
+    let view = state
+        .view_for(state.current_player())
+        .expect("Donald has a view");
+    let team = TeamConventionSnapshot::new(view, HGroupProfile::Max);
+    let alice = team
+        .projection(PlayerId::new(0))
+        .expect("Alice has a projection");
+    let bob = team
+        .projection(PlayerId::new(1))
+        .expect("Bob has a projection");
+
+    assert!(
+        alice.replay.pending_connections.iter().any(|pending| {
+            pending.actor == PlayerId::new(0)
+                && pending.cards.first() == Some(&CardId::new(39))
+                && pending.expected == Card::new(Suit::Green, Rank::Four)
+        }),
+        "Alice's executable green-4 connection must survive the later-layer discard: {:#?}",
+        alice.replay.pending_connections,
+    );
+    assert!(
+        alice.inferred.signals.iter().any(|signal| {
+            signal.target == Some(PlayerId::new(0))
+                && signal.cards.contains(&CardId::new(39))
+                && signal.identity == Some(Card::new(Suit::Green, Rank::Four))
+                && signal.kind == HGroupMoveKind::LayeredFinesse
+        }),
+        "Alice still owes green 4: {:#?}",
+        alice.inferred,
+    );
+    assert!(
+        bob.inferred.clues.iter().any(|clue| {
+            clue.focus == CardId::new(23)
+                && matches!(clue.kind, HGroupClueKind::Play | HGroupClueKind::PlayOrSave)
+                && clue
+                    .play_identities
+                    .contains(Card::new(Suit::Green, Rank::Five))
+        }),
+        "Bob still owns the green-5 focus: {:#?}",
+        bob.inferred,
     );
 }
 

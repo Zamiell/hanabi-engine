@@ -143,9 +143,9 @@ fn every_expert_replay_prefix_satisfies_h_group_state_invariants() {
                     "invalid {fixture_name} replay at turn {turn} for {observer:?}"
                 );
                 assert_eq!(
-                    replay.cards.facts,
+                    replay.cards.facts.signal_reducible_subset(),
                     ConventionFacts::from_signals(&replay.signals),
-                    "incremental facts differ from a complete journal reduction in {fixture_name} at turn {turn} for {observer:?}"
+                    "incremental signal-derived facts differ from a complete signal reduction in {fixture_name} at turn {turn} for {observer:?}"
                 );
             }
         }

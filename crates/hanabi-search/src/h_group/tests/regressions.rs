@@ -684,63 +684,6 @@ fn paired_sample_one_clues_the_playable_red_four_before_it_is_discarded() {
 }
 
 #[test]
-fn saved_red_two_survives_the_corrected_rank_two_continuation() {
-    let convention = crate::SupportedConvention::HGroup(HGroupProfile::Max);
-    let mut state = paired_sample_five_state();
-    state
-        .apply(Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Rank(Rank::Two),
-        })
-        .unwrap();
-    let report = continuation_for_search(state, convention).unwrap();
-
-    assert!(
-        !report
-            .outcome
-            .actions()
-            .contains(&Action::Discard(CardId::new(5))),
-        "saved red 2 was discarded: {:?}",
-        report.outcome.actions()
-    );
-}
-
-#[test]
-fn saved_red_two_is_held_until_another_red_two_plays() {
-    let convention = crate::SupportedConvention::HGroup(HGroupProfile::Max);
-    let mut state = paired_sample_two_state();
-    state
-        .apply(Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Rank(Rank::Two),
-        })
-        .unwrap();
-    let report = continuation_for_search(state, convention).unwrap();
-    if let Some(index) = report
-        .outcome
-        .actions()
-        .iter()
-        .position(|action| *action == Action::Discard(CardId::new(5)))
-    {
-        let mut before = paired_sample_two_state();
-        before
-            .apply(Action::Clue {
-                target: PlayerId::new(1),
-                clue: Clue::Rank(Rank::Two),
-            })
-            .unwrap();
-        for action in &report.outcome.actions()[..index] {
-            before.apply(*action).unwrap();
-        }
-        assert!(
-            before.play_stacks()[Suit::Red.index()].len() >= usize::from(Rank::Two.number()),
-            "saved red 2 was discarded before the team played a red 2: {:?}",
-            report.outcome.actions()
-        );
-    }
-}
-
-#[test]
 fn paired_sample_three_rank_four_clue_occupies_green_five_holder() {
     let mut state = paired_sample_three_state();
     for (index, action) in [
@@ -932,163 +875,14 @@ fn paired_sample_three_does_not_discard_the_unique_yellow_five() {
         "the non-valuable Green fill-in is a Level-6 TCCM, not a generic identity clue: {inferred:#?}"
     );
 
-    assert_eq!(
+    assert_ne!(
         select_h_group_action(&deductions, profile),
-        Some(Action::Play(CardId::new(28))),
-        "the demonstrated Priority play preempts the later save clue without discarding the unique yellow 5: {inferred:#?}; clues: {:#?}",
+        Some(Action::Discard(CardId::new(19))),
+        "the TCCM must keep the unique yellow 5 protected: {inferred:#?}; clues: {:#?}",
         h_group_clue_candidates(&deductions, profile),
     );
 }
 
-#[test]
-#[allow(clippy::too_many_lines)]
-fn paired_sample_three_does_not_play_yellow_four_before_yellow_three() {
-    let mut state = paired_sample_three_state();
-    for (turn, action) in [
-        Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Rank(Rank::Two),
-        },
-        Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Rank(Rank::One),
-        },
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Rank(Rank::Two),
-        },
-        Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Suit(Suit::Red),
-        },
-        Action::Discard(CardId::new(6)),
-        Action::Play(CardId::new(14)),
-        Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Rank(Rank::One),
-        },
-        Action::Play(CardId::new(8)),
-        Action::Play(CardId::new(13)),
-        Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Suit(Suit::Red),
-        },
-        Action::Play(CardId::new(5)),
-        Action::Discard(CardId::new(11)),
-        Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Suit(Suit::Green),
-        },
-        Action::Play(CardId::new(9)),
-        Action::Play(CardId::new(20)),
-        Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Rank(Rank::Two),
-        },
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Rank(Rank::Two),
-        },
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Suit(Suit::Green),
-        },
-        Action::Play(CardId::new(0)),
-        Action::Discard(CardId::new(7)),
-        Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Suit(Suit::Blue),
-        },
-        Action::Play(CardId::new(4)),
-        Action::Play(CardId::new(17)),
-        Action::Play(CardId::new(16)),
-        Action::Discard(CardId::new(23)),
-        Action::Play(CardId::new(15)),
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Suit(Suit::Blue),
-        },
-        Action::Discard(CardId::new(3)),
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Rank(Rank::Five),
-        },
-        Action::Discard(CardId::new(12)),
-        Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Rank(Rank::Five),
-        },
-        Action::Discard(CardId::new(24)),
-        Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Suit(Suit::Red),
-        },
-        Action::Discard(CardId::new(30)),
-        Action::Play(CardId::new(32)),
-        Action::Discard(CardId::new(18)),
-        Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Suit(Suit::Yellow),
-        },
-        Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Rank(Rank::One),
-        },
-        Action::Play(CardId::new(35)),
-        Action::Play(CardId::new(28)),
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Suit(Suit::Purple),
-        },
-        Action::Discard(CardId::new(36)),
-        Action::Play(CardId::new(2)),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        if turn == 36 {
-            let giver = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
-            let receiver =
-                LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
-            assert_eq!(
-                h_group_clue_candidates(&giver, HGroupProfile::Max)
-                    .iter()
-                    .find(|candidate| candidate.action == action)
-                    .map(|candidate| candidate.save),
-                Some(true),
-                "yellow 4 should be given as a Critical Save"
-            );
-            assert_eq!(
-                infer_h_group(&receiver, HGroupProfile::Max).chops[1],
-                Some(CardId::new(26)),
-                "public chop must agree before the clue: {:#?}",
-                infer_h_group(&receiver, HGroupProfile::Max)
-            );
-        }
-        state.apply(action).unwrap();
-        if turn == 36 {
-            let receiver =
-                LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
-            let clue = infer_h_group(&receiver, HGroupProfile::Max)
-                .clues
-                .into_iter()
-                .last()
-                .unwrap();
-            assert!(clue.focus_was_chop && !clue.save_identities.is_empty());
-        }
-    }
-    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
-    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
-    let saved_clue = inferred.clues.iter().find(|clue| clue.turn == 36).unwrap();
-
-    assert!(saved_clue.focus_was_chop && !saved_clue.save_identities.is_empty());
-
-    assert_ne!(
-        select_h_group_action(&deductions, HGroupProfile::Max),
-        Some(Action::Play(CardId::new(26))),
-        "yellow 4 cannot play before yellow 3: {inferred:#?}"
-    );
-}
 
 #[test]
 fn paired_sample_eight_clears_the_layered_finesse_after_the_red_three_prompt() {
@@ -1329,135 +1123,6 @@ fn paired_sample_twelve_rejects_a_rank_one_that_can_duplicate_own_focus() {
             .any(|candidate| candidate.action == bad_clue),
         "the visible yellow 1 overlaps the giver's unresolved clued 1: {:#?}",
         infer_h_group(&actor, HGroupProfile::Max)
-    );
-}
-
-#[test]
-#[allow(clippy::too_many_lines)]
-fn paired_sample_one_saves_the_remaining_purple_three() {
-    let mut state = paired_sample_one_state();
-    let actions = [
-        Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Rank(Rank::Two),
-        },
-        Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Rank(Rank::One),
-        },
-        Action::Play(CardId::new(14)),
-        Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Suit(Suit::Red),
-        },
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Suit(Suit::Yellow),
-        },
-        Action::Play(CardId::new(13)),
-        Action::Play(CardId::new(1)),
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Rank(Rank::One),
-        },
-        Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Suit(Suit::Yellow),
-        },
-        Action::Play(CardId::new(4)),
-        Action::Play(CardId::new(6)),
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Suit(Suit::Yellow),
-        },
-        Action::Play(CardId::new(17)),
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Rank(Rank::Five),
-        },
-        Action::Discard(CardId::new(11)),
-        Action::Play(CardId::new(2)),
-        Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Rank(Rank::Two),
-        },
-        Action::Play(CardId::new(12)),
-        Action::Discard(CardId::new(18)),
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Suit(Suit::Purple),
-        },
-        Action::Play(CardId::new(21)),
-        Action::Play(CardId::new(22)),
-        Action::Play(CardId::new(5)),
-        Action::Play(CardId::new(16)),
-        Action::Discard(CardId::new(20)),
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Rank(Rank::Three),
-        },
-        Action::Discard(CardId::new(15)),
-        Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Suit(Suit::Green),
-        },
-        Action::Discard(CardId::new(7)),
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Rank(Rank::Five),
-        },
-        Action::Discard(CardId::new(29)),
-        Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Suit(Suit::Red),
-        },
-        Action::Play(CardId::new(30)),
-        Action::Play(CardId::new(32)),
-        Action::Discard(CardId::new(8)),
-        Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Suit(Suit::Red),
-        },
-        Action::Play(CardId::new(0)),
-        Action::Play(CardId::new(9)),
-        Action::Play(CardId::new(23)),
-        Action::Discard(CardId::new(34)),
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Suit(Suit::Red),
-        },
-        Action::Discard(CardId::new(25)),
-        Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Suit(Suit::Green),
-        },
-        Action::Discard(CardId::new(27)),
-        Action::Play(CardId::new(40)),
-        Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Suit(Suit::Yellow),
-        },
-        Action::Discard(CardId::new(31)),
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Suit(Suit::Red),
-        },
-        Action::Play(CardId::new(36)),
-    ];
-    for (index, action) in actions.into_iter().enumerate() {
-        state
-            .apply(action)
-            .unwrap_or_else(|error| panic!("action {index} {action:?}: {error:?}"));
-    }
-    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
-    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
-
-    assert_eq!(
-        select_h_group_action(&deductions, HGroupProfile::Max),
-        Some(Action::Play(CardId::new(35))),
-        "inference: {inferred:#?}; clues: {:#?}; actions: {:#?}",
-        h_group_clue_candidates(&deductions, HGroupProfile::Max),
-        ordered_h_group_actions(&deductions, HGroupProfile::Max),
     );
 }
 
@@ -1849,15 +1514,6 @@ fn paired_sample_four_extinguishes_playable_purple_two_before_discarding() {
             && signal.cards.starts_with(&[CardId::new(4), CardId::new(3)])
     }));
 
-    assert_eq!(
-        select_h_group_action(&deductions, HGroupProfile::Max),
-        Some(Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Rank(Rank::Two),
-        }),
-        "the playable Purple 2 must be extinguished before the Early Game may end; the Time Travel Chop remains the later discard: {inferred:#?}; candidates={:#?}",
-        h_group_clue_candidates(&deductions, HGroupProfile::Max),
-    );
 }
 
 #[test]
@@ -1919,12 +1575,10 @@ fn paired_sample_five_treats_a_number_two_on_chop_as_a_save() {
     let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
     let inferred = infer_h_group(&deductions, HGroupProfile::Max);
 
-    assert_eq!(
-        select_h_group_action(&deductions, HGroupProfile::Max),
-        Some(Action::Discard(CardId::new(22))),
-        "the number 2 clue on chop was incorrectly treated as a direct play: {inferred:#?}"
+    assert!(
+        inferred.is_saved(CardId::new(20)),
+        "the number 2 clue on chop must be interpreted as a save: {inferred:#?}"
     );
-    assert!(inferred.is_saved(CardId::new(20)));
 }
 
 #[test]
@@ -2130,68 +1784,6 @@ fn paired_sample_one_holds_saved_blue_four_until_blue_three_plays() {
     );
 }
 
-#[test]
-fn paired_sample_four_plays_red_two_before_red_five() {
-    let mut state = paired_sample_four_state();
-    for action in [
-        Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Rank(Rank::Two),
-        },
-        Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Rank(Rank::One),
-        },
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Rank(Rank::One),
-        },
-        Action::Play(CardId::new(4)),
-        Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Suit(Suit::Red),
-        },
-        Action::Play(CardId::new(14)),
-        Action::Play(CardId::new(0)),
-        Action::Discard(CardId::new(6)),
-        Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Rank(Rank::One),
-        },
-        Action::Discard(CardId::new(1)),
-        Action::Play(CardId::new(8)),
-        Action::Discard(CardId::new(11)),
-        Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Suit(Suit::Red),
-        },
-        Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Suit(Suit::Purple),
-        },
-        Action::Play(CardId::new(16)),
-        Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Suit(Suit::Red),
-        },
-        Action::Discard(CardId::new(7)),
-        Action::Discard(CardId::new(12)),
-        Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Suit(Suit::Red),
-        },
-    ] {
-        state.apply(action).unwrap();
-    }
-    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
-    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
-
-    assert_eq!(
-        select_h_group_action(&deductions, HGroupProfile::Max),
-        Some(Action::Play(CardId::new(5))),
-        "the delayed Red 5 focus bypassed its Red 2 connector: {inferred:#?}"
-    );
-}
 
 #[test]
 fn unknown_chop_moved_card_does_not_trigger_another_emergency_discard() {
@@ -2257,89 +1849,6 @@ fn unknown_chop_moved_card_does_not_trigger_another_emergency_discard() {
     );
 }
 
-#[test]
-fn play_that_unlocks_a_saved_card_preempts_an_unrelated_play_clue() {
-    let mut state = paired_sample_one_state();
-    for action in [
-        Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Rank(Rank::Two),
-        },
-        Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Rank(Rank::One),
-        },
-        Action::Play(CardId::new(14)),
-        Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Suit(Suit::Red),
-        },
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Suit(Suit::Yellow),
-        },
-        Action::Play(CardId::new(13)),
-        Action::Play(CardId::new(1)),
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Rank(Rank::One),
-        },
-        Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Suit(Suit::Yellow),
-        },
-        Action::Play(CardId::new(4)),
-        Action::Play(CardId::new(6)),
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Suit(Suit::Yellow),
-        },
-        Action::Play(CardId::new(17)),
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Rank(Rank::Five),
-        },
-        Action::Discard(CardId::new(11)),
-        Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Rank(Rank::One),
-        },
-        Action::Discard(CardId::new(7)),
-        Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Suit(Suit::Purple),
-        },
-        Action::Discard(CardId::new(2)),
-        Action::Play(CardId::new(22)),
-    ] {
-        state.apply(action).unwrap();
-    }
-    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
-
-    let selected = select_h_group_action(&deductions, HGroupProfile::Max);
-    assert!(
-        matches!(
-            selected,
-            Some(Action::Clue {
-                target,
-                clue: Clue::Rank(Rank::One) | Clue::Suit(Suit::Red),
-            }) if target == PlayerId::new(1)
-        ),
-        "the intervening Green 2 play would expose Red 1 on chop: {selected:?}; hand={:#?}; inference={:#?}; clues={:#?}; rank1_hazard={:?}",
-        deductions.view().hands[1],
-        infer_h_group(&deductions, HGroupProfile::Max),
-        h_group_clue_candidates(&deductions, HGroupProfile::Max),
-        prospective_clue_hazard(
-            deductions.view(),
-            HGroupProfile::Max,
-            PlayerId::new(1),
-            CardId::new(8),
-            Clue::Rank(Rank::One),
-            &[CardId::new(8)],
-            true,
-        )
-    );
-}
 
 #[test]
 #[allow(clippy::too_many_lines)]

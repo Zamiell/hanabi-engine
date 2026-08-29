@@ -87,12 +87,23 @@ pub(in crate::h_group) fn apply_context_effects(
                 && is_playable_at(context.before.stack_heights, identity)
         })
     });
+    // https://hanabi.github.io/level-12/#focus-inversion
+    // A physically playable newly touched card does not invert focus when the
+    // ordinary focus already has a valid Prompt/Finesse chain. For example,
+    // a clue can touch green 3 while focusing green 5 through green 4: green
+    // 3 starts the line, but green 5 remains its focus.
+    let old_focus_has_executable_connection = old_focus.is_some_and(|old_focus| {
+        effects.pending.iter().any(|connection| {
+            connection.focus == old_focus && effects.pending.was_created_on(connection, entry.turn)
+        })
+    });
     let focus_inversion = touched.len() >= 2
         && old_focus.is_some_and(|card| {
             chop(&context.before.hands[target.index()], &prior_gotten) == Some(card)
         })
         && old_focus != newest_touched
         && directly_impossible_focus
+        && !old_focus_has_executable_connection
         && newest_touched.is_some_and(|card| {
             IdentitySet::all().iter().any(|identity| {
                 clue.matches(identity)

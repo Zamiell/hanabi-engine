@@ -459,10 +459,9 @@ fn ordered_h_group_actions_from_analysis(
         });
     }
     if !actions.is_empty() {
-        let urgent_next_save = clue_candidates.iter().any(|candidate| {
-            candidate.is_urgent_save()
-                && candidate.target == next_player(view.current_player, view.hands.len())
-        });
+        let urgent_next_save = clue_candidates
+            .iter()
+            .any(|candidate| hard_clue_obligation(view, &analysis.replay, candidate));
         actions.sort_by(|left, right| {
             let score = |action: &Action| {
                 clue_candidates
@@ -996,7 +995,7 @@ fn derive_predictable_action(
     } else if gentlemans_discard_candidate(view, inferred, profile, &inferred.gotten())
         .is_none_or(|(_, identity)| identity.rank == Rank::One)
         && !clues.iter().any(|candidate| {
-            candidate.is_urgent_save()
+            (candidate.is_urgent_save() && hard_clue_obligation(view, replay, candidate))
                 || (!has_forced_play
                     && candidate_can_preempt_current_play(candidate, inferred, replay)
                     && !completed_connection_focus_is_due(inferred))
@@ -1314,9 +1313,10 @@ fn convention_known_trash_discard(
 
 /// Returns the remaining visible 5s whose owners do not yet know to play.
 ///
-/// This deliberately recognizes only the cleanup state in which every stack
-/// has reached 4. A missing 5 in the deck or in the observer's hidden hand
-/// leaves the completion plan unresolved and disables progress dominance.
+/// Stacks below 4 are accepted only when every intervening card is visible and
+/// already committed by its owner's convention state. A missing connector in
+/// the deck or in the observer's hidden hand leaves the completion plan
+/// unresolved and disables progress dominance.
 fn endgame_completion_plan<'analysis>(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
@@ -1329,28 +1329,71 @@ fn endgame_completion_plan<'analysis>(
             let team = TeamConventionSnapshot::new(view.clone(), profile);
             let mut unresolved_fives = CardSet::default();
             for suit in Suit::ALL {
-                match view.play_stacks[suit.index()].len() {
-                    5 => continue,
-                    4 => {}
-                    _ => return None,
+                let height = view.play_stacks[suit.index()].len();
+                if height == Rank::ALL.len() {
+                    continue;
                 }
-                let identity = Card::new(suit, Rank::Five);
-                let (owner, card) = view
-                    .hands
-                    .iter()
-                    .enumerate()
-                    .filter(|(owner, _)| *owner != view.observer.index())
-                    .find_map(|(owner, hand)| {
-                        hand.iter()
-                            .find(|card| card.identity == Some(identity))
-                            .map(|card| (owner, card.id))
-                    })?;
-                let owner = PlayerId::new(
-                    u8::try_from(owner).expect("standard Hanabi has at most five players"),
-                );
-                let projection = team.projection(owner)?;
-                if !projection.inferred.playable_now.contains(&card) {
-                    unresolved_fives.insert(card);
+                for rank in Rank::ALL.iter().copied().skip(height) {
+                    let identity = Card::new(suit, rank);
+                    let visible_copies = view
+                        .hands
+                        .iter()
+                        .enumerate()
+                        .filter(|(owner, _)| *owner != view.observer.index())
+                        .flat_map(|(owner, hand)| {
+                            hand.iter()
+                                .filter(move |card| card.identity == Some(identity))
+                                .map(move |card| (owner, card.id))
+                        })
+                        .collect::<Vec<_>>();
+                    if visible_copies.is_empty() {
+                        return None;
+                    }
+                    let committed = visible_copies.iter().find_map(|(owner, card)| {
+                        let owner = PlayerId::new(
+                            u8::try_from(*owner).expect("standard Hanabi has at most five players"),
+                        );
+                        let projection = team.projection(owner)?;
+                        let owns_commitment = projection.inferred.playable_now.contains(card)
+                            || projection.inferred.cards.iter().any(|note| {
+                                note.card == *card
+                                    && (note.finessed || note.play_obligation.is_some())
+                            })
+                            || projection.inferred.signals.iter().any(|signal| {
+                                signal.target == Some(owner)
+                                    && signal.cards.contains(card)
+                                    && signal.identity == Some(identity)
+                                    && matches!(
+                                        signal.kind,
+                                        HGroupMoveKind::Prompt
+                                            | HGroupMoveKind::Finesse
+                                            | HGroupMoveKind::ReverseFinesse
+                                            | HGroupMoveKind::SelfFinesse
+                                            | HGroupMoveKind::LayeredFinesse
+                                            | HGroupMoveKind::HiddenFinesse
+                                            | HGroupMoveKind::ClandestineFinesse
+                                            | HGroupMoveKind::QueuedFinesse
+                                            | HGroupMoveKind::AmbiguousFinesse
+                                    )
+                            })
+                            || projection.inferred.clues.iter().rev().any(|clue| {
+                                clue.focus == *card
+                                    && matches!(
+                                        clue.kind,
+                                        HGroupClueKind::Play | HGroupClueKind::PlayOrSave
+                                    )
+                                    && clue.play_identities.contains(identity)
+                            });
+                        owns_commitment.then_some(*card)
+                    });
+                    if rank == Rank::Five {
+                        if committed.is_none() {
+                            // There is only one copy of every 5.
+                            unresolved_fives.insert(visible_copies[0].1);
+                        }
+                    } else if committed.is_none() {
+                        return None;
+                    }
                 }
             }
             Some(EndgameCompletionPlan { unresolved_fives })
@@ -1574,7 +1617,7 @@ fn deferred_teamwork_priority(
     let current_candidates = analysis_clue_candidates(deductions, profile, analysis);
     let current_coverage = current_candidates
         .iter()
-        .map(|candidate| candidate.action_coverage)
+        .map(deferred_teamwork_action_count)
         .max()
         .unwrap_or(0);
     if current_coverage < 2 {
@@ -1593,7 +1636,7 @@ fn deferred_teamwork_priority(
         let best_future_coverage =
             h_group_clue_candidates_from_replay(&next_deductions, profile, &next_replay)
                 .iter()
-                .map(|candidate| candidate.action_coverage)
+                .map(deferred_teamwork_action_count)
                 .max()
                 .unwrap_or(0);
         guaranteed_future_coverage = guaranteed_future_coverage.min(best_future_coverage);
@@ -1608,6 +1651,19 @@ fn deferred_teamwork_priority(
         .max()
         .unwrap_or(0);
     Some(best_immediate_clue + 40 * i32::from(extra_actions))
+}
+
+/// Counts only a convention-established multi-action line when deciding
+/// whether to spend a turn manufacturing a clue token. Projection closure can
+/// expose incidental future actions (including conclusions drawn later from a
+/// declined alternative), but an ordinary one-for-one Play Clue is still a
+/// one-action comparison for Teamwork deferral.
+fn deferred_teamwork_action_count(candidate: &ClueCandidate) -> u8 {
+    if candidate.connection_steps > 0 {
+        candidate.action_coverage
+    } else {
+        u8::from(candidate.action_coverage > 0)
+    }
 }
 
 /// Once teammates have demonstrated a connection for a clue, its focus is a
@@ -1791,7 +1847,19 @@ fn clue_preempts_play_obligation(
 ) -> bool {
     hard_clue_obligation(view, replay, candidate)
         || (candidate.target == next_player(view.current_player, view.hands.len())
-            && candidate.is_urgent_for_next_player())
+            && candidate.is_urgent_for_next_player()
+            && (!candidate.is_urgent_save() || !target_is_occupied(view, replay, candidate.target)))
+}
+
+fn target_is_occupied(view: &PlayerView, replay: &HGroupState, target: PlayerId) -> bool {
+    replay.pending_connections.iter().any(|connection| {
+        connection.actor == target
+            && pending_is_active(connection, &replay.pending_connections)
+            && is_playable_now(view, connection.expected)
+    }) || replay.hands[target.index()].iter().any(|card| {
+        replay.cards.already_playing.contains(card)
+            && identity_of(view, *card).is_some_and(|identity| is_playable_now(view, identity))
+    })
 }
 
 /// Hard clue obligations are distinct from clues that are merely permitted
@@ -1807,15 +1875,7 @@ fn hard_clue_obligation(
         return true;
     }
     let player_count = view.hands.len();
-    let target_is_occupied = replay.pending_connections.iter().any(|connection| {
-        connection.actor == candidate.target
-            && pending_is_active(connection, &replay.pending_connections)
-            && is_playable_now(view, connection.expected)
-    }) || replay.hands[candidate.target.index()].iter().any(|card| {
-        replay.cards.already_playing.contains(card)
-            && identity_of(view, *card).is_some_and(|identity| is_playable_now(view, identity))
-    });
-    if target_is_occupied {
+    if target_is_occupied(view, replay, candidate.target) {
         // An urgent Save preempts only a discard that can actually happen on
         // the target's next turn. A player already bound to play cannot
         // discard their chop, leaving another full turn cycle to save it.

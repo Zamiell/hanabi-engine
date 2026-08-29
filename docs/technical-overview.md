@@ -127,6 +127,11 @@ H-Group uses shared internal boundaries to keep these answers consistent:
   mutation occurs and partitioned into their causal public transitions. A pure
   reducer projects identity restrictions, exact promises, typed fact changes,
   and blind-play obligations; no final-note source guessing remains.
+- Declined-alternative inference handles a constrained form of retrospective
+  reasoning: when a direct one-for-one clue is chosen over a uniquely stronger
+  legal Finesse, Good Touch and Efficiency can prove which identity made the
+  stronger clue unavailable. The deduction records both actions as provenance
+  and does not assume that every unchosen engine-preferred move is informative.
 - one canonical owner epistemic read model separates logical identities from
   convention identities and derived classifications. Production diagnostics
   and the expert superposition regression consume that model directly.

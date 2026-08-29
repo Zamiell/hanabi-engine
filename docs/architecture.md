@@ -178,6 +178,13 @@ recipient modeling.
 - `hypothesis.rs` owns mutually exclusive whole-history interpretations. Each
   alternative retains its own connections, promises, and identity claims, so
   ordinary and empathy readings cannot be merged card-by-card.
+- `rationality.rs` owns narrowly scoped inverse-planning deductions. It may
+  infer an identity from a clue giver declining a strictly stronger,
+  convention-valid alternative only when the counterfactual is unique. The
+  resulting `DeclinedAlternativeInference` records the actor, turn, chosen
+  clue, superior clue, card, and identity; owner knowledge consumes that fact
+  through an explicit provenance-bearing effect rather than a replay-specific
+  exception.
 - `recognition.rs` is now only the level-gated registry surface and shared
   imports. Cohesive modules own Basic moves, Tempo and emergency discards,
   Chop Moves, Bluffs, advanced connections, special discards, Trash moves,
@@ -224,6 +231,9 @@ Every completed replay reduction validates that:
   ordered effect program;
 - ordinary knowledge effects only narrow identity domains; replacement requires
   explicit reinterpretation provenance; and
+- inverse-planning deductions retain the observed and counterfactual actions
+  that justify them, and ambiguous or conflicting counterfactuals produce no
+  identity restriction; and
 - pure owner projection reproduces the convention compiler's result without
   recognizing clue meaning again.
 

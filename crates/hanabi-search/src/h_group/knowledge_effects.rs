@@ -13,10 +13,18 @@ use super::{
 pub(super) enum KnowledgeSource {
     Clue(u32),
     Reinterpretation(u32),
-    Promise { id: PromiseId, turn: u32 },
+    Promise {
+        id: PromiseId,
+        turn: u32,
+    },
     ForcedPlay(u32),
     ImplicitSave(u32),
     CurrentFocus(u32),
+    DeclinedAlternative {
+        turn: u32,
+        chosen: hanabi_core::Action,
+        superior: hanabi_core::Action,
+    },
     ReplayClosure(u32),
 }
 
@@ -29,7 +37,8 @@ impl KnowledgeSource {
             | Self::ForcedPlay(turn)
             | Self::ImplicitSave(turn)
             | Self::CurrentFocus(turn)
-            | Self::ReplayClosure(turn) => turn,
+            | Self::ReplayClosure(turn)
+            | Self::DeclinedAlternative { turn, .. } => turn,
         }
     }
 }

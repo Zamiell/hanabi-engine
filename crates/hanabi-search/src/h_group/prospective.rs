@@ -548,6 +548,28 @@ pub(super) fn prospective_clue_primary_kind(
         .map(|interpretation| interpretation.kind)
 }
 
+/// Complete primary interpretation assigned by the recipient-side replay.
+/// Candidate construction uses this when convention focus differs from the
+/// raw physical focus (for example, a Focus Inversion).
+pub(super) fn prospective_clue_primary_interpretation(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    target: PlayerId,
+    clue: Clue,
+    touched: &[CardId],
+) -> Option<super::HGroupClueInterpretation> {
+    let turn = source.turn;
+    prospective_clue_snapshot(source, profile, target, clue, touched)?
+        .team
+        .projection(target)?
+        .replay
+        .clues
+        .iter()
+        .rev()
+        .find(|interpretation| interpretation.turn == turn)
+        .cloned()
+}
+
 pub(super) fn prospective_clue_has_unsafe_connection(
     source: &PlayerView,
     profile: HGroupProfile,

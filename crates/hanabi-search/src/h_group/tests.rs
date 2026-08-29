@@ -490,6 +490,70 @@ fn final_play_clues_advance_the_plan_before_surplus_known_trash_discards() {
 }
 
 #[test]
+fn third_replay_final_play_clues_advance_before_surplus_known_trash() {
+    let state = expert_replay_p4v0s2()
+        .state_at_turn(43)
+        .expect("fixture prefix is legal");
+    let actor = state.current_player();
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(actor)
+            .expect("current player has a legal view"),
+    )
+    .expect("fixture deductions are valid");
+    let decision = analyze_h_group_convention(&deductions, HGroupProfile::Max);
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let trash_priority = decision
+        .actions
+        .iter()
+        .filter_map(|(action, _, priority, _)| {
+            matches!(action, Action::Discard(_)).then_some(*priority)
+        })
+        .max()
+        .expect("Donald has known trash");
+
+    let actions = [
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::Five),
+        },
+    ];
+    let mut clue_priorities = Vec::new();
+    for action in actions {
+        let clue_priority = decision
+            .actions
+            .iter()
+            .find_map(|(candidate, _, priority, _)| (*candidate == action).then_some(*priority))
+            .expect("both direct yellow-5 clues are admitted");
+        assert!(
+            clue_priority > trash_priority,
+            "the final play clue must advance the committed cleanup line"
+        );
+        clue_priorities.push(clue_priority);
+    }
+    assert_eq!(clue_priorities[0], clue_priorities[1]);
+    let candidate = |action| {
+        candidates
+            .iter()
+            .find(|candidate| candidate.action == action)
+            .expect("both direct yellow-5 clues are candidates")
+    };
+    assert_eq!(candidate(actions[0]).purpose, candidate(actions[1]).purpose);
+    assert_eq!(
+        candidate(actions[0]).action_coverage,
+        candidate(actions[1]).action_coverage
+    );
+    assert_eq!(
+        candidate(actions[0]).score(),
+        candidate(actions[1]).score() + 1
+    );
+}
+
+#[test]
 fn rejects_no_value_five_fill_in_before_move_32() {
     let state = expert_replay_p4v0s415()
         .state_at_turn(31)
@@ -1144,12 +1208,12 @@ fn recognizes_expert_replay_yellow_two_priority() {
 }
 
 #[test]
-fn recipient_understands_expert_red_four_lie() {
+fn fixer_understands_expert_red_four_lie() {
     let state = expert_replay_p4v0s415()
         .state_at_turn(6)
         .expect("turn exists");
     let deductions =
-        LogicalDeductions::new(state.view_for(PlayerId::new(3)).expect("recipient exists"))
+        LogicalDeductions::new(state.view_for(PlayerId::new(2)).expect("fixer exists"))
             .expect("valid deductions");
     let replay = replay_h_group_inner(
         &deductions,
@@ -1167,5 +1231,14 @@ fn recipient_understands_expert_red_four_lie() {
             .contains(Card::new(Suit::Red, Rank::Four)),
         "{clue:#?}"
     );
-    assert!(replay.required_fix.is_some(), "{replay:#?}");
+    assert_eq!(
+        replay.required_fix,
+        Some(RequiredFix {
+            actor: PlayerId::new(2),
+            target: PlayerId::new(0),
+            focus: CardId::new(3),
+            identity: Card::new(Suit::Green, Rank::Four),
+        }),
+        "{replay:#?}",
+    );
 }
