@@ -490,6 +490,42 @@ pub(super) fn prospective_team_clue_signal_kinds(
     kinds
 }
 
+/// Card ordered to blind-play by a team-recognized Stacked Ejection or
+/// Stacked Discharge in a hypothetical clue.
+pub(super) fn prospective_stacked_ejection_card(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    target: PlayerId,
+    clue: Clue,
+    touched: &[CardId],
+) -> Option<CardId> {
+    let turn = source.turn;
+    let snapshot = prospective_clue_snapshot(source, profile, target, clue, touched)?;
+    for player in 0..source.hands.len() {
+        let observer =
+            PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
+        let Some(projection) = snapshot.team.projection(observer) else {
+            continue;
+        };
+        if let Some(card) = projection
+            .replay
+            .signals
+            .iter()
+            .find(|signal| {
+                signal.turn == turn
+                    && matches!(
+                        signal.kind,
+                        HGroupMoveKind::StackedEjection | HGroupMoveKind::StackedDischarge
+                    )
+            })
+            .and_then(|signal| signal.cards.first().copied())
+        {
+            return Some(card);
+        }
+    }
+    None
+}
+
 /// Primary meaning assigned by the same replay reducer that handles a real
 /// clue. Candidate admission uses this instead of maintaining a second
 /// Play/Save/Fix precedence ladder.
@@ -570,12 +606,39 @@ fn duplicates_good_touch_superposition(
                         .invalidated_focuses
                         .contains(&card.id)
             });
+            let settled_identity = projection
+                .replay
+                .cards
+                .facts
+                .known_identity(interpretation.focus)
+                .or_else(|| {
+                    projection
+                        .inferred
+                        .cards
+                        .iter()
+                        .find(|card| {
+                            card.card == interpretation.focus && card.identities.len() == 1
+                        })
+                        .and_then(|card| card.identities.iter().next())
+                });
+            let interpretation_is_still_possible = settled_identity
+                .is_none_or(|identity| interpretation.play_identities.contains(identity));
             if focus_is_live
+                && interpretation_is_still_possible
                 && interpretation.focus != focus
                 && !giver_hand.contains(&interpretation.focus)
             {
-                let reserved = interpretation.play_identities.iter().filter(|identity| {
-                    interpretation.play_identities.len() == 1
+                // Once later public information settles a clue focus, only
+                // that surviving identity remains a Good Touch promise. Raw
+                // alternatives from the clue turn are historical branches,
+                // not permanent reservations (for example, a fixed Green 4
+                // must not continue reserving Yellow 4).
+                let live_identities = settled_identity
+                    .map_or(interpretation.play_identities, |id| {
+                        IdentitySet::singleton(id)
+                    });
+                let reserved = live_identities.iter().filter(|identity| {
+                    live_identities.len() == 1
                         || usize::from(identity.rank.number())
                             > usize::from(interpretation.stack_heights[identity.suit.index()]) + 1
                 });
@@ -614,18 +677,39 @@ pub(super) fn prospective_clue_hazard(
     let Some(baseline) = prospective_baseline_projection(source, profile, target) else {
         return Some(ProspectiveClueHazard::ProjectionFailed);
     };
+    let intervening_bluff = target != next_player(source.current_player, source.hands.len())
+        && (0..source.hands.len()).any(|player| {
+            let observer = PlayerId::new(
+                u8::try_from(player).expect("standard Hanabi has at most five players"),
+            );
+            snapshot
+                .team
+                .projection(observer)
+                .is_some_and(|projection| {
+                    projection.replay.signals.iter().any(|signal| {
+                        signal.turn == source.turn
+                            && signal.kind == HGroupMoveKind::Bluff
+                            && signal.target
+                                == Some(next_player(source.current_player, source.hands.len()))
+                            && signal.cards.last() == Some(&focus)
+                    })
+                })
+        });
     if let Some(hazard) = recipient_projection_hazard(
-        source,
+        RecipientProjectionComparison {
+            source,
+            replay,
+            inferred,
+            baseline: &baseline.replay,
+            baseline_inferred: &baseline.inferred,
+        },
         focus,
         expect_immediate_focus,
-        replay,
-        inferred,
-        &baseline.replay,
-        &baseline.inferred,
+        intervening_bluff,
     ) {
         return Some(hazard);
     }
-    let new_play_identities = replay
+    let interpreted_play_identities = replay
         .clues
         .iter()
         .rev()
@@ -637,6 +721,22 @@ pub(super) fn prospective_clue_hazard(
         .map_or_else(IdentitySet::default, |interpretation| {
             interpretation.play_identities
         });
+    // Candidate safety must use the recipient's resolved action note, not the
+    // raw set of every clue-time branch. A rank clue can initially admit both
+    // direct and delayed identities, then settle to its sole direct play after
+    // connection validation. Treating a discarded delayed branch as a live
+    // Good Touch promise incorrectly rejects the direct clue as duplication.
+    let new_play_identities = if inferred.playable_now.contains(&focus) {
+        inferred
+            .cards
+            .iter()
+            .find(|card| card.card == focus)
+            .map_or(interpreted_play_identities, |card| {
+                interpreted_play_identities.intersection(card.identities)
+            })
+    } else {
+        interpreted_play_identities
+    };
     let Some(duplicates_existing_promise) =
         duplicates_good_touch_superposition(source, profile, focus, new_play_identities)
     else {
@@ -707,15 +807,29 @@ fn recipient_follow_up_is_unsafe(
     })
 }
 
+#[derive(Clone, Copy)]
+struct RecipientProjectionComparison<'a> {
+    source: &'a PlayerView,
+    replay: &'a HGroupState,
+    inferred: &'a HGroupInferences,
+    baseline: &'a HGroupState,
+    baseline_inferred: &'a HGroupInferences,
+}
+
 fn recipient_projection_hazard(
-    source: &PlayerView,
+    comparison: RecipientProjectionComparison<'_>,
     focus: CardId,
     expect_immediate_focus: bool,
-    replay: &HGroupState,
-    inferred: &HGroupInferences,
-    baseline: &HGroupState,
-    baseline_inferred: &HGroupInferences,
+    intervening_bluff: bool,
 ) -> Option<ProspectiveClueHazard> {
+    let RecipientProjectionComparison {
+        source,
+        replay,
+        inferred,
+        baseline,
+        baseline_inferred,
+    } = comparison;
+    let intervening_predecessor = has_intervening_playable_predecessor(source, replay, focus);
     let missing_focus = expect_immediate_focus
         && identity_of(source, focus).is_some_and(|actual| is_playable_now(source, actual))
         && !inferred.playable_now.contains(&focus);
@@ -750,28 +864,36 @@ fn recipient_projection_hazard(
         .any(|(card, identities)| {
             identity_of(source, *card).is_some_and(|actual| !identities.contains(actual))
         });
-    let wrong_play = inferred
-        .playable_now
-        .iter()
-        .copied()
-        .filter(|card| {
-            if !baseline_inferred.playable_now.contains(card) {
-                return true;
-            }
-            let after_note = inferred.cards.iter().find(|note| note.card == *card);
-            let before_note = baseline_inferred
-                .cards
-                .iter()
-                .find(|note| note.card == *card);
-            after_note.map(|note| note.identities) != before_note.map(|note| note.identities)
-        })
-        .any(|card| {
-            identity_of(source, card).is_some_and(|actual| !is_playable_now(source, actual))
+    // The recipient does not act on their provisional direct interpretation
+    // before an intervening Bluff resolves. Evaluating their clue-time note as
+    // an immediate move falsely rejects legal lines such as Alice's yellow
+    // Bluff to Cathy through Bob's off-suit playable card.
+    // https://hanabi.github.io/level-11/#the-bluff
+    let wrong_play = !intervening_bluff
+        && inferred
+            .playable_now
+            .iter()
+            .copied()
+            .filter(|card| {
+                if !baseline_inferred.playable_now.contains(card) {
+                    return true;
+                }
+                let after_note = inferred.cards.iter().find(|note| note.card == *card);
+                let before_note = baseline_inferred
+                    .cards
+                    .iter()
+                    .find(|note| note.card == *card);
+                after_note.map(|note| note.identities) != before_note.map(|note| note.identities)
+            })
+            .any(|card| {
+                identity_of(source, card).is_some_and(|actual| !is_playable_now(source, actual))
+            });
+    let wrong_connection = !intervening_predecessor
+        && inferred.connection.is_some_and(|connection| {
+            identity_of(source, connection.card).is_some_and(|actual| {
+                actual != connection.identity && !is_playable_now(source, actual)
+            })
         });
-    let wrong_connection = inferred.connection.is_some_and(|connection| {
-        identity_of(source, connection.card)
-            .is_some_and(|actual| actual != connection.identity && !is_playable_now(source, actual))
-    });
     if missing_focus {
         Some(ProspectiveClueHazard::RecipientMissingFocusPlay)
     } else if competing_connection {
@@ -785,6 +907,38 @@ fn recipient_projection_hazard(
     } else {
         None
     }
+}
+
+fn has_intervening_playable_predecessor(
+    source: &PlayerView,
+    replay: &HGroupState,
+    focus: CardId,
+) -> bool {
+    identity_of(source, focus)
+        .filter(|identity| identity.rank != Rank::One)
+        .is_some_and(|focus_identity| {
+            let predecessor = Card::new(
+                focus_identity.suit,
+                Rank::ALL[focus_identity.rank.index() - 1],
+            );
+            let target = source
+                .hands
+                .iter()
+                .position(|hand| hand.iter().any(|candidate| candidate.id == focus));
+            target.is_some_and(|target| {
+                (1..source.hands.len())
+                    .map(|distance| (source.current_player.index() + distance) % source.hands.len())
+                    .take_while(|player| *player != target)
+                    .any(|player| {
+                        replay.hands[player].iter().copied().any(|card| {
+                            (replay.cards.already_playing.contains(&card)
+                                || replay.cards.explicitly_clued.contains(&card))
+                                && identity_of(source, card) == Some(predecessor)
+                                && is_playable_now(source, predecessor)
+                        })
+                    })
+            })
+        })
 }
 
 fn other_player_projection_is_unsafe(
@@ -896,7 +1050,60 @@ pub(super) fn prospective_play_view(
     ProspectiveTransition::successful_play(source, player, card, identity)
 }
 
-pub(super) fn subjective_chop_before_action(
+/// Inputs for one actor-relative reconstruction immediately before a public
+/// action. Bundling them prevents callers from pairing history, hands, clue
+/// facts, or deck size from different temporal snapshots.
+#[derive(Clone, Copy)]
+pub(super) struct SubjectiveReplayRequest<'a> {
+    pub(super) source: &'a PlayerView,
+    pub(super) profile: HGroupProfile,
+    pub(super) observer: PlayerId,
+    pub(super) history: &'a [ObservedHistoryEntry],
+    pub(super) hands: &'a [Vec<CardId>],
+    pub(super) facts: &'a [ClueFacts],
+    pub(super) deck_size: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) struct SubjectiveActionContext {
+    pub(super) chop: Option<CardId>,
+    pub(super) known_identity: Option<Card>,
+}
+
+/// Reconstructs the actor's chop and exact knowledge in one replay. Special
+/// discard rules must consume this result rather than an observing teammate's
+/// visible card faces.
+pub(super) fn subjective_action_context_before(
+    request: SubjectiveReplayRequest<'_>,
+    card: CardId,
+) -> Option<SubjectiveActionContext> {
+    let (deductions, replay) = subjective_h_group_replay_before_action(
+        request.source,
+        request.profile,
+        request.observer,
+        request.history,
+        request.hands,
+        request.facts,
+        request.deck_size,
+    )?;
+    let promptable = replay.promptable();
+    let gotten = replay.gotten_from(&promptable);
+    let actor_chop = chop(&replay.hands[request.observer.index()], &gotten);
+    let known_identity = convention_card_inferences(&deductions, &replay)
+        .into_iter()
+        .find(|inference| inference.card == card)
+        .and_then(|inference| {
+            (inference.identities.len() == 1)
+                .then(|| inference.identities.iter().next())
+                .flatten()
+        });
+    Some(SubjectiveActionContext {
+        chop: actor_chop,
+        known_identity,
+    })
+}
+
+fn subjective_h_group_replay_before_action(
     source: &PlayerView,
     profile: HGroupProfile,
     observer: PlayerId,
@@ -904,7 +1111,7 @@ pub(super) fn subjective_chop_before_action(
     hands: &[Vec<CardId>],
     facts: &[ClueFacts],
     deck_size: usize,
-) -> Option<CardId> {
+) -> Option<(LogicalDeductions, HGroupState)> {
     let observed_hands = hands
         .iter()
         .enumerate()
@@ -989,7 +1196,5 @@ pub(super) fn subjective_chop_before_action(
     };
     let deductions = LogicalDeductions::new(view).ok()?;
     let replay = replay_h_group_inner(&deductions, profile, PerspectiveDepth::ObserverOnly, false);
-    let promptable = replay.promptable();
-    let gotten = replay.gotten_from(&promptable);
-    chop(&replay.hands[observer.index()], &gotten)
+    Some((deductions, replay))
 }

@@ -17,7 +17,7 @@ H-Group history reducer
    |-- HistoricalView         identities legal at the event's turn
    |-- HGroupTurnContext      explicit before/after event snapshots
    |-- RuleSpec               phase and dependency metadata
-   |-- RuleProposal           typed per-rule transition output
+   |-- RuleProposal           audited per-rule transition record
    |-- ConventionTransitionResult  causal record for one public event
    |-- ConventionTransitionDelta   exact card-fact and epistemic changes
    |-- ConventionJournal      incremental facts plus explanation history
@@ -31,7 +31,9 @@ H-Group history reducer
    |-- ActionSchedule         unified live play/discard commitments
    |-- StackTimeline          clue/current/before-player stack horizons
    |-- ClueInterpretationPlan one Play/Save/Fix/5CM/Stall precedence result
-   `-- TeamConventionSnapshot coherent lazy per-player epistemic overlays
+   |-- TeamConventionSnapshot coherent lazy per-player epistemic overlays
+   |-- InterpretationHypotheses correlated whole-state alternatives
+   `-- ActorBeliefBefore      acting player's pre-event knowledge
    |
    v
 EpistemicState               observer-owned identity domains and provenance
@@ -40,13 +42,16 @@ EpistemicState               observer-owned identity domains and provenance
 ConventionConstraints        hard required/admissible actions
    |
    v
-typed candidates / rejections / recognition evidence
+typed candidates / rejections / recipient assessments
    |
    v
 LineOutcome                  actions, protection, trash, and connections
    |
    v
-blank-card forced-line projection / exact endgame solver
+ConditionalPlan             projected steps and dependency frontier
+   |
+   v
+blank-card plan summary / exact endgame solver
 ```
 
 The giver, recipient, and hypothetical analyzer all use
@@ -57,7 +62,9 @@ recipient modeling.
 ## Boundary responsibilities
 
 - `turn_context.rs` owns temporal access. A historical rule cannot ask for an
-  identity revealed by a future play, discard, or draw.
+  identity revealed by a future play, discard, or draw. `ActorBeliefBefore`
+  groups the acting player's pre-event discard knowledge so a visible card
+  face cannot be substituted for what that actor knew.
 - `action_schedule.rs` is the unified read model for direct plays, active
   connections, forced plays, and required discards. `StackTimeline` labels
   stack heights as clue-time, current, or before a named player's turn; code
@@ -84,7 +91,9 @@ recipient modeling.
   where the ledger attaches the rule source and records an exact delta; direct
   mutation of an unsourced final state fails validation.
 - `facts.rs` separates current truth from history. `HGroupSignal` explains why
-  something was inferred; `ConventionFacts` is what downstream code queries.
+  something was inferred and remains available to recognizers needing
+  cross-event causality; `ConventionFacts` is what downstream code queries for
+  live semantic state, including exact knowledge transfers.
   Ambiguous identities are retained as relational `OneOf` claims rather than
   being incorrectly copied onto every candidate card.
 - `model.rs` owns `ConventionCardState`, the canonical grouping for clue,
@@ -120,9 +129,12 @@ recipient modeling.
 - `rule_engine.rs` owns ordered post-event execution. Real replay and
   prospective transitions both enter this registry through the same history
   reducer. Each `RuleSpec` declares its semantic phase and dependencies, and
-  diagnostic reductions retain every non-empty contribution as a
-  `RuleProposal` in the event's `ConventionTransitionResult`; `rules.rs` proves
-  every level has exactly one valid execution path.
+  diagnostic reductions retain every non-empty contribution as an audited
+  `RuleProposal` transition record in the event's
+  `ConventionTransitionResult`; `rules.rs` proves every level has exactly one
+  valid execution path. Recognizers mutate only through the single
+  `HGroupRuleEffects` capability, and the resulting delta is the authoritative
+  account of what that transaction changed.
 - `event_reducer.rs` owns the mutable capability passed to recognizers.
   `RuleExecutionContext` binds an immutable turn context, observer view, and
   profile into one value, preventing mismatched temporal or perspective
@@ -132,7 +144,9 @@ recipient modeling.
   planner paths.
 - `constraints.rs` separates semantic obligations from utility. Urgent clues,
   connection responses, required discards, and must-clue states restrict the
-  action set before numeric strategy priorities are compared.
+  action set before numeric strategy priorities are compared. Planner actions
+  also carry a lexicographic `ConventionPolicyTier`, so a heuristic number
+  cannot outweigh a required action.
 - `perspective.rs` owns observer projection and hypothetical public
   transitions. `TeamConventionSnapshot` groups lazy observer overlays for one
   coherent public position, so candidate consumers share lifecycle state.
@@ -152,12 +166,18 @@ recipient modeling.
   that legitimately branch after the recipient sees the giver's hidden hand.
   Every excluded legal clue receives a typed rejection reason.
 - `candidate_pipeline.rs` makes admission stages explicit in the type system:
-  semantically admitted candidates become recipient-checked candidates and
-  only then become causally compared, ranked candidates.
+  semantically admitted candidates become recipient-assessed candidates and
+  only then become causally compared, ranked candidates. The assessment is
+  explicitly either `RecipientReplay` or `GeneratorProof`.
 - `interpretation.rs` owns observer-relative clue meaning, convention card
   inference, and convention-admissible clue generation.
-- `symbolic_line.rs` advances only convention-predictable actions. New draws
-  remain blank, and projection stops at the first identity or policy branch.
+- `plan.rs` distinguishes `ProjectedAction` from authoritative replay actions
+  and stores projected consequences in dependency-linked `PlanStep` nodes.
+  `symbolic_line.rs` builds this `ConditionalPlan`; new draws remain blank and
+  projection stops at an explicit frontier before the plan is summarized.
+- `hypothesis.rs` owns mutually exclusive whole-history interpretations. Each
+  alternative retains its own connections, promises, and identity claims, so
+  ordinary and empathy readings cannot be merged card-by-card.
 - `recognition.rs` is now only the level-gated registry surface and shared
   imports. Cohesive modules own Basic moves, Tempo and emergency discards,
   Chop Moves, Bluffs, advanced connections, special discards, Trash moves,
@@ -169,8 +189,8 @@ recipient modeling.
   facts and owner-knowledge effects; rule proposals also retain exact card
   replacements rather than comparing collection lengths. Strategic evaluation
   consumes these deltas.
-  Human-readable signals remain explanations rather than an alternative
-  causality source.
+  Human-readable signals remain explanations and recognizer history rather
+  than an alternative source of current decision truth.
 - `strategic_value.rs` compares structured `LineOutcome` values. It may use
   teammate identities visible to the giver for team coverage, but Directness
   uses only each card owner's `EpistemicState`.
@@ -189,6 +209,8 @@ Every completed replay reduction validates that:
 - every connection candidate is still in the promised actor's hand;
 - every discard-now entry is unique;
 - every relational identity claim has at least one candidate card;
+- exact transferred knowledge is materialized in current facts rather than
+  reconstructed from the diagnostic signal log;
 - every active connection has registered promise provenance; and
 - every materialized clue, protection, play, chop-move, and forced-play fact
   has at least one typed source;
@@ -207,7 +229,7 @@ Every completed replay reduction validates that:
 
 Architecture properties additionally require that leaked own-hand truth does
 not change an observer's `EpistemicState`, and that candidate signal and hazard
-inspection share one prospective convention snapshot. They also run both expert
+inspection share one prospective convention snapshot. They also run all expert
 replays through every observer, prove canonical focus domains cannot be widened
 by owner projection, and exercise generated legal histories.
 
@@ -234,7 +256,8 @@ behavior, architecture properties, and golden replay parity.
 4. Add current query state to `ConventionFacts` rather than searching the
    signal log at decision time.
 5. Express mandatory behavior as a `ConventionConstraints` rule. Use a numeric
-   priority only for a genuine strategic preference among admissible actions.
+   priority only for a genuine strategic preference among actions in the same
+   `ConventionPolicyTier`.
 6. Test giver and recipient interpretations, prospective/retrospective
    equivalence, hidden-truth noninterference when relevant, and at least one
    replay prefix.

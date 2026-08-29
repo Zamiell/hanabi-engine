@@ -4,8 +4,9 @@ use std::{borrow::Cow, collections::HashMap};
 use hanabi_core::{Action, Clue, FullState, GameStatus, PlayerView, Rank, RuleError, Suit};
 
 use crate::{
-    ConventionAction, ConventionAnalysis, EnumerateWorldsError, InformationSet,
-    InformationSetError, LogicalDeductions, SupportedConvention, WorldCount, assess_card,
+    ConventionAction, ConventionAnalysis, ConventionPolicyTier, EnumerateWorldsError,
+    InformationSet, InformationSetError, LogicalDeductions, SupportedConvention, WorldCount,
+    assess_card,
 };
 
 /// The result the planner should optimize during exact endgame analysis.
@@ -165,6 +166,7 @@ impl ExactActionValue {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlannerActionEvaluation {
     pub action: Action,
+    pub policy_tier: ConventionPolicyTier,
     /// Convention ordering, derived solely from the legal observation.
     pub convention_priority: i32,
     pub certainly_playable: bool,
@@ -445,6 +447,7 @@ fn planning_candidates(analysis: &ConventionAnalysis) -> Cow<'_, [ConventionActi
                     .copied()
                     .unwrap_or(ConventionAction {
                         action: forced,
+                        policy_tier: ConventionPolicyTier::Required,
                         priority: 0,
                         reason: crate::ConventionActionReason::Fallback,
                     }),
@@ -556,6 +559,7 @@ fn symbolic_evaluation(
         };
     PlannerActionEvaluation {
         action,
+        policy_tier: convention_action.policy_tier,
         convention_priority: convention_action.priority,
         certainly_playable: assessment.is_some_and(|value| value.certainly_playable),
         certainly_useless: assessment.is_some_and(|value| value.certainly_useless),
@@ -613,8 +617,9 @@ fn best_symbolic_index(
         .iter()
         .enumerate()
         .max_by(|(left_index, left), (right_index, right)| {
-            left.convention_priority
-                .cmp(&right.convention_priority)
+            left.policy_tier
+                .cmp(&right.policy_tier)
+                .then_with(|| left.convention_priority.cmp(&right.convention_priority))
                 .then_with(|| {
                     (preferred == Some(left.action)).cmp(&(preferred == Some(right.action)))
                 })
@@ -653,6 +658,7 @@ fn best_exact_index(
                     objective,
                 );
             exact
+                .then_with(|| left.policy_tier.cmp(&right.policy_tier))
                 .then_with(|| left.convention_priority.cmp(&right.convention_priority))
                 .then_with(|| {
                     (preferred == Some(left.action)).cmp(&(preferred == Some(right.action)))
@@ -877,11 +883,13 @@ mod tests {
             actions: vec![
                 ConventionAction {
                     action: first,
+                    policy_tier: ConventionPolicyTier::Admitted,
                     priority: 900,
                     reason: crate::ConventionActionReason::PromisedPlay,
                 },
                 ConventionAction {
                     action: forced,
+                    policy_tier: ConventionPolicyTier::Required,
                     priority: 400,
                     reason: crate::ConventionActionReason::PromisedPlay,
                 },
@@ -894,10 +902,36 @@ mod tests {
             planning_candidates(&analysis).as_ref(),
             &[ConventionAction {
                 action: forced,
+                policy_tier: ConventionPolicyTier::Required,
                 priority: 400,
                 reason: crate::ConventionActionReason::PromisedPlay,
             }]
         );
+    }
+
+    #[test]
+    fn required_policy_tier_outweighs_a_larger_heuristic_number() {
+        let state = FullState::new_standard(2, standard_deck()).unwrap();
+        let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+        let legal = deductions.view().legal_actions();
+        let low_required = ConventionAction {
+            action: legal[0],
+            policy_tier: ConventionPolicyTier::Required,
+            priority: 1,
+            reason: crate::ConventionActionReason::PromisedPlay,
+        };
+        let high_admitted = ConventionAction {
+            action: legal[1],
+            policy_tier: ConventionPolicyTier::Admitted,
+            priority: 10_000,
+            reason: crate::ConventionActionReason::OtherClue,
+        };
+        let evaluations = [
+            symbolic_evaluation(&deductions, low_required),
+            symbolic_evaluation(&deductions, high_admitted),
+        ];
+
+        assert_eq!(best_symbolic_index(&evaluations, None), Some(0));
     }
 
     #[test]

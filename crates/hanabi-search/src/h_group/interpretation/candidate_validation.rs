@@ -1,7 +1,8 @@
 use super::{
-    Action, ClueCandidate, CluePurpose, ConventionRejectionReason, HGroupClueKind, HGroupMoveKind,
-    HGroupProfile, HGroupState, LogicalDeductions, PlayerView, RejectedConventionAction, chop,
-    focus, identity_of, prospective_clue_primary_kind, prospective_team_clue_signal_kinds,
+    Action, ClueCandidate, CluePurpose, ClueRecognition, ConventionRejectionReason, HGroupClueKind,
+    HGroupMoveKind, HGroupProfile, HGroupState, LogicalDeductions, PlayerView,
+    RejectedConventionAction, chop, focus, identity_of, prospective_clue_primary_kind,
+    prospective_team_clue_signal_kinds,
 };
 
 /// Classifies every legal clue excluded from the convention action set.
@@ -65,13 +66,13 @@ pub(crate) fn h_group_rejected_clues_from_replay(
         .collect()
 }
 
-pub(in crate::h_group) fn recipient_replay_recognizes_candidate(
+pub(in crate::h_group) fn recipient_replay_assessment(
     view: &PlayerView,
     profile: HGroupProfile,
     candidate: &ClueCandidate,
-) -> bool {
+) -> ClueRecognition {
     let Action::Clue { target, clue } = candidate.action else {
-        return false;
+        return ClueRecognition::GeneratorProof;
     };
     let touched = view.hands[target.index()]
         .iter()
@@ -80,7 +81,7 @@ pub(in crate::h_group) fn recipient_replay_recognizes_candidate(
         .collect::<Vec<_>>();
     let signals = prospective_team_clue_signal_kinds(view, profile, target, clue, &touched);
     let primary = prospective_clue_primary_kind(view, profile, target, clue, &touched);
-    match candidate.purpose {
+    let recognized = match candidate.purpose {
         CluePurpose::Play => matches!(
             primary,
             Some(HGroupClueKind::Play | HGroupClueKind::PlayOrSave)
@@ -97,5 +98,10 @@ pub(in crate::h_group) fn recipient_replay_recognizes_candidate(
             )
         }),
         CluePurpose::Advanced | CluePurpose::Fallback => !signals.is_empty(),
+    };
+    if recognized {
+        ClueRecognition::RecipientReplay
+    } else {
+        ClueRecognition::GeneratorProof
     }
 }

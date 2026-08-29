@@ -64,6 +64,7 @@ pub(super) enum ConnectionTransitionReason {
     Superseded,
     FocusInvalidated,
     IdentitySatisfiedElsewhere,
+    IdentityRevealed,
     LayerExtended,
 }
 
@@ -120,17 +121,66 @@ impl ConnectionManager {
             .find(|origin| origin.id == id)
     }
 
+    pub(super) fn was_created_on(&self, connection: &ConnectionObligation, turn: u32) -> bool {
+        self.provenance(connection.promise)
+            .is_some_and(|provenance| provenance.created_turn == turn)
+    }
+
+    /// Whether an actor was already carrying a different live connection
+    /// immediately before `turn`. This historical query is used when
+    /// compiling a later clue: a loaded player retains the clue's direct and
+    /// delayed superposition until public actions disambiguate it.
+    pub(super) fn actor_had_pending_before(
+        &self,
+        actor: PlayerId,
+        turn: u32,
+        excluded_focus: CardId,
+    ) -> bool {
+        self.provenance
+            .iter()
+            .filter(|origin| {
+                origin.actor == actor
+                    && origin.focus != excluded_focus
+                    && origin.created_turn < turn
+            })
+            .any(|origin| {
+                self.transitions
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, transition)| {
+                        transition.promise == origin.id && transition.turn < turn
+                    })
+                    .max_by_key(|(index, transition)| (transition.turn, *index))
+                    .is_some_and(|(_, transition)| {
+                        matches!(
+                            transition.to,
+                            ConnectionStatus::Pending | ConnectionStatus::AwaitingFix
+                        )
+                    })
+            })
+    }
+
     /// Returns the focus identity only after an earlier blind play has
     /// demonstrated that the still-active layered connection is real.
     /// Scheduling a connection is not evidence by itself: until a layer
     /// actually plays, the focus may remain in a direct/delayed
     /// superposition.
     pub(super) fn demonstrated_focus_identity(&self, focus: CardId) -> Option<Card> {
-        self.active.iter().find_map(|connection| {
-            (connection.focus == focus
-                && self.promise_was_demonstrated_after(connection.promise, 0))
-            .then_some(connection.focus_identity)
-        })
+        self.active
+            .iter()
+            .find_map(|connection| {
+                (connection.focus == focus
+                    && self.promise_was_demonstrated_after(connection.promise, 0))
+                .then_some(connection.focus_identity)
+            })
+            .or_else(|| {
+                self.transitions
+                    .iter()
+                    .rev()
+                    .find(|transition| transition.focus == focus)
+                    .filter(|transition| transition.to == ConnectionStatus::Satisfied)
+                    .map(|transition| transition.focus_identity)
+            })
     }
 
     /// Whether a queued promise for this identity was publicly demonstrated
@@ -149,10 +199,7 @@ impl ConnectionManager {
         })
     }
 
-    /// Whether an identity belonged to a live connection promise at a past
-    /// turn. This reconstructs historical commitment state from the lifecycle
-    /// journal, so replaying a clue does not forget connectors merely because
-    /// they have since played and left the current hands.
+    #[cfg(test)]
     pub(super) fn identity_was_queued_at(&self, identity: Card, turn: u32) -> bool {
         self.transitions
             .iter()
@@ -338,6 +385,46 @@ impl ConnectionManager {
         self.cancel_where(turn, ConnectionTransitionReason::Fixed, |connection| {
             connection.cards.is_empty()
         });
+    }
+
+    /// Removes a card from incompatible connection alternatives after public
+    /// convention evidence establishes its exact identity. This is distinct
+    /// from a Fix: the original clue was not repaired; one branch of its
+    /// superposition became impossible.
+    pub(super) fn reveal_identity(
+        &mut self,
+        turn: u32,
+        actor: PlayerId,
+        card: CardId,
+        identity: Card,
+    ) {
+        let mut narrowed = Vec::new();
+        for connection in &mut self.active {
+            if connection.actor != actor
+                || connection.expected == identity
+                || !connection.cards.contains(&card)
+            {
+                continue;
+            }
+            connection.cards.retain(|candidate| *candidate != card);
+            if !connection.cards.is_empty() {
+                narrowed.push(connection.clone());
+            }
+        }
+        for connection in narrowed {
+            self.record(
+                turn,
+                &connection,
+                ConnectionStatus::Pending,
+                ConnectionStatus::Pending,
+                ConnectionTransitionReason::IdentityRevealed,
+            );
+        }
+        self.cancel_where(
+            turn,
+            ConnectionTransitionReason::IdentityRevealed,
+            |connection| connection.cards.is_empty(),
+        );
     }
 
     /// Prepends newly demonstrated blind plays to an existing Finesse.

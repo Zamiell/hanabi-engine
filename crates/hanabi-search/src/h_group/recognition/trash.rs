@@ -6,6 +6,41 @@ use super::{
     identity_of, is_playable_at, is_playable_now, is_trash_at, next_player, pending_is_active,
     protected_cards, push_signal, same_turn_signal, was_clued_before,
 };
+use crate::h_group::{EffectSource, ProvenancedCardSet};
+
+fn retract_connections(
+    entry: &ObservedHistoryEntry,
+    actor: PlayerId,
+    connections: Vec<ConnectionObligation>,
+    pending: &mut ConnectionManager,
+    invisibly_clued: &mut ProvenancedCardSet,
+    signals: &mut ConventionJournal,
+) {
+    let promises = connections
+        .iter()
+        .map(|connection| connection.promise)
+        .collect::<Vec<_>>();
+    pending.cancel_where(
+        entry.turn,
+        ConnectionTransitionReason::Superseded,
+        |connection| promises.contains(&connection.promise),
+    );
+    for connection in connections {
+        invisibly_clued.retract_source(
+            EffectSource::Promise(connection.promise),
+            ConnectionTransitionReason::Superseded,
+        );
+        push_signal(
+            signals,
+            entry,
+            actor,
+            Some(connection.actor),
+            HGroupMoveKind::Retraction,
+            connection.cards,
+            Some(connection.expected),
+        );
+    }
+}
 
 pub(in crate::h_group) fn apply_trash_effects(
     context: &HGroupTurnContext<'_>,
@@ -252,12 +287,13 @@ pub(in crate::h_group) fn apply_trash_connection_refinements(
 pub(in crate::h_group) fn apply_ejection_discharge_effects(
     entry: &ObservedHistoryEntry,
     view: &PlayerView,
+    hands_before: &[Vec<CardId>],
     hands: &[Vec<CardId>],
     facts: &[ClueFacts],
     clues: &[HGroupClueInterpretation],
     stack_heights: [u8; 5],
     explicitly_clued: &CardSet,
-    invisibly_clued: &CardSet,
+    invisibly_clued: &mut ProvenancedCardSet,
     chop_moved: &CardSet,
     pending: &mut ConnectionManager,
     forced_playable: &mut CardSet,
@@ -272,9 +308,68 @@ pub(in crate::h_group) fn apply_ejection_discharge_effects(
     // - https://hanabi.github.io/level-16/#the-unknown-dupe-discharge-udd
     // - https://hanabi.github.io/extras/ejection-extensions/#the-out-of-position-ejection
     // - https://hanabi.github.io/extras/ejection-extensions/#the-stacked-ejection
+    if let ObservedEvent::Played {
+        player,
+        card,
+        identity,
+        successful: true,
+    } = &entry.event
+    {
+        let prior = view
+            .history
+            .iter()
+            .find(|prior| prior.turn.saturating_add(1) == entry.turn);
+        let prior_clue = prior.and_then(|prior| match &prior.event {
+            ObservedEvent::Clued {
+                giver,
+                target,
+                clue: Clue::Suit(suit),
+                ..
+            } if next_player(*giver, hands_before.len()) == *player => {
+                Some((prior, *giver, *target, *suit))
+            }
+            _ => None,
+        });
+        if let Some((prior, giver, target, suit)) = prior_clue {
+            let prior_interpretation = clues.iter().rev().find(|clue| clue.turn == prior.turn);
+            let mut gotten = explicitly_clued.clone();
+            gotten.extend(chop_moved.iter().copied());
+            let played_from_ejection_position =
+                finesse_position_id(&hands_before[player.index()], &gotten, 1) == Some(*card);
+            if played_from_ejection_position
+                && identity.suit != suit
+                && prior_interpretation.is_some_and(|interpretation| {
+                    !was_clued_before(view, prior.turn, interpretation.focus)
+                        && stack_heights[suit.index()] <= 3
+                })
+            {
+                let focus = prior_interpretation
+                    .expect("the Ejection position check requires a clue interpretation")
+                    .focus;
+                let connections = pending
+                    .iter()
+                    .filter(|connection| connection.focus == focus)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                retract_connections(entry, giver, connections, pending, invisibly_clued, signals);
+                forced_playable.remove(&focus);
+                push_signal(
+                    signals,
+                    entry,
+                    giver,
+                    Some(target),
+                    HGroupMoveKind::FiveColorEjection,
+                    vec![focus],
+                    Some(Card::new(suit, Rank::Five)),
+                );
+            }
+        }
+        return;
+    }
+
     let ObservedEvent::Clued {
         giver,
-        target: _,
+        target,
         clue,
         touched,
         ..
@@ -359,13 +454,36 @@ pub(in crate::h_group) fn apply_ejection_discharge_effects(
         (None, 0)
     };
     if let Some(kind) = kind {
-        let gotten = protected_cards(explicitly_clued, invisibly_clued, chop_moved);
+        let mut gotten = protected_cards(explicitly_clued, invisibly_clued, chop_moved);
+        // The ordinary connection scheduler runs before advanced precedence
+        // rules. Its same-turn apparent Finesse on the 5 must not consume
+        // Finesse Positions while deciding whether this clue is an Ejection.
+        for connection in pending
+            .iter()
+            .filter(|connection| pending.was_created_on(connection, entry.turn))
+        {
+            for card in &connection.cards {
+                let protected_by_older_connection = pending.iter().any(|older| {
+                    !pending.was_created_on(older, entry.turn) && older.cards.contains(card)
+                });
+                if !explicitly_clued.contains(card)
+                    && !chop_moved.contains(card)
+                    && !protected_by_older_connection
+                {
+                    gotten.remove(card);
+                }
+            }
+        }
         let loaded_connections = pending
             .iter()
             .filter(|connection| {
-                connection.actor == ejection_actor && pending_is_active(connection, pending)
+                connection.actor == ejection_actor
+                    && !pending.was_created_on(connection, entry.turn)
+                    && pending_is_active(connection, pending)
             })
-            .count();
+            .filter_map(|connection| connection.cards.first().copied())
+            .collect::<CardSet>()
+            .len();
         let available = hands[ejection_actor.index()]
             .iter()
             .filter(|card| !gotten.contains(card))
@@ -375,7 +493,30 @@ pub(in crate::h_group) fn apply_ejection_discharge_effects(
             && blind_plays + loaded_connections > available;
         let requested_position = if stacked { 0 } else { position };
         let mut actor = ejection_actor;
-        let mut card = finesse_position_id(&hands[actor.index()], &gotten, requested_position);
+        let loaded_connection = stacked.then(|| {
+            pending.iter().find(|connection| {
+                connection.actor == ejection_actor
+                    && !pending.was_created_on(connection, entry.turn)
+                    && pending_is_active(connection, pending)
+            })
+        });
+        let mut card = loaded_connection
+            .flatten()
+            .and_then(|connection| connection.cards.get(1).copied())
+            .or_else(|| {
+                loaded_connection.flatten().and_then(|connection| {
+                    let anchor = *connection.cards.first()?;
+                    let anchor_position = hands[actor.index()]
+                        .iter()
+                        .position(|candidate| *candidate == anchor)?;
+                    hands[actor.index()][..anchor_position]
+                        .iter()
+                        .rev()
+                        .copied()
+                        .find(|candidate| !gotten.contains(candidate))
+                })
+            })
+            .or_else(|| finesse_position_id(&hands[actor.index()], &gotten, requested_position));
         let mut out_of_position = false;
         if extras_enabled && card.is_none() {
             for distance in 2..hands.len() {
@@ -398,10 +539,22 @@ pub(in crate::h_group) fn apply_ejection_discharge_effects(
             // when the requested ungotten position does not exist.
             return;
         };
-        pending.cancel_where(
-            entry.turn,
-            ConnectionTransitionReason::Superseded,
-            |connection| connection.actor == actor,
+        let apparent_focus = interpretation.map(|interpretation| interpretation.focus);
+        let same_turn_connections = pending
+            .iter()
+            .filter(|connection| {
+                pending.was_created_on(connection, entry.turn)
+                    && apparent_focus == Some(connection.focus)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        retract_connections(
+            entry,
+            *giver,
+            same_turn_connections,
+            pending,
+            invisibly_clued,
+            signals,
         );
         forced_playable.insert(card);
         if matches!(
@@ -412,6 +565,26 @@ pub(in crate::h_group) fn apply_ejection_discharge_effects(
                 if !discard_now.contains(&focus) {
                     discard_now.push(focus);
                 }
+            }
+        }
+        if kind == HGroupMoveKind::FiveColorEjection && focus_identity.is_some() {
+            if let (Some(focus), Clue::Suit(suit)) = (
+                interpretation.map(|interpretation| interpretation.focus),
+                clue,
+            ) {
+                // The Ejection meaning proves that the color-clued focus is
+                // the 5, replacing its apparent ordinary Play interpretation.
+                // Keep this identity claim focus-only; the ejected card is an
+                // unrelated successful blind play, not another copy of the 5.
+                push_signal(
+                    signals,
+                    entry,
+                    *giver,
+                    Some(*target),
+                    HGroupMoveKind::FiveColorEjection,
+                    vec![focus],
+                    Some(Card::new(*suit, Rank::Five)),
+                );
             }
         }
         let mut affected = vec![card];

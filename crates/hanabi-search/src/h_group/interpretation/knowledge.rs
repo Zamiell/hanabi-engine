@@ -1,12 +1,15 @@
-use super::super::{HGroupIdentityStatus, blind_reverse_finesse_is_eligible};
+use super::super::{
+    HGroupIdentityStatus, IdentityClaimRelation, blind_reverse_finesse_is_eligible,
+};
 use super::{
     Card, CardId, CardSet, Clue, ClueFacts, ConnectionObligation, ConventionFacts,
     ConventionKnowledge, HGroupCardInference, HGroupConnection, HGroupConnectionKind,
     HGroupMoveKind, HGroupPlayObligation, HGroupProfile, HGroupRuleId, HGroupState, HistoricalView,
     IdentityClaims, IdentitySet, LogicalDeductions, MaterializedCardFact, ObservedEvent, PlayerId,
     PlayerView, Rank, StackTimeline, chop, elimination_finesse_connection, identity_of,
-    is_eventually_useful, is_playable_at, loaded_connection_plan, pending_identity_is_queued,
-    pending_is_active, replay_identity_is_queued, rule_enabled, was_clued_before,
+    is_eventually_useful, is_playable_at, loaded_connection_plan, pending_card_allows_identity,
+    pending_identity_is_queued, pending_is_active, replay_identity_is_queued, rule_enabled,
+    was_clued_before,
 };
 use crate::h_group::knowledge_effects::{
     CardKnowledgeEffect, KnowledgeSource, effects_between, initial_card_inferences,
@@ -170,6 +173,28 @@ fn compile_convention_card_inferences(
 
     for clue in &replay.clues {
         let clue_stack_heights = StackTimeline::at_clue(clue.turn, clue.stack_heights).heights();
+        let first_connector_was_played_before_target = |identity: Card| {
+            let player_count = view.hands.len();
+            let target_distance =
+                (clue.target.index() + player_count - clue.giver.index()) % player_count;
+            let target_turn = clue.turn + u32::try_from(target_distance).unwrap_or(u32::MAX);
+            let first_missing = usize::from(clue.stack_heights[identity.suit.index()]);
+            Rank::ALL.get(first_missing).is_some_and(|rank| {
+                let connector = Card::new(identity.suit, *rank);
+                view.history.iter().any(|entry| {
+                    entry.turn > clue.turn
+                        && entry.turn < target_turn
+                        && matches!(
+                            entry.event,
+                            ObservedEvent::Played {
+                                identity,
+                                successful: true,
+                                ..
+                            } if identity == connector
+                        )
+                })
+            })
+        };
         let has_existing_prompt_for_delayed_identity = clue.clue == Clue::Rank(Rank::Two)
             && clue.play_identities.iter().any(|identity| {
                 let height = usize::from(clue.stack_heights[identity.suit.index()]);
@@ -187,9 +212,15 @@ fn compile_convention_card_inferences(
                 })
             });
         if !replay.cards.invalidated_focuses.contains(&clue.focus) {
-            let source = if replay
-                .signals
-                .has_at_turn(clue.turn, HGroupMoveKind::FixClue)
+            let resolved_bluff = replay.signals.of_kind(HGroupMoveKind::Bluff).any(|signal| {
+                signal.cards.len() >= 2
+                    && signal.turn >= clue.turn
+                    && signal.cards.last() == Some(&clue.focus)
+            });
+            let source = if resolved_bluff
+                || replay
+                    .signals
+                    .has_at_turn(clue.turn, HGroupMoveKind::FixClue)
             {
                 KnowledgeSource::Reinterpretation(clue.turn)
             } else {
@@ -197,11 +228,6 @@ fn compile_convention_card_inferences(
             };
             knowledge.update(clue.focus, source, |card| {
                 card.identity_status = HGroupIdentityStatus::Settled;
-                let resolved_bluff = replay.signals.of_kind(HGroupMoveKind::Bluff).any(|signal| {
-                    signal.cards.len() >= 2
-                        && signal.turn >= clue.turn
-                        && signal.cards.last() == Some(&clue.focus)
-                });
                 if resolved_bluff {
                     let one_away =
                         identities_at_distance_at(card.identities, clue.stack_heights, 1);
@@ -225,6 +251,12 @@ fn compile_convention_card_inferences(
                         .pending_connections
                         .iter()
                         .any(|connection| connection.focus == clue.focus);
+                    let loaded_color_clue_remains_ambiguous = matches!(clue.clue, Clue::Suit(_))
+                        && replay.pending_connections.actor_had_pending_before(
+                            clue.target,
+                            clue.turn,
+                            clue.focus,
+                        );
                     let delayed_plan_was_demonstrated =
                         clue.play_identities.iter().any(|identity| {
                             if view.play_stacks[identity.suit.index()].len()
@@ -307,7 +339,7 @@ fn compile_convention_card_inferences(
                                     replay.pending_connections.identity_was_demonstrated_after(
                                         Card::new(identity.suit, Rank::ALL[rank - 2]),
                                         clue.turn,
-                                    )
+                                    ) || first_connector_was_played_before_target(*identity)
                                 })
                                 .fold(0, |mask, identity| mask | (1 << identity.index())),
                         );
@@ -329,6 +361,7 @@ fn compile_convention_card_inferences(
                             narrowed = demonstrated_queued_identity;
                         } else if !queued_interpretation_is_live
                             && !has_existing_prompt_for_delayed_identity
+                            && !loaded_color_clue_remains_ambiguous
                         {
                             // Without an actual Prompt/Finesse obligation or
                             // an existing clued Prompt candidate, an
@@ -450,6 +483,121 @@ fn compile_convention_card_inferences(
                 });
             }
         }
+    }
+
+    // Good Touch applies when a later clue establishes an exact Play or
+    // connection identity, not only when that identity is the clue's focus.
+    // Preserve that negative information on every card that was already
+    // physically clued. The demonstrated connector may have left the hand by
+    // the time this projection is built, but the information learned when the
+    // promise was made remains valid.
+    // https://hanabi.github.io/level-1/#good-touch-principle
+    for claim in replay.cards.facts.identity_claims().iter().filter(|claim| {
+        let connection_was_demonstrated = claim.cards.iter().any(|claimed| {
+            view.history.iter().any(|entry| {
+                matches!(
+                    entry.event,
+                    ObservedEvent::Played {
+                        card,
+                        identity,
+                        successful: true,
+                        ..
+                    } if card == *claimed && identity == claim.identity
+                )
+            })
+        });
+        claim.relation == IdentityClaimRelation::Each
+            && (claim.source == HGroupMoveKind::PlayClue || connection_was_demonstrated)
+            && matches!(
+                claim.source,
+                HGroupMoveKind::PlayClue
+                    | HGroupMoveKind::Prompt
+                    | HGroupMoveKind::Finesse
+                    | HGroupMoveKind::ReverseFinesse
+                    | HGroupMoveKind::SelfFinesse
+                    | HGroupMoveKind::LayeredFinesse
+                    | HGroupMoveKind::HiddenFinesse
+                    | HGroupMoveKind::ClandestineFinesse
+                    | HGroupMoveKind::QueuedFinesse
+                    | HGroupMoveKind::AmbiguousFinesse
+            )
+    }) {
+        let claimed = IdentitySet::singleton(claim.identity);
+        for card in knowledge.cards.clone() {
+            if claim.cards.contains(&card.card) || !was_clued_before(view, claim.turn, card.card) {
+                continue;
+            }
+            let narrowed = card.identities.without(claimed);
+            if narrowed.is_empty() || narrowed == card.identities {
+                continue;
+            }
+            knowledge.update(card.card, KnowledgeSource::Clue(claim.turn), |card| {
+                card.identities = narrowed;
+            });
+        }
+    }
+
+    // Transfer discards identify the matching card exactly even when a Baton
+    // Discard transfers an identity that is not playable yet. Unlike an active
+    // Gentleman's-Discard play obligation, that epistemic fact outlives the
+    // connection and must remain available to later Prompt/Finesse searches.
+    // https://hanabi.github.io/level-10/#the-gentlemans-discard-gd
+    // https://hanabi.github.io/level-10/#the-baton-discard-bd
+    for claim in replay.cards.facts.identity_claims().iter().filter(|claim| {
+        claim.relation == IdentityClaimRelation::Each
+            && matches!(
+                claim.source,
+                HGroupMoveKind::TransferDiscard
+                    | HGroupMoveKind::GentlemansDiscard
+                    | HGroupMoveKind::LayeredGentlemansDiscard
+                    | HGroupMoveKind::BatonDiscard
+            )
+    }) {
+        for card in claim.cards.iter().copied() {
+            if deductions
+                .possible_identities(card)
+                .is_none_or(|logical| !logical.contains(claim.identity))
+            {
+                continue;
+            }
+            knowledge.update(
+                card,
+                KnowledgeSource::Reinterpretation(claim.turn),
+                |card| card.identities = IdentitySet::singleton(claim.identity),
+            );
+        }
+    }
+
+    // A resolved 5 Color Ejection replaces the focus's apparent ordinary
+    // Play interpretation with an exact 5. Apply that precedence after the
+    // original clue history. Other relational identity claims have dedicated
+    // projection paths below and must not be flattened into unconditional
+    // per-card replacements here.
+    for card in knowledge.cards.clone() {
+        let Some(identity) = replay
+            .cards
+            .facts
+            .identity_claims()
+            .iter()
+            .rev()
+            .find(|claim| {
+                claim.source == HGroupMoveKind::FiveColorEjection && claim.cards == [card.card]
+            })
+            .map(|claim| claim.identity)
+        else {
+            continue;
+        };
+        if deductions
+            .possible_identities(card.card)
+            .is_none_or(|logical| !logical.contains(identity))
+        {
+            continue;
+        }
+        knowledge.update(
+            card.card,
+            KnowledgeSource::Reinterpretation(closure_turn),
+            |card| card.identities = IdentitySet::singleton(identity),
+        );
     }
 
     // Focus identifies how the latest clue is interpreted; it is not a
@@ -586,8 +734,16 @@ fn compile_convention_card_inferences(
                     card.identities = narrowed;
                 }
                 card.promised_identity = Some(pending.expected);
-                card.finessed = pending.kind == HGroupConnectionKind::Finesse;
-                card.play_obligation = Some(HGroupPlayObligation::Connection(pending.kind));
+                if replay.is_exact_transfer(*pending_card, pending.expected) {
+                    // A Gentleman's Discard produces an exact, globally known
+                    // note. It is ordered like a clued play, rather than an
+                    // unproven Finesse that must be demonstrated immediately.
+                    card.finessed = false;
+                    card.play_obligation = None;
+                } else {
+                    card.finessed = pending.kind == HGroupConnectionKind::Finesse;
+                    card.play_obligation = Some(HGroupPlayObligation::Connection(pending.kind));
+                }
             },
         );
     }
@@ -793,30 +949,30 @@ pub(in crate::h_group) fn snapshot_playable(
     {
         return true;
     }
-    let accounted_after_first = ((height + 2)..rank).all(|needed_rank| {
-        let needed = Card::new(identity.suit, Rank::ALL[needed_rank - 1]);
-        snapshot_accounted(needed, focus, view, hands, facts, gotten)
-    });
-    if !accounted_after_first {
-        return false;
-    }
     if rank == height + 1 {
         return true;
     }
-    if ((height + 1)..rank).all(|needed_rank| {
-        let needed = Card::new(identity.suit, Rank::ALL[needed_rank - 1]);
-        pending_identity_is_queued(pending_connections, needed)
-    }) {
+    let missing = ((height + 1)..rank)
+        .filter_map(|needed_rank| {
+            let needed = Card::new(identity.suit, Rank::ALL[needed_rank - 1]);
+            (!pending_identity_is_queued(pending_connections, needed)
+                && !snapshot_accounted(needed, focus, view, hands, facts, gotten))
+            .then_some(needed)
+        })
+        .collect::<Vec<_>>();
+    if missing.is_empty() {
         return true;
     }
-    let first = Card::new(identity.suit, Rank::ALL[height]);
-    if snapshot_accounted(first, focus, view, hands, facts, gotten) {
+    let [connector] = missing.as_slice() else {
+        return false;
+    };
+    if snapshot_accounted(*connector, focus, view, hands, facts, gotten) {
         return true;
     }
 
     snapshot_connection_exists(
         profile,
-        first,
+        *connector,
         giver,
         target,
         focus,
@@ -825,6 +981,8 @@ pub(in crate::h_group) fn snapshot_playable(
         facts,
         gotten,
         already_playing,
+        pending_connections,
+        convention_facts,
         stack_heights,
         allow_blind_reverse_empathy,
     ) || (rule_enabled(profile, HGroupRuleId::Elimination)
@@ -854,6 +1012,8 @@ pub(in crate::h_group) fn snapshot_connection_exists(
     facts: &[ClueFacts],
     gotten: &CardSet,
     already_playing: &CardSet,
+    pending_connections: &[ConnectionObligation],
+    convention_facts: &ConventionFacts,
     stack_heights: [u8; 5],
     allow_blind_reverse_empathy: bool,
 ) -> bool {
@@ -884,6 +1044,8 @@ pub(in crate::h_group) fn snapshot_connection_exists(
             already_playing,
             first_actor,
             ordinary_search_len,
+            stack_heights,
+            rule_enabled(profile, HGroupRuleId::SpecialFinesses),
             allow_blind_reverse_empathy,
         );
     let search_len = if direct_reverse_finesse {
@@ -907,6 +1069,8 @@ pub(in crate::h_group) fn snapshot_connection_exists(
         facts,
         gotten,
         already_playing,
+        pending_connections,
+        convention_facts,
         stack_heights,
         &player_order,
     ) {
@@ -916,7 +1080,7 @@ pub(in crate::h_group) fn snapshot_connection_exists(
     let layered = rule_enabled(profile, HGroupRuleId::SpecialFinesses);
     let mut unknown_observer_finesse = false;
     for actor_index in player_order {
-        if actor_index == target.index() {
+        if actor_index == target.index() || actor_index == giver.index() {
             continue;
         }
         let unclued = hands[actor_index]
@@ -964,11 +1128,16 @@ fn snapshot_prompt_exists(
     facts: &[ClueFacts],
     gotten: &CardSet,
     already_playing: &CardSet,
+    pending_connections: &[ConnectionObligation],
+    convention_facts: &ConventionFacts,
     stack_heights: [u8; 5],
     player_order: &[usize],
 ) -> bool {
     let mut unknown_observer_prompt = false;
     for &actor_index in player_order {
+        if actor_index == giver.index() {
+            continue;
+        }
         let candidates = hands[actor_index]
             .iter()
             .rev()
@@ -977,6 +1146,13 @@ fn snapshot_prompt_exists(
                 *card != focus
                     && gotten.contains(card)
                     && !already_playing.contains(card)
+                    && pending_card_allows_identity(
+                        pending_connections,
+                        convention_facts,
+                        *card,
+                        expected,
+                        stack_heights,
+                    )
                     && facts[card.index()].allows(expected)
             })
             .collect::<Vec<_>>();
@@ -1025,36 +1201,57 @@ fn snapshot_direct_reverse_finesse_exists(
     already_playing: &CardSet,
     first_actor: usize,
     ordinary_search_len: usize,
+    stack_heights: [u8; 5],
+    layered: bool,
     allow_blind_reverse_empathy: bool,
 ) -> bool {
-    let finesse_positions = (ordinary_search_len..hands.len())
+    let finesse_candidates = (ordinary_search_len..hands.len())
         .filter_map(|distance| {
             let actor_index = (first_actor + distance) % hands.len();
-            (actor_index != target.index())
+            (actor_index != target.index() && actor_index != giver.index())
                 .then(|| {
-                    hands[actor_index]
+                    let cards = hands[actor_index]
                         .iter()
                         .rev()
                         .copied()
-                        .find(|card| {
+                        .filter(|card| {
                             *card != focus
                                 && !gotten.contains(card)
                                 && !already_playing.contains(card)
                         })
-                        .map(|card| (actor_index, card))
+                        .collect::<Vec<_>>();
+                    (!cards.is_empty()).then_some((actor_index, cards))
                 })
                 .flatten()
         })
         .collect::<Vec<_>>();
-    let visible = finesse_positions.iter().any(|(actor_index, card)| {
-        identity_of(view, *card) == Some(expected)
-            || (*actor_index == view.observer.index()
-                && facts[card.index()].identity_mask() == 1 << expected.index())
+    let visible = finesse_candidates.iter().any(|(actor_index, cards)| {
+        let mut simulated = stack_heights;
+        cards.iter().enumerate().any(|(position, card)| {
+            let identity = identity_of(view, *card).or_else(|| {
+                (*actor_index == view.observer.index()
+                    && facts[card.index()].identity_mask() == 1 << expected.index())
+                .then_some(expected)
+            });
+            let Some(identity) = identity else {
+                return false;
+            };
+            if identity == expected {
+                return position == 0 || layered;
+            }
+            if !layered || !is_playable_at(simulated, identity) {
+                return false;
+            }
+            simulated[identity.suit.index()] = identity.rank.number();
+            false
+        })
     });
     visible
         || (blind_reverse_finesse_is_eligible(view, giver, allow_blind_reverse_empathy)
-            && finesse_positions.iter().any(|(actor_index, card)| {
-                *actor_index == view.observer.index() && facts[card.index()].allows(expected)
+            && finesse_candidates.iter().any(|(actor_index, cards)| {
+                cards.first().is_some_and(|card| {
+                    *actor_index == view.observer.index() && facts[card.index()].allows(expected)
+                })
             }))
 }
 

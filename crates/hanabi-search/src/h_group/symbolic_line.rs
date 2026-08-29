@@ -1,10 +1,11 @@
 use hanabi_core::{Action, Card, CardId, Clue, PlayerId, PlayerView};
 
-use crate::{LogicalDeductions, SymbolicLineOutcome, SymbolicStopReason};
+use crate::{LogicalDeductions, SymbolicLineOutcome};
 
 use super::{
-    HGroupProfile, PerspectiveDepth, PerspectiveProjector, ProspectiveTransition,
-    h_group_predictable_action, identity_of, infer_h_group_from_replay, is_playable_now,
+    ConditionalPlan, HGroupProfile, PerspectiveDepth, PerspectiveProjector, PlanFrontier,
+    ProjectedAction, ProjectedConsequences, ProspectiveTransition, h_group_predictable_action,
+    identity_of, infer_h_group_from_replay, is_playable_now,
 };
 
 /// Projects convention-determined public actions while leaving unknown draws
@@ -15,46 +16,60 @@ pub(crate) fn project_h_group_line(
     root: Action,
     limit: u8,
 ) -> SymbolicLineOutcome {
-    let mut outcome = SymbolicLineOutcome::default();
+    project_h_group_plan(source, profile, root, limit).summarize()
+}
+
+fn project_h_group_plan(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    root: Action,
+    limit: u8,
+) -> ConditionalPlan {
+    let mut plan = ConditionalPlan::default();
     let mut public = source.clone();
     let mut action = Some(root);
 
     while let Some(current) = action {
-        if outcome.actions >= limit {
-            outcome.stop_reason = SymbolicStopReason::Limit;
+        if plan.len() >= usize::from(limit) {
+            plan.stop_at(PlanFrontier::Limit);
             break;
         }
         let actor = public.current_player;
         let Some((actor_deductions, actor_replay)) = PerspectiveProjector::new(&public, profile)
             .project(actor, PerspectiveDepth::NestedRecipients)
         else {
-            outcome.stop_reason = SymbolicStopReason::ProjectionUnavailable;
+            plan.stop_at(PlanFrontier::ProjectionUnavailable);
             break;
         };
         let actor_inferences = infer_h_group_from_replay(&actor_deductions, actor_replay, profile);
-        let Some(after) = apply_symbolic_action(
+        let Some((after, consequences)) = apply_symbolic_action(
             &public,
             &actor_deductions,
             &actor_inferences,
             actor,
             current,
-            &mut outcome,
         ) else {
-            outcome.stop_reason = SymbolicStopReason::UnknownIdentity;
+            plan.stop_at(PlanFrontier::IdentityBranch);
             break;
         };
+        plan.push(
+            ProjectedAction {
+                actor,
+                action: current,
+            },
+            consequences,
+        );
         public = after;
-        outcome.actions = outcome.actions.saturating_add(1);
         let next = public.current_player;
         let Some((next_deductions, _)) = PerspectiveProjector::new(&public, profile)
             .project(next, PerspectiveDepth::NestedRecipients)
         else {
-            outcome.stop_reason = SymbolicStopReason::ProjectionUnavailable;
+            plan.stop_at(PlanFrontier::ProjectionUnavailable);
             break;
         };
         action = h_group_predictable_action(&next_deductions, profile);
     }
-    outcome
+    plan
 }
 
 fn apply_symbolic_action(
@@ -63,39 +78,42 @@ fn apply_symbolic_action(
     actor_inferences: &super::HGroupInferences,
     actor: PlayerId,
     action: Action,
-    outcome: &mut SymbolicLineOutcome,
-) -> Option<PlayerView> {
+) -> Option<(PlayerView, ProjectedConsequences)> {
+    let mut consequences = ProjectedConsequences::default();
     match action {
         Action::Clue { target, clue } => {
             let touched = touched_cards(source, target, clue)?;
-            outcome.clues_spent = outcome.clues_spent.saturating_add(1);
-            Some(ProspectiveTransition::clue_by(
-                source, actor, target, clue, &touched,
+            consequences.clues_spent = 1;
+            Some((
+                ProspectiveTransition::clue_by(source, actor, target, clue, &touched),
+                consequences,
             ))
         }
         Action::Play(card) => {
             let identity = symbolic_identity(source, actor_deductions, actor_inferences, card)?;
             let successful = is_playable_now(source, identity);
             if successful {
-                outcome.score_gain = outcome.score_gain.saturating_add(1);
+                consequences.score_gain = 1;
                 if identity.rank.number() == 5 {
-                    outcome.clues_gained = outcome.clues_gained.saturating_add(1);
+                    consequences.clues_gained = 1;
                 }
             } else {
-                outcome.strikes = outcome.strikes.saturating_add(1);
+                consequences.strikes = 1;
             }
-            Some(ProspectiveTransition::play(
-                source, actor, card, identity, successful,
+            Some((
+                ProspectiveTransition::play(source, actor, card, identity, successful),
+                consequences,
             ))
         }
         Action::Discard(card) => {
             let identity = symbolic_identity(source, actor_deductions, actor_inferences, card)?;
-            outcome.discards = outcome.discards.saturating_add(1);
+            consequences.discards = 1;
             if source.clue_tokens < hanabi_core::MAX_CLUE_TOKENS {
-                outcome.clues_gained = outcome.clues_gained.saturating_add(1);
+                consequences.clues_gained = 1;
             }
-            Some(ProspectiveTransition::discard(
-                source, actor, card, identity,
+            Some((
+                ProspectiveTransition::discard(source, actor, card, identity),
+                consequences,
             ))
         }
     }
@@ -137,6 +155,7 @@ fn touched_cards(source: &PlayerView, target: PlayerId, clue: Clue) -> Option<Ve
 
 #[cfg(test)]
 mod tests {
+    use crate::SymbolicStopReason;
     use hanabi_core::{FullState, PlayerId, standard_deck};
 
     use super::*;

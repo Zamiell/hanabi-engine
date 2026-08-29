@@ -1,21 +1,22 @@
 use super::{
-    CardId, CardSet, ConnectionManager, ConnectionObligation, ConventionJournal,
-    HGroupConnectionKind, HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, ObservedEvent,
-    ObservedHistoryEntry, PlayerId, PlayerView, PromiseId, identity_of, is_playable_now,
-    push_signal, same_turn_signal, was_clued_before,
+    CardSet, ConnectionManager, ConnectionObligation, ConventionJournal, HGroupConnectionKind,
+    HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, ObservedEvent, PlayerId, PlayerView,
+    PromiseId, identity_of, is_playable_at, push_signal, same_turn_signal, was_clued_before,
 };
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub(in crate::h_group) fn apply_transfer_effects(
-    entry: &ObservedHistoryEntry,
+    context: &HGroupTurnContext<'_>,
     view: &PlayerView,
-    hands: &[Vec<CardId>],
     explicitly_clued: &CardSet,
     invisibly_clued: &mut CardSet,
     already_playing: &mut CardSet,
     pending: &mut ConnectionManager,
     signals: &mut ConventionJournal,
 ) {
+    let entry = context.entry;
+    let stack_heights = context.before.stack_heights;
+    let hands = context.after.hands;
     // Sources: https://hanabi.github.io/level-10/#the-gentlemans-discard-gd
     // https://hanabi.github.io/level-10/#the-layered-gentlemans-discard
     // https://hanabi.github.io/level-10/#the-baton-discard-bd
@@ -30,6 +31,15 @@ pub(in crate::h_group) fn apply_transfer_effects(
     else {
         return;
     };
+    if context.actor_before.discarded_identity != Some(*identity) {
+        // A revealed identity is not proof that the discarder knew it. Both
+        // Gentleman's and Baton Discards require exact owner knowledge; an
+        // observer may not manufacture a transfer from visible simulator
+        // truth that was hidden from the actor.
+        // https://hanabi.github.io/level-10/#the-gentlemans-discard-gd
+        // https://hanabi.github.io/level-10/#the-baton-discard-bd
+        return;
+    }
     if signals
         .iter()
         .any(|signal| signal.turn == entry.turn && signal.kind == HGroupMoveKind::SacrificeDiscard)
@@ -52,6 +62,7 @@ pub(in crate::h_group) fn apply_transfer_effects(
         }
     }
     if transfer.is_none() {
+        let mut observer_fallback = None;
         for distance in 1..hands.len() {
             let index = (player.index() + distance) % hands.len();
             let ungotten = hands[index]
@@ -62,6 +73,15 @@ pub(in crate::h_group) fn apply_transfer_effects(
                     !explicitly_clued.contains(candidate) && !invisibly_clued.contains(candidate)
                 })
                 .collect::<Vec<_>>();
+            if index == view.observer.index() {
+                observer_fallback = observer_fallback.or_else(|| {
+                    ungotten
+                        .first()
+                        .copied()
+                        .map(|card| (PlayerId::new(u8::try_from(index).unwrap_or(0)), card))
+                });
+                continue;
+            }
             let Some((layer, target_card)) = ungotten
                 .iter()
                 .copied()
@@ -70,13 +90,11 @@ pub(in crate::h_group) fn apply_transfer_effects(
             else {
                 continue;
             };
-            let playable = is_playable_now(view, *identity);
+            let playable = is_playable_at(stack_heights, *identity);
             let layer_is_safe = if layer == 0 {
                 true
             } else {
-                let mut heights = core::array::from_fn::<_, 5, _>(|suit| {
-                    u8::try_from(view.play_stacks[suit].len()).unwrap_or(0)
-                });
+                let mut heights = stack_heights;
                 ungotten[..layer].iter().all(|layer_card| {
                     let Some(layer_identity) = identity_of(view, *layer_card) else {
                         return false;
@@ -103,12 +121,23 @@ pub(in crate::h_group) fn apply_transfer_effects(
             transfer = Some((PlayerId::new(u8::try_from(index).unwrap_or(0)), target_card));
             break;
         }
+        if transfer.is_none() {
+            transfer = observer_fallback;
+            if transfer.is_some() {
+                kind = if is_playable_at(stack_heights, *identity) {
+                    HGroupMoveKind::GentlemansDiscard
+                } else {
+                    HGroupMoveKind::BatonDiscard
+                };
+            }
+        }
     }
     let Some((target, target_card)) = transfer else {
         return;
     };
+    pending.reveal_identity(entry.turn, target, target_card, *identity);
     invisibly_clued.insert(target_card);
-    if is_playable_now(view, *identity) {
+    if is_playable_at(stack_heights, *identity) {
         already_playing.insert(target_card);
         pending.start(
             entry.turn,

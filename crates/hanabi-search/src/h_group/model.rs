@@ -308,11 +308,23 @@ pub(super) struct HGroupState {
 }
 
 impl HGroupState {
+    /// A normal Gentleman's Discard gives the recipient an exact identity
+    /// note. Level 25 therefore treats the transferred card as clued for
+    /// Priority, not as an urgent blind-play that jumps ahead of every older
+    /// play obligation.
+    ///
+    /// Source: <https://hanabi.github.io/level-25/#priority-with-blind-plays>
+    pub(super) fn is_exact_transfer(&self, card: CardId, identity: Card) -> bool {
+        self.cards.facts.is_exact_transfer(card, identity)
+    }
+
     /// Cards eligible to act as Prompts. Chop movement alone is not a clue.
     pub(super) fn promptable(&self) -> CardSet {
+        let active_invisible =
+            active_invisibly_clued(&self.cards.invisibly_clued, &self.pending_connections);
         self.cards
             .explicitly_clued
-            .union(&self.cards.invisibly_clued)
+            .union(&active_invisible)
             .copied()
             .collect()
     }
@@ -478,6 +490,38 @@ impl HGroupState {
         }
         Ok(())
     }
+}
+
+/// Materializes only the presently actionable member of each ambiguous
+/// Finesse promise. Later cards in `connection.cards` are conditional suffixes:
+/// they become the Finesse Position only after every earlier candidate has
+/// produced a successful alternative play. Treating the whole suffix as
+/// already clued corrupts later focus and Prompt selection.
+pub(super) fn active_invisibly_clued(
+    invisibly_clued: &ProvenancedCardSet,
+    pending: &ConnectionManager,
+) -> CardSet {
+    invisibly_clued
+        .iter()
+        .copied()
+        .filter(|card| {
+            let sources = invisibly_clued.sources(*card);
+            sources.is_empty()
+                || sources
+                    .iter()
+                    .any(|source| !matches!(source, EffectSource::Promise(_)))
+                || sources.iter().any(|source| {
+                    let EffectSource::Promise(promise) = source else {
+                        return false;
+                    };
+                    pending.iter().any(|connection| {
+                        connection.promise == *promise
+                            && connection.kind == HGroupConnectionKind::Finesse
+                            && connection.cards.first() == Some(card)
+                    })
+                })
+        })
+        .collect()
 }
 
 pub(super) fn protected_cards(

@@ -1,3 +1,4 @@
+use crate::ConventionPolicyTier;
 use hanabi_core::{Action, PlayerId};
 
 /// Semantic role assigned to an action before policy ordering is applied.
@@ -20,6 +21,7 @@ pub(super) enum HGroupActionKind {
 pub(super) struct HGroupAnalyzedAction {
     pub(super) action: Action,
     pub(super) kind: HGroupActionKind,
+    pub(super) policy_tier: ConventionPolicyTier,
     pub(super) priority: i32,
 }
 

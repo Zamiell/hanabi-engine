@@ -101,9 +101,5 @@
     { "type": 0, "target": 23 },
     { "type": 0, "target": 38 }
   ],
-  "options": { "variant": "No Variant" },
-  "notes": [],
-  "characters": [],
-  "id": 0,
-  "seed": ""
+  "seed": "p4v0s2"
 }

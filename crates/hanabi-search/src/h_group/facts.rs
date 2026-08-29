@@ -38,6 +38,10 @@ pub(super) struct ConventionFacts {
     demonstrated_layers: [Option<Card>; 50],
     layer_conflicts: [bool; 50],
     active_priority: CardSet,
+    /// Exact owner knowledge transferred by a Gentleman's Discard. This is a
+    /// live semantic fact, not something consumers should reconstruct from
+    /// the explanation journal.
+    exact_transfers: Vec<(CardId, Card)>,
     identity_claims: Vec<ConventionIdentityClaim>,
 }
 
@@ -51,6 +55,7 @@ impl Default for ConventionFacts {
             demonstrated_layers: [None; 50],
             layer_conflicts: [false; 50],
             active_priority: CardSet::default(),
+            exact_transfers: Vec::new(),
             identity_claims: Vec::new(),
         }
     }
@@ -125,7 +130,16 @@ impl ConventionFacts {
             for card in &signal.cards {
                 self.rebuild_known_identity(*card);
             }
+            self.exact_transfers
+                .retain(|(card, claimed)| !signal.cards.contains(card) || *claimed != identity);
             return;
+        }
+        if signal.kind == HGroupMoveKind::GentlemansDiscard {
+            for card in &signal.cards {
+                if !self.exact_transfers.contains(&(*card, identity)) {
+                    self.exact_transfers.push((*card, identity));
+                }
+            }
         }
         if signal.kind == HGroupMoveKind::EliminationRewrite {
             // https://hanabi.github.io/extras/miscellaneous/#the-elimination-rewrite-for-1s
@@ -218,6 +232,10 @@ impl ConventionFacts {
 
     pub(super) const fn active_priority(&self) -> &CardSet {
         &self.active_priority
+    }
+
+    pub(super) fn is_exact_transfer(&self, card: CardId, identity: Card) -> bool {
+        self.exact_transfers.contains(&(card, identity))
     }
 
     pub(super) fn identity_claims(&self) -> &[ConventionIdentityClaim] {
@@ -319,6 +337,20 @@ mod tests {
                 relation: IdentityClaimRelation::OneOf,
             }]
         );
+    }
+
+    #[test]
+    fn exact_transfer_is_materialized_as_current_truth() {
+        let card = CardId::new(7);
+        let identity = Card::new(Suit::Purple, Rank::Four);
+        let facts = ConventionFacts::from_signals(&[signal(
+            HGroupMoveKind::GentlemansDiscard,
+            card,
+            Some(identity),
+        )]);
+
+        assert!(facts.is_exact_transfer(card, identity));
+        assert!(!facts.is_exact_transfer(card, Card::new(Suit::Purple, Rank::Five)));
     }
 
     #[test]

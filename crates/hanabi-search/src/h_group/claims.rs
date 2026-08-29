@@ -1,8 +1,8 @@
-use hanabi_core::{Card, CardId, PlayerId, PlayerView};
+use hanabi_core::{Card, CardId, PlayerView};
 
 use super::{
-    CardSet, ClueFacts, ConventionFacts, HGroupClueInterpretation, HGroupState, HistoricalView,
-    IdentitySet,
+    CardSet, ClueFacts, ConnectionObligation, ConventionFacts, HGroupClueInterpretation,
+    HGroupState, HistoricalView, IdentitySet,
 };
 
 /// Observer-safe authority for exact convention identity claims. Relational
@@ -70,16 +70,16 @@ impl<'a> IdentityClaims<'a> {
 #[allow(clippy::too_many_arguments)]
 pub(super) fn claimed_identities_at_clue(
     focus: CardId,
-    giver: PlayerId,
     hands: &[Vec<CardId>],
     historical: &HistoricalView<'_>,
     clue_facts: &[ClueFacts],
     convention_facts: &ConventionFacts,
     clues: &[HGroupClueInterpretation],
     gotten: &CardSet,
+    pending: &[ConnectionObligation],
 ) -> IdentitySet {
     let live_cards = hands.iter().flatten().copied().collect::<CardSet>();
-    gotten
+    let claimed = gotten
         .iter()
         .copied()
         .filter(|card| {
@@ -88,10 +88,13 @@ pub(super) fn claimed_identities_at_clue(
                 && !convention_facts.fixed_cards().contains(card)
         })
         .fold(IdentitySet::default(), |claimed, card| {
-            let giver_holds_card = hands[giver.index()].contains(&card);
-            let identity = (!giver_holds_card)
-                .then(|| historical.identity(card))
-                .flatten()
+            // `HistoricalView` already hides the observer's physical hand.
+            // Do not additionally hide the clue giver's card: a recipient can
+            // see it, and the giver may independently know an exact identity
+            // from an earlier convention promise. Good Touch may use either
+            // source, but never simulator-only truth.
+            let identity = historical
+                .identity(card)
                 .or_else(|| {
                     let logical = IdentitySet::from_mask(clue_facts[card.index()].identity_mask());
                     (logical.len() == 1)
@@ -99,9 +102,6 @@ pub(super) fn claimed_identities_at_clue(
                         .flatten()
                 })
                 .or_else(|| {
-                    if giver_holds_card {
-                        return None;
-                    }
                     let prior = clues.iter().rev().find(|prior| prior.focus == card)?;
                     // Good Touch reserves exact playing promises. A Save is
                     // protection, not an assertion that another clue cannot
@@ -113,5 +113,14 @@ pub(super) fn claimed_identities_at_clue(
             identity.map_or(claimed, |identity| {
                 claimed.union(IdentitySet::singleton(identity))
             })
-        })
+        });
+    pending.iter().fold(claimed, |claimed, connection| {
+        connection
+            .cards
+            .first()
+            .filter(|card| **card != focus && live_cards.contains(card))
+            .map_or(claimed, |_| {
+                claimed.union(IdentitySet::singleton(connection.expected))
+            })
+    })
 }

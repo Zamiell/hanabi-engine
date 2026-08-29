@@ -15,9 +15,9 @@ use super::recognition::{
     apply_ignition_effects, apply_intermediate_bluff_effects, apply_level_three_effects,
     apply_level_two_effects, apply_max_special_effects, apply_order_chop_move_effects,
     apply_out_of_order_effects, apply_phantom_effects, apply_positional_effects,
-    apply_priority_effects, apply_special_finesse_discard_effects, apply_stall_effects,
-    apply_tempo_effects, apply_transfer_effects, apply_trash_connection_refinements,
-    apply_trash_effects, apply_unnecessary_move_effects,
+    apply_priority_effects, apply_resolved_bluff_effects, apply_special_finesse_discard_effects,
+    apply_stall_effects, apply_tempo_effects, apply_transfer_effects,
+    apply_trash_connection_refinements, apply_trash_effects, apply_unnecessary_move_effects,
 };
 use super::rules::POST_EVENT_RULES;
 use super::{
@@ -260,9 +260,8 @@ fn apply_rule(
         HGroupRuleId::SpecialDiscards => {
             apply_special_finesse_discard_effects(context, view, effects);
             apply_transfer_effects(
-                context.entry,
+                context,
                 view,
-                context.after.hands,
                 effects.explicitly_clued,
                 effects.invisibly_clued,
                 effects.already_playing,
@@ -270,17 +269,24 @@ fn apply_rule(
                 effects.signals,
             );
         }
-        HGroupRuleId::Bluffs => apply_bluff_effects(
-            context.entry,
-            view,
-            context.after.hands,
-            context.after.stack_heights,
-            effects.explicitly_clued,
-            effects.already_playing,
-            effects.pending,
-            effects.forced_playable,
-            effects.signals,
-        ),
+        HGroupRuleId::Bluffs => {
+            // A play immediately following a Bluff clue disambiguates the
+            // clue's competing direct/Finesse interpretations. Keep that
+            // lifecycle transition in the same rule pipeline used for real
+            // history and projected continuations.
+            apply_resolved_bluff_effects(context.entry, view, &context.before, effects);
+            apply_bluff_effects(
+                context.entry,
+                view,
+                context.after.hands,
+                context.after.stack_heights,
+                effects.explicitly_clued,
+                effects.already_playing,
+                effects.pending,
+                effects.forced_playable,
+                effects.signals,
+            );
+        }
         HGroupRuleId::Context => apply_context_effects(context, view, effects),
         HGroupRuleId::IntermediateBluffs => {
             apply_intermediate_bluff_effects(context, view, effects);
@@ -293,6 +299,7 @@ fn apply_rule(
         HGroupRuleId::EjectionsAndDischarges => apply_ejection_discharge_effects(
             context.entry,
             view,
+            &context.before.hands,
             context.after.hands,
             context.after.facts,
             effects.clues,

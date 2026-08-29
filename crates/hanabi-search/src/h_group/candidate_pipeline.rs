@@ -1,15 +1,16 @@
 use super::{
     ClueCandidate, HGroupProfile, LogicalDeductions, apply_strategic_clue_values,
-    recipient_replay_recognizes_candidate,
+    recipient_replay_assessment,
 };
 
 /// Candidates that have passed legality, focus, semantic-admissibility, and
 /// convention-safety checks in the interpretation layer.
 pub(super) struct SemanticallyAdmittedCandidates(Vec<ClueCandidate>);
 
-/// Candidates whose proposed meaning has been checked against the same
-/// recipient replay used for real public history.
-struct RecipientCheckedCandidates(Vec<ClueCandidate>);
+/// Candidates whose proposed meaning has an explicit recipient assessment.
+/// Generator-only candidates remain visible as correlated hidden-world
+/// branches; they are no longer mislabeled as recipient-confirmed.
+struct RecipientAssessedCandidates(Vec<ClueCandidate>);
 
 /// Candidates after structured causal outcomes and strategic preferences
 /// have been compared.
@@ -24,14 +25,12 @@ impl SemanticallyAdmittedCandidates {
         mut self,
         deductions: &LogicalDeductions,
         profile: HGroupProfile,
-    ) -> RecipientCheckedCandidates {
+    ) -> RecipientAssessedCandidates {
         let view = deductions.view();
         for candidate in &mut self.0 {
-            if recipient_replay_recognizes_candidate(view, profile, candidate) {
-                candidate.mark_recipient_replay();
-            }
+            candidate.set_recognition(recipient_replay_assessment(view, profile, candidate));
         }
-        RecipientCheckedCandidates(self.0)
+        RecipientAssessedCandidates(self.0)
     }
 
     pub(super) fn finalize(
@@ -45,7 +44,7 @@ impl SemanticallyAdmittedCandidates {
     }
 }
 
-impl RecipientCheckedCandidates {
+impl RecipientAssessedCandidates {
     fn compare_outcomes(
         mut self,
         deductions: &LogicalDeductions,

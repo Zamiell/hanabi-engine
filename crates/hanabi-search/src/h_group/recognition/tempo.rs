@@ -264,7 +264,7 @@ pub(in crate::h_group) fn apply_emergency_discard_effects(
         .collect::<Vec<_>>();
     let known_trash_cards = known_trash_order.iter().copied().collect::<CardSet>();
     let discarded_known_trash = known_trash_cards.contains(card);
-    let discarded_was_chop = context.actor_saw_normal_discard;
+    let discarded_was_chop = context.actor_before.normal_chop_discard;
     let trash_skip = known_trash_order
         .iter()
         .position(|candidate| candidate == card)
@@ -470,7 +470,7 @@ pub(in crate::h_group) fn apply_positional_effects(
     let explicitly_clued = effects.explicitly_clued;
     let invisibly_clued = &*effects.invisibly_clued;
     let chop_moved = &*effects.chop_moved;
-    let actor_saw_normal_discard = context.actor_saw_normal_discard;
+    let actor_saw_normal_discard = context.actor_before.normal_chop_discard;
     let pending = &mut *effects.pending;
     let forced_playable = &mut *effects.forced_playable;
     let signals = &mut *effects.signals;

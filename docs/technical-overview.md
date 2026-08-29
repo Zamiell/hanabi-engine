@@ -47,14 +47,16 @@ history before the graph reaches exact world enumeration.
 ## Deterministic planning
 
 The engine has one planning path. In openings and midgames, unknown identities
-remain symbolic. Every convention-permitted root action receives a stable
-priority derived from convention semantics and public facts: certain
+remain symbolic. Every convention-permitted root action receives a
+lexicographic semantic tier and a stable within-tier priority derived from
+convention semantics and public facts: certain
 playability or uselessness, newly touched cards, immediately playable touches,
 critical-card protection, and oldest-card protection. Identical input therefore
 produces identical output without a random seed or iteration budget.
 
-When convention priority and explicit preference do not separate root actions,
-the planner projects each convention-predictable continuation. Unknown draws
+Hard convention constraints filter the action set before these priorities are
+compared. When policy tier, within-tier priority, and explicit preference do
+not separate root actions, the planner projects each convention-predictable continuation. Unknown draws
 remain blank rather than receiving sampled identities, and the projection stops
 at the first real policy or identity branch. The reported trajectory compares
 score gain, strikes, discards, and clue flow without pretending to know hidden
@@ -105,7 +107,8 @@ H-Group uses shared internal boundaries to keep these answers consistent:
   explicit without exposing simulator truth; action obligations stay in the
   canonical convention state.
 - `HistoricalView` prevents future identity reveals from changing old moves.
-- `HGroupTurnContext` exposes explicit pre-event and post-event facts.
+- `HGroupTurnContext` exposes explicit pre-event and post-event facts, with an
+  `ActorBeliefBefore` projection for knowledge belonging to the actor.
 - `ConnectionManager` owns the auditable Prompt/Finesse lifecycle.
 - the provenance ledger, implemented by `ProvenancedCardSet`, gives every
   materialized clue, protection, play, and chop-move fact one or more event,
@@ -137,7 +140,8 @@ H-Group uses shared internal boundaries to keep these answers consistent:
   projection, and planning one definition of playability, trash, focus, chop,
   and finesse position.
 - `ConventionConstraints` applies mandatory semantics before numeric strategy
-  priorities.
+  priorities, while `ConventionPolicyTier` preserves that ordering at the
+  planner boundary.
 - `LineOutcome` retains promised actions, protected cards, known trash, and
   connections so strategic comparisons operate on semantics before scores.
   Teamwork compares public action coverage and protection; Directness compares
@@ -154,15 +158,19 @@ H-Group uses shared internal boundaries to keep these answers consistent:
   replacements.
 - connection promises have stable IDs and durable origin metadata rather than
   being inferred later from whichever card sets survived.
-- clue selection has explicit semantic-admission, recipient-replay, and causal
-  outcome-ranking stages.
+- clue selection has explicit semantic-admission, recipient-assessment, and
+  causal outcome-ranking stages.
 - Convention-admissible Fix alternatives compare recipient-visible negative
   information using active promises, likely play timing, criticality, and
   future clue economy before applying the color-over-rank tie-break.
 - `HGroupActionSet` is the canonical action analysis used by selection,
   candidate generation, priorities, safety checks, and continuation detection.
-- otherwise-equivalent candidates use deterministic blank-card forced-line
-  projection before exact endgame solving is considered.
+- otherwise-equivalent candidates use a typed `ConditionalPlan` of
+  observer-relative `ProjectedAction` nodes. The public blank-card line is a
+  summary of this plan; projected steps are not authoritative replay events.
+- mutually exclusive ordinary and empathy readings are retained as correlated
+  whole-state interpretation hypotheses until actor obligations select the
+  applicable reading.
 
 See [H-Group architecture](architecture.md) for invariants and extension rules,
 and [H-Group convention interpreter](h-group.md) for the level matrix.
@@ -265,10 +273,11 @@ overflow checks. The repository pins cargo-nextest 0.9.143 for fail-fast test
 scheduling; nextest's missing rustdoc support is covered by the separate
 `cargo test --doc` command.
 
-The curated `game-p4v0s415.json` replay is an active golden oracle: the planner
-must choose the fixture action at every position. Full parity for
-`game-p4v0s9.json` remains ignored pending expert review of move 28; its
-settled convention behaviors are still covered by focused active regressions.
+The curated `game-p4v0s415.json` and `game-p4v0s9.json` replays are active
+golden oracles: the planner must choose the fixture action at every position.
+The third expert replay, `game-p4v0s2.json`, is active while its remaining
+positions are reviewed. It currently agrees through move 36; move 37 is the
+first unresolved convention interpretation.
 
 The Python development requirements pin ty, and `ty.toml` checks every Python
 bridge and test module against Python 3.10. The test suite also rejects any

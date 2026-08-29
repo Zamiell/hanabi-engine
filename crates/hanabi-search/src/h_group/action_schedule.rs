@@ -37,6 +37,7 @@ pub(super) struct ActionObligation {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(super) struct ActionSchedule {
     obligations: Vec<ActionObligation>,
+    blocked_cards: CardSet,
 }
 
 impl ActionSchedule {
@@ -49,6 +50,16 @@ impl ActionSchedule {
             .pending_connections
             .iter()
             .filter(|connection| pending_is_active(connection, &replay.pending_connections))
+            .filter(|connection| {
+                !replay.is_exact_transfer(
+                    connection
+                        .cards
+                        .first()
+                        .copied()
+                        .unwrap_or(connection.focus),
+                    connection.expected,
+                )
+            })
         {
             let Some(card) = connection.cards.first().copied() else {
                 continue;
@@ -100,13 +111,47 @@ impl ActionSchedule {
                 source: ObligationSource::RequiredDiscard,
             });
         }
-        Self { obligations }
+        let observer = view.observer;
+        let blocked_cards = replay
+            .pending_connections
+            .iter()
+            .filter(|pending| {
+                pending
+                    .cards
+                    .first()
+                    .is_none_or(|card| !replay.is_exact_transfer(*card, pending.expected))
+            })
+            .flat_map(|pending| {
+                let blocked_candidates = if pending.actor != observer {
+                    &[][..]
+                } else if pending_is_active(pending, &replay.pending_connections) {
+                    pending.cards.get(1..).unwrap_or_default()
+                } else {
+                    pending.cards.as_slice()
+                };
+                blocked_candidates
+                    .iter()
+                    .copied()
+                    .chain(core::iter::once(pending.focus))
+            })
+            .collect();
+        Self {
+            obligations,
+            blocked_cards,
+        }
     }
 
     pub(super) fn plays_for(&self, actor: PlayerId) -> impl Iterator<Item = &ActionObligation> {
         self.obligations.iter().filter(move |obligation| {
             obligation.actor == actor && obligation.action == ScheduledAction::Play
         })
+    }
+
+    /// Cards that cannot act before the observer's currently due connection
+    /// steps resolve. This is the canonical blocking query for inference;
+    /// consumers must not rebuild connection suffix semantics themselves.
+    pub(super) const fn blocked_cards(&self) -> &CardSet {
+        &self.blocked_cards
     }
 
     pub(super) fn required_discards_for(

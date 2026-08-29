@@ -178,6 +178,7 @@ pub(in crate::h_group) fn apply_resolved_bluff_effects(
     let stack_heights = before.stack_heights;
     let already_playing = &mut *effects.already_playing;
     let pending = &mut *effects.pending;
+    let forced_playable = &*effects.forced_playable;
     let signals = &mut *effects.signals;
     let ObservedEvent::Played {
         player,
@@ -188,6 +189,22 @@ pub(in crate::h_group) fn apply_resolved_bluff_effects(
     else {
         return;
     };
+    let had_preexisting_play_obligation = before.already_playing.contains(&card)
+        || forced_playable.contains(&card)
+        || pending.iter().any(|connection| {
+            connection.actor == player
+                && connection.cards.contains(&card)
+                && pending_is_active(connection, pending)
+        });
+    if had_preexisting_play_obligation {
+        // A successful play that was already convention-bound before the
+        // immediately preceding clue resolves that older promise; it is not
+        // evidence that the new clue was a Bluff. In game p4v0s2, Donald's
+        // promised red 3 follows Cathy's blue clue to Alice. Reclassifying it
+        // as a Bluff would falsely rewrite Alice's playable blue 1 as blue 2.
+        // Source: https://hanabi.github.io/level-11/#the-bluff
+        return;
+    }
     if was_clued_before(view, entry.turn, card) {
         return;
     }

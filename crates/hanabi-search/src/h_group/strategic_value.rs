@@ -2,14 +2,18 @@ use super::{
     Action, ActionCommitment, CachedProspectiveProjection, Card, CardId, ClueCandidate,
     CluedCardSuperposition, EpistemicState, HGroupConnection, HGroupMoveKind, HGroupProfile,
     HGroupRuleId, IdentitySet, LineOutcome, LogicalDeductions, PlayerId, PlayerView, Rank,
-    TeamConventionSnapshot, card_is_trash, identity_of, is_eventually_useful, is_playable_now,
-    prospective_clue_view, prospective_team_clue_signal_kinds, rule_enabled,
+    TeamConventionSnapshot, card_is_trash, identity_of, is_eventually_useful, is_playable_at,
+    is_playable_now, prospective_clue_view, prospective_team_clue_signal_kinds, rule_enabled,
 };
 
 const TEAM_ACTION_COVERAGE_PENALTY: u16 = 80;
 const TEAM_ACTION_COUNT_PENALTY: u16 = 100;
+const NAMED_LINE_ACTION_DEFICIT_PENALTY: u16 = 80;
 const TEAM_MULTI_CARD_PROTECTION_BONUS: u16 = 80;
 const TEAM_ACTION_DELAY_PENALTY: u16 = 2;
+const TEAM_OCCUPIED_TARGET_PENALTY: u16 = 20;
+const PLAY_OVER_SAVE_PENALTY: u16 = 80;
+const CRITICAL_CHOP_DEADLINE_PENALTY: u16 = 80;
 const INDIRECT_CONNECTION_PENALTY: u16 = 24;
 const STALLED_MULTI_STEP_CONNECTION_PENALTY: u16 = 280;
 
@@ -88,11 +92,67 @@ pub(super) fn apply_strategic_clue_values(
         })
         .min()
         .unwrap_or(source.hands.len());
-
+    let best_named_line_action_count = values
+        .iter()
+        .filter_map(|value| value.as_ref()?.convention_action_count)
+        .max();
+    let current_stack_heights = std::array::from_fn(|suit| {
+        u8::try_from(source.play_stacks[suit].len())
+            .expect("a standard stack has at most five cards")
+    });
+    let target_has_scheduled_play = |target: PlayerId| {
+        scheduled_play_continuation_value(
+            source,
+            &baselines[target.index()],
+            target,
+            current_stack_heights,
+        )
+        .is_some()
+    };
+    let critical_chop_deadline_values = values
+        .iter()
+        .map(|value| {
+            value.as_ref().map_or(0, |value| {
+                secured_critical_chop_deadline_value(
+                    source,
+                    &baselines,
+                    value,
+                    current_stack_heights,
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    let best_critical_chop_deadline_value = critical_chop_deadline_values
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or(0);
+    let has_unoccupied_immediate_target = candidates.iter().any(|candidate| {
+        candidate.immediate_play() && !target_has_scheduled_play(candidate.target)
+    });
+    let mut best_immediate_action_count_by_target: Vec<Option<usize>> =
+        vec![None; source.hands.len()];
+    for (candidate, value) in candidates.iter().zip(&values) {
+        if !candidate.immediate_play() {
+            continue;
+        }
+        let Some(value) = value else {
+            continue;
+        };
+        let action_count = value
+            .convention_action_count
+            .unwrap_or(value.action_coverage)
+            .max(value.action_coverage);
+        let best = &mut best_immediate_action_count_by_target[candidate.target.index()];
+        *best = Some(best.map_or(action_count, |prior| prior.max(action_count)));
+    }
     for (index, candidate) in candidates.iter_mut().enumerate() {
         let Some(value) = &values[index] else {
             continue;
         };
+        candidate.set_preserves_visible_continuation(preserves_visible_continuation(
+            source, *candidate, &baselines,
+        ));
         let action_coverage = value.action_coverage;
         candidate.action_coverage = u8::try_from(action_coverage).unwrap_or(u8::MAX);
         candidate.convention_action_count = value
@@ -101,6 +161,53 @@ pub(super) fn apply_strategic_clue_values(
         candidate.convention_connection_steps = value
             .convention_connection_steps
             .map(|count| u8::try_from(count).unwrap_or(u8::MAX));
+        let candidate_action_count = value
+            .convention_action_count
+            .unwrap_or(value.action_coverage)
+            .max(value.action_coverage);
+        if candidate_action_count <= 1 {
+            // A demonstrated multi-action convention line already advances
+            // the team's schedule past this local one-card comparison. Apply
+            // chop-deadline ordering only to ordinary one-action alternatives;
+            // otherwise an opening Clandestine Finesse can lose merely because
+            // its first projected action belongs to another player.
+            let missed_critical_chop_deadline = best_critical_chop_deadline_value
+                .saturating_sub(critical_chop_deadline_values[index]);
+            candidate.value.penalize_teamwork(
+                CRITICAL_CHOP_DEADLINE_PENALTY.saturating_mul(
+                    u16::try_from(missed_critical_chop_deadline).unwrap_or(u16::MAX),
+                ),
+            );
+        }
+        let same_target_immediate_play_is_at_least_as_productive =
+            best_immediate_action_count_by_target[candidate.target.index()]
+                .is_some_and(|best| best >= candidate_action_count);
+        if candidate.save && same_target_immediate_play_is_at_least_as_productive {
+            // An immediate Play Clue occupies the recipient, so their critical
+            // chop cannot be discarded on this turn. Prefer advancing the
+            // stack over spending the clue only to Save that same player,
+            // unless the Save secures a strictly longer action line.
+            // Source: https://hanabi.github.io/beginner/other-general-strategy/#give-play-clues-over-save-clues
+            candidate.value.penalize_teamwork(PLAY_OVER_SAVE_PENALTY);
+        }
+        if source.turn > 0 {
+            if let (Some(best), Some(actual)) =
+                (best_named_line_action_count, value.convention_action_count)
+            {
+                // Compare named convention lines by the actions they actually
+                // secure, not by an apparent connection's raw depth. A stalled
+                // Layered Finesse may be legal while accomplishing less than a
+                // Clandestine Finesse that gives the team several forced actions.
+                // This remains observer-relative: the metric is compiled from
+                // each player's projected interpretation, never from the hidden
+                // authoritative deck.
+                candidate.value.penalize_teamwork(
+                    NAMED_LINE_ACTION_DEFICIT_PENALTY.saturating_mul(
+                        u16::try_from(best.saturating_sub(actual)).unwrap_or(u16::MAX),
+                    ),
+                );
+            }
+        }
         let extends_existing_owner_promise = match candidate.action {
             Action::Clue { target, clue } => source.hands[target.index()].iter().any(|card| {
                 card.identity.is_some_and(|identity| clue.matches(identity))
@@ -111,12 +218,33 @@ pub(super) fn apply_strategic_clue_values(
             }),
             Action::Play(_) | Action::Discard(_) => false,
         };
+        let actor_recognizes =
+            clue_establishes_actor_recognized_action(source, profile, candidate.action);
+        let giver_commitments =
+            baselines[source.observer.index()].closed_public_commitments(source);
+        let continues_established_suit = value.public_actions.iter().any(|commitment| {
+            let identity = commitment.identities.iter().next();
+            identity.is_some_and(|identity| {
+                commitment.identities.len() == 1
+                    && usize::from(identity.rank.number())
+                        > source.play_stacks[identity.suit.index()].len() + 1
+                    && ((source.play_stacks[identity.suit.index()].len() + 1)
+                        ..usize::from(identity.rank.number()))
+                        .all(|rank| {
+                            giver_commitments.iter().any(|(_, promised)| {
+                                promised.suit == identity.suit
+                                    && usize::from(promised.rank.number()) == rank
+                            })
+                        })
+            })
+        });
         if candidate.purpose == super::CluePurpose::Play
-            && !candidate.immediate_play
+            && !candidate.immediate_play()
             && source.turn > 0
             && !extends_existing_owner_promise
-            && clue_establishes_actor_recognized_action(source, profile, candidate.action)
-                != Some(true)
+            && !continues_established_suit
+            && value.action_coverage == 0
+            && actor_recognizes != Some(true)
         {
             candidate
                 .value
@@ -142,9 +270,17 @@ pub(super) fn apply_strategic_clue_values(
         // this projection horizon, so a raw action-count penalty would make
         // ordinary multi-card clues incorrectly beat them.
         let cards_in_hands = source.hands.iter().map(Vec::len).sum::<usize>();
+        let effective_action_count = value
+            .convention_action_count
+            .unwrap_or(action_coverage)
+            .max(action_coverage);
         let missing_actions = if source.deck_size <= cards_in_hands && immediately_actionable[index]
         {
-            best_action_count.saturating_sub(action_coverage)
+            // A recognized Bluff/Finesse line can have more deterministic
+            // actions than the giver's one-step public-commitment projection.
+            // Penalizing only the latter made a two-action Bluff lose to a
+            // direct one-for-one clue at the endgame boundary.
+            best_action_count.saturating_sub(effective_action_count)
         } else {
             0
         };
@@ -152,6 +288,20 @@ pub(super) fn apply_strategic_clue_values(
             TEAM_ACTION_COUNT_PENALTY
                 .saturating_mul(u16::try_from(missing_actions).unwrap_or(u16::MAX)),
         );
+        if has_unoccupied_immediate_target
+            && candidate.immediate_play()
+            && target_has_scheduled_play(candidate.target)
+            && action_coverage <= 1
+        {
+            // Giving a player a second immediate play delays the action they
+            // already own. For otherwise equivalent one-action clues, occupy
+            // an unoccupied teammate so both promises can advance during the
+            // same rotation. Do not erase the value of a clue that establishes
+            // multiple actions merely because its recipient is already loaded.
+            candidate
+                .value
+                .penalize_teamwork(TEAM_OCCUPIED_TARGET_PENALTY);
+        }
         let consolidates_chop_move = match candidate.action {
             Action::Clue { target, clue } => source.hands[target.index()].iter().any(|card| {
                 card.identity.is_some_and(|identity| clue.matches(identity))
@@ -191,6 +341,191 @@ pub(super) fn apply_strategic_clue_values(
                 .saturating_mul(u16::try_from(unnecessary_connections).unwrap_or(u16::MAX)),
         );
     }
+}
+
+/// Values protection by the turn on which an otherwise-unoccupied player
+/// would reach a critical chop. Earlier deadlines dominate later ones: a clue
+/// that occupies Bob before his discard can be strictly more urgent than one
+/// that protects Cathy's later chop, even when both secure one card.
+fn secured_critical_chop_deadline_value(
+    source: &PlayerView,
+    baselines: &[ProjectedLineState],
+    value: &LineOutcome,
+    stack_heights: [u8; 5],
+) -> usize {
+    let player_count = source.hands.len();
+    baselines
+        .iter()
+        .enumerate()
+        .filter_map(|(player, baseline)| {
+            let actor = PlayerId::new(
+                u8::try_from(player).expect("standard Hanabi has at most five players"),
+            );
+            let distance = (player + player_count - source.current_player.index()) % player_count;
+            if distance == 0
+                || scheduled_play_continuation_value(source, baseline, actor, stack_heights)
+                    .is_some()
+            {
+                return None;
+            }
+            let chop = baseline.chop?;
+            let identity = identity_of(source, chop)?;
+            if identity.rank != Rank::Five && !super::is_critical(source, identity) {
+                return None;
+            }
+            let protected = value.protected_cards.contains(&chop);
+            let occupied = value.public_actions.iter().any(|commitment| {
+                commitment.owner == actor
+                    && !commitment.identities.is_empty()
+                    && commitment
+                        .identities
+                        .iter()
+                        .all(|identity| is_playable_at(stack_heights, identity))
+            });
+            (protected || occupied).then_some(player_count - distance)
+        })
+        .sum()
+}
+
+/// Whether giving a clue now preserves a more valuable sequence of already
+/// scheduled plays than taking the giver's own play and passing the clue to a
+/// teammate before the target's turn.
+///
+/// This is an action-ordering comparison, not hidden-card speculation. Every
+/// intervening player must already have a certain play. The clue wins only
+/// when even the least valuable displaced play unlocks a longer chain of
+/// visible successors than the giver's current play.
+fn preserves_visible_continuation(
+    source: &PlayerView,
+    candidate: ClueCandidate,
+    baselines: &[ProjectedLineState],
+) -> bool {
+    let Action::Clue { target, clue } = candidate.action else {
+        return false;
+    };
+    if !candidate.immediate_play() {
+        return false;
+    }
+    let useful_touched = source.hands[target.index()]
+        .iter()
+        .filter_map(|card| card.identity)
+        .filter(|identity| clue.matches(*identity))
+        .filter(|identity| is_eventually_useful(source, *identity))
+        .count();
+    if useful_touched < 2 {
+        // A one-for-one direct play clue merely substitutes one play for
+        // another; it does not create enough additional team progress to
+        // preempt the giver's existing play. The scheduling exception is for
+        // multi-card setups such as a 4 clue that both plays purple 4 and
+        // protects yellow 4.
+        return false;
+    }
+    let player_count = source.hands.len();
+    let target_distance =
+        (target.index() + player_count - source.current_player.index()) % player_count;
+    if target_distance <= 1 {
+        return false;
+    }
+    let mut projected_heights = std::array::from_fn(|suit| {
+        u8::try_from(source.play_stacks[suit].len())
+            .expect("a standard stack has at most five cards")
+    });
+    let Some((giver_value, _)) = scheduled_play_continuation_value(
+        source,
+        &baselines[source.current_player.index()],
+        source.current_player,
+        projected_heights,
+    ) else {
+        return false;
+    };
+    let mut least_intervening_value = usize::MAX;
+    for distance in 1..target_distance {
+        let player = PlayerId::new(
+            u8::try_from((source.current_player.index() + distance) % player_count)
+                .expect("standard Hanabi has at most five players"),
+        );
+        let Some((value, identity)) = scheduled_play_continuation_value(
+            source,
+            &baselines[player.index()],
+            player,
+            projected_heights,
+        ) else {
+            // An unoccupied teammate can give the clue later without delaying
+            // a promised play, so giving it now has no scheduling advantage.
+            return false;
+        };
+        least_intervening_value = least_intervening_value.min(value);
+        projected_heights[identity.suit.index()] += 1;
+    }
+    // If the target already has a play when their turn arrives, the clue has
+    // no this-rotation deadline. It can wait until a later orbit without
+    // displacing any of the intervening plays. This is what distinguishes a
+    // genuinely urgent setup clue from merely offering the target a second
+    // playable card.
+    if scheduled_play_continuation_value(
+        source,
+        &baselines[target.index()],
+        target,
+        projected_heights,
+    )
+    .is_some()
+    {
+        return false;
+    }
+    least_intervening_value > giver_value
+}
+
+fn scheduled_play_continuation_value(
+    source: &PlayerView,
+    state: &ProjectedLineState,
+    player: PlayerId,
+    stack_heights: [u8; 5],
+) -> Option<(usize, Card)> {
+    let mut commitments = state.closed_public_commitments(source);
+    // A target can already be occupied by an exact owner-relative promise
+    // even while that promise is waiting for an intervening connector. The
+    // public-closure helper intentionally excludes such not-yet-playable
+    // promises, but the scheduling projection below advances the stacks and
+    // must then recognize them.
+    commitments.extend(
+        state
+            .owner_promises
+            .iter()
+            .filter(|(_, identities)| identities.len() == 1)
+            .map(|(card, identities)| (*card, identities.iter().next().expect("singleton"))),
+    );
+    commitments.extend(state.playable_now.iter().copied().filter_map(|card| {
+        identity_of(source, card)
+            .or_else(|| state.epistemic.belief(card)?.known_identity())
+            .map(|identity| (card, identity))
+    }));
+    commitments.sort_unstable_by_key(|(card, identity)| (card.index(), identity.index()));
+    commitments.dedup();
+    commitments
+        .into_iter()
+        .filter(|(card, _)| card_owner(source, *card) == Some(player))
+        .filter(|(_, identity)| is_playable_at(stack_heights, *identity))
+        .map(|(_, identity)| (visible_successor_depth(source, identity), identity))
+        .max_by_key(|(value, _)| *value)
+}
+
+fn visible_successor_depth(source: &PlayerView, identity: Card) -> usize {
+    let mut depth = 0;
+    let mut rank = identity.rank.number();
+    while rank < Rank::Five.number() {
+        rank += 1;
+        let successor = Card::new(identity.suit, Rank::ALL[usize::from(rank - 1)]);
+        if !source
+            .hands
+            .iter()
+            .flatten()
+            .any(|card| card.identity == Some(successor))
+        {
+            break;
+        }
+        depth += 1;
+    }
+    depth
 }
 
 fn clue_is_bluff(source: &PlayerView, profile: HGroupProfile, action: Action) -> bool {
@@ -265,6 +600,8 @@ struct ProjectedLineState {
     owner_clued_superpositions: Vec<(CardId, IdentitySet)>,
     connection: Option<HGroupConnection>,
     connection_lines: Vec<(PlayerId, CardId, Card, Vec<CardId>)>,
+    playable_now: Vec<CardId>,
+    chop: Option<CardId>,
     chop_moved: super::CardSet,
     causal_cards: super::CardSet,
 }
@@ -402,6 +739,8 @@ fn projected_line_state(
         .flat_map(|transition| transition.delta.added_cards())
         .collect();
     let inferred = projection.inferred;
+    let chop = inferred.chops[observer.index()];
+    let playable_now = inferred.playable_now.clone();
     let epistemic = EpistemicState::from_analysis(&projection.deductions, &inferred);
     let mut giver_visible_commitments = inferred
         .cards
@@ -478,6 +817,8 @@ fn projected_line_state(
         owner_clued_superpositions,
         connection: inferred.connection,
         connection_lines,
+        playable_now,
+        chop,
         chop_moved,
         causal_cards,
     }
@@ -706,6 +1047,7 @@ fn canonical_named_line_metrics(
     let mut bluff = None;
     let mut clandestine = None;
     let mut layered = None;
+    let mut ejection = None;
     for player in 0..source.hands.len() {
         let observer =
             PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
@@ -735,11 +1077,21 @@ fn canonical_named_line_metrics(
                 | HGroupMoveKind::AmbiguousFinesse => {
                     layered = Some((signal.cards.len() + 1, signal.cards.len()));
                 }
+                HGroupMoveKind::FiveColorEjection
+                | HGroupMoveKind::Ejection
+                | HGroupMoveKind::OutOfPositionEjection
+                | HGroupMoveKind::StackedEjection => {
+                    // The signal contains the ejected blind-play followed by
+                    // the clued focus. An Ejection takes precedence over the
+                    // apparent multi-step Finesse on the 5, so those are the
+                    // only two actions this clue actually promises.
+                    ejection = Some((signal.cards.len(), 1));
+                }
                 _ => {}
             }
         }
     }
-    bluff.or(clandestine).or(layered)
+    ejection.or(bluff).or(clandestine).or(layered)
 }
 
 fn view_distance_from_playable(source: &PlayerView, identity: Card) -> usize {

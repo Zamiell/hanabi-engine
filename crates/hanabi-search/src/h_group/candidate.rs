@@ -17,8 +17,30 @@ pub(super) enum CluePurpose {
 /// single unresolved projection can assign one universal label.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ClueRecognition {
+    /// The semantic generator proved the clue, but nested recipient replay
+    /// could not assign one universal interpretation across hidden worlds.
     GeneratorProof,
+    /// The recipient's canonical replay independently reconstructed it.
     RecipientReplay,
+}
+
+/// Scheduling consequences kept together instead of accumulating unrelated
+/// booleans on `ClueCandidate`.
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct ClueSchedule {
+    urgent_save: bool,
+    immediate_play: bool,
+    preserves_visible_continuation: bool,
+}
+
+impl ClueSchedule {
+    pub(super) const fn new(urgent_save: bool, immediate_play: bool) -> Self {
+        Self {
+            urgent_save,
+            immediate_play,
+            preserves_visible_continuation: false,
+        }
+    }
 }
 
 /// Named components of clue utility.
@@ -97,14 +119,16 @@ pub(super) struct ClueCandidate {
     pub(super) purpose: CluePurpose,
     pub(super) target: PlayerId,
     pub(super) save: bool,
-    pub(super) urgent_save: bool,
-    pub(super) immediate_play: bool,
+    pub(super) schedule: ClueSchedule,
     pub(super) connection_steps: u8,
     pub(super) action_coverage: u8,
     /// Total cards secured by the canonical named convention line.
     pub(super) convention_action_count: Option<u8>,
     /// Blind plays required by that named line, including off-suit layers.
     pub(super) convention_connection_steps: Option<u8>,
+    /// Giving this clue now avoids forcing an occupied teammate to delay a
+    /// play that unlocks a stronger visible continuation than the giver's
+    /// currently available play.
     pub(super) recognition: ClueRecognition,
 }
 
@@ -117,7 +141,7 @@ impl ClueCandidate {
     pub(super) fn is_urgent_save(self) -> bool {
         // Comparative Teamwork and delay penalties order otherwise-valid
         // clues; they must not erase the semantic urgency of a critical Save.
-        self.urgent_save && self.value.semantic_strength() >= 400
+        self.schedule.urgent_save && self.value.semantic_strength() >= 400
     }
 
     /// A non-immediate setup clue that may interrupt a demonstrated layer.
@@ -125,21 +149,36 @@ impl ClueCandidate {
         // Comparative penalties order otherwise-valid clues; they must not
         // retroactively make a semantically strong setup clue illegal while
         // a demonstrated connection is parked.
-        !self.save && !self.immediate_play && self.value.semantic_strength() >= 365
+        !self.save && !self.schedule.immediate_play && self.value.semantic_strength() >= 365
     }
 
-    /// A line with at least two missing connectors may park an exact ordinary
-    /// play while it occupies the teammates who establish those connectors.
+    /// A long connection line may park an ordinary play while it advances at
+    /// least two blind-play steps. Immediate multi-action clues have a
+    /// narrower exception for exact transferred plays, evaluated with the
+    /// current play obligation in `decision`.
     pub(super) fn can_preempt_ordinary_play(self) -> bool {
-        self.purpose == CluePurpose::Play && self.connection_steps >= 2
+        (self.purpose == CluePurpose::Play && self.connection_steps >= 2)
+            || self.schedule.preserves_visible_continuation
     }
 
     /// A time-sensitive clue to the next player that may preempt occupancy.
     pub(super) fn is_urgent_for_next_player(self) -> bool {
-        self.score() >= 450 && (self.urgent_save || self.immediate_play)
+        self.score() >= 450 && (self.schedule.urgent_save || self.schedule.immediate_play)
     }
 
-    pub(super) fn mark_recipient_replay(&mut self) {
-        self.recognition = ClueRecognition::RecipientReplay;
+    pub(super) const fn set_recognition(&mut self, recognition: ClueRecognition) {
+        self.recognition = recognition;
+    }
+
+    pub(super) const fn immediate_play(self) -> bool {
+        self.schedule.immediate_play
+    }
+
+    pub(super) const fn preserves_visible_continuation(self) -> bool {
+        self.schedule.preserves_visible_continuation
+    }
+
+    pub(super) const fn set_preserves_visible_continuation(&mut self, preserves: bool) {
+        self.schedule.preserves_visible_continuation = preserves;
     }
 }

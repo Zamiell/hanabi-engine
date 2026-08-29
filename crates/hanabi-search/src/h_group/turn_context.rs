@@ -116,6 +116,17 @@ pub(super) struct HGroupTurnView<'a> {
     pub(super) early_game: bool,
 }
 
+/// Knowledge and action context available to the actor immediately before an
+/// event. Keeping this projection together prevents recognizers from mixing
+/// observer-visible simulator truth with what the acting player knew.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(super) struct ActorBeliefBefore {
+    /// Whether the actor considered the discarded card their ordinary chop.
+    pub(super) normal_chop_discard: bool,
+    /// Exact identity the actor knew for the discarded card, if any.
+    pub(super) discarded_identity: Option<Card>,
+}
+
 /// One event with explicit pre- and post-event convention state.
 ///
 /// Convention rules must select the side they require rather than depending
@@ -125,9 +136,7 @@ pub(super) struct HGroupTurnContext<'a> {
     pub(super) historical: HistoricalView<'a>,
     pub(super) before: HGroupTurnSnapshot,
     pub(super) after: HGroupTurnView<'a>,
-    /// Whether the acting player considered this an ordinary chop discard
-    /// before the public event changed their hand.
-    pub(super) actor_saw_normal_discard: bool,
+    pub(super) actor_before: ActorBeliefBefore,
 }
 
 #[cfg(test)]

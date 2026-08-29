@@ -281,6 +281,18 @@ pub(super) fn reconcile_connection_fact_lifecycles(
             }
         }
         if transition.to != ConnectionStatus::Pending {
+            if transition.to == ConnectionStatus::Satisfied
+                && !pending
+                    .iter()
+                    .any(|connection| connection.focus == transition.focus)
+                && already_playing.contains(&transition.focus)
+            {
+                // Once the final connector succeeds, the focus is no longer
+                // conditionally playable because of a live promise; it is a
+                // settled consequence of this public play. Transfer that fact
+                // before retracting the completed promise's provenance.
+                already_playing.insert_from(EffectSource::Event(transition.turn), transition.focus);
+            }
             invisibly_clued.retract_source(source, transition.reason);
             already_playing.retract_source(source, transition.reason);
             forced_playable.retract_source(source, transition.reason);

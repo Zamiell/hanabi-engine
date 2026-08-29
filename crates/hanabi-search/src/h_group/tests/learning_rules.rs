@@ -446,6 +446,35 @@ fn second_replay_move_thirty_eight_keeps_the_layered_green_three_consistent() {
 }
 
 #[test]
+fn second_replay_move_forty_one_keeps_the_rank_four_focus_due() {
+    let fixture = expert_replay_p4v0s9();
+    let state = fixture
+        .state_at_turn(40)
+        .expect("the position before move 41 exists");
+    let alice = state.current_player();
+    let deductions = LogicalDeductions::new(state.view_for(alice).expect("Alice has a view"))
+        .expect("valid Alice deductions");
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    let green_four = inferred
+        .cards
+        .iter()
+        .find(|card| card.card == CardId::new(20));
+
+    assert!(
+        inferred.playable_now.contains(&CardId::new(20)),
+        "Donald's rank-4 clue promised the focused green 4 after yellow 4; note={green_four:#?}; clue={:#?}; pending={:#?}; signals={:#?}",
+        replay.clues.iter().find(|clue| clue.turn == 31),
+        replay.pending_connections,
+        replay.signals.iter().filter(|signal| signal.turn == 31).collect::<Vec<_>>(),
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(20))),
+    );
+}
+
+#[test]
 fn second_replay_move_forty_two_prefers_both_playable_fives() {
     let fixture = expert_replay_p4v0s9();
     let state = fixture
@@ -910,7 +939,54 @@ fn second_replay_move_twenty_five_treats_rank_five_as_a_five_chop_move() {
     assert_eq!(
         select_h_group_action(&deductions, HGroupProfile::Max),
         Some(replay_action_at_turn(&fixture, 24)),
-        "rank 4 to Cathy is the first convention-valid line after rejecting the valueless 5CM: {candidates:#?}"
+        "rank 4 to Cathy is the first convention-valid line after rejecting the valueless 5CM: {candidates:#?}",
+    );
+}
+
+#[test]
+fn second_replay_move_twenty_seven_keeps_the_rank_four_focus_due() {
+    let fixture = expert_replay_p4v0s9();
+    let state = fixture.state_at_turn(26).expect("fixture prefix is legal");
+    let cathy = state.current_player();
+    let deductions = LogicalDeductions::new(state.view_for(cathy).expect("Cathy has a view"))
+        .expect("valid Cathy deductions");
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
+    let inferred = infer_h_group_from_replay(&deductions, replay.clone(), HGroupProfile::Max);
+
+    assert!(
+        inferred.playable_now.contains(&CardId::new(28)),
+        "Bob's red-3 Prompt demonstrates that the rank-4 focus is red 4 and due: clues={:#?}; pending={:#?}; transitions={:#?}; cards={:#?}",
+        replay.clues,
+        replay.pending_connections,
+        replay.transitions,
+        inferred.cards,
+    );
+}
+
+#[test]
+fn second_replay_move_thirty_keeps_the_parked_yellow_three_prompt() {
+    let fixture = expert_replay_p4v0s9();
+    let state = fixture.state_at_turn(29).expect("fixture prefix is legal");
+    let bob = state.current_player();
+    let deductions = LogicalDeductions::new(state.view_for(bob).expect("Bob has a view"))
+        .expect("valid Bob deductions");
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
+    let inferred = infer_h_group_from_replay(&deductions, replay.clone(), HGroupProfile::Max);
+
+    assert!(
+        inferred.playable_now.contains(&CardId::new(4)),
+        "Bob's original yellow-3 Prompt remains parked while he demonstrates red 3: pending={:#?}; transitions={:#?}; cards={:#?}",
+        replay.pending_connections,
+        replay.transitions,
+        inferred.cards,
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(replay_action_at_turn(&fixture, 29)),
+        "the parked, physically clued yellow 3 has Priority over an invisible duplicate; excluded={:?}; claims={:#?}; pending={:#?}",
+        replay.cards.facts.excluded_identities(CardId::new(4)),
+        replay.cards.facts.identity_claims(),
+        replay.pending_connections,
     );
 }
 

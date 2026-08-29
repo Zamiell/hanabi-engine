@@ -169,8 +169,20 @@ pub enum ConventionInferences {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ConventionAction {
     pub action: hanabi_core::Action,
+    /// Hard semantic tier. Numeric priority is only a tie-break within this
+    /// tier and cannot outweigh a convention-required action.
+    pub policy_tier: ConventionPolicyTier,
     pub priority: i32,
     pub reason: ConventionActionReason,
+}
+
+/// Lexicographic policy tier applied before heuristic numeric ordering.
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+pub enum ConventionPolicyTier {
+    Fallback,
+    #[default]
+    Admitted,
+    Required,
 }
 
 /// Structured explanation for why a convention admitted an action.
@@ -299,6 +311,7 @@ impl SupportedConvention {
                     .into_iter()
                     .map(|action| ConventionAction {
                         action,
+                        policy_tier: ConventionPolicyTier::Admitted,
                         priority: 100,
                         reason: ConventionActionReason::ConventionFree,
                     })
@@ -313,8 +326,9 @@ impl SupportedConvention {
                 let actions = decision
                     .actions
                     .into_iter()
-                    .map(|(action, priority, reason)| ConventionAction {
+                    .map(|(action, policy_tier, priority, reason)| ConventionAction {
                         action,
+                        policy_tier,
                         priority,
                         reason,
                     })

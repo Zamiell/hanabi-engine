@@ -469,12 +469,12 @@ fn final_play_clues_advance_the_plan_before_surplus_known_trash_discards() {
         let expected_priority = decision
             .actions
             .iter()
-            .find_map(|(action, priority, _)| (*action == expected).then_some(*priority))
+            .find_map(|(action, _, priority, _)| (*action == expected).then_some(*priority))
             .expect("the final Play Clue is admitted");
         let trash_priority = decision
             .actions
             .iter()
-            .filter_map(|(action, priority, _)| {
+            .filter_map(|(action, _, priority, _)| {
                 matches!(action, Action::Discard(_)).then_some(*priority)
             })
             .max()
@@ -590,10 +590,21 @@ fn recognizes_expert_replay_queued_yellow_three() {
         &[CardId::new(10), CardId::new(16)],
         true,
     );
+    let after = prospective_clue_view(
+        &view,
+        PlayerId::new(2),
+        Clue::Suit(Suit::Yellow),
+        &[CardId::new(10), CardId::new(16)],
+    );
+    let (recipient, recipient_replay) =
+        projected_h_group_replay(&after, HGroupProfile::Max, PlayerId::new(2))
+            .expect("recipient projection succeeds");
+    let recipient_inferred =
+        infer_h_group_from_replay(&recipient, recipient_replay.clone(), HGroupProfile::Max);
     assert_eq!(
         hazard,
         None,
-        "signals={:?}",
+        "signals={:?}; inferred={recipient_inferred:#?}; replay={recipient_replay:#?}",
         prospective_clue_signal_kinds(
             &view,
             HGroupProfile::Max,
@@ -604,12 +615,22 @@ fn recognizes_expert_replay_queued_yellow_three() {
     );
 
     let deductions = LogicalDeductions::new(view).expect("valid deductions");
+    let convention = crate::SupportedConvention::HGroup(HGroupProfile::Max).analyze(&deductions);
+    let expected = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Suit(Suit::Yellow),
+    };
+    assert!(
+        convention
+            .actions
+            .iter()
+            .any(|candidate| candidate.action == expected),
+        "the queued yellow-3 clue must be admitted; rejected={:#?}",
+        convention.rejected_actions,
+    );
     assert_eq!(
         select_h_group_action(&deductions, HGroupProfile::Max),
-        Some(Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Suit(Suit::Yellow),
-        })
+        Some(expected)
     );
 }
 
@@ -867,7 +888,6 @@ fn optimal_replay_move_26_compares_directness_and_team_tempo() {
         clue: Clue::Rank(Rank::Five),
     };
     let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
-
     for action in [yellow, blue, five] {
         assert!(
             candidates
