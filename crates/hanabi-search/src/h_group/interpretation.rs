@@ -310,23 +310,29 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 // out-of-order focus requires a Fix before it acts.
                 && signal.cards.last() == Some(&focus)
                 });
+        let repeats_exact_play_promise = replay.clues.iter().rev().any(|prior| {
+            prior.focus == focus
+                && matches!(
+                    prior.kind,
+                    HGroupClueKind::Play | HGroupClueKind::PlayOrSave
+                )
+                && prior.focus_identities == IdentitySet::singleton(focus_identity)
+        });
         if !repairs_required_fix
             && !repairs_focus_inversion
-            && baseline_playing.contains(&focus)
             && gotten.contains(&focus)
-            && (replay.clues.iter().rev().any(|prior| {
-                prior.focus == focus
-                    && prior.focus_identities == IdentitySet::singleton(focus_identity)
-            }) || replay
-                .pending_connections
-                .iter()
-                .any(|pending| pending.focus == focus && pending.focus_identity == focus_identity)
-                || subjective_convention_cards(view, profile, target).is_some_and(|cards| {
-                    cards.iter().any(|card| {
-                        card.card == focus
-                            && card.identities == IdentitySet::singleton(focus_identity)
-                    })
-                }))
+            && (repeats_exact_play_promise
+                || baseline_playing.contains(&focus)
+                    && (replay.pending_connections.iter().any(|pending| {
+                        pending.focus == focus && pending.focus_identity == focus_identity
+                    }) || subjective_convention_cards(view, profile, target).is_some_and(
+                        |cards| {
+                            cards.iter().any(|card| {
+                                card.card == focus
+                                    && card.identities == IdentitySet::singleton(focus_identity)
+                            })
+                        },
+                    )))
         {
             // Adding a direct clue fact that merely repeats an identity the
             // recipient already knows by convention is not Minimum Clue
@@ -1126,10 +1132,20 @@ pub(super) fn advanced_clue_candidates(
                 }
             });
         let clue_focus = focus(layout, &touched, chop(layout, gotten), gotten);
-        let recipient_playing = subjective_playable_cards(view, profile, target).map_or_else(
+        let mut recipient_playing = subjective_playable_cards(view, profile, target).map_or_else(
             || replay.cards.already_playing.materialized().clone(),
             |cards| cards.into_iter().collect::<CardSet>(),
         );
+        recipient_playing.extend(replay.clues.iter().filter_map(|prior| {
+            (prior.target == target
+                && matches!(
+                    prior.kind,
+                    HGroupClueKind::Play | HGroupClueKind::PlayOrSave
+                )
+                && prior.focus_identities.len() == 1
+                && layout.contains(&prior.focus))
+            .then_some(prior.focus)
+        }));
         let tempo = newly_touched.is_empty()
             && touched.iter().any(|card| {
                 !previously_fixed.contains(card)
@@ -1734,7 +1750,7 @@ pub(super) fn advanced_clue_candidates(
             && delayed.is_none()
         {
             Some((HGroupMoveKind::Extra, 145))
-        } else if off_chop_five && stalling {
+        } else if off_chop_five && stalling && playable == 0 {
             Some((HGroupMoveKind::FiveStall, 80))
         } else if charm {
             // A 4 Charm is still a Play Clue on the focused 4, while also

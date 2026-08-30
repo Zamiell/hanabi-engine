@@ -236,7 +236,7 @@ fn third_expert_replay_matches_engine() {
 }
 
 #[test]
-#[ignore = "pending expert review: first unresolved disagreement is move 20"]
+#[ignore = "pending expert review: first unresolved disagreement is move 23"]
 fn fourth_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine(&expert_replay_p4v0s3());
 }
@@ -622,6 +622,36 @@ fn fourth_replay_move_eighteen_transfers_the_promised_purple_four() {
         select_h_group_action(&deductions, HGroupProfile::Max),
         Some(Action::Discard(CardId::new(16))),
         "Bob should transfer his promised purple 4 to Cathy's visible copy: {inferred:#?}",
+    );
+}
+
+#[test]
+fn fourth_replay_move_twenty_rejects_the_redundant_rank_five_fill_in() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(19).expect("fixture prefix is legal");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("Donald has a view"),
+    )
+    .expect("valid deductions");
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let redundant = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Rank(Rank::Five),
+    };
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| candidate.action != redundant),
+        "Cathy already knows her yellow 5 is a delayed Play promise: {candidates:#?}",
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Yellow),
+        }),
     );
 }
 
