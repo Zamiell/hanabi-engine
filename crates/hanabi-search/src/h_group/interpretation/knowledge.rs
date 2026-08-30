@@ -257,6 +257,46 @@ impl<'a> ConventionKnowledgeCompiler<'a> {
         }
     }
 
+    /// A Finesse with a Lie Component gives its original focus a persistent
+    /// exact promise. The connection lifecycle may finish before the focus is
+    /// due, so this knowledge cannot live only on the pending connection.
+    ///
+    /// <https://hanabi.github.io/extras/special-finesses/#finesses-with-a-lie-component>
+    fn apply_lie_component_focus_claims(&mut self) {
+        for claim in self
+            .replay
+            .cards
+            .facts
+            .identity_claims()
+            .iter()
+            .filter(|claim| {
+                claim.source == HGroupMoveKind::LieComponentFinesse
+                    && claim.relation == IdentityClaimRelation::Each
+            })
+        {
+            for card in claim.cards.iter().copied() {
+                let is_original_focus = self
+                    .replay
+                    .clues
+                    .iter()
+                    .any(|clue| clue.focus == card && clue.clue.matches(claim.identity));
+                if !is_original_focus
+                    || self
+                        .deductions
+                        .possible_identities(card)
+                        .is_none_or(|logical| !logical.contains(claim.identity))
+                {
+                    continue;
+                }
+                self.knowledge.update(
+                    card,
+                    KnowledgeSource::Reinterpretation(claim.turn),
+                    |card| card.identities = IdentitySet::singleton(claim.identity),
+                );
+            }
+        }
+    }
+
     /// <https://hanabi.github.io/level-16/#the-5-color-ejection-5ce>
     fn apply_resolved_ejections(&mut self) {
         for card in self.knowledge.cards.clone() {
@@ -976,6 +1016,7 @@ fn compile_convention_card_inferences(
     compiler.apply_established_good_touch();
     compiler.apply_promised_good_touch();
     compiler.apply_transfer_claims();
+    compiler.apply_lie_component_focus_claims();
     compiler.apply_resolved_ejections();
     compiler.apply_connection_promises();
     compiler.apply_current_focus();

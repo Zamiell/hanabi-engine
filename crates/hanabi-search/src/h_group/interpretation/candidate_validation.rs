@@ -82,10 +82,12 @@ pub(in crate::h_group) fn recipient_replay_assessment(
     let signals = prospective_team_clue_signal_kinds(view, profile, target, clue, &touched);
     let primary = prospective_clue_primary_kind(view, profile, target, clue, &touched);
     let recognized = match candidate.purpose {
-        CluePurpose::Play => matches!(
-            primary,
-            Some(HGroupClueKind::Play | HGroupClueKind::PlayOrSave)
-        ),
+        CluePurpose::Play => {
+            matches!(
+                primary,
+                Some(HGroupClueKind::Play | HGroupClueKind::PlayOrSave)
+            ) || signals.contains(&HGroupMoveKind::LieComponentFinesse)
+        }
         CluePurpose::Save => matches!(
             primary,
             Some(HGroupClueKind::Save(_) | HGroupClueKind::PlayOrSave)

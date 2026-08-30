@@ -1,10 +1,387 @@
 use super::{
-    Card, CardSet, Clue, ConnectionTransitionReason, HGroupClueKind, HGroupConnectionKind,
-    HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, IdentitySet, ObservedEvent, PlayerId,
-    PlayerView, Rank, chop, finesse_position_id, five_pulled_card, focus, is_critical,
-    is_playable_at, is_trash_at, next_player, protected_cards, push_signal, same_turn_signal,
-    was_clued_before,
+    Card, CardId, CardSet, Clue, ConnectionObligation, ConnectionTransitionReason, HGroupClueKind,
+    HGroupConnectionKind, HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, IdentitySet,
+    ObservedEvent, PlayerId, PlayerView, PromiseId, Rank, RequiredFix, chop, finesse_position_id,
+    five_pulled_card, focus, is_critical, is_playable_at, is_trash_at, next_player,
+    protected_cards, push_signal, same_turn_signal, was_clued_before,
 };
+use crate::h_group::EffectSource;
+
+#[derive(Clone, Debug)]
+struct LieComponentPlan {
+    focus: CardId,
+    focus_identity: Card,
+    connections: Vec<ConnectionObligation>,
+    required_fix: Option<RequiredFix>,
+}
+
+fn cyclic_distance(from: PlayerId, to: PlayerId, player_count: usize) -> usize {
+    (to.index() + player_count - from.index()) % player_count
+}
+
+fn fix_clue_for_blockers(
+    context: &HGroupTurnContext<'_>,
+    hand: &[CardId],
+    blockers: &[CardId],
+    expected: Card,
+) -> Option<Clue> {
+    let first = context.historical.identity(*blockers.first()?)?;
+    [Clue::Suit(first.suit), Clue::Rank(first.rank)]
+        .into_iter()
+        .find(|clue| {
+            !clue.matches(expected)
+                && blockers.iter().all(|card| {
+                    context
+                        .historical
+                        .identity(*card)
+                        .is_some_and(|identity| clue.matches(identity))
+                })
+                && hand.iter().copied().all(|card| {
+                    context
+                        .historical
+                        .identity(card)
+                        .is_none_or(|identity| !clue.matches(identity) || blockers.contains(&card))
+                })
+        })
+}
+
+/// Finds the lowest-precedence Max line in which one future Fix removes a
+/// false layer while the original Finesse remains live.
+///
+/// Source: <https://hanabi.github.io/extras/special-finesses/#finesses-with-a-lie-component>
+#[allow(clippy::too_many_lines)]
+fn lie_component_plan(
+    context: &HGroupTurnContext<'_>,
+    view: &PlayerView,
+    effects: &HGroupRuleEffects<'_>,
+    giver: PlayerId,
+    target: PlayerId,
+    clue: Clue,
+    touched: &[CardId],
+) -> Option<LieComponentPlan> {
+    let has_higher_precedence_meaning = effects.signals.iter().any(|signal| {
+        signal.turn == context.entry.turn
+            && !matches!(signal.kind, HGroupMoveKind::Context | HGroupMoveKind::Extra)
+    });
+    if touched.len() < 2 || has_higher_precedence_meaning {
+        return None;
+    }
+    let hands = context.after.hands;
+    let mut gotten = protected_cards(
+        effects.explicitly_clued,
+        effects.invisibly_clued,
+        effects.chop_moved,
+    );
+    for card in touched {
+        gotten.remove(card);
+    }
+    gotten.extend(effects.already_playing.iter().copied());
+    let layout = &hands[target.index()];
+    let focus = focus(layout, touched, chop(layout, &gotten), &gotten)?;
+    let focus_identities = context.historical.identity(focus).map_or_else(
+        || IdentitySet::from_mask(context.after.facts[focus.index()].identity_mask()),
+        IdentitySet::singleton,
+    );
+    let player_count = hands.len();
+
+    for focus_identity in focus_identities
+        .iter()
+        .filter(|identity| clue.matches(*identity))
+    {
+        let height = context.after.stack_heights[focus_identity.suit.index()];
+        if focus_identity.rank.number() <= height + 2 {
+            continue;
+        }
+        let mut simulated = context.after.stack_heights;
+        let mut scheduled = CardSet::default();
+        let mut connections = Vec::new();
+        let mut previous_actor = giver;
+        let mut used_fix = false;
+        let mut required_fix = None;
+        let mut failed = false;
+
+        for (step, rank) in ((height + 1)..focus_identity.rank.number()).enumerate() {
+            let expected = Card::new(focus_identity.suit, Rank::ALL[usize::from(rank - 1)]);
+            if effects
+                .pending
+                .iter()
+                .any(|connection| connection.expected == expected)
+                || effects
+                    .already_playing
+                    .iter()
+                    .any(|card| context.historical.identity(*card) == Some(expected))
+            {
+                simulated[expected.suit.index()] = expected.rank.number();
+                continue;
+            }
+
+            let first_actor = next_player(previous_actor, player_count);
+            let mut choices = Vec::new();
+            for distance in 0..player_count {
+                let actor = PlayerId::new(
+                    u8::try_from((first_actor.index() + distance) % player_count)
+                        .expect("standard Hanabi has at most five players"),
+                );
+                if actor == giver || (actor == target && connections.is_empty()) {
+                    continue;
+                }
+                let candidates = hands[actor.index()]
+                    .iter()
+                    .rev()
+                    .copied()
+                    .filter(|card| {
+                        *card != focus
+                            && !scheduled.contains(card)
+                            && (!gotten.contains(card)
+                                || (effects
+                                    .signals
+                                    .of_kind(HGroupMoveKind::TrashChopMove)
+                                    .any(|signal| signal.cards.contains(card))
+                                    && !effects.explicitly_clued.contains(card)
+                                    && !effects.invisibly_clued.contains(card)))
+                    })
+                    .collect::<Vec<_>>();
+                if candidates.is_empty() {
+                    continue;
+                }
+                let expected_position = if actor == view.observer {
+                    let compatible = candidates
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(position, card)| {
+                            context.after.facts[card.index()]
+                                .allows(expected)
+                                .then_some(position)
+                        })
+                        .collect::<Vec<_>>();
+                    if rank + 1 == focus_identity.rank.number() && !used_fix {
+                        compatible.last().copied()
+                    } else {
+                        compatible.first().copied()
+                    }
+                } else {
+                    candidates
+                        .iter()
+                        .position(|card| context.historical.identity(*card) == Some(expected))
+                };
+                let Some(expected_position) = expected_position else {
+                    continue;
+                };
+                let cards = candidates[..=expected_position].to_vec();
+                let mut local = simulated;
+                let mut blockers = Vec::new();
+                for card in &cards[..expected_position] {
+                    let Some(identity) = context.historical.identity(*card) else {
+                        blockers.push(*card);
+                        continue;
+                    };
+                    if is_playable_at(local, identity) {
+                        local[identity.suit.index()] = identity.rank.number();
+                    } else {
+                        blockers.push(*card);
+                    }
+                }
+                let fix_is_available = if blockers.is_empty() {
+                    true
+                } else {
+                    !used_fix
+                        && cyclic_distance(previous_actor, giver, player_count) > 0
+                        && cyclic_distance(previous_actor, giver, player_count)
+                            < cyclic_distance(previous_actor, actor, player_count)
+                        && ((actor == view.observer
+                            && cards.iter().any(|card| {
+                                effects
+                                    .signals
+                                    .of_kind(HGroupMoveKind::TrashChopMove)
+                                    .any(|signal| signal.cards.contains(card))
+                            }))
+                            || fix_clue_for_blockers(
+                                context,
+                                &hands[actor.index()],
+                                &blockers,
+                                expected,
+                            )
+                            .is_some())
+                };
+                if fix_is_available {
+                    let fix = blockers.first().and_then(|card| {
+                        context
+                            .historical
+                            .identity(*card)
+                            .map(|identity| RequiredFix {
+                                actor: giver,
+                                target: actor,
+                                focus: *card,
+                                identity,
+                            })
+                    });
+                    choices.push((!blockers.is_empty(), distance, actor, cards, local, fix));
+                }
+            }
+            choices.sort_by_key(|(needs_fix, distance, ..)| (*needs_fix, *distance));
+            let Some((needs_fix, _, actor, cards, local, fix)) = choices.into_iter().next() else {
+                failed = true;
+                break;
+            };
+            used_fix |= needs_fix;
+            if needs_fix {
+                required_fix = fix;
+            }
+            scheduled.extend(cards.iter().copied());
+            connections.push(ConnectionObligation {
+                promise: PromiseId::UNASSIGNED,
+                actor,
+                cards,
+                expected,
+                focus_identity,
+                kind: HGroupConnectionKind::Finesse,
+                focus,
+                step: u8::try_from(step).expect("a standard connection has at most four steps"),
+            });
+            simulated = local;
+            simulated[expected.suit.index()] = expected.rank.number();
+            previous_actor = actor;
+        }
+        if !failed && used_fix && !connections.is_empty() {
+            return Some(LieComponentPlan {
+                focus,
+                focus_identity,
+                connections,
+                required_fix,
+            });
+        }
+    }
+    None
+}
+
+#[allow(clippy::too_many_lines)]
+fn apply_lie_component_fix(
+    context: &HGroupTurnContext<'_>,
+    effects: &mut HGroupRuleEffects<'_>,
+    giver: PlayerId,
+    target: PlayerId,
+    clue: Clue,
+    touched: &[CardId],
+) -> bool {
+    if effects.clues.last().is_some_and(|current| {
+        current.turn == context.entry.turn && current.kind != HGroupClueKind::Unrecognized
+    }) {
+        // Lie-component interpretations have the lowest possible precedence.
+        // A clue with an ordinary Play/Save meaning cannot be repurposed as a
+        // Fix merely because an older multi-touch clue resembles a lie line.
+        // Source: <https://hanabi.github.io/extras/special-finesses/#finesses-with-a-lie-component>
+        return false;
+    }
+    let connection = effects.pending.iter().find(|connection| {
+        connection.actor == target
+            && connection.kind == HGroupConnectionKind::Finesse
+            && touched.iter().all(|card| connection.cards.contains(card))
+            && connection.cards.iter().any(|card| !touched.contains(card))
+            && !clue.matches(connection.expected)
+            && effects.signals.iter().any(|signal| {
+                signal.turn < context.entry.turn
+                    && signal.kind == HGroupMoveKind::LieComponentFinesse
+                    && signal.cards.contains(&connection.focus)
+            })
+    });
+    let connection = connection.cloned().or_else(|| {
+        effects.clues.iter().rev().find_map(|prior| {
+            let next_giver_turn = prior.turn
+                + u32::try_from(context.after.hands.len())
+                    .expect("standard Hanabi has at most five players");
+            if context.entry.turn != next_giver_turn
+                || prior.giver != giver
+                || prior.touched.len() < 2
+            {
+                return None;
+            }
+            let focus_identity = context.historical.identity(prior.focus)?;
+            if prior.clue != Clue::Rank(focus_identity.rank) {
+                return None;
+            }
+            let height = context.after.stack_heights[focus_identity.suit.index()];
+            if height + 1 >= focus_identity.rank.number() {
+                return None;
+            }
+            let expected = Card::new(focus_identity.suit, Rank::ALL[usize::from(height)]);
+            if clue.matches(expected) {
+                return None;
+            }
+            let card = context.after.hands[target.index()]
+                .iter()
+                .copied()
+                .find(|card| {
+                    !touched.contains(card) && context.historical.identity(*card) == Some(expected)
+                })?;
+            Some(ConnectionObligation {
+                promise: PromiseId::UNASSIGNED,
+                actor: target,
+                cards: vec![card],
+                expected,
+                focus_identity,
+                kind: HGroupConnectionKind::Finesse,
+                focus: prior.focus,
+                step: height,
+            })
+        })
+    });
+    let Some(connection) = connection else {
+        return false;
+    };
+    if connection.promise == PromiseId::UNASSIGNED {
+        let cards = connection.cards.clone();
+        let promise = effects
+            .pending
+            .start(context.entry.turn, connection.clone());
+        effects
+            .invisibly_clued
+            .extend_from(EffectSource::Promise(promise), cards);
+    }
+    effects.pending.repair_actor(
+        context.entry.turn,
+        target,
+        |card| touched.contains(&card),
+        |_| None,
+    );
+    for card in touched {
+        if !effects
+            .pending
+            .iter()
+            .any(|pending| pending.cards.contains(card))
+        {
+            effects.invisibly_clued.remove(card);
+        }
+    }
+    effects.required_fixes.retain(|obligation| {
+        let required = obligation.required;
+        !(required.target == target && touched.contains(&required.focus))
+    });
+    push_signal(
+        effects.signals,
+        context.entry,
+        giver,
+        Some(target),
+        HGroupMoveKind::FixClue,
+        touched.to_vec(),
+        None,
+    );
+    push_signal(
+        effects.signals,
+        context.entry,
+        giver,
+        context
+            .after
+            .hands
+            .iter()
+            .position(|hand| hand.contains(&connection.focus))
+            .and_then(|index| u8::try_from(index).ok())
+            .map(PlayerId::new),
+        HGroupMoveKind::LieComponentFinesse,
+        vec![connection.focus],
+        Some(connection.focus_identity),
+    );
+    true
+}
 
 #[allow(clippy::too_many_lines)]
 pub(in crate::h_group) fn apply_extra_effects(
@@ -22,6 +399,35 @@ pub(in crate::h_group) fn apply_extra_effects(
             touched,
             ..
         } => {
+            let repaired_lie =
+                apply_lie_component_fix(context, effects, *giver, *target, *clue, touched);
+            if !repaired_lie {
+                if let Some(plan) =
+                    lie_component_plan(context, view, effects, *giver, *target, *clue, touched)
+                {
+                    if let Some(required) = plan.required_fix {
+                        effects.required_fixes.insert_unconditional(required);
+                    }
+                    for connection in plan.connections {
+                        let cards = connection.cards.clone();
+                        let promise = effects.pending.start(entry.turn, connection);
+                        if promise != PromiseId::UNASSIGNED {
+                            effects
+                                .invisibly_clued
+                                .extend_from(EffectSource::Promise(promise), cards.iter().copied());
+                        }
+                    }
+                    push_signal(
+                        effects.signals,
+                        entry,
+                        *giver,
+                        Some(*target),
+                        HGroupMoveKind::LieComponentFinesse,
+                        vec![plan.focus],
+                        Some(plan.focus_identity),
+                    );
+                }
+            }
             let pending_cards = effects
                 .pending
                 .iter()
@@ -564,15 +970,20 @@ pub(in crate::h_group) fn apply_extra_effects(
                                 &gotten,
                             ) == Some(meaning.focus)
                     });
-                let bad_chop_move = effects.signals.iter().find(|signal| {
-                    signal.turn == entry.turn
-                        && signal.kind == HGroupMoveKind::ChopMove
-                        && signal.cards.iter().all(|card| {
-                            context.historical.identity(*card).is_some_and(|known| {
-                                is_trash_at(context.before.stack_heights, known)
+                let bad_chop_move =
+                    (!same_turn_signal(effects.signals, entry.turn, HGroupMoveKind::PlayClue))
+                        .then(|| {
+                            effects.signals.iter().find(|signal| {
+                                signal.turn == entry.turn
+                                    && signal.kind == HGroupMoveKind::ChopMove
+                                    && signal.cards.iter().all(|card| {
+                                        context.historical.identity(*card).is_some_and(|known| {
+                                            is_trash_at(context.before.stack_heights, known)
+                                        })
+                                    })
                             })
                         })
-                });
+                        .flatten();
                 let trash_push = effects.signals.iter().find(|signal| {
                     signal.turn == entry.turn && signal.kind == HGroupMoveKind::TrashPush
                 });

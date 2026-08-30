@@ -1348,6 +1348,7 @@ fn replay_h_group_inner(
                         promptable_before: PromptableBeforeClue(&clue_promptable),
                         protected_before: &gotten,
                         already_playing: &already_playing,
+                        declined_direct_plays: &declined_direct_plays,
                         convention_facts: signals.facts(),
                         chop_moved: &chop_moved,
                         stack_heights,
@@ -1614,6 +1615,7 @@ fn replay_h_group_inner(
                             promptable_before: PromptableBeforeClue(&clue_promptable),
                             protected_before: &gotten,
                             already_playing: &already_playing,
+                            declined_direct_plays: &declined_direct_plays,
                             convention_facts: signals.facts(),
                             chop_moved: &chop_moved,
                             stack_heights,
@@ -2492,6 +2494,7 @@ struct ConnectionPlanningContext<'a> {
     promptable_before: PromptableBeforeClue<'a>,
     protected_before: &'a CardSet,
     already_playing: &'a CardSet,
+    declined_direct_plays: &'a CardSet,
     convention_facts: &'a ConventionFacts,
     chop_moved: &'a CardSet,
     stack_heights: [u8; 5],
@@ -2538,6 +2541,7 @@ impl ConnectionPlanningContext<'_> {
             self.clues,
             self.promptable_before.0,
             self.already_playing,
+            self.declined_direct_plays,
             self.convention_facts,
             self.chop_moved,
             &mut simulated_invisible,
@@ -2584,6 +2588,7 @@ impl ConnectionPlanningContext<'_> {
             self.clues,
             self.promptable_before.0,
             self.already_playing,
+            self.declined_direct_plays,
             self.convention_facts,
             self.chop_moved,
             invisibly_clued,
@@ -2612,6 +2617,7 @@ fn schedule_connection(
     clues: &[HGroupClueInterpretation],
     promptable_before_clue: &CardSet,
     already_playing: &CardSet,
+    declined_direct_plays: &CardSet,
     convention_facts: &ConventionFacts,
     chop_moved: &CardSet,
     invisibly_clued: &mut ProvenancedCardSet,
@@ -2661,15 +2667,19 @@ fn schedule_connection(
     for offset in 0..connection_count {
         let expected_rank = usize::from(height + offset);
         let expected = Card::new(focus_identity.suit, Rank::ALL[expected_rank]);
-        let expected_is_already_playing = same_clue_touched.len() == 1
-            && already_playing.iter().any(|card| {
-                hands[actor_index].contains(card)
-                    && (identity_of(view, *card) == Some(expected)
-                        || clues.iter().rev().any(|clue| {
-                            clue.focus == *card
-                                && clue.focus_identities == IdentitySet::singleton(expected)
-                        }))
-            });
+        let matches_expected = |card: CardId| {
+            identity_of(view, card) == Some(expected)
+                || clues.iter().rev().any(|clue| {
+                    clue.focus == card && clue.focus_identities == IdentitySet::singleton(expected)
+                })
+        };
+        let gotten_match_is_still_waiting = promptable_before_clue
+            .iter()
+            .any(|card| !already_playing.contains(card) && matches_expected(*card));
+        let expected_is_already_playing = !gotten_match_is_still_waiting
+            && already_playing
+                .iter()
+                .any(|card| !declined_direct_plays.contains(card) && matches_expected(*card));
         if pending_identity_is_queued(pending, expected) {
             let giver_is_deferring_this_connection = pending.iter().any(|connection| {
                 connection.actor == giver
@@ -2926,6 +2936,7 @@ fn schedule_connection(
                     .filter(|card| {
                         *card != focus
                             && already_playing.contains(card)
+                            && !declined_direct_plays.contains(card)
                             && !scheduled_cards.contains(card)
                             && pending_card_allows_identity(
                                 pending,

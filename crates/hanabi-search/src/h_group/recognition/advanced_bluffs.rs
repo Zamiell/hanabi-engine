@@ -266,6 +266,12 @@ pub(in crate::h_group) fn apply_intermediate_bluff_effects(
         return;
     }
     let focus_identity = identity_of(view, focus);
+    if focus_identity.is_some_and(|identity| is_playable_at(stack_heights, identity)) {
+        // A clue on a currently playable focus is a direct Play interpretation
+        // (or, when that identity is already promised elsewhere, a Trash Chop
+        // Move). It cannot simultaneously manufacture a Critical Color Bluff.
+        return;
+    }
     let critical_color = matches!(clue, Clue::Suit(_))
         && !was_clued_before(view, entry.turn, focus)
         && focus_identity
@@ -465,11 +471,43 @@ pub(in crate::h_group) fn apply_duplication_effects(
             identity,
             successful: true,
         } => {
+            let gotten = protected_cards(
+                effects.explicitly_clued,
+                effects.invisibly_clued,
+                effects.chop_moved,
+            );
             let duplicate_is_gotten = context.after.hands.iter().flatten().copied().any(|other| {
+                let is_trash_chop_move_focus = effects.clues.iter().any(|clue| {
+                    clue.focus == other
+                        && effects.signals.iter().any(|signal| {
+                            signal.turn == clue.turn && signal.kind == HGroupMoveKind::TrashChopMove
+                        })
+                });
                 other != *card
                     && (effects.explicitly_clued.contains(&other)
                         || effects.invisibly_clued.contains(&other))
-                    && context.historical.identity(other) == Some(*identity)
+                    && (context.historical.identity(other) == Some(*identity)
+                        || IdentitySet::from_mask(
+                            context.after.facts[other.index()].identity_mask(),
+                        ) == IdentitySet::singleton(*identity)
+                        || (is_trash_chop_move_focus
+                            && context.after.facts[other.index()].allows(*identity)
+                            && IdentitySet::from_mask(
+                                context.after.facts[other.index()].identity_mask(),
+                            )
+                            .iter()
+                            .filter(|candidate| *candidate != *identity)
+                            .all(|candidate| {
+                                is_trash_at(context.before.stack_heights, candidate)
+                                    || context.after.hands.iter().flatten().copied().any(
+                                        |duplicate| {
+                                            duplicate != other
+                                                && gotten.contains(&duplicate)
+                                                && context.historical.identity(duplicate)
+                                                    == Some(candidate)
+                                        },
+                                    )
+                            })))
             });
             if !duplicate_is_gotten {
                 return;

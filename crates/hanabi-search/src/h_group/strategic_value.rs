@@ -312,7 +312,16 @@ pub(super) fn apply_strategic_clue_values(
             Action::Play(_) | Action::Discard(_) => false,
         };
         if consolidates_chop_move {
-            let extra_protection = value.protected_card_count().saturating_sub(1);
+            let extra_protection = match candidate.action {
+                Action::Clue { target, clue } => source.hands[target.index()]
+                    .iter()
+                    .filter_map(|card| card.identity)
+                    .filter(|identity| clue.matches(*identity))
+                    .filter(|identity| is_eventually_useful(source, *identity))
+                    .count()
+                    .saturating_sub(1),
+                Action::Play(_) | Action::Discard(_) => 0,
+            };
             candidate.value.reward_teamwork(
                 TEAM_MULTI_CARD_PROTECTION_BONUS
                     .saturating_mul(u16::try_from(extra_protection).unwrap_or(u16::MAX)),

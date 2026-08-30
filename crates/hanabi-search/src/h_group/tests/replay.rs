@@ -236,7 +236,7 @@ fn third_expert_replay_matches_engine() {
 }
 
 #[test]
-#[ignore = "pending expert review: first unresolved disagreement is move 11"]
+#[ignore = "pending expert review: first unresolved disagreement is move 20"]
 fn fourth_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine(&expert_replay_p4v0s3());
 }
@@ -456,6 +456,172 @@ fn fourth_replay_move_eight_uses_the_demonstrated_charm_identity_as_a_prompt() {
         select_h_group_action(&deductions, HGroupProfile::Max),
         Some(Action::Play(CardId::new(15))),
         "the proven yellow 4 is the visible reverse Prompt for Cathy's yellow 5",
+    );
+}
+
+#[test]
+fn fourth_replay_move_eleven_schedules_the_lie_component_finesse() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(10).expect("fixture prefix is legal");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("Cathy has a view"),
+    )
+    .expect("valid deductions");
+    let view = deductions.view();
+    let target = PlayerId::new(1);
+    let touched = vec![CardId::new(7), CardId::new(16)];
+    let action = Action::Clue {
+        target,
+        clue: Clue::Rank(Rank::Four),
+    };
+    let signals = prospective_team_clue_signal_kinds(
+        view,
+        HGroupProfile::Max,
+        target,
+        Clue::Rank(Rank::Four),
+        &touched,
+    );
+    assert!(
+        signals.contains(&HGroupMoveKind::LieComponentFinesse),
+        "rank 4 schedules purple 1, purple 2, a red Fix, purple 3, and purple 4: {signals:?}",
+    );
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let lie_candidate = candidates
+        .iter()
+        .find(|candidate| candidate.action == action)
+        .expect("lie candidate exists");
+    assert!(
+        lie_candidate.can_preempt_ordinary_play(),
+        "the multi-step lie line must be allowed to park an ordinary play: {lie_candidate:#?}",
+    );
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate.action == action),
+        "the initiating Lie Component Finesse must be admitted: {candidates:#?}",
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(action),
+        "the full candidate set was {candidates:#?}",
+    );
+}
+
+#[test]
+fn fourth_replay_move_fifteen_fixes_the_false_red_layer_without_cancelling_the_finesse() {
+    let fixture = expert_replay_p4v0s3();
+    let before = fixture.state_at_turn(14).expect("fixture prefix is legal");
+    let before_deductions = LogicalDeductions::new(
+        before
+            .view_for(before.current_player())
+            .expect("Cathy has a view"),
+    )
+    .expect("valid deductions");
+    let before_replay = replay_h_group(&before_deductions, HGroupProfile::Max);
+    assert!(
+        before_replay.pending_connections.iter().any(|connection| {
+            connection.actor == PlayerId::new(0)
+                && connection.expected == Card::new(Suit::Purple, Rank::Three)
+                && connection.cards == vec![CardId::new(3), CardId::new(1), CardId::new(0)]
+        }),
+        "the live connections were {:#?}",
+        before_replay.pending_connections,
+    );
+
+    let after = fixture.state_at_turn(15).expect("fixture prefix is legal");
+    let after_deductions = LogicalDeductions::new(
+        after
+            .view_for(after.current_player())
+            .expect("Donald has a view"),
+    )
+    .expect("valid deductions");
+    let after_replay = replay_h_group(&after_deductions, HGroupProfile::Max);
+    assert!(
+        after_replay.required_fixes.iter().next().is_none(),
+        "the completed lie Fix left residual obligations: {:#?}",
+        after_replay.required_fixes,
+    );
+    assert!(
+        after_replay.pending_connections.iter().any(|connection| {
+            connection.actor == PlayerId::new(0)
+                && connection.expected == Card::new(Suit::Purple, Rank::Three)
+                && connection.cards == vec![CardId::new(0)]
+        }),
+        "the repaired connections were {:#?}",
+        after_replay.pending_connections,
+    );
+}
+
+#[test]
+fn fourth_replay_time_travel_chop_move_is_observer_invariant() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(12).expect("fixture prefix is legal");
+    for observer in (0..4).map(PlayerId::new) {
+        let deductions =
+            LogicalDeductions::new(state.view_for(observer).expect("observer has a legal view"))
+                .expect("valid deductions");
+        let replay = replay_h_group(&deductions, HGroupProfile::Max);
+        assert!(
+            replay.signals.iter().any(|signal| {
+                signal.kind == HGroupMoveKind::TimeTravelChopMove
+                    && signal.cards.contains(&CardId::new(15))
+                    && signal.cards.contains(&CardId::new(14))
+            }),
+            "observer {observer:?} did not preserve Donald's Time Travel Chop Move: signals={:#?}",
+            replay.signals,
+        );
+        if observer != PlayerId::new(3) {
+            assert!(
+                replay.signals.iter().any(|signal| {
+                    signal.kind == HGroupMoveKind::LieComponentFinesse
+                        && signal.cards.contains(&CardId::new(16))
+                }),
+                "observer {observer:?} did not recognize the Lie Component Finesse: signals={:#?}",
+                replay.signals,
+            );
+        }
+    }
+}
+
+#[test]
+fn fourth_replay_move_sixteen_continues_with_green_after_the_lie_fix() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(15).expect("fixture prefix is legal");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("Donald has a view"),
+    )
+    .expect("valid deductions");
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let expected = Action::Clue {
+        target: PlayerId::new(1),
+        clue: Clue::Suit(Suit::Green),
+    };
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(expected),
+        "the post-Fix candidates were {candidates:#?}",
+    );
+}
+
+#[test]
+fn fourth_replay_move_eighteen_transfers_the_promised_purple_four() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(17).expect("fixture prefix is legal");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("Bob has a view"),
+    )
+    .expect("valid deductions");
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Discard(CardId::new(16))),
+        "Bob should transfer his promised purple 4 to Cathy's visible copy: {inferred:#?}",
     );
 }
 

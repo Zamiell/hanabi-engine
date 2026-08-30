@@ -312,6 +312,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 });
         if !repairs_required_fix
             && !repairs_focus_inversion
+            && baseline_playing.contains(&focus)
             && gotten.contains(&focus)
             && (replay.clues.iter().rev().any(|prior| {
                 prior.focus == focus
@@ -329,7 +330,9 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
         {
             // Adding a direct clue fact that merely repeats an identity the
             // recipient already knows by convention is not Minimum Clue
-            // Value. A genuine Fix remains allowed when their note differs.
+            // Value. A genuine Fix remains allowed when their note differs,
+            // as does a fill-in that turns a merely saved exact card into a
+            // newly scheduled Play connection.
             continue;
         }
         if repairs_required_fix || repairs_focus_inversion {
@@ -513,27 +516,51 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 // a direct clue that concentrates both plays in one hand.
                 .map(|_| 500)
         });
+        let fallback_signals =
+            prospective_team_clue_signal_kinds(view, profile, target, clue, &touched);
+        let recipient_focus_inversion = fallback_signals.contains(&HGroupMoveKind::FocusInversion);
+        let mixed_touch_continuation = matches!(clue, Clue::Suit(_))
+            && touched.len() > newly_informed.len()
+            && !gotten.contains(&focus);
         if play_score.is_none()
             && save_score.is_none()
-            && prospective_team_clue_signal_kinds(view, profile, target, clue, &touched)
-                .contains(&HGroupMoveKind::FocusInversion)
+            && (recipient_focus_inversion || mixed_touch_continuation)
             && prospective_clue_primary_interpretation(view, profile, target, clue, &touched)
                 .is_some_and(|interpretation| {
+                    let height = view.play_stacks[focus_identity.suit.index()].len();
+                    let predecessors_are_queued =
+                        ((height + 1)..usize::from(focus_identity.rank.number())).all(|rank| {
+                            let expected = Card::new(focus_identity.suit, Rank::ALL[rank - 1]);
+                            baseline_playing
+                                .iter()
+                                .any(|card| identity_of(view, *card) == Some(expected))
+                                || replay
+                                    .pending_connections
+                                    .iter()
+                                    .any(|connection| connection.expected == expected)
+                        });
                     interpretation.focus == focus
                         && matches!(
                             interpretation.kind,
                             HGroupClueKind::Play | HGroupClueKind::PlayOrSave
                         )
                         && interpretation.play_identities.contains(focus_identity)
+                        && (is_playable_now(view, focus_identity)
+                            || predecessors_are_queued
+                            || (recipient_focus_inversion
+                                && interpretation
+                                    .hypotheses
+                                    .iter()
+                                    .any(|hypothesis| !hypothesis.connection_steps.is_empty())))
                 })
         {
-            // A Focus Inversion can recognize a delayed line whose
-            // intermediate promises depend on observer-relative knowledge
-            // that the giver-side structural connection search cannot
-            // reconstruct. Admit that same safe Play interpretation only
-            // when the recipient-side interpretation retains that focus and
-            // identity. Hazard validation below still rejects an unsafe
-            // recipient action.
+            // Recipient replay is the canonical semantic compiler. It can
+            // recognize a Focus Inversion or Continuation line whose intermediate
+            // promises depend on observer-relative knowledge that the
+            // giver-side structural search cannot reconstruct. Admit that
+            // same Play interpretation when the recipient retains this focus
+            // and identity; hazard validation below still rejects unsafe team
+            // projections.
             play_score = Some(
                 390 + 2 * u16::try_from(newly_informed.len()).unwrap_or(0)
                     + u16::from(matches!(clue, Clue::Suit(_))),
@@ -1496,11 +1523,22 @@ pub(super) fn advanced_clue_candidates(
                                 | HGroupMoveKind::BadTrashFinesseEjection
                                 | HGroupMoveKind::TrashFinessePushEjection
                                 | HGroupMoveKind::RankChoiceEjection
+                                | HGroupMoveKind::LieComponentFinesse
                                 | HGroupMoveKind::TrashEjection
                                 | HGroupMoveKind::ReplayEjection
                                 | HGroupMoveKind::PokeEjection
-                        ) && (*kind != HGroupMoveKind::JustInTimeFix
-                            || recipient_signals.contains(kind))
+                        ) && (!matches!(
+                            kind,
+                            HGroupMoveKind::JustInTimeFix | HGroupMoveKind::LieComponentFinesse
+                        ) || recipient_signals.contains(kind))
+                            && !(recipient_signals.contains(&HGroupMoveKind::PlayClue)
+                                && matches!(
+                                    kind,
+                                    HGroupMoveKind::UnknownTrashDischarge
+                                        | HGroupMoveKind::UnknownDupeDischarge
+                                        | HGroupMoveKind::OutOfPositionDischarge
+                                        | HGroupMoveKind::StackedDischarge
+                                ))
                     })
             })
             .flatten();
@@ -1577,6 +1615,12 @@ pub(super) fn advanced_clue_candidates(
             Some((HGroupMoveKind::JustInTimeFix, 500))
         } else if max_signal == Some(HGroupMoveKind::FakeSave) {
             Some((HGroupMoveKind::FakeSave, 450))
+        } else if max_signal == Some(HGroupMoveKind::LieComponentFinesse) {
+            // This line is intentionally below every equally efficient
+            // truthful Finesse. Whole-line action coverage can still make it
+            // beat an unrelated one-for-one play.
+            // Source: https://hanabi.github.io/extras/special-finesses/#finesses-with-a-lie-component
+            Some((HGroupMoveKind::LieComponentFinesse, 300))
         } else if rule_enabled(profile, HGroupRuleId::BasicStrategy) && fix {
             Some((HGroupMoveKind::FixClue, 500))
         } else if rule_enabled(profile, HGroupRuleId::EjectionsAndDischarges) && five_ejection {
@@ -1840,6 +1884,8 @@ pub(super) fn advanced_clue_candidates(
             value: ClueValue::new(score + efficiency + u16::from(matches!(clue, Clue::Suit(_)))),
             purpose: if matches!(kind, HGroupMoveKind::SaveClue | HGroupMoveKind::FakeSave) {
                 CluePurpose::Save
+            } else if kind == HGroupMoveKind::LieComponentFinesse {
+                CluePurpose::Play
             } else {
                 CluePurpose::Advanced
             },
@@ -1849,7 +1895,19 @@ pub(super) fn advanced_clue_candidates(
                 kind == HGroupMoveKind::FakeSave || urgently_protects_critical_chop,
                 playable > 0,
             ),
-            connection_steps: 0,
+            connection_steps: if kind == HGroupMoveKind::LieComponentFinesse {
+                clue_focus
+                    .and_then(|focus| identity_of(view, focus))
+                    .map_or(0, |identity| {
+                        u8::try_from(
+                            usize::from(identity.rank.number())
+                                .saturating_sub(view.play_stacks[identity.suit.index()].len() + 1),
+                        )
+                        .expect("a standard connection has at most four steps")
+                    })
+            } else {
+                0
+            },
             action_coverage: 0,
             convention_action_count: None,
             convention_connection_steps: None,
@@ -1880,6 +1938,7 @@ fn advanced_kind_replaces_ordinary_play(kind: HGroupMoveKind) -> bool {
             | HGroupMoveKind::TrashEjection
             | HGroupMoveKind::ReplayEjection
             | HGroupMoveKind::PokeEjection
+            | HGroupMoveKind::LieComponentFinesse
             | HGroupMoveKind::Charm
     )
 }

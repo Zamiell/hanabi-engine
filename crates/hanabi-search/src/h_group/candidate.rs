@@ -157,7 +157,9 @@ impl ClueCandidate {
     /// narrower exception for exact transferred plays, evaluated with the
     /// current play obligation in `decision`.
     pub(super) fn can_preempt_ordinary_play(self) -> bool {
-        (self.purpose == CluePurpose::Play && self.connection_steps >= 2)
+        (self.purpose == CluePurpose::Play
+            && self.connection_steps >= 2
+            && self.action_coverage >= 2)
             || self.schedule.preserves_visible_continuation
     }
 

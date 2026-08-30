@@ -8,6 +8,7 @@ fn same_turn_signal_blocks_chop_move(
     signals: &ConventionJournal,
     turn: u32,
     target: PlayerId,
+    clue_domain_is_accounted: bool,
 ) -> bool {
     signals.iter().any(|signal| {
         signal.turn == turn
@@ -23,6 +24,10 @@ fn same_turn_signal_blocks_chop_move(
                     | HGroupMoveKind::TrashPush
                     | HGroupMoveKind::Bluff
             )
+            && (!matches!(
+                signal.kind,
+                HGroupMoveKind::PlayClue | HGroupMoveKind::Bluff
+            ) || !clue_domain_is_accounted)
     })
 }
 
@@ -64,6 +69,52 @@ fn card_is_accounted_trash(
         })
 }
 
+fn clue_domain_is_accounted(
+    context: &HGroupTurnContext<'_>,
+    view: &PlayerView,
+    effects: &HGroupRuleEffects<'_>,
+    clue: Clue,
+    touched: &[super::CardId],
+    gotten: &super::CardSet,
+) -> bool {
+    IdentitySet::all()
+        .iter()
+        .filter(|identity| clue.matches(*identity))
+        .all(|identity| {
+            touched.iter().copied().any(|card| {
+                is_card_identity_accounted_trash(
+                    view,
+                    card,
+                    identity,
+                    context.after.stack_heights,
+                    gotten,
+                    effects.signals.facts(),
+                )
+            })
+        })
+}
+
+fn supersede_current_connections(
+    context: &HGroupTurnContext<'_>,
+    effects: &mut HGroupRuleEffects<'_>,
+    touched: &[super::CardId],
+) {
+    let superseded_cards = effects
+        .pending
+        .iter()
+        .filter(|connection| touched.contains(&connection.focus))
+        .flat_map(|connection| connection.cards.iter().copied())
+        .collect::<Vec<_>>();
+    effects.pending.cancel_where(
+        context.entry.turn,
+        super::ConnectionTransitionReason::Superseded,
+        |connection| touched.contains(&connection.focus),
+    );
+    for card in superseded_cards {
+        effects.forced_playable.remove(&card);
+    }
+}
+
 /// Recognizes Level-4 Trash and 5's Chop Moves from observer-relative clue
 /// facts. The recipient must not need the physical identity of their own
 /// touched card to understand the move.
@@ -84,15 +135,27 @@ pub(crate) fn apply_chop_move_effects(
     else {
         return;
     };
-    if same_turn_signal_blocks_chop_move(effects.signals, context.entry.turn, *target) {
-        return;
-    }
     let hand = &context.after.hands[target.index()];
-    let gotten = protected_cards(
+    let mut gotten = protected_cards(
         effects.explicitly_clued,
         effects.invisibly_clued,
         effects.chop_moved,
     );
+    // Current touches cannot account for themselves; TCM identities must
+    // already have been accounted for before positive clue facts are applied.
+    for card in touched {
+        gotten.remove(card);
+    }
+    let clue_domain_is_accounted =
+        clue_domain_is_accounted(context, view, effects, *clue, touched, &gotten);
+    if same_turn_signal_blocks_chop_move(
+        effects.signals,
+        context.entry.turn,
+        *target,
+        clue_domain_is_accounted,
+    ) {
+        return;
+    }
     let five_chop_moved = (*clue == Clue::Rank(Rank::Five))
         .then(|| five_chop_moved_card(hand, touched, &gotten))
         .flatten();
@@ -103,6 +166,15 @@ pub(crate) fn apply_chop_move_effects(
     let five_chop_move = five_chop_moved.is_some();
     if !all_trash && !five_chop_move {
         return;
+    }
+    if all_trash {
+        // A Bluff is only provisional until the clue's ordinary trash
+        // interpretation has been checked. If every touched identity is
+        // already accounted for, Minimum Clue Value makes this a Trash Chop
+        // Move instead; retract any same-focus connection synthesized by the
+        // earlier Bluff pass.
+        // Source: https://hanabi.github.io/level-4/#the-trash-chop-move-tcm
+        supersede_current_connections(context, effects, touched);
     }
     let boundary = touched
         .iter()

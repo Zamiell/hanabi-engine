@@ -15,7 +15,8 @@ use super::{
     is_critical, is_eventually_useful, is_playable_at, is_playable_now, next_player,
     owner_knowledge_read_model, pending_is_active, projected_h_group_replay,
     prospective_clue_has_unsafe_connection, prospective_clue_marks_focus_saved,
-    prospective_clue_view, prospective_play_has_unsafe_inference, replay_h_group, rule_enabled,
+    prospective_clue_primary_kind, prospective_clue_view, prospective_play_has_unsafe_inference,
+    prospective_team_clue_signal_kinds, replay_h_group, rule_enabled,
 };
 
 #[derive(Clone, Debug)]
@@ -980,6 +981,25 @@ fn candidate_can_preempt_current_play(
             }))
 }
 
+fn candidate_is_lie_component_finesse(
+    view: &PlayerView,
+    profile: HGroupProfile,
+    candidate: &ClueCandidate,
+) -> bool {
+    let Action::Clue { target, clue } = candidate.action else {
+        return false;
+    };
+    let touched = view.hands[target.index()]
+        .iter()
+        .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
+        .map(|card| card.id)
+        .collect::<Vec<_>>();
+    prospective_clue_primary_kind(view, profile, target, clue, &touched)
+        == Some(HGroupClueKind::Unrecognized)
+        && prospective_team_clue_signal_kinds(view, profile, target, clue, &touched)
+            .contains(&HGroupMoveKind::LieComponentFinesse)
+}
+
 fn derive_predictable_action(
     deductions: &LogicalDeductions,
     inferred: &HGroupInferences,
@@ -1031,7 +1051,8 @@ fn derive_predictable_action(
             (candidate.is_urgent_save() && hard_clue_obligation(view, replay, candidate))
                 || (!has_forced_play
                     && candidate_can_preempt_current_play(candidate, inferred, replay)
-                    && !completed_connection_focus_is_due(inferred))
+                    && (!completed_connection_focus_is_due(inferred)
+                        || candidate_is_lie_component_finesse(view, profile, candidate)))
         })
         && inferred.playable_now.len() == 1
     {
@@ -1553,7 +1574,14 @@ fn raw_h_group_action_priority(
         endgame_progress_priority(deductions, profile, analysis, candidate)
             .unwrap_or_else(|| 100 + i32::from(candidate.score()))
     });
-    adjust_clue_priority(deductions, analysis, action, clue_candidate, clue_priority)
+    adjust_clue_priority(
+        deductions,
+        profile,
+        analysis,
+        action,
+        clue_candidate,
+        clue_priority,
+    )
 }
 
 /// Applies play-obligation precedence after the candidate's within-tier clue
@@ -1561,6 +1589,7 @@ fn raw_h_group_action_priority(
 /// scoring from silently overriding a forced or already-promised action.
 fn adjust_clue_priority(
     deductions: &LogicalDeductions,
+    profile: HGroupProfile,
     analysis: &HGroupAnalysis,
     action: Action,
     clue_candidate: Option<&ClueCandidate>,
@@ -1582,9 +1611,10 @@ fn adjust_clue_priority(
         // Only a genuinely hard Fix or endangered Save can interrupt it.
         clue_priority.min(500)
     } else if !inferred.playable_now.is_empty()
-        && !completed_connection_focus_is_due(inferred)
         && clue_candidate.is_some_and(|candidate| {
             candidate_can_preempt_current_play(candidate, inferred, &analysis.replay)
+                && (!completed_connection_focus_is_due(inferred)
+                    || candidate_is_lie_component_finesse(deductions.view(), profile, candidate))
         })
     {
         // A semantically strong setup clue can occupy several teammates while

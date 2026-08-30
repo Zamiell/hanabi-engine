@@ -412,6 +412,7 @@ pub(in crate::h_group) fn apply_ejection_discharge_effects(
     // Merely touching an already-played duplicate as a useful non-focus card is
     // an ordinary multi-card clue and must not eject the next player's slot 3.
     let unknown_discharge = touched.len() >= 2
+        && !same_turn_signal(signals, entry.turn, HGroupMoveKind::PlayClue)
         && interpretation.is_none_or(|interpretation| interpretation.save_identities.is_empty())
         && interpretation.is_some_and(|interpretation| {
             let possibilities =
@@ -422,6 +423,7 @@ pub(in crate::h_group) fn apply_ejection_discharge_effects(
                     .all(|identity| is_trash_at(stack_heights, identity))
         });
     let unknown_dupe_discharge = touched.len() >= 2
+        && !same_turn_signal(signals, entry.turn, HGroupMoveKind::PlayClue)
         && !signals.iter().any(|signal| {
             signal.turn == entry.turn
                 && matches!(signal.kind, HGroupMoveKind::FixClue | HGroupMoveKind::Stall)

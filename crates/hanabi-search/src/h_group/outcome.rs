@@ -86,10 +86,6 @@ impl LineOutcome {
         players.len()
     }
 
-    pub(super) fn protected_card_count(&self) -> usize {
-        self.protected_cards.len()
-    }
-
     pub(super) fn first_action_distance(&self, current: PlayerId, player_count: usize) -> usize {
         self.public_actions
             .iter()
