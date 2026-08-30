@@ -7,8 +7,8 @@ use super::{
     HGroupActionSet, HGroupAnalyzedAction, HGroupClueKind, HGroupConnection, HGroupConnectionKind,
     HGroupConnectionPromise, HGroupIdentityStatus, HGroupInferences, HGroupMoveKind, HGroupPhase,
     HGroupPlayObligation, HGroupProfile, HGroupRuleId, HGroupState, IdentitySet, LogicalDeductions,
-    MAX_CLUE_TOKENS, ObservedCard, OnceLock, PerspectiveDepth, PerspectiveProjector, PlayerId,
-    PlayerView, ProspectiveTransition, Rank, RejectedConventionAction, Suit,
+    MAX_CLUE_TOKENS, ObservedCard, ObservedEvent, OnceLock, PerspectiveDepth, PerspectiveProjector,
+    PlayerId, PlayerView, ProspectiveTransition, Rank, RejectedConventionAction, Suit,
     TeamConventionSnapshot, chop, convention_card_inferences, creates_false_anxiety,
     finesse_position, focus, h_group_clue_candidates_from_replay, h_group_phase,
     h_group_rejected_clues_from_replay, identity_of, infer_clue_to_self, is_convention_trash,
@@ -383,6 +383,27 @@ fn ordered_h_group_actions_from_analysis(
         return Vec::new();
     }
     let inferred = &analysis.inferences;
+    let fresh_trash_chop_move_focus = analysis.replay.clues.iter().rev().find_map(|clue| {
+        let recipient_has_acted = view.history.iter().any(|entry| {
+            entry.turn > clue.turn
+                && match entry.event {
+                    ObservedEvent::Played { player, .. }
+                    | ObservedEvent::Discarded { player, .. } => player == clue.target,
+                    ObservedEvent::Clued { giver, .. } => giver == clue.target,
+                    ObservedEvent::Drew { .. } => false,
+                }
+        });
+        (clue.target == view.observer
+            && !recipient_has_acted
+            && analysis
+                .replay
+                .signals
+                .has_at_turn(clue.turn, HGroupMoveKind::TrashChopMove)
+            && view.hands[view.observer.index()]
+                .iter()
+                .any(|card| card.id == clue.focus))
+        .then_some(clue.focus)
+    });
     let mut clue_candidates = analysis_clue_candidates(deductions, profile, analysis).to_vec();
     clue_candidates.sort_by_key(|candidate| core::cmp::Reverse(candidate.score()));
     if inferred.must_clue.contains(&view.observer) {
@@ -428,22 +449,26 @@ fn ordered_h_group_actions_from_analysis(
             .into_iter()
             .map(Action::Play),
     );
-    if !early_game_has_extinguishing_clue {
-        if let Some((card, _)) = scored_discard_candidate(view, inferred, profile) {
+    if let Some((card, _)) = scored_discard_candidate(view, inferred, profile) {
+        if !early_game_has_extinguishing_clue || fresh_trash_chop_move_focus == Some(card) {
             actions.push(Action::Discard(card));
         }
     }
     actions.extend(clue_candidates.iter().map(|candidate| candidate.action));
     // https://hanabi.github.io/level-1/#the-early-game
     // A player may not end the Early Game while a genuine Play or Save Clue
-    // remains. Remove discards at candidate admission so a generic discard
-    // score cannot overrule the convention; other valid clues remain choices.
+    // remains. The recipient may still respond to a fresh Trash Chop Move by
+    // discarding its known-trash focus; that action consumes the clue's
+    // explicit safe-discard message rather than generically preferring any
+    // surplus off-chop trash over forward progress.
     if early_game_has_extinguishing_clue {
         let gotten = inferred.gotten();
         let transfer =
             gentlemans_discard_candidate(view, inferred, profile, &gotten).map(|(card, _)| card);
         actions.retain(|action| match action {
-            Action::Discard(card) => transfer == Some(*card),
+            Action::Discard(card) => {
+                transfer == Some(*card) || fresh_trash_chop_move_focus == Some(*card)
+            }
             Action::Play(_) | Action::Clue { .. } => true,
         });
     }

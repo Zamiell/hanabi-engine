@@ -1,6 +1,6 @@
 use hanabi_core::{Card, CardId, ObservedEvent, PlayerView, Rank};
 
-use super::{CardSet, HGroupCardInference};
+use super::{CardSet, ConventionFacts, HGroupCardInference};
 
 /// Identity visible in the source view at its current turn. Historical rule
 /// interpretation must use `HistoricalView` instead.
@@ -104,6 +104,29 @@ pub(super) fn is_convention_trash(
         .take(2)
         .count()
         >= 2
+}
+
+/// Whether this specific card is useless because its identity is either
+/// already played or already represented by another protected card.
+///
+/// Unlike [`is_convention_trash`], this form is suitable while compiling a
+/// clue event: the newly touched card may still have several possible
+/// identities, and each possibility must be checked against exact convention
+/// facts established elsewhere on the board.
+pub(super) fn is_card_identity_accounted_trash(
+    view: &PlayerView,
+    card: CardId,
+    identity: Card,
+    stack_heights: [u8; 5],
+    gotten: &CardSet,
+    convention_facts: &ConventionFacts,
+) -> bool {
+    identity.rank.number() <= stack_heights[identity.suit.index()]
+        || gotten.iter().copied().any(|other| {
+            other != card
+                && (identity_of(view, other) == Some(identity)
+                    || convention_facts.known_identity(other) == Some(identity))
+        })
 }
 
 pub(super) fn is_unique_visible(view: &PlayerView, excluded: CardId, identity: Card) -> bool {

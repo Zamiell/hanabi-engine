@@ -236,7 +236,7 @@ fn third_expert_replay_matches_engine() {
 }
 
 #[test]
-#[ignore = "pending expert review: first unresolved disagreement is move 7"]
+#[ignore = "pending expert review: first unresolved disagreement is move 11"]
 fn fourth_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine(&expert_replay_p4v0s3());
 }
@@ -383,6 +383,79 @@ fn fourth_replay_move_five_uses_the_visible_reverse_prompt() {
         select_h_group_action(&deductions, HGroupProfile::Max),
         Some(Action::Play(CardId::new(6))),
         "the visible reverse Prompt must not create a false yellow-4 Layered Finesse in Bob's hand",
+    );
+}
+
+#[test]
+fn fourth_replay_move_seven_recognizes_the_accounted_yellow_trash_chop_move() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(6).expect("fixture prefix is legal");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("Cathy has a view"),
+    )
+    .expect("valid deductions");
+    let expected = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Suit(Suit::Yellow),
+    };
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate.action == expected),
+        "yellow 1-3 are played, Donald has the promised yellow 4, and Cathy has the gotten yellow 5, so Alice's yellow card is known trash: {candidates:#?}",
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(expected),
+    );
+}
+
+#[test]
+fn fourth_replay_move_nine_discards_the_trash_chop_move_target_off_chop() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(8).expect("fixture prefix is legal");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("Alice has a view"),
+    )
+    .expect("valid deductions");
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    assert_ne!(
+        inferred.chops[0],
+        Some(CardId::new(2)),
+        "the Trash Chop Move moved Alice's chop beyond the clued yellow trash",
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Discard(CardId::new(2))),
+        "discarding off-chop known trash does not end the Early Game",
+    );
+}
+
+#[test]
+fn fourth_replay_move_eight_uses_the_demonstrated_charm_identity_as_a_prompt() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(7).expect("fixture prefix is legal");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("Donald has a view"),
+    )
+    .expect("valid deductions");
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
+    assert_eq!(
+        replay.cards.facts.known_identity(CardId::new(15)),
+        Some(Card::new(Suit::Yellow, Rank::Four)),
+        "Bob's demonstrated Charm proves the hidden clue focus is yellow 4 to Donald",
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(15))),
+        "the proven yellow 4 is the visible reverse Prompt for Cathy's yellow 5",
     );
 }
 

@@ -6,6 +6,7 @@ use super::{
     identity_of, is_playable_at, is_trash_at, next_player, pending_identity_is_queued,
     protected_cards, push_signal, same_turn_signal, was_clued_before,
 };
+use crate::h_group::ProvenancedCardSet;
 
 #[allow(clippy::too_many_lines)]
 pub(in crate::h_group) fn apply_ignition_effects(
@@ -543,12 +544,14 @@ pub(in crate::h_group) fn apply_phantom_effects(
 pub(in crate::h_group) fn apply_charm_effects(
     entry: &ObservedHistoryEntry,
     view: &PlayerView,
+    hands_before: &[Vec<CardId>],
     hands: &[Vec<CardId>],
     clues: &[HGroupClueInterpretation],
     stack_heights: [u8; 5],
     explicitly_clued: &CardSet,
     invisibly_clued: &CardSet,
     chop_moved: &CardSet,
+    already_playing: &mut ProvenancedCardSet,
     pending: &mut ConnectionManager,
     forced_playable: &mut CardSet,
     signals: &mut ConventionJournal,
@@ -634,6 +637,85 @@ pub(in crate::h_group) fn apply_charm_effects(
                 }
             }
             let _ = touched;
+        }
+        ObservedEvent::Played {
+            player,
+            card,
+            identity,
+            successful: true,
+        } => {
+            let Some(prior) = clues.iter().rev().find(|clue| {
+                clue.turn.saturating_add(1) == entry.turn
+                    && next_player(clue.giver, hands_before.len()) == *player
+                    && clue.target != *player
+            }) else {
+                return;
+            };
+            let Clue::Suit(suit) = prior.clue else {
+                return;
+            };
+            let focus_identity = Card::new(suit, Rank::Four);
+            let gotten = protected_cards(explicitly_clued, invisibly_clued, chop_moved);
+            let demonstrated_fourth_position =
+                finesse_position_id(&hands_before[player.index()], &gotten, 3) == Some(*card);
+            if !demonstrated_fourth_position
+                || prior.stack_heights[suit.index()] != 0
+                || four_charm_blind_plays(
+                    view,
+                    *player,
+                    focus_identity,
+                    prior.stack_heights,
+                    explicitly_clued,
+                ) < 3
+                || was_clued_before(view, prior.turn, prior.focus)
+                || signals.has_at_turn(prior.turn, HGroupMoveKind::Charm)
+            {
+                return;
+            }
+            // The blind-play demonstrates the Charm to observers who could
+            // not see the clue focus (most importantly, the clue recipient).
+            // Retract any provisional direct-play identity before recording
+            // the now-proven 4; otherwise the two hard claims conflict and a
+            // later Prompt search invents a false Finesse in the owner's hand.
+            if let Some(retracted) = signals
+                .facts()
+                .known_identity(prior.focus)
+                .filter(|claimed| *claimed != focus_identity)
+            {
+                push_signal(
+                    signals,
+                    entry,
+                    prior.giver,
+                    Some(prior.target),
+                    HGroupMoveKind::Retraction,
+                    vec![prior.focus],
+                    Some(retracted),
+                );
+            }
+            already_playing.remove(&prior.focus);
+            pending.cancel_where(
+                entry.turn,
+                ConnectionTransitionReason::FocusInvalidated,
+                |connection| connection.focus == prior.focus,
+            );
+            push_signal(
+                signals,
+                entry,
+                prior.giver,
+                Some(prior.target),
+                HGroupMoveKind::Context,
+                vec![prior.focus],
+                Some(focus_identity),
+            );
+            push_signal(
+                signals,
+                entry,
+                prior.giver,
+                Some(*player),
+                HGroupMoveKind::Charm,
+                vec![*card],
+                Some(*identity),
+            );
         }
         ObservedEvent::Discarded { player, card, .. }
             if !was_clued_before(view, entry.turn, *card)

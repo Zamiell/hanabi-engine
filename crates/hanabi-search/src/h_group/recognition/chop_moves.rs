@@ -1,7 +1,7 @@
 use super::{
     Clue, ConventionJournal, HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, IdentitySet,
-    ObservedEvent, PlayerId, PlayerView, Rank, five_chop_moved_card, identity_of, protected_cards,
-    push_signal,
+    ObservedEvent, PlayerId, PlayerView, Rank, five_chop_moved_card, identity_of,
+    is_card_identity_accounted_trash, protected_cards, push_signal,
 };
 
 fn same_turn_signal_blocks_chop_move(
@@ -24,6 +24,44 @@ fn same_turn_signal_blocks_chop_move(
                     | HGroupMoveKind::Bluff
             )
     })
+}
+
+fn card_is_accounted_trash(
+    context: &HGroupTurnContext<'_>,
+    view: &PlayerView,
+    effects: &HGroupRuleEffects<'_>,
+    gotten: &super::CardSet,
+    card: super::CardId,
+) -> bool {
+    let possibilities = identity_of(view, card)
+        .map(IdentitySet::singleton)
+        .or_else(|| {
+            effects
+                .signals
+                .facts()
+                .known_identity(card)
+                .map(IdentitySet::singleton)
+        })
+        .unwrap_or_else(|| {
+            context
+                .after
+                .facts
+                .get(card.index())
+                .map_or_else(IdentitySet::all, |facts| {
+                    IdentitySet::from_mask(facts.identity_mask())
+                })
+        });
+    !possibilities.is_empty()
+        && possibilities.iter().all(|identity| {
+            is_card_identity_accounted_trash(
+                view,
+                card,
+                identity,
+                context.after.stack_heights,
+                gotten,
+                effects.signals.facts(),
+            )
+        })
 }
 
 /// Recognizes Level-4 Trash and 5's Chop Moves from observer-relative clue
@@ -59,30 +97,9 @@ pub(crate) fn apply_chop_move_effects(
         .then(|| five_chop_moved_card(hand, touched, &gotten))
         .flatten();
     let all_trash = !touched.is_empty()
-        && touched.iter().all(|card| {
-            let possibilities = identity_of(view, *card)
-                .map(IdentitySet::singleton)
-                .or_else(|| {
-                    effects
-                        .signals
-                        .facts()
-                        .known_identity(*card)
-                        .map(IdentitySet::singleton)
-                })
-                .unwrap_or_else(|| {
-                    context
-                        .after
-                        .facts
-                        .get(card.index())
-                        .map_or_else(IdentitySet::all, |facts| {
-                            IdentitySet::from_mask(facts.identity_mask())
-                        })
-                });
-            !possibilities.is_empty()
-                && possibilities.iter().all(|identity| {
-                    identity.rank.number() <= context.after.stack_heights[identity.suit.index()]
-                })
-        });
+        && touched
+            .iter()
+            .all(|card| card_is_accounted_trash(context, view, effects, &gotten, *card));
     let five_chop_move = five_chop_moved.is_some();
     if !all_trash && !five_chop_move {
         return;

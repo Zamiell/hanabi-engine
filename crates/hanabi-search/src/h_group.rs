@@ -85,8 +85,8 @@ use hand::{
 };
 use hypothesis::{InterpretationHypotheses, InterpretationSource};
 use identity::{
-    card_is_trash, identity_of, is_convention_trash, is_eventually_useful, is_playable_at,
-    is_playable_now, is_trash_at, is_unique_visible,
+    card_is_trash, identity_of, is_card_identity_accounted_trash, is_convention_trash,
+    is_eventually_useful, is_playable_at, is_playable_now, is_trash_at, is_unique_visible,
 };
 use information_value::convention_information_value;
 #[cfg(test)]
