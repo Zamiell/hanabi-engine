@@ -2,9 +2,9 @@ use super::{
     Card, CardId, CardSet, Clue, ConnectionManager, ConnectionTransitionReason, ConventionJournal,
     HGroupClueInterpretation, HGroupClueKind, HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext,
     IdentitySet, ObservedEvent, ObservedHistoryEntry, PlayerId, PlayerView, Rank, card_is_trash,
-    chop, finesse_position_id, focus, has_higher_basic_priority, identity_of, is_playable_at,
-    is_trash_at, next_player, pending_identity_is_queued, protected_cards, push_signal,
-    was_clued_before,
+    chop, finesse_position_id, focus, four_charm_blind_plays, has_higher_basic_priority,
+    identity_of, is_playable_at, is_trash_at, next_player, pending_identity_is_queued,
+    protected_cards, push_signal, same_turn_signal, was_clued_before,
 };
 
 #[allow(clippy::too_many_lines)]
@@ -560,27 +560,40 @@ pub(in crate::h_group) fn apply_charm_effects(
         ObservedEvent::Clued {
             giver,
             target,
-            clue: Clue::Rank(Rank::Four),
             touched,
             ..
         } => {
             let interpretation = clues.iter().rev().find(|clue| clue.turn == entry.turn);
             let charm_focus = interpretation.and_then(|clue| {
                 identity_of(view, clue.focus).filter(|identity| {
-                    usize::from(identity.rank.number())
-                        == usize::from(stack_heights[identity.suit.index()]) + 4
+                    identity.rank == Rank::Four
+                        && stack_heights[identity.suit.index()] == 0
+                        && !chop_moved.contains(&clue.focus)
+                        && !was_clued_before(view, entry.turn, clue.focus)
                 })
             });
-            if let (Some(interpretation), Some(_)) = (interpretation, charm_focus) {
-                // Once a rank-4 clue would require three ordinary blind plays,
-                // it is either a valid 4 Charm or an invalid clue. Do not leave
-                // the generic layered-Finesse interpretation active.
-                pending.cancel_where(
-                    entry.turn,
-                    ConnectionTransitionReason::FocusInvalidated,
-                    |connection| connection.focus == interpretation.focus,
-                );
+            let higher_priority_interpretation =
+                same_turn_signal(signals, entry.turn, HGroupMoveKind::FixClue)
+                    || same_turn_signal(signals, entry.turn, HGroupMoveKind::CriticalColorBluff)
+                    || same_turn_signal(signals, entry.turn, HGroupMoveKind::DoubleBluff);
+            if higher_priority_interpretation {
+                return;
+            }
+            if let (Some(interpretation), Some(focus_identity)) = (interpretation, charm_focus) {
                 let actor = next_player(*giver, hands.len());
+                if four_charm_blind_plays(
+                    view,
+                    actor,
+                    focus_identity,
+                    stack_heights,
+                    explicitly_clued,
+                ) < 3
+                {
+                    // Prompt steps do not count, and an ordinary Finesse of
+                    // only one or two blind plays has priority over a Charm.
+                    // Source: https://hanabi.github.io/level-23/#the-4-charm
+                    return;
+                }
                 let gotten = explicitly_clued
                     .union(invisibly_clued)
                     .copied()
@@ -591,9 +604,18 @@ pub(in crate::h_group) fn apply_charm_effects(
                     .flatten()
                     .filter(|card| {
                         identity_of(view, *card)
-                            .is_some_and(|identity| is_playable_at(stack_heights, identity))
+                            .is_none_or(|identity| is_playable_at(stack_heights, identity))
                     });
                 if let Some(charmed) = charmed {
+                    // Only a valid Charm supersedes the apparent ordinary
+                    // layered line. Merely focusing an untouched 4 is not
+                    // enough: if the next player has no fourth Finesse
+                    // Position, the earlier connections remain intact.
+                    pending.cancel_where(
+                        entry.turn,
+                        ConnectionTransitionReason::FocusInvalidated,
+                        |connection| connection.focus == interpretation.focus,
+                    );
                     pending.cancel_where(
                         entry.turn,
                         ConnectionTransitionReason::Superseded,
@@ -606,7 +628,7 @@ pub(in crate::h_group) fn apply_charm_effects(
                         *giver,
                         Some(actor),
                         HGroupMoveKind::Charm,
-                        vec![charmed],
+                        vec![charmed, interpretation.focus],
                         identity_of(view, charmed),
                     );
                 }
@@ -646,19 +668,58 @@ pub(in crate::h_group) fn apply_charm_effects(
             let Some(delayed) = delayed else {
                 return;
             };
-            let focus_identity = identity_of(view, delayed.focus).or_else(|| {
-                (delayed.focus_identities.len() == 1)
-                    .then(|| delayed.focus_identities.iter().next())
-                    .flatten()
-            });
-            let Some(focus_identity) = focus_identity else {
-                return;
-            };
-            let height = stack_heights[focus_identity.suit.index()];
-            if focus_identity.rank.number() <= height + 1 {
+            if pending
+                .iter()
+                .any(|connection| connection.focus == delayed.focus && connection.actor == *player)
+            {
+                // A Self-Finessed player can be waiting on their own layer;
+                // their discard does not identify another player's card.
                 return;
             }
-            let connector = Card::new(focus_identity.suit, Rank::ALL[usize::from(height)]);
+            let focus_identities = delayed
+                .focus_identities
+                .union(delayed.play_identities)
+                .union(IdentitySet::all().iter().fold(
+                    IdentitySet::default(),
+                    |identities, identity| {
+                        if delayed.clue.matches(identity) {
+                            identities.union(IdentitySet::singleton(identity))
+                        } else {
+                            identities
+                        }
+                    },
+                ))
+                .union(
+                    identity_of(view, delayed.focus)
+                        .map_or_else(IdentitySet::default, IdentitySet::singleton),
+                );
+            let connectors = focus_identities.iter().fold(
+                IdentitySet::default(),
+                |connectors, focus_identity| {
+                    let height = stack_heights[focus_identity.suit.index()];
+                    if focus_identity.rank.number() <= height + 1 {
+                        connectors
+                    } else {
+                        connectors.union(IdentitySet::singleton(Card::new(
+                            focus_identity.suit,
+                            Rank::ALL[usize::from(height)],
+                        )))
+                    }
+                },
+            );
+            let Some(connector) = (connectors.len() == 1)
+                .then(|| connectors.iter().next())
+                .flatten()
+            else {
+                // Acting on a hesitation is safe only when exactly one
+                // connecting identity explains it.
+                return;
+            };
+            if focus_identities.contains(connector) {
+                // Playing another copy of the clued identity would make the
+                // focus owner misplay their directly clued card.
+                return;
+            }
             if pending_identity_is_queued(pending, connector) {
                 // Hesitation calls for a genuinely missing connector. The
                 // focus owner may discard while an earlier teammate's queued
@@ -669,10 +730,37 @@ pub(in crate::h_group) fn apply_charm_effects(
             }
             let actor = next_player(*player, hands.len());
             let gotten = protected_cards(explicitly_clued, invisibly_clued, chop_moved);
+            let clued_connector = hands[actor.index()]
+                .iter()
+                .any(|card| gotten.contains(card) && identity_of(view, *card) == Some(connector));
             let hesitation =
                 finesse_position_id(&hands[actor.index()], &gotten, 0).filter(|card| {
                     identity_of(view, *card).is_none_or(|identity| identity == connector)
                 });
+            if clued_connector && hesitation.is_some() {
+                // A clued connector and a Finesse-Position connector are
+                // ambiguous; guessing could misplay a critical card.
+                return;
+            }
+            let creates_self_component = focus_identities.iter().any(|focus_identity| {
+                if focus_identity.suit != connector.suit
+                    || focus_identity.rank.number() <= connector.rank.number() + 1
+                {
+                    return false;
+                }
+                let successor = Card::new(
+                    connector.suit,
+                    Rank::ALL[usize::from(connector.rank.number())],
+                );
+                finesse_position_id(&hands[player.index()], &gotten, 0)
+                    .and_then(|card| identity_of(view, card))
+                    == Some(successor)
+            });
+            if creates_self_component {
+                // The blind-play would make the clue look like a Double
+                // Finesse with a self component, causing a later misplay.
+                return;
+            }
             if let Some(hesitation) = hesitation {
                 forced_playable.insert(hesitation);
                 push_signal(
@@ -691,36 +779,79 @@ pub(in crate::h_group) fn apply_charm_effects(
             card,
             identity,
         } if was_clued_before(view, entry.turn, *card) && !card_is_trash(view, *identity) => {
+            if signals.iter().any(|signal| {
+                signal.turn == entry.turn
+                    && matches!(
+                        signal.kind,
+                        HGroupMoveKind::SarcasticDiscard
+                            | HGroupMoveKind::LayeredGentlemansDiscard
+                            | HGroupMoveKind::ScreamDiscard
+                            | HGroupMoveKind::ShoutDiscard
+                            | HGroupMoveKind::GenerationDiscard
+                    )
+            }) {
+                // Sarcastic transfer takes precedence, a safe layer is an
+                // ordinary Layered Gentleman's Discard, and emergency
+                // discards retain their emergency meaning.
+                // Source: https://hanabi.github.io/level-23/#the-blaze-discard
+                return;
+            }
             let gotten = protected_cards(explicitly_clued, invisibly_clued, chop_moved);
-            let matching = hands.iter().enumerate().find_map(|(owner, hand)| {
-                hand.iter()
-                    .copied()
-                    .find(|candidate| identity_of(view, *candidate) == Some(*identity))
-                    .map(|candidate| (owner, candidate))
-            });
-            if let Some((owner, matching)) = matching {
-                let position = hands[owner]
+            let mut matching = None;
+            for (owner, hand) in hands.iter().enumerate() {
+                for candidate in hand
                     .iter()
-                    .rev()
-                    .filter(|candidate| !gotten.contains(candidate))
-                    .position(|candidate| *candidate == matching);
-                if let Some(position) = position.filter(|position| *position > 0) {
-                    let actor = next_player(*player, hands.len());
-                    if let Some(blaze) =
-                        finesse_position_id(&hands[actor.index()], &gotten, position)
-                    {
-                        forced_playable.insert(blaze);
-                        push_signal(
-                            signals,
-                            entry,
-                            *player,
-                            Some(actor),
-                            HGroupMoveKind::BlazeDiscard,
-                            vec![blaze, matching],
-                            identity_of(view, blaze),
-                        );
-                        return;
+                    .copied()
+                    .filter(|candidate| identity_of(view, *candidate) == Some(*identity))
+                {
+                    let position = hand
+                        .iter()
+                        .rev()
+                        .filter(|held| !gotten.contains(held))
+                        .position(|held| *held == candidate);
+                    if let Some(position) = position.filter(|position| *position > 0) {
+                        if matching.is_none_or(|(best_owner, _, best_position)| {
+                            (position, owner) < (best_position, best_owner)
+                        }) {
+                            matching = Some((owner, candidate, position));
+                        }
                     }
+                }
+            }
+            if let Some((_owner, matching, position)) = matching {
+                let actor = next_player(*player, hands.len());
+                let matching_owner = hands
+                    .iter()
+                    .position(|hand| hand.contains(&matching))
+                    .expect("matching Blaze card remains in a hand");
+                let holder_has_layer = (0..position).any(|earlier| {
+                    finesse_position_id(&hands[matching_owner], &gotten, earlier)
+                        .and_then(|card| identity_of(view, card))
+                        .is_some_and(|identity| is_playable_at(stack_heights, identity))
+                });
+                let actor_has_layer = (0..position).any(|earlier| {
+                    finesse_position_id(&hands[actor.index()], &gotten, earlier)
+                        .and_then(|card| identity_of(view, card))
+                        .is_some_and(|identity| is_playable_at(stack_heights, identity))
+                });
+                if holder_has_layer || actor_has_layer {
+                    // Layering either the matching hand or the ignited hand
+                    // makes the positional message ambiguous and is illegal.
+                    // Source: https://hanabi.github.io/level-23/#the-blaze-discard
+                    return;
+                }
+                if let Some(blaze) = finesse_position_id(&hands[actor.index()], &gotten, position) {
+                    forced_playable.insert(blaze);
+                    push_signal(
+                        signals,
+                        entry,
+                        *player,
+                        Some(actor),
+                        HGroupMoveKind::BlazeDiscard,
+                        vec![blaze, matching],
+                        identity_of(view, blaze),
+                    );
+                    return;
                 }
             }
             push_signal(

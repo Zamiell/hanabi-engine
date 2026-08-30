@@ -1439,22 +1439,27 @@ pub(super) fn advanced_clue_candidates(
         let every_touched_card_is_playable = identities.len() == touched.len()
             && playable == identities.len()
             && distinct_touched_identities.len() == identities.len();
+        let charm_actor = next_player(view.current_player, view.hands.len());
+        let charm_double_bluff_actor = next_player(charm_actor, view.hands.len());
+        let charm_double_bluff_available =
+            finesse_position(&view.hands[charm_double_bluff_actor.index()], gotten, 0)
+                .and_then(|card| card.identity)
+                .is_some_and(|identity| is_playable_now(view, identity));
         let charm = rule_enabled(profile, HGroupRuleId::Charms)
-            && clue == Clue::Rank(Rank::Four)
+            && !safe_generic_play
+            && !charm_double_bluff_available
             && target != next_player(view.current_player, view.hands.len())
             && clue_focus.is_some_and(|focus| {
                 newly_touched.contains(&focus)
+                    && !gotten.contains(&focus)
+                    && !was_clued_before(view, view.turn, focus)
                     && identity_of(view, focus).is_some_and(|identity| {
-                        let height = view.play_stacks[identity.suit.index()].len();
-                        usize::from(identity.rank.number()) == height + 4
+                        identity.rank == Rank::Four
+                            && view.play_stacks[identity.suit.index()].is_empty()
                     })
-                    && finesse_position(
-                        &view.hands[next_player(view.current_player, view.hands.len()).index()],
-                        gotten,
-                        3,
-                    )
-                    .and_then(|card| card.identity)
-                    .is_some_and(|identity| is_playable_now(view, identity))
+                    && finesse_position(&view.hands[charm_actor.index()], gotten, 3)
+                        .and_then(|card| card.identity)
+                        .is_some_and(|identity| is_playable_now(view, identity))
             });
         let eight_clue_save = rule_enabled(profile, HGroupRuleId::Stalling)
             && !replay.early_game
@@ -1686,7 +1691,12 @@ pub(super) fn advanced_clue_candidates(
         } else if off_chop_five && stalling {
             Some((HGroupMoveKind::FiveStall, 80))
         } else if charm {
-            Some((HGroupMoveKind::Charm, 70))
+            // A 4 Charm is still a Play Clue on the focused 4, while also
+            // producing the next player's Fourth-Finesse-Position play.
+            // Value it like an ordinary Play Clue; its named two-action line
+            // supplies the efficiency comparison.
+            // Source: https://hanabi.github.io/level-23/#the-4-charm
+            Some((HGroupMoveKind::Charm, 400))
         } else if eight_clue_save {
             Some((HGroupMoveKind::SaveClue, 50))
         } else if rule_enabled(profile, HGroupRuleId::Stalling)
@@ -1868,6 +1878,7 @@ fn advanced_kind_replaces_ordinary_play(kind: HGroupMoveKind) -> bool {
             | HGroupMoveKind::TrashEjection
             | HGroupMoveKind::ReplayEjection
             | HGroupMoveKind::PokeEjection
+            | HGroupMoveKind::Charm
     )
 }
 

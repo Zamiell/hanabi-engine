@@ -864,6 +864,12 @@ fn clue_line_value(
     let after_team = TeamConventionSnapshot::new(after_clue.clone(), profile);
     let mut value = LineOutcome::default();
     let named_line = canonical_named_line_metrics(source, &after_team);
+    let charm_focus = after_team
+        .projection(source.observer)?
+        .replay
+        .signals
+        .at_turn(source.turn, HGroupMoveKind::Charm)
+        .find_map(|signal| signal.cards.last().copied());
     let mut giver_public_actions = Vec::new();
     let caused_by_clue = |card: CardId, identity: Card| {
         touched.contains(&card)
@@ -885,7 +891,13 @@ fn clue_line_value(
     for (player, baseline) in baselines.iter().enumerate() {
         let observer =
             PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
-        let after = projected_line_state(&after_clue, after_team.projection(observer)?);
+        let projection = after_team.projection(observer)?;
+        let conflicts_with_giver = charm_focus.is_none()
+            && projection
+                .replay
+                .signals
+                .has_at_turn(source.turn, HGroupMoveKind::Charm);
+        let after = projected_line_state(&after_clue, projection);
         record_clued_superpositions(&mut value, observer, &after);
         let changed_connection_cards = after
             .connection_lines
@@ -955,18 +967,20 @@ fn clue_line_value(
                     }),
             );
         }
-        value.public_actions.extend(
-            after
-                .closed_public_commitments(source)
-                .iter()
-                .copied()
-                .filter(|commitment| !baseline_public_commitments.contains(commitment))
-                .filter(|(card, identity)| commitment_caused(*card, *identity))
-                .filter_map(|(card, identity)| {
-                    card_owner(source, card)
-                        .map(|owner| ActionCommitment::exact(card, owner, identity))
-                }),
-        );
+        if !conflicts_with_giver {
+            value.public_actions.extend(
+                after
+                    .closed_public_commitments(source)
+                    .iter()
+                    .copied()
+                    .filter(|commitment| !baseline_public_commitments.contains(commitment))
+                    .filter(|(card, identity)| commitment_caused(*card, *identity))
+                    .filter_map(|(card, identity)| {
+                        card_owner(source, card)
+                            .map(|owner| ActionCommitment::exact(card, owner, identity))
+                    }),
+            );
+        }
         let baseline_owner_commitments = baseline.closed_owner_commitments(source);
         let new_actions = after
             .closed_owner_commitments(source)
@@ -1010,16 +1024,31 @@ fn clue_line_value(
                             .then_some(belief.card)
                     })
             }));
-        if let Some(connection) = after.connection.filter(|connection| {
-            baseline
-                .connection
-                .is_none_or(|prior| prior.card != connection.card)
-                && !baseline_public_commitments.iter().any(|(card, identity)| {
-                    *card == connection.card && *identity == connection.identity
-                })
-        }) {
+        if let Some(connection) = (!conflicts_with_giver)
+            .then_some(after.connection)
+            .flatten()
+            .filter(|connection| {
+                baseline
+                    .connection
+                    .is_none_or(|prior| prior.card != connection.card)
+                    && !baseline_public_commitments.iter().any(|(card, identity)| {
+                        *card == connection.card && *identity == connection.identity
+                    })
+            })
+        {
             record_new_connection(&mut value, source, connection);
         }
+    }
+    if let Some(focus) = charm_focus {
+        // A Charm immediately schedules the Fourth-Finesse-Position card.
+        // Its untouched 4 remains a valuable long-term promise, but is not a
+        // deterministic continuation until the intervening 1, 2, and 3 are
+        // secured. Keep it in owner knowledge/protection without inflating
+        // immediate team-action coverage.
+        giver_public_actions.retain(|commitment| commitment.card != focus);
+        value
+            .public_actions
+            .retain(|commitment| commitment.card != focus);
     }
     giver_public_actions
         .sort_unstable_by_key(|commitment| (commitment.card.index(), commitment.owner.index()));
@@ -1086,6 +1115,22 @@ fn canonical_named_line_metrics(
                     // apparent multi-step Finesse on the 5, so those are the
                     // only two actions this clue actually promises.
                     ejection = Some((signal.cards.len(), 1));
+                }
+                HGroupMoveKind::Charm => {
+                    if observer != source.observer {
+                        // The blind player necessarily treats their hidden
+                        // Fourth Finesse Position as possibly playable. Only
+                        // the clue giver can verify that the Charm is safe;
+                        // another observer's provisional reading must not
+                        // inflate the deterministic team line.
+                        continue;
+                    }
+                    // The signal contains the immediate Fourth-Finesse-
+                    // Position blind play and the long-term focused 4. Only
+                    // the former is a deterministic continuation now; the 4
+                    // still depends on its ordinary intervening stack cards.
+                    // Source: https://hanabi.github.io/level-23/#the-4-charm
+                    ejection = Some((1, 1));
                 }
                 _ => {}
             }

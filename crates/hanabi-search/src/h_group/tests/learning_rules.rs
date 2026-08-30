@@ -1644,7 +1644,7 @@ fn duplicate_rank_ones_use_a_focused_play_clue_instead_of_ignition() {
 }
 
 #[test]
-fn delayed_green_four_is_not_clued_over_an_invalid_finesse() {
+fn delayed_green_four_is_rejected_before_charms_and_admitted_as_a_charm_at_level_twenty_three() {
     let mut state = paired_sample_zero_state();
     for action in [
         Action::Clue {
@@ -1670,17 +1670,26 @@ fn delayed_green_four_is_not_clued_over_an_invalid_finesse() {
         state.apply(action).unwrap();
     }
     let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
-    let clue_candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let before_charms =
+        h_group_clue_candidates(&deductions, HGroupProfile::Level(HGroupLevel::Level22));
+    let with_charms =
+        h_group_clue_candidates(&deductions, HGroupProfile::Level(HGroupLevel::Level23));
+    let green_four = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Suit(Suit::Green),
+    };
 
     assert!(
-        !clue_candidates.iter().any(|candidate| {
-            candidate.action
-                == Action::Clue {
-                    target: PlayerId::new(0),
-                    clue: Clue::Suit(Suit::Green),
-                }
-        }),
-        "candidates: {clue_candidates:#?}, inference: {:#?}",
+        !before_charms
+            .iter()
+            .any(|candidate| candidate.action == green_four),
+        "the ordinary Finesse is invalid before Level 23: {before_charms:#?}"
+    );
+    assert!(
+        with_charms
+            .iter()
+            .any(|candidate| candidate.action == green_four),
+        "Level 23 reinterprets the same physical clue as a 4 Charm: {with_charms:#?}; inference: {:#?}",
         infer_h_group(&deductions, HGroupProfile::Max)
     );
 }
@@ -3147,4 +3156,126 @@ fn five_save_does_not_also_pull_the_adjacent_purple_four() {
             .iter()
             .any(|signal| { signal.turn == 14 && signal.kind == HGroupMoveKind::FivePull })
     );
+}
+
+#[test]
+fn level_twenty_three_blaze_discard_uses_matching_finesse_positions() {
+    // Directly models https://hanabi.github.io/level-23/#the-blaze-discard:
+    // Cathy's clued red 2 is transferred to Bob's Second Finesse Position,
+    // so Alice must blind-play her own Second Finesse Position.
+    let mut state = state_with_prefix(
+        3,
+        &[
+            Card::new(Suit::Purple, Rank::Five),
+            Card::new(Suit::Yellow, Rank::Five),
+            Card::new(Suit::Green, Rank::Five),
+            Card::new(Suit::Green, Rank::Four),
+            Card::new(Suit::Yellow, Rank::One),
+            Card::new(Suit::Red, Rank::One),
+            Card::new(Suit::Blue, Rank::Five),
+            Card::new(Suit::Purple, Rank::Three),
+            Card::new(Suit::Red, Rank::Two),
+            Card::new(Suit::Purple, Rank::Four),
+            Card::new(Suit::Blue, Rank::Four),
+            Card::new(Suit::Green, Rank::Three),
+            Card::new(Suit::Yellow, Rank::Three),
+            Card::new(Suit::Blue, Rank::Three),
+            Card::new(Suit::Red, Rank::Two),
+        ],
+    );
+    state.apply(Action::Play(CardId::new(0))).unwrap();
+    state
+        .apply(Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        })
+        .unwrap();
+    state.apply(Action::Discard(CardId::new(14))).unwrap();
+
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let replay = replay_h_group(
+        &deductions,
+        HGroupProfile::Level(HGroupLevel::Level23),
+    );
+    assert!(
+        replay.signals.iter().any(|signal| {
+                signal.kind == HGroupMoveKind::BlazeDiscard
+                && signal.target == Some(PlayerId::new(0))
+                && signal.cards == [CardId::new(4), CardId::new(8)]
+        }),
+        "the Blaze must communicate the matching Finesse Position: {replay:#?}"
+    );
+    assert!(replay.cards.forced_playable.contains(&CardId::new(4)));
+}
+
+#[test]
+fn level_twenty_three_hesitation_uses_the_unique_safe_connector() {
+    // Directly models
+    // https://hanabi.github.io/level-23/#the-hesitation-blind-play:
+    // blue 3 is directly playable, but red 3 remains a Reverse-Finesse
+    // possibility. Bob's discard identifies Cathy's red 2 as the sole safe
+    // connector.
+    let mut state = state_with_prefix(
+        3,
+        &[
+            Card::new(Suit::Red, Rank::One),
+            Card::new(Suit::Blue, Rank::One),
+            Card::new(Suit::Green, Rank::Two),
+            Card::new(Suit::Red, Rank::Four),
+            Card::new(Suit::Yellow, Rank::Four),
+            Card::new(Suit::Yellow, Rank::One),
+            Card::new(Suit::Purple, Rank::One),
+            Card::new(Suit::Blue, Rank::Two),
+            Card::new(Suit::Red, Rank::Five),
+            Card::new(Suit::Yellow, Rank::Five),
+            Card::new(Suit::Green, Rank::One),
+            Card::new(Suit::Yellow, Rank::Two),
+            Card::new(Suit::Purple, Rank::Two),
+            Card::new(Suit::Green, Rank::Five),
+            Card::new(Suit::Blue, Rank::Five),
+            Card::new(Suit::Red, Rank::Two),
+            Card::new(Suit::Yellow, Rank::One),
+            Card::new(Suit::Green, Rank::One),
+            Card::new(Suit::Blue, Rank::One),
+            Card::new(Suit::Purple, Rank::One),
+            Card::new(Suit::Red, Rank::One),
+            Card::new(Suit::Yellow, Rank::Four),
+            Card::new(Suit::Blue, Rank::Three),
+            Card::new(Suit::Red, Rank::Two),
+        ],
+    );
+    for action in [
+        Action::Play(CardId::new(0)),
+        Action::Play(CardId::new(5)),
+        Action::Play(CardId::new(10)),
+        Action::Play(CardId::new(1)),
+        Action::Play(CardId::new(6)),
+        Action::Play(CardId::new(11)),
+        Action::Play(CardId::new(2)),
+        Action::Play(CardId::new(7)),
+        Action::Play(CardId::new(12)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Three),
+        },
+        Action::Discard(CardId::new(8)),
+    ] {
+        state.apply(action).unwrap();
+    }
+
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
+    let replay = replay_h_group(
+        &deductions,
+        HGroupProfile::Level(HGroupLevel::Level23),
+    );
+    assert!(
+        replay.signals.iter().any(|signal| {
+            signal.kind == HGroupMoveKind::HesitationBlindPlay
+                && signal.target == Some(PlayerId::new(2))
+                && signal.cards == [CardId::new(23), CardId::new(22)]
+                && signal.identity == Some(Card::new(Suit::Red, Rank::Two))
+        }),
+        "the hesitation must identify the sole missing red-2 connector: {replay:#?}"
+    );
+    assert!(replay.cards.forced_playable.contains(&CardId::new(23)));
 }

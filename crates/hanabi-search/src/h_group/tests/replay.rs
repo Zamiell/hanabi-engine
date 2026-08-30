@@ -236,9 +236,68 @@ fn third_expert_replay_matches_engine() {
 }
 
 #[test]
-#[ignore = "pending expert review: opening yellow clue to Donald is not yet admitted"]
+#[ignore = "pending expert review: first unresolved disagreement is move 3"]
 fn fourth_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine(&expert_replay_p4v0s3());
+}
+
+#[test]
+fn fourth_replay_opening_color_clue_is_a_four_charm() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(0).expect("fixture prefix is legal");
+    let view = state.view_for(PlayerId::new(0)).expect("Alice has a view");
+    let deductions = LogicalDeductions::new(view).expect("valid deductions");
+    let charm = Action::Clue {
+        target: PlayerId::new(3),
+        clue: Clue::Suit(Suit::Yellow),
+    };
+    let rank_charm = Action::Clue {
+        target: PlayerId::new(3),
+        clue: Clue::Rank(Rank::Four),
+    };
+
+    assert!(
+        !h_group_clue_candidates(&deductions, HGroupProfile::Level(HGroupLevel::Level22))
+            .iter()
+            .any(|candidate| candidate.action == charm),
+        "the Charm must not be available before Level 23"
+    );
+    assert!(
+        h_group_clue_candidates(&deductions, HGroupProfile::Level(HGroupLevel::Level23))
+            .iter()
+            .any(|candidate| candidate.action == charm),
+        "Level 23 permits a 4 Charm with either a color clue or a rank clue"
+    );
+    assert!(
+        h_group_clue_candidates(&deductions, HGroupProfile::Level(HGroupLevel::Level23))
+            .iter()
+            .any(|candidate| candidate.action == rank_charm),
+        "the ordinary rank form of the 4 Charm remains available"
+    );
+
+    let after_clue = fixture
+        .state_at_turn(1)
+        .expect("opening Charm is a legal fixture prefix");
+    let deductions = LogicalDeductions::new(
+        after_clue
+            .view_for(PlayerId::new(1))
+            .expect("Bob has a view"),
+    )
+    .expect("valid deductions");
+    let replay = replay_h_group(&deductions, HGroupProfile::Level(HGroupLevel::Level23));
+    assert!(
+        replay.signals.iter().any(|signal| {
+            signal.kind == HGroupMoveKind::Charm
+                && signal.target == Some(PlayerId::new(1))
+                && signal.cards == [CardId::new(4), CardId::new(15)]
+        }),
+        "the color 4 Charm must force Bob's Fourth Finesse Position: {replay:#?}"
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Level(HGroupLevel::Level23)),
+        Some(Action::Play(CardId::new(4))),
+        "Bob must immediately prove the Charm by blind-playing his Fourth Finesse Position",
+    );
 }
 
 #[test]

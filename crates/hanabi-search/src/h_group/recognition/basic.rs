@@ -301,11 +301,11 @@ pub(super) fn apply_sarcastic_discard(
         return;
     };
     if was_clued_before(view, entry.turn, card)
-        && view
-            .hands
-            .iter()
-            .flatten()
-            .any(|candidate| candidate.id != card && candidate.identity == Some(identity))
+        && view.hands.iter().flatten().any(|candidate| {
+            candidate.id != card
+                && candidate.identity == Some(identity)
+                && was_clued_before(view, entry.turn, candidate.id)
+        })
     {
         push_signal(
             signals,

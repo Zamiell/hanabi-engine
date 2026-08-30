@@ -1,8 +1,9 @@
 use super::{
-    Card, CardSet, Clue, ConnectionTransitionReason, HGroupClueKind, HGroupMoveKind,
-    HGroupRuleEffects, HGroupTurnContext, IdentitySet, ObservedEvent, PlayerId, PlayerView, Rank,
-    chop, finesse_position_id, five_pulled_card, focus, is_critical, is_playable_at, is_trash_at,
-    next_player, protected_cards, push_signal, same_turn_signal, was_clued_before,
+    Card, CardSet, Clue, ConnectionTransitionReason, HGroupClueKind, HGroupConnectionKind,
+    HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, IdentitySet, ObservedEvent, PlayerId,
+    PlayerView, Rank, chop, finesse_position_id, five_pulled_card, focus, is_critical,
+    is_playable_at, is_trash_at, next_player, protected_cards, push_signal, same_turn_signal,
+    was_clued_before,
 };
 
 #[allow(clippy::too_many_lines)]
@@ -43,19 +44,21 @@ pub(in crate::h_group) fn apply_extra_effects(
                     None,
                 );
             }
-            let just_in_time_focuses = effects
+            let just_in_time_targets = effects
                 .pending
                 .iter()
-                .filter(|connection| {
-                    connection.actor == *target
-                        && touched.contains(&connection.focus)
+                .filter_map(|connection| {
+                    let finesse_target = connection
+                        .cards
+                        .first()
+                        .copied()
+                        .filter(|card| touched.contains(card))?;
+                    (connection.actor == *target
+                        && connection.kind == HGroupConnectionKind::Finesse
+                        && next_player(*giver, hands.len()) == *target
                         && touched
                             .iter()
                             .all(|card| was_clued_before(view, entry.turn, *card))
-                        && connection
-                            .cards
-                            .iter()
-                            .all(|candidate| !touched.contains(candidate))
                         && effects.signals.iter().any(|signal| {
                             signal.turn < entry.turn
                                 && matches!(
@@ -72,20 +75,24 @@ pub(in crate::h_group) fn apply_extra_effects(
                                         .cards
                                         .iter()
                                         .any(|card| signal.cards.contains(card)))
-                        })
+                        }))
+                    .then_some(finesse_target)
                 })
-                .map(|connection| connection.focus)
                 .collect::<Vec<_>>();
-            for focus in just_in_time_focuses {
+            for finesse_target in just_in_time_targets {
                 // https://hanabi.github.io/extras/fix-clues/#the-just-in-time-fix-clue-jit
+                // JIT fixes the final card that would otherwise be
+                // blind-played, not the separately clued focus at the end of
+                // the Finesse. Treating a fill-in on the focus as JIT gives a
+                // redundant clue false multi-action value.
                 push_signal(
                     effects.signals,
                     entry,
                     *giver,
                     Some(*target),
                     HGroupMoveKind::JustInTimeFix,
-                    vec![focus],
-                    context.historical.identity(focus),
+                    vec![finesse_target],
+                    context.historical.identity(finesse_target),
                 );
             }
             if !continuation {

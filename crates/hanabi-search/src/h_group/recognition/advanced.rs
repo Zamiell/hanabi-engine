@@ -3,8 +3,8 @@ use super::{
     ConnectionTransitionReason, ConventionJournal, HGroupClueInterpretation, HGroupClueKind,
     HGroupConnectionKind, HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, IdentitySet,
     ObservedEvent, ObservedHistoryEntry, PlayerView, PromiseId, Rank, RequiredFix, chop,
-    finesse_position_id, five_pulled_card, identity_of, is_playable_at, is_trash_at, next_player,
-    protected_cards, push_signal, same_turn_signal, was_clued_before,
+    finesse_position_id, five_pulled_card, four_charm_blind_plays, identity_of, is_playable_at,
+    is_trash_at, next_player, protected_cards, push_signal, same_turn_signal, was_clued_before,
 };
 use crate::h_group::model::FixObligations;
 
@@ -445,6 +445,9 @@ pub(in crate::h_group) fn apply_out_of_order_effects(
     hands: &[Vec<CardId>],
     clues: &[HGroupClueInterpretation],
     stack_heights: [u8; 5],
+    explicitly_clued: &CardSet,
+    invisibly_clued: &CardSet,
+    chop_moved: &CardSet,
     pending: &mut ConnectionManager,
     _forced_playable: &mut CardSet,
     required_fixes: &mut FixObligations,
@@ -473,6 +476,47 @@ pub(in crate::h_group) fn apply_out_of_order_effects(
             matches!(clue.kind, HGroupClueKind::Play)
                 || (clue.kind == HGroupClueKind::Unrecognized && clue.save_identities.is_empty())
         });
+    let four_charm = interpretation.is_some_and(|meaning| {
+        if *target == next_player(*giver, hands.len())
+            || was_clued_before(view, entry.turn, meaning.focus)
+        {
+            return false;
+        }
+        let Some(focus_identity) = identity_of(view, meaning.focus) else {
+            return false;
+        };
+        if focus_identity.rank != Rank::Four || stack_heights[focus_identity.suit.index()] != 0 {
+            return false;
+        }
+        if same_turn_signal(signals, entry.turn, HGroupMoveKind::CriticalColorBluff)
+            || same_turn_signal(signals, entry.turn, HGroupMoveKind::DoubleBluff)
+        {
+            return false;
+        }
+        let actor = next_player(*giver, hands.len());
+        if four_charm_blind_plays(view, actor, focus_identity, stack_heights, explicitly_clued) < 3
+        {
+            return false;
+        }
+        let gotten = protected_cards(explicitly_clued, invisibly_clued, chop_moved);
+        let charmed = finesse_position_id(&hands[actor.index()], &gotten, 3).is_some_and(|card| {
+            identity_of(view, card).map_or(actor == view.observer, |identity| {
+                is_playable_at(stack_heights, identity)
+            })
+        });
+        let double_bluff_actor = next_player(actor, hands.len());
+        let double_bluff_available =
+            finesse_position_id(&hands[double_bluff_actor.index()], &gotten, 0)
+                .and_then(|card| identity_of(view, card))
+                .is_some_and(|identity| is_playable_at(stack_heights, identity));
+        charmed && !double_bluff_available
+    });
+    if four_charm {
+        // A 4 Charm replaces the apparent multi-card Out-of-Order Play. It
+        // must not manufacture a Fix obligation for the focused 4.
+        // Source: https://hanabi.github.io/level-23/#the-4-charm
+        return;
+    }
     if let Some(card) = interpretation.map(|clue| clue.focus).filter(|card| {
         identity_of(view, *card).is_some_and(|identity| {
             identity.rank.number() > stack_heights[identity.suit.index()] + 1

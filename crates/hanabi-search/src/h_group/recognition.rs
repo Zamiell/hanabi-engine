@@ -56,3 +56,27 @@ pub(super) use trash::{
 fn same_turn_signal(signals: &ConventionJournal, turn: u32, kind: HGroupMoveKind) -> bool {
     signals.has_at_turn(turn, kind)
 }
+
+/// Counts only the blind steps needed to connect a 4 Play Clue. Previously
+/// clued exact connectors are Prompts and therefore do not count toward the
+/// three-blind-play threshold for a 4 Charm.
+fn four_charm_blind_plays(
+    view: &PlayerView,
+    actor: PlayerId,
+    focus_identity: Card,
+    stack_heights: [u8; 5],
+    explicitly_clued: &CardSet,
+) -> usize {
+    let height = stack_heights[focus_identity.suit.index()];
+    ((height + 1)..focus_identity.rank.number())
+        .filter(|rank| {
+            let needed = Card::new(focus_identity.suit, Rank::ALL[usize::from(*rank - 1)]);
+            !view.hands[actor.index()].iter().any(|card| {
+                explicitly_clued.contains(&card.id)
+                    && (card.identity == Some(needed)
+                        || IdentitySet::from_mask(card.clues.identity_mask())
+                            == IdentitySet::singleton(needed))
+            })
+        })
+        .count()
+}

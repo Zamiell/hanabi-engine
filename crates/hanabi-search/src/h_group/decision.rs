@@ -870,9 +870,17 @@ fn derive_convention_constraints(
     clues: &[ClueCandidate],
     analyzed: &[HGroupAnalyzedAction],
 ) -> ConventionConstraints {
-    if let Some(urgent) = clues
-        .iter()
-        .find(|candidate| hard_clue_obligation(view, replay, candidate))
+    let has_forced_play = inferred.cards.iter().any(|card| {
+        inferred.playable_now.contains(&card.card)
+            && card.play_obligation == Some(HGroupPlayObligation::Forced)
+    });
+    if let Some(urgent) = (!has_forced_play)
+        .then(|| {
+            clues
+                .iter()
+                .find(|candidate| hard_clue_obligation(view, replay, candidate))
+        })
+        .flatten()
     {
         return ConventionConstraints::require(
             ConstraintReason::UrgentClue,
