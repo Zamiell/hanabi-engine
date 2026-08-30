@@ -628,7 +628,7 @@ pub(in crate::h_group) fn apply_charm_effects(
                         *giver,
                         Some(actor),
                         HGroupMoveKind::Charm,
-                        vec![charmed, interpretation.focus],
+                        vec![charmed],
                         identity_of(view, charmed),
                     );
                 }

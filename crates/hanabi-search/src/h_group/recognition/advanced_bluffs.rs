@@ -1,7 +1,7 @@
 use super::{
-    BluffTargetKind, Card, CardSet, Clue, ConnectionTransitionReason, HGroupMoveKind,
-    HGroupRuleEffects, HGroupTurnContext, IdentitySet, ObservedEvent, PlayerView, Rank,
-    bluff_play_connects, bluff_target_kind_at, bluff_target_order_is_legal, chop,
+    BluffTargetKind, Card, CardSet, Clue, ConnectionTransitionReason, HGroupClueKind,
+    HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, IdentitySet, ObservedEvent, PlayerView,
+    Rank, bluff_play_connects, bluff_target_kind_at, bluff_target_order_is_legal, chop,
     finesse_position_id, focus, identity_of, is_critical, is_playable_at, is_trash_at, next_player,
     pending_is_active, protected_cards, push_signal, same_turn_signal, was_clued_before,
 };
@@ -97,7 +97,19 @@ pub(in crate::h_group) fn apply_context_effects(
             connection.focus == old_focus && effects.pending.was_created_on(connection, entry.turn)
         })
     });
-    let focus_inversion = touched.len() >= 2
+    let primary_is_play = effects
+        .clues
+        .iter()
+        .rev()
+        .find(|interpretation| interpretation.turn == entry.turn)
+        .is_some_and(|interpretation| {
+            matches!(
+                interpretation.kind,
+                HGroupClueKind::Play | HGroupClueKind::PlayOrSave
+            )
+        });
+    let focus_inversion = primary_is_play
+        && touched.len() >= 2
         && old_focus.is_some_and(|card| {
             chop(&context.before.hands[target.index()], &prior_gotten) == Some(card)
         })

@@ -2788,10 +2788,31 @@ fn schedule_connection(
                     *candidate_index == view.observer.index()
                         && facts[card.index()].allows(expected)
                 });
-        let direct_reverse_finesse = rule_enabled(profile, HGroupRuleId::BasicMoves)
+        let visible_reverse_prompt = (ordinary_search_len..hands.len()).any(|distance| {
+            let candidate_index = (actor_index + distance) % hands.len();
+            if candidate_index == target.index() || candidate_index == giver.index() {
+                return false;
+            }
+            hands[candidate_index].iter().rev().copied().any(|card| {
+                card != focus
+                    && promptable_before_clue.contains(&card)
+                    && !chop_moved.contains(&card)
+                    && !already_playing.contains(&card)
+                    && !scheduled_cards.contains(&card)
+                    && pending_card_allows_identity(
+                        pending,
+                        convention_facts,
+                        card,
+                        expected,
+                        stack_heights,
+                    )
+                    && identity_of(view, card) == Some(expected)
+            })
+        });
+        let direct_reverse_connection = rule_enabled(profile, HGroupRuleId::BasicMoves)
             && !target_loaded
-            && (visible_reverse_finesse || blind_reverse_finesse);
-        if direct_reverse_finesse {
+            && (visible_reverse_prompt || visible_reverse_finesse || blind_reverse_finesse);
+        if direct_reverse_connection {
             reverse_cycle_started = true;
         }
         let search_len = if target_loaded || reverse_cycle_started {

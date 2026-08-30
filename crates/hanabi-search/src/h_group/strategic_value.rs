@@ -864,12 +864,21 @@ fn clue_line_value(
     let after_team = TeamConventionSnapshot::new(after_clue.clone(), profile);
     let mut value = LineOutcome::default();
     let named_line = canonical_named_line_metrics(source, &after_team);
-    let charm_focus = after_team
-        .projection(source.observer)?
+    let giver_projection = after_team.projection(source.observer)?;
+    let charm_focus = giver_projection
         .replay
         .signals
-        .at_turn(source.turn, HGroupMoveKind::Charm)
-        .find_map(|signal| signal.cards.last().copied());
+        .has_at_turn(source.turn, HGroupMoveKind::Charm)
+        .then(|| {
+            giver_projection
+                .replay
+                .clues
+                .iter()
+                .rev()
+                .find(|clue| clue.turn == source.turn)
+                .map(|clue| clue.focus)
+        })
+        .flatten();
     let mut giver_public_actions = Vec::new();
     let caused_by_clue = |card: CardId, identity: Card| {
         touched.contains(&card)

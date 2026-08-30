@@ -236,7 +236,7 @@ fn third_expert_replay_matches_engine() {
 }
 
 #[test]
-#[ignore = "pending expert review: first unresolved disagreement is move 3"]
+#[ignore = "pending expert review: first unresolved disagreement is move 7"]
 fn fourth_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine(&expert_replay_p4v0s3());
 }
@@ -289,7 +289,7 @@ fn fourth_replay_opening_color_clue_is_a_four_charm() {
         replay.signals.iter().any(|signal| {
             signal.kind == HGroupMoveKind::Charm
                 && signal.target == Some(PlayerId::new(1))
-                && signal.cards == [CardId::new(4), CardId::new(15)]
+                && signal.cards == [CardId::new(4)]
         }),
         "the color 4 Charm must force Bob's Fourth Finesse Position: {replay:#?}"
     );
@@ -297,6 +297,92 @@ fn fourth_replay_opening_color_clue_is_a_four_charm() {
         select_h_group_action(&deductions, HGroupProfile::Level(HGroupLevel::Level23)),
         Some(Action::Play(CardId::new(4))),
         "Bob must immediately prove the Charm by blind-playing his Fourth Finesse Position",
+    );
+}
+
+#[test]
+fn fourth_replay_move_three_uses_the_charm_settled_prompt_without_inverting_focus() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(2).expect("fixture prefix is legal");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("Cathy has a view"),
+    )
+    .expect("valid deductions");
+    let rank_two = Clue::Rank(Rank::Two);
+    let rank_two_touched = deductions.view().hands[3]
+        .iter()
+        .filter(|card| {
+            card.identity
+                .is_some_and(|identity| rank_two.matches(identity))
+        })
+        .map(|card| card.id)
+        .collect::<Vec<_>>();
+    assert!(
+        !prospective_clue_signal_kinds(
+            deductions.view(),
+            HGroupProfile::Max,
+            PlayerId::new(3),
+            rank_two,
+            &rank_two_touched,
+        )
+        .contains(&HGroupMoveKind::FocusInversion),
+        "a 2 Save remains chop-focused; filling in the collateral yellow 2 does not invert focus",
+    );
+
+    let expected = Action::Clue {
+        target: PlayerId::new(1),
+        clue: Clue::Rank(Rank::Three),
+    };
+    assert!(
+        h_group_clue_candidates(&deductions, HGroupProfile::Max)
+            .iter()
+            .any(|candidate| candidate.action == expected),
+        "the Charm-settled yellow 4 must not block Donald's yellow-2 Prompt into Bob's yellow 3",
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(expected),
+    );
+}
+
+#[test]
+fn fourth_replay_move_five_uses_the_visible_reverse_prompt() {
+    let fixture = expert_replay_p4v0s3();
+    let before_clue = fixture.state_at_turn(4).expect("fixture prefix is legal");
+    let deductions = LogicalDeductions::new(
+        before_clue
+            .view_for(before_clue.current_player())
+            .expect("Alice has a view"),
+    )
+    .expect("valid deductions");
+    let yellow = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Suit(Suit::Yellow),
+    };
+    assert!(
+        h_group_clue_candidates(&deductions, HGroupProfile::Max)
+            .iter()
+            .any(|candidate| candidate.action == yellow),
+        "yellow 5 connects through Donald's visible, previously clued yellow 4",
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(yellow),
+    );
+
+    let after_clue = fixture.state_at_turn(5).expect("fixture clue is legal");
+    let deductions = LogicalDeductions::new(
+        after_clue
+            .view_for(after_clue.current_player())
+            .expect("Bob has a view"),
+    )
+    .expect("valid deductions");
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(6))),
+        "the visible reverse Prompt must not create a false yellow-4 Layered Finesse in Bob's hand",
     );
 }
 

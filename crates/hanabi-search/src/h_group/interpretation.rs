@@ -471,6 +471,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             &baseline_playing,
             &replay.pending_connections,
             &convention_cards,
+            &replay.cards.facts,
         )
         .or_else(|| {
             let identities = newly_informed
@@ -1336,6 +1337,7 @@ pub(super) fn advanced_clue_candidates(
                         &replay.cards.explicitly_clued,
                         &replay.cards.already_playing,
                         &replay.pending_connections,
+                        &replay.cards.facts,
                     )
                     .is_some()
                         && !prospective_clue_has_unsafe_connection(
@@ -2008,6 +2010,7 @@ pub(super) fn play_clue_score(
     already_playing: &CardSet,
     pending_connections: &[ConnectionObligation],
     convention_cards: &[HGroupCardInference],
+    convention_facts: &ConventionFacts,
 ) -> Option<u16> {
     let trash_collateral = known_trash_collateral(view, focus, focus_identity, clue, newly_touched);
     let ordinary_touches = newly_touched
@@ -2057,6 +2060,7 @@ pub(super) fn play_clue_score(
             explicitly_clued,
             already_playing,
             pending_connections,
+            convention_facts,
         )?
     };
     Some(
@@ -2211,6 +2215,7 @@ pub(super) fn delayed_connection_score(
     explicitly_clued: &CardSet,
     already_playing: &CardSet,
     pending_connections: &[ConnectionObligation],
+    convention_facts: &ConventionFacts,
 ) -> Option<u16> {
     let stack_height = view.play_stacks[focus_identity.suit.index()].len();
     if usize::from(focus_identity.rank.number()) <= stack_height + 1
@@ -2297,30 +2302,46 @@ pub(super) fn delayed_connection_score(
     } else {
         1
     };
-    let direct_reverse_finesse = rule_enabled(profile, HGroupRuleId::BasicMoves)
+    let prompt_allows = |card: &ObservedCard, identity: Card| {
+        convention_facts
+            .known_identity(card.id)
+            .map_or_else(|| card.clues.allows(identity), |known| known == identity)
+    };
+    let direct_reverse_connection = rule_enabled(profile, HGroupRuleId::BasicMoves)
         && (ordinary_search_len..view.hands.len()).any(|distance| {
             let player = (first + distance) % view.hands.len();
-            player != target.index()
-                && view.hands[player]
-                    .iter()
-                    .rev()
-                    .find(|card| {
-                        card.id != focus
-                            && !explicitly_clued.contains(&card.id)
-                            && !already_playing.contains(&card.id)
-                    })
-                    .and_then(|card| card.identity)
-                    == Some(connector)
+            if player == target.index() {
+                return false;
+            }
+            let prompt = view.hands[player].iter().rev().any(|card| {
+                card.id != focus
+                    && explicitly_clued.contains(&card.id)
+                    && !already_playing.contains(&card.id)
+                    && prompt_allows(card, connector)
+                    && card.identity == Some(connector)
+            });
+            let finesse = view.hands[player]
+                .iter()
+                .rev()
+                .find(|card| {
+                    card.id != focus
+                        && !explicitly_clued.contains(&card.id)
+                        && !already_playing.contains(&card.id)
+                })
+                .and_then(|card| card.identity)
+                == Some(connector);
+            prompt || finesse
         });
-    let search_len = if explicitly_clued.contains(&focus) || direct_reverse_finesse {
+    let search_len = if explicitly_clued.contains(&focus) || direct_reverse_connection {
         // A fill-in clue on an already gotten delayed card cannot make its
         // recipient play immediately. Its connection may therefore wrap
         // beyond that recipient, as in a Green-4 reclue that finesses the
-        // following player's Green 2 and Green 3. A newly clued card only
-        // wraps when the recipient can see the exact connector in another
-        // player's immediate Finesse Position (a Level-2 Reverse Finesse).
-        // This prevents deeper hidden layers from manufacturing a reverse
-        // line that the recipient could not recognize on the clue turn.
+        // following player's Green 2 and Green 3. A newly clued card also
+        // wraps when the recipient can see the exact connector either on a
+        // later player's immediate Finesse Position (a Level-2 Reverse
+        // Finesse) or as an already-clued Prompt. This prevents deeper hidden
+        // layers from manufacturing a reverse line while preserving direct,
+        // recipient-visible reverse connections.
         view.hands.len()
     } else {
         ordinary_search_len
@@ -2336,7 +2357,7 @@ pub(super) fn delayed_connection_score(
                 card.id != focus
                     && explicitly_clued.contains(&card.id)
                     && !already_playing.contains(&card.id)
-                    && card.clues.allows(connector)
+                    && prompt_allows(card, connector)
             })
             .collect::<Vec<_>>();
         candidates
@@ -2384,7 +2405,7 @@ pub(super) fn delayed_connection_score(
             card.id != focus
                 && explicitly_clued.contains(&card.id)
                 && !already_playing.contains(&card.id)
-                && card.clues.allows(needed)
+                && prompt_allows(card, needed)
                 && card
                     .identity
                     .is_some_and(|actual| actual != needed && !is_playable_now(view, actual))
