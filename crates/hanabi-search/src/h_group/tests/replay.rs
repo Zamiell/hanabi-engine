@@ -22,11 +22,18 @@ fn assert_expert_replay_matches_engine(replay: &HanabiLiveReplay) {
         let expected = replay_action_at_turn(replay, turn);
         let deductions = LogicalDeductions::new(view).expect("fixture position is logical");
         let clue_candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+        let replay = replay_h_group(&deductions, HGroupProfile::Max);
+        let admitted = clue_candidates
+            .iter()
+            .map(|candidate| candidate.action)
+            .collect::<Vec<_>>();
+        let rejected =
+            h_group_rejected_clues_from_replay(&deductions, HGroupProfile::Max, &replay, &admitted);
         let inferences = infer_h_group(&deductions, HGroupProfile::Max);
         assert_eq!(
             analysis.planner.best_action,
             expected,
-            "engine disagrees at move {}; planner candidates: {:#?}; convention candidates: {clue_candidates:#?}; inferences: {inferences:#?}",
+            "engine disagrees at move {}; planner candidates: {:#?}; convention candidates: {clue_candidates:#?}; rejected clues: {rejected:#?}; inferences: {inferences:#?}",
             turn + 1,
             analysis.planner.root_actions,
         );
@@ -226,6 +233,12 @@ fn second_replay_move_seventeen_excludes_the_promised_purple_two() {
 #[test]
 fn third_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine(&expert_replay_p4v0s2());
+}
+
+#[test]
+#[ignore = "pending expert review: opening yellow clue to Donald is not yet admitted"]
+fn fourth_expert_replay_matches_engine() {
+    assert_expert_replay_matches_engine(&expert_replay_p4v0s3());
 }
 
 #[test]

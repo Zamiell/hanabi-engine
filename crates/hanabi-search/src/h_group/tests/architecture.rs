@@ -1,11 +1,12 @@
 use super::*;
 use crate::{InformationSet, SupportedConvention};
 
-fn expert_replays() -> [(&'static str, HanabiLiveReplay); 3] {
+fn expert_replays() -> [(&'static str, HanabiLiveReplay); 4] {
     [
         ("game-p4v0s415", expert_replay_p4v0s415()),
         ("game-p4v0s9", expert_replay_p4v0s9()),
         ("game-p4v0s2", expert_replay_p4v0s2()),
+        ("game-p4v0s3", expert_replay_p4v0s3()),
     ]
 }
 
