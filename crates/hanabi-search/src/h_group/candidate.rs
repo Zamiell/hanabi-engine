@@ -1,5 +1,7 @@
 use hanabi_core::{Action, PlayerId};
 
+use super::HGroupMoveKind;
+
 /// The primary convention role of an admitted clue.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum CluePurpose {
@@ -115,6 +117,10 @@ impl ClueValue {
 #[derive(Clone, Copy, Debug)]
 pub(super) struct ClueCandidate {
     pub(super) action: Action,
+    /// Canonical semantic move assigned when the candidate was generated.
+    /// Consumers must not replay the hypothetical merely to recover this
+    /// classification.
+    pub(super) move_kind: Option<HGroupMoveKind>,
     pub(super) value: ClueValue,
     pub(super) purpose: CluePurpose,
     pub(super) target: PlayerId,

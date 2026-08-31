@@ -243,7 +243,18 @@ pub(in crate::h_group) fn apply_intermediate_bluff_effects(
         return;
     }
     let focus = interpretation.focus;
-    let special_three = !interpretation.focus_identities.is_empty()
+    // A complete two-step connection is a Double Finesse, not a 3 Bluff.
+    // The 3 Bluff remains the fallback when the recipient cannot see that
+    // full chain.
+    // Sources:
+    // - https://hanabi.github.io/level-2/#the-reverse-finesse
+    // - https://hanabi.github.io/level-13/#the-3-bluff
+    let complete_double_finesse = interpretation
+        .hypotheses
+        .iter()
+        .any(|hypothesis| hypothesis.connection_steps.len() > 1);
+    let special_three = !complete_double_finesse
+        && !interpretation.focus_identities.is_empty()
         && interpretation.focus_identities.iter().all(|identity| {
             bluff_target_kind_at(stack_heights, *clue, identity) == Some(BluffTargetKind::Three)
         });

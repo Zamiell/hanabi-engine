@@ -137,6 +137,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                     (
                         ClueCandidate {
                             action,
+                            move_kind: Some(HGroupMoveKind::FixClue),
                             value: ClueValue::new(600),
                             purpose: CluePurpose::Fix,
                             target,
@@ -212,17 +213,16 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
     );
     let convention_cards = convention_card_inferences(deductions, replay);
     let mut baseline_playing = replay.cards.already_playing.clone();
+    let promised_connection_cards = replay
+        .pending_connections
+        .iter()
+        .flat_map(|connection| connection.cards.iter().copied())
+        .collect::<CardSet>();
     let active_connection_cards = replay
         .pending_connections
         .iter()
         .filter(|connection| pending_is_active(connection, &replay.pending_connections))
         .flat_map(|connection| connection.cards.iter().copied())
-        .collect::<CardSet>();
-    let due_connection_cards = replay
-        .pending_connections
-        .iter()
-        .filter(|connection| pending_is_active(connection, &replay.pending_connections))
-        .filter_map(|connection| connection.cards.first().copied())
         .collect::<CardSet>();
     let conditional_connection_cards = replay
         .pending_connections
@@ -318,8 +318,24 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 )
                 && prior.focus_identities == IdentitySet::singleton(focus_identity)
         });
+        let touches_active_connection = touched.iter().any(|card| {
+            replay.pending_connections.iter().any(|connection| {
+                connection.actor == target
+                    && connection.cards.contains(card)
+                    && clue.matches(connection.expected)
+                    && pending_is_active(connection, &replay.pending_connections)
+            })
+        });
+        let continues_inactive_connection = !touches_active_connection
+            && replay.pending_connections.iter().any(|connection| {
+                connection.actor == target
+                    && connection.cards.contains(&focus)
+                    && clue.matches(connection.expected)
+                    && !pending_is_active(connection, &replay.pending_connections)
+            });
         if !repairs_required_fix
             && !repairs_focus_inversion
+            && !continues_inactive_connection
             && gotten.contains(&focus)
             && (repeats_exact_play_promise
                 || baseline_playing.contains(&focus)
@@ -349,6 +365,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             // can incorrectly erase the mandatory repair.
             candidates.push(ClueCandidate {
                 action,
+                move_kind: Some(HGroupMoveKind::FixClue),
                 value: ClueValue::new(650),
                 purpose: CluePurpose::Fix,
                 target,
@@ -596,13 +613,14 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             play_score = None;
         }
         if play_score.is_some()
-            && baseline_playing.contains(&focus)
+            && (baseline_playing.contains(&focus) || promised_connection_cards.contains(&focus))
+            && !continues_inactive_connection
             && !fixed_cards.contains(&focus)
             && !replay.cards.invalidated_focuses.contains(&focus)
             && newly_informed
                 .iter()
-                .all(|card| *card == focus || baseline_playing.contains(card))
-            && (newly_informed.is_empty() || due_connection_cards.contains(&focus))
+                .all(|card| *card == focus || promised_connection_cards.contains(card))
+            && (newly_informed.is_empty() || promised_connection_cards.contains(&focus))
         {
             // A direct clue on a card already promised to play creates no new
             // action, regardless of whether that promise came from positive
@@ -611,8 +629,10 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             // information and fails Minimum Clue Value. A newly touched focus
             // is rejected here only when it is already an explicit active
             // connection card; broader subjective playability must not erase
-            // a new Elimination Finesse or other legitimate clue. Required
-            // Fixes are handled before ordinary candidate generation above.
+            // a new Elimination Finesse or other legitimate clue. Every card
+            // in an active layered connection is already promised, not only
+            // its immediately due member. Required Fixes are handled before
+            // ordinary candidate generation above.
             play_score = None;
         }
         let repairable_lie = !is_playable_now(view, focus_identity)
@@ -741,6 +761,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             }
             candidates.push(ClueCandidate {
                 action,
+                move_kind: Some(HGroupMoveKind::PlayClue),
                 value: ClueValue::new(score),
                 purpose: CluePurpose::Play,
                 target,
@@ -771,6 +792,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             {
                 candidates.push(ClueCandidate {
                     action,
+                    move_kind: Some(HGroupMoveKind::SaveClue),
                     value: ClueValue::new(score),
                     purpose: CluePurpose::Save,
                     target,
@@ -1056,6 +1078,34 @@ pub(super) fn advanced_clue_candidates(
             .copied()
             .filter(|card| !promptable.contains(card))
             .collect::<Vec<_>>();
+        let only_confirms_existing_connections = !touched.is_empty()
+            && touched.iter().all(|card| {
+                replay.pending_connections.iter().any(|connection| {
+                    connection.actor == target
+                        && connection.cards.contains(card)
+                        && clue.matches(connection.expected)
+                })
+            })
+            && touched.iter().any(|card| {
+                replay.pending_connections.iter().any(|connection| {
+                    connection.actor == target
+                        && connection.cards.contains(card)
+                        && clue.matches(connection.expected)
+                        && pending_is_active(connection, &replay.pending_connections)
+                })
+            });
+        if only_confirms_existing_connections {
+            // Every touched card already has the same identity promise, and
+            // at least one is the active connection step. Naming that due
+            // card directly neither creates a play nor repairs a
+            // contradiction, so the clue cannot acquire a second life as
+            // Out-of-Order Play, Tempo, or another advanced label. A clue
+            // that touches only a later layer is different: it can be a
+            // continuation that tells the recipient to demonstrate the
+            // active connector now.
+            // Source: https://hanabi.github.io/level-1/#minimum-clue-value-principle
+            continue;
+        }
         let identities = touched
             .iter()
             .filter_map(|card| identity_of(view, *card))
@@ -1376,6 +1426,7 @@ pub(super) fn advanced_clue_candidates(
                         identity,
                         previously_fixed.contains(&focus)
                             || replay.cards.invalidated_focuses.contains(&focus),
+                        previously_fixed,
                         touched.len() == 1,
                         &replay.cards.explicitly_clued,
                         &replay.cards.already_playing,
@@ -1897,6 +1948,7 @@ pub(super) fn advanced_clue_candidates(
         };
         candidates.push(ClueCandidate {
             action,
+            move_kind: Some(kind),
             value: ClueValue::new(score + efficiency + u16::from(matches!(clue, Clue::Suit(_)))),
             purpose: if matches!(kind, HGroupMoveKind::SaveClue | HGroupMoveKind::FakeSave) {
                 CluePurpose::Save
@@ -2131,6 +2183,7 @@ pub(super) fn play_clue_score(
             focus,
             focus_identity,
             fixed_cards.contains(&focus) || invalidated_focuses.contains(&focus),
+            fixed_cards,
             clue_touch_count == 1,
             explicitly_clued,
             already_playing,
@@ -2286,6 +2339,7 @@ pub(super) fn delayed_connection_score(
     focus: CardId,
     focus_identity: Card,
     focus_was_fixed: bool,
+    fixed_cards: &CardSet,
     allow_queued_prefix: bool,
     explicitly_clued: &CardSet,
     already_playing: &CardSet,
@@ -2378,9 +2432,10 @@ pub(super) fn delayed_connection_score(
         1
     };
     let prompt_allows = |card: &ObservedCard, identity: Card| {
-        convention_facts
-            .known_identity(card.id)
-            .map_or_else(|| card.clues.allows(identity), |known| known == identity)
+        !fixed_cards.contains(&card.id)
+            && convention_facts
+                .known_identity(card.id)
+                .map_or_else(|| card.clues.allows(identity), |known| known == identity)
     };
     let direct_reverse_connection = rule_enabled(profile, HGroupRuleId::BasicMoves)
         && (ordinary_search_len..view.hands.len()).any(|distance| {
@@ -2772,6 +2827,7 @@ pub(super) fn tempo_clue_candidates(
             // play is a Burn Clue and is not admitted by this fallback.
             candidates.push(ClueCandidate {
                 action,
+                move_kind: Some(HGroupMoveKind::TempoClue),
                 value: ClueValue::new(100 + u16::from(matches!(clue, Clue::Suit(_)))),
                 purpose: CluePurpose::Tempo,
                 target,

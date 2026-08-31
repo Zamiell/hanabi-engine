@@ -236,7 +236,7 @@ fn third_expert_replay_matches_engine() {
 }
 
 #[test]
-#[ignore = "pending expert review: first unresolved disagreement is move 24"]
+#[ignore = "pending expert review: first unresolved disagreement is move 30"]
 fn fourth_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine(&expert_replay_p4v0s3());
 }
@@ -676,6 +676,137 @@ fn fourth_replay_move_twenty_three_plays_the_five_for_clue_recovery() {
     assert_eq!(
         select_h_group_action(&deductions, HGroupProfile::Max),
         Some(Action::Play(CardId::new(8))),
+    );
+}
+
+#[test]
+fn fourth_replay_move_twenty_four_admits_the_red_double_reverse_finesse() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(23).expect("fixture prefix is legal");
+    let view = state
+        .view_for(state.current_player())
+        .expect("Donald has a view");
+    let deductions = LogicalDeductions::new(view.clone()).expect("valid deductions");
+    let expected = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Rank(Rank::Three),
+    };
+    let touched = vec![CardId::new(1)];
+    let after = prospective_clue_view(
+        deductions.view(),
+        PlayerId::new(0),
+        Clue::Rank(Rank::Three),
+        &touched,
+    );
+    let (_, recipient_replay) =
+        projected_h_group_replay(&after, HGroupProfile::Max, PlayerId::new(0))
+            .expect("recipient projection succeeds");
+    let red_one = Card::new(Suit::Red, Rank::One);
+    let red_two = Card::new(Suit::Red, Rank::Two);
+    assert!(
+        recipient_replay
+            .pending_connections
+            .iter()
+            .any(|connection| {
+                connection.actor == PlayerId::new(2)
+                    && connection.focus == CardId::new(1)
+                    && connection.expected == red_one
+            })
+    );
+    assert!(
+        recipient_replay
+            .pending_connections
+            .iter()
+            .any(|connection| {
+                connection.actor == PlayerId::new(2)
+                    && connection.focus == CardId::new(1)
+                    && connection.expected == red_two
+            })
+    );
+    assert!(!recipient_replay.signals.iter().any(|signal| {
+        signal.turn == 23
+            && matches!(
+                signal.kind,
+                HGroupMoveKind::Bluff | HGroupMoveKind::ThreeBluff
+            )
+    }));
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate.action == expected),
+        "rank 3 to Alice should Reverse-Finesse Cathy's red 1 and red 2 for Alice's red 3: candidates={candidates:#?}",
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(expected),
+    );
+}
+
+#[test]
+fn fourth_replay_move_twenty_five_does_not_reclue_the_promised_red_chain() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(24).expect("fixture prefix is legal");
+    let view = state
+        .view_for(state.current_player())
+        .expect("Alice has a view");
+    let deductions = LogicalDeductions::new(view).expect("valid deductions");
+    let redundant_red = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Suit(Suit::Red),
+    };
+    let expected = Action::Clue {
+        target: PlayerId::new(3),
+        clue: Clue::Rank(Rank::Five),
+    };
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| candidate.action != redundant_red),
+        "Cathy's active red 1 and red 2 are already promised by the Double Reverse Finesse: candidates={candidates:#?}",
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(expected),
+        "move 25 candidates={candidates:#?}",
+    );
+}
+
+#[test]
+fn fourth_replay_move_twenty_eight_continues_the_red_chain_with_rank_two() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(27).expect("fixture prefix is legal");
+    let view = state
+        .view_for(state.current_player())
+        .expect("Donald has a view");
+    let deductions = LogicalDeductions::new(view).expect("valid deductions");
+    let expected = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Rank(Rank::Two),
+    };
+    let touched = vec![CardId::new(9)];
+    let signals = prospective_team_clue_signal_kinds(
+        deductions.view(),
+        HGroupProfile::Max,
+        PlayerId::new(2),
+        Clue::Rank(Rank::Two),
+        &touched,
+    );
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    assert!(signals.contains(&HGroupMoveKind::ContinuationClue));
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate.action == expected),
+        "rank 2 should continue Cathy's red-1/red-2 chain: signals={signals:?}; candidates={candidates:#?}",
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(expected),
     );
 }
 

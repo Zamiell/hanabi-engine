@@ -407,6 +407,64 @@ fn ordered_h_group_actions_from_analysis(
     });
     let mut clue_candidates = analysis_clue_candidates(deductions, profile, analysis).to_vec();
     clue_candidates.sort_by_key(|candidate| core::cmp::Reverse(candidate.score()));
+    let has_normal_play_or_save = clue_candidates
+        .iter()
+        .any(|candidate| candidate.purpose == CluePurpose::Play || candidate.save);
+    let gotten = inferred.gotten();
+    let actor_has_known_safe_discard = !inferred.discard_now.is_empty()
+        || analysis.replay.hands[view.observer.index()]
+            .iter()
+            .any(|card| {
+                inferred
+                    .cards
+                    .iter()
+                    .find(|note| note.card == *card)
+                    .is_some_and(|note| {
+                        !note.identities.is_empty()
+                            && note.identities.iter().all(|identity| {
+                                is_convention_trash(view, identity, &gotten, &inferred.cards)
+                            })
+                    })
+            });
+    // https://hanabi.github.io/level-2/#the-5-stall-cluing-off-chop-5s
+    // https://hanabi.github.io/level-9/#early-game-5-stalls
+    // A known-trash or special discard does not end the Early Game. Before
+    // the first completely unknown chop discard, the team must collectively
+    // perform one available 5 Stall. This is a semantic obligation, so its
+    // low intrinsic clue value must not lose to the null discard action.
+    let first_five_stall_can_be_due = analysis.replay.early_game
+        && rule_enabled(profile, HGroupRuleId::BasicMoves)
+        && !analysis
+            .replay
+            .signals
+            .iter()
+            .any(|signal| signal.kind == HGroupMoveKind::FiveStall)
+        && inferred.playable_now.is_empty()
+        && !actor_has_known_safe_discard
+        && !has_normal_play_or_save;
+    let mut first_five_stall_is_due = false;
+    if first_five_stall_can_be_due {
+        let closest_five_stall_distance = clue_candidates
+            .iter()
+            .filter(|candidate| candidate_is_five_stall(candidate))
+            .map(|candidate| five_stall_distance_from_chop(view, candidate, &gotten))
+            .min();
+        if let Some(closest_five_stall_distance) = closest_five_stall_distance {
+            first_five_stall_is_due = true;
+            // https://hanabi.github.io/level-9/#5-stalls-closest-to-chop
+            // Optional lower-precedence moves cannot postpone the team's
+            // first required 5 Stall. A genuine Trash Chop Move remains
+            // available because it protects a card that would otherwise be
+            // discarded now; the curated second replay exercises that
+            // urgency distinction.
+            clue_candidates.retain(|candidate| {
+                candidate.move_kind == Some(HGroupMoveKind::TrashChopMove)
+                    || candidate_is_five_stall(candidate)
+                        && five_stall_distance_from_chop(view, candidate, &gotten)
+                            == closest_five_stall_distance
+            });
+        }
+    }
     if inferred.must_clue.contains(&view.observer) {
         let actions = clue_candidates
             .iter()
@@ -432,12 +490,13 @@ fn ordered_h_group_actions_from_analysis(
         return actions;
     }
 
-    let early_game_has_extinguishing_clue = analysis.replay.early_game
-        && inferred.discard_now.is_empty()
-        && inferred.playable_now.is_empty()
-        && clue_candidates
-            .iter()
-            .any(|candidate| candidate.purpose == CluePurpose::Play || candidate.save);
+    let early_game_has_extinguishing_clue = first_five_stall_is_due
+        || analysis.replay.early_game
+            && inferred.discard_now.is_empty()
+            && inferred.playable_now.is_empty()
+            && clue_candidates
+                .iter()
+                .any(|candidate| candidate.purpose == CluePurpose::Play || candidate.save);
 
     let mut actions = inferred
         .discard_now
@@ -624,6 +683,35 @@ fn ordered_h_group_actions_from_analysis(
     own_hand
         .last()
         .map_or_else(Vec::new, |newest| vec![Action::Play(newest.id)])
+}
+
+fn candidate_is_five_stall(candidate: &ClueCandidate) -> bool {
+    candidate.move_kind == Some(HGroupMoveKind::FiveStall)
+}
+
+fn five_stall_distance_from_chop(
+    view: &PlayerView,
+    candidate: &ClueCandidate,
+    gotten: &CardSet,
+) -> usize {
+    let Action::Clue { target, clue } = candidate.action else {
+        return usize::MAX;
+    };
+    view.hands[target.index()]
+        .iter()
+        .enumerate()
+        .filter(|(_, card)| {
+            card.identity
+                .is_some_and(|identity| clue.matches(identity) && identity.rank == Rank::Five)
+        })
+        .map(|(position, _)| {
+            view.hands[target.index()][position + 1..]
+                .iter()
+                .filter(|card| !gotten.contains(&card.id))
+                .count()
+        })
+        .min()
+        .unwrap_or(usize::MAX)
 }
 
 fn no_valid_first_turn_damage(
@@ -1107,6 +1195,7 @@ fn fallback_clue_score(
     };
     let candidate = ClueCandidate {
         action,
+        move_kind: None,
         value: ClueValue::new(u16::from(score)),
         purpose: CluePurpose::Fallback,
         target,

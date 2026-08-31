@@ -1333,6 +1333,12 @@ fn replay_h_group_inner(
                             })
                             .fold(0, |mask, identity| mask | (1 << identity.index())),
                     );
+                    // Speculation and commit must both read the same pre-clue
+                    // convention snapshot. Pushing the new Play signal may
+                    // reactivate a previously fixed card; allowing commit to
+                    // observe that mutation made it manufacture a loaded
+                    // connection and Fix that simulation never proposed.
+                    let convention_facts_before_clue = signals.facts().clone();
                     let connection_context = ConnectionPlanningContext {
                         profile,
                         view,
@@ -1349,7 +1355,7 @@ fn replay_h_group_inner(
                         protected_before: &gotten,
                         already_playing: &already_playing,
                         declined_direct_plays: &declined_direct_plays,
-                        convention_facts: signals.facts(),
+                        convention_facts: &convention_facts_before_clue,
                         chop_moved: &chop_moved,
                         stack_heights,
                         allow_blind_reverse_empathy,
@@ -1364,6 +1370,21 @@ fn replay_h_group_inner(
                             )
                         })
                         .collect::<Vec<_>>();
+                    // A rank-3 clue may superficially look like a Self 3
+                    // Bluff, but a complete two-card chain to the focus is a
+                    // Double Finesse instead. Bluff recognition is the
+                    // fallback only when the recipient cannot see that full
+                    // connecting line.
+                    // Sources:
+                    // - https://hanabi.github.io/level-2/#the-reverse-finesse
+                    // - https://hanabi.github.io/level-13/#the-3-bluff
+                    if intermediate_bluff
+                        && connection_hypotheses
+                            .iter()
+                            .any(|hypothesis| hypothesis.connection_steps.len() > 1)
+                    {
+                        intermediate_bluff = false;
+                    }
                     for hypothesis in &connection_hypotheses {
                         let Some(required) = hypothesis.required_fix else {
                             continue;
@@ -1563,7 +1584,7 @@ fn replay_h_group_inner(
                             promptable_before: &previously_promptable,
                             already_playing: already_playing.materialized(),
                             pending: &pending_connections,
-                            convention_facts: signals.facts(),
+                            convention_facts: &convention_facts_before_clue,
                             chop_moved: chop_moved.materialized(),
                         });
                     for inference in declined_alternatives {
@@ -1621,11 +1642,22 @@ fn replay_h_group_inner(
                             stack_heights,
                             allow_blind_reverse_empathy,
                         };
-                        let (new_connections, scheduled_fix) = committed_plan.commit(
+                        let (new_connections, _recomputed_fix) = committed_plan.commit(
                             connection_identity,
                             &mut pending_connections,
                             &mut invisibly_clued,
                         );
+                        // The hypothesis is the canonical speculative result.
+                        // Commit materializes its connection graph, but must
+                        // not independently invent a repair obligation after
+                        // clue-state mutations have occurred.
+                        let scheduled_fix = connection_identity.and_then(|identity| {
+                            current_clue
+                                .hypotheses
+                                .iter()
+                                .find(|hypothesis| hypothesis.focus_identity == identity)
+                                .and_then(|hypothesis| hypothesis.required_fix)
+                        });
                         if let (Some(required), Some(identity)) =
                             (scheduled_fix, connection_identity)
                         {
@@ -2514,21 +2546,22 @@ impl ConnectionPlanningContext<'_> {
         pending: &ConnectionManager,
         invisibly_clued: &ProvenancedCardSet,
     ) -> ClueInterpretationHypothesis {
-        let loaded = loaded_connection_plan(
-            self.view,
-            Some(self.hands),
-            Some(self.facts),
-            Some(HistoricalView::new(self.view, self.turn)),
-            self.giver,
-            self.target,
-            self.focus,
-            identity,
-            self.protected_before,
-            self.already_playing,
-            pending,
-            self.stack_heights,
-        )
-        .is_some();
+        let loaded = !self.convention_facts.fixed_cards().contains(&self.focus)
+            && loaded_connection_plan(
+                self.view,
+                Some(self.hands),
+                Some(self.facts),
+                Some(HistoricalView::new(self.view, self.turn)),
+                self.giver,
+                self.target,
+                self.focus,
+                identity,
+                self.protected_before,
+                self.already_playing,
+                pending,
+                self.stack_heights,
+            )
+            .is_some();
         let mut simulated_pending = pending.clone();
         let mut simulated_invisible = invisibly_clued.clone();
         let mut required_fix = None;
@@ -2640,7 +2673,12 @@ fn schedule_connection(
     if focus_identity.rank.number() <= height + 1 {
         return scheduled_connections;
     }
-    let loaded_plan = rule_enabled(profile, HGroupRuleId::Extras).then(|| {
+    // A previously fixed focus has no live Play obligation for a new clue to
+    // load. Its physical clues remain, but the Fix retracted their convention
+    // meaning; the new clue establishes a fresh interpretation instead.
+    let loaded_plan = (rule_enabled(profile, HGroupRuleId::Extras)
+        && !convention_facts.fixed_cards().contains(&focus))
+    .then(|| {
         loaded_connection_plan(
             view,
             Some(hands),
@@ -2980,6 +3018,31 @@ fn schedule_connection(
             }
         }
         if found.is_none() {
+            // If several visible players have the same connector on Finesse
+            // Position, the earlier player trusts that the clue is directed
+            // at the later visible copy. The clue giver and recipient must
+            // therefore schedule that later copy too; otherwise their shared
+            // connection graph disagrees with the blind players' Ambiguous
+            // Finesse interpretation.
+            // Source: https://hanabi.github.io/level-5/#the-ambiguous-finesse
+            let visible_finesse_actors = (0..search_len)
+                .filter_map(|distance| {
+                    let candidate_index = (actor_index + distance) % hands.len();
+                    if candidate_index == target.index() || candidate_index == giver.index() {
+                        return None;
+                    }
+                    let card = hands[candidate_index].iter().rev().copied().find(|card| {
+                        !promptable_before_clue.contains(card)
+                            && !invisibly_clued.contains(card)
+                            && !scheduled_cards.contains(card)
+                            && *card != focus
+                    })?;
+                    (identity_of(view, card) == Some(expected)).then_some((candidate_index, card))
+                })
+                .collect::<Vec<_>>();
+            let ambiguous_visible_actor = (visible_finesse_actors.len() > 1)
+                .then(|| visible_finesse_actors.last().map(|(actor, _)| *actor))
+                .flatten();
             for distance in 0..search_len {
                 let candidate_index = (actor_index + distance) % hands.len();
                 let actor = PlayerId::new(
@@ -3044,6 +3107,14 @@ fn schedule_connection(
                     unclued.first().copied().into_iter().collect()
                 };
                 if !cards.is_empty() {
+                    if ambiguous_visible_actor.is_some_and(|chosen| chosen != candidate_index)
+                        && cards.len() == 1
+                        && cards
+                            .first()
+                            .is_some_and(|card| identity_of(view, *card) == Some(expected))
+                    {
+                        continue;
+                    }
                     if actor == view.observer && giver != view.observer {
                         // From the possible blind player's perspective their
                         // own identities are unknown. Prefer a later, visible
@@ -3277,6 +3348,15 @@ fn pending_card_allows_identity(
     identity: Card,
     stack_heights: [u8; 5],
 ) -> bool {
+    // A Fix retracts the card's former Play meaning. Until a later Play clue
+    // explicitly reactivates that card, it cannot become a Prompt merely
+    // because its physical clues still allow the connecting identity. This is
+    // essential for Reverse Finesses: the recipient must ignore an older
+    // fixed card before looking for the visible connector in a later hand.
+    // Source: https://hanabi.github.io/level-2/#the-reverse-finesse
+    if convention_facts.fixed_cards().contains(&card) {
+        return false;
+    }
     let is_conditional_connection = |source| {
         matches!(
             source,
