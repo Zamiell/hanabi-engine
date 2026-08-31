@@ -1,12 +1,13 @@
 use super::{
     Action, Arc, Card, CardId, Clue, ClueFacts, ConnectionObligation, GameStatus,
-    HGroupCardInference, HGroupClueInterpretation, HGroupInferences, HGroupMoveKind, HGroupProfile,
-    HGroupState, IdentitySet, LogicalDeductions, MAX_CLUE_TOKENS, ObservedCard, ObservedEvent,
-    ObservedHistoryEntry, PerspectiveDepth, PerspectiveProjector, PlayerId, PlayerView,
-    ProspectiveTransition, Rank, RefCell, chop, convention_card_inferences, identity_of,
-    infer_h_group, infer_h_group_from_replay, is_playable_now, next_player, replay_h_group_inner,
-    replay_identity_is_queued,
+    HGroupCardInference, HGroupClueInterpretation, HGroupClueKind, HGroupInferences,
+    HGroupMoveKind, HGroupProfile, HGroupSaveKind, HGroupState, IdentitySet, LogicalDeductions,
+    MAX_CLUE_TOKENS, ObservedCard, ObservedEvent, ObservedHistoryEntry, PerspectiveDepth,
+    PerspectiveProjector, PlayerId, PlayerView, ProspectiveTransition, Rank, RefCell, chop,
+    convention_card_inferences, identity_of, infer_h_group, infer_h_group_from_replay,
+    is_playable_now, next_player, replay_h_group_inner, replay_identity_is_queued,
 };
+use crate::information_set::HandAssignmentVisitEnd;
 use std::rc::Rc;
 
 pub(super) fn subjective_convention_cards(
@@ -157,10 +158,10 @@ impl CompiledProspectiveClue {
     }
 }
 
-#[derive(Clone)]
-enum ProspectiveCacheSlot<T> {
-    Empty,
-    Computed(Option<T>),
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ProspectiveSaveKey {
+    clue: ProspectiveClueKey,
+    focus: CardId,
 }
 
 struct ProspectiveAnalysisCache {
@@ -168,7 +169,7 @@ struct ProspectiveAnalysisCache {
     profile: HGroupProfile,
     baseline_team: TeamConventionSnapshot,
     clue_snapshots: Vec<(ProspectiveClueKey, Option<CompiledProspectiveClue>)>,
-    source_hand_worlds: ProspectiveCacheSlot<Arc<Vec<PlayerView>>>,
+    save_validations: Vec<(ProspectiveSaveKey, bool)>,
 }
 
 thread_local! {
@@ -202,7 +203,7 @@ pub(super) fn with_prospective_analysis_cache<T>(
         profile,
         baseline_team: TeamConventionSnapshot::new(source.clone(), profile),
         clue_snapshots: Vec::new(),
-        source_hand_worlds: ProspectiveCacheSlot::Empty,
+        save_validations: Vec::new(),
     };
     let previous = PROSPECTIVE_ANALYSIS_CACHE.with(|cache| cache.replace(Some(replacement)));
     let _guard = ProspectiveAnalysisCacheGuard(previous);
@@ -341,43 +342,69 @@ mod tests {
             PROSPECTIVE_SNAPSHOT_REDUCTIONS.with(|count| assert_eq!(count.get(), 1));
         });
     }
+
+    #[test]
+    fn incomplete_world_traversal_cannot_prove_contextual_save_safety() {
+        assert!(exhaustive_world_validation_is_safe(
+            HandAssignmentVisitEnd::Exhausted,
+            false
+        ));
+        assert!(!exhaustive_world_validation_is_safe(
+            HandAssignmentVisitEnd::Exhausted,
+            true
+        ));
+        assert!(!exhaustive_world_validation_is_safe(
+            HandAssignmentVisitEnd::LimitReached,
+            false
+        ));
+        assert!(!exhaustive_world_validation_is_safe(
+            HandAssignmentVisitEnd::VisitorStopped,
+            true
+        ));
+    }
 }
 
-fn prospective_source_hand_worlds(
+fn cached_save_validation(
     source: &PlayerView,
     profile: HGroupProfile,
-) -> Option<Arc<Vec<PlayerView>>> {
+    key: &ProspectiveSaveKey,
+) -> Option<bool> {
     let source_address = core::ptr::from_ref(source).addr();
-    if let Some(cached) = PROSPECTIVE_ANALYSIS_CACHE.with(|cache| {
+    PROSPECTIVE_ANALYSIS_CACHE.with(|cache| {
         let cache = cache.borrow();
         let cache = cache.as_ref()?;
         if cache.source_address != source_address || cache.profile != profile {
             return None;
         }
-        match &cache.source_hand_worlds {
-            ProspectiveCacheSlot::Empty => None,
-            ProspectiveCacheSlot::Computed(worlds) => Some(worlds.clone()),
-        }
-    }) {
-        return cached;
-    }
-    let mut worlds = Vec::new();
-    let _visit =
-        PerspectiveProjector::new(source, profile).visit_source_hand_worlds(256, |world| {
-            worlds.push(world.clone());
-            false
-        })?;
-    let computed = Arc::new(worlds);
+        cache
+            .save_validations
+            .iter()
+            .find_map(|(candidate, safe)| (candidate == key).then_some(*safe))
+    })
+}
+
+fn cache_save_validation(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    key: ProspectiveSaveKey,
+    safe: bool,
+) {
+    let source_address = core::ptr::from_ref(source).addr();
     PROSPECTIVE_ANALYSIS_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if let Some(cache) = cache.as_mut() {
             if cache.source_address == source_address && cache.profile == profile {
-                cache.source_hand_worlds =
-                    ProspectiveCacheSlot::Computed(Some(Arc::clone(&computed)));
+                cache.save_validations.push((key, safe));
             }
         }
     });
-    Some(computed)
+}
+
+const fn exhaustive_world_validation_is_safe(
+    end: HandAssignmentVisitEnd,
+    unsafe_world_found: bool,
+) -> bool {
+    !unsafe_world_found && matches!(end, HandAssignmentVisitEnd::Exhausted)
 }
 
 fn projected_h_group_replay_inner(
@@ -463,32 +490,78 @@ pub(super) fn prospective_clue_marks_focus_saved(
     clue: Clue,
     touched: &[CardId],
 ) -> bool {
-    let focus_is_saved = |world: &PlayerView| {
-        let after_clue = prospective_clue_view(world, target, clue, touched);
-        projected_h_group_replay(&after_clue, profile, target)
-            .map(|(deductions, replay)| infer_h_group_from_replay(&deductions, replay, profile))
-            .is_some_and(|inferred| inferred.is_saved(focus))
+    let key = ProspectiveSaveKey {
+        clue: ProspectiveClueKey {
+            target,
+            clue,
+            touched: touched.to_vec(),
+        },
+        focus,
     };
-    if !focus_is_saved(source) {
+    if let Some(safe) = cached_save_validation(source, profile, &key) {
+        return safe;
+    }
+    let Some(compiled) = compiled_prospective_clue(source, profile, target, clue, touched) else {
+        return false;
+    };
+    if !compiled
+        .projection(target)
+        .is_some_and(|projection| projection.inferred.is_saved(focus))
+    {
+        cache_save_validation(source, profile, key, false);
         return false;
     }
 
+    // Ordinary Level 1 Save precedence is independent of the giver's hidden
+    // hand. Rank 2/5 clues may be represented as `PlayOrSave` when the focus
+    // spans both categories, but it remains saved in every branch. A genuinely
+    // critical focus is likewise invariant. Resolving more of the giver's
+    // cards may narrow the recipient's Save identities but cannot turn the
+    // focus into a non-Save. Eight-Clue Saves remain contextual and require
+    // the exhaustive check below.
+    let primary_save_is_hidden_hand_invariant =
+        compiled
+            .primary_interpretation()
+            .is_some_and(|interpretation| {
+                interpretation.focus == focus
+                    && (matches!(
+                        interpretation.kind,
+                        HGroupClueKind::Save(
+                            HGroupSaveKind::Five | HGroupSaveKind::Two | HGroupSaveKind::Critical
+                        )
+                    ) || matches!(interpretation.kind, HGroupClueKind::PlayOrSave)
+                        && !interpretation.save_identities.is_empty()
+                        && matches!(clue, Clue::Rank(Rank::Two | Rank::Five)))
+            });
+    if primary_save_is_hidden_hand_invariant {
+        cache_save_validation(source, profile, key, true);
+        return true;
+    }
+
     // The recipient sees the giver's complete hand even though the giver does
-    // not. Visit joint, card-count-consistent giver hands instead of mutating
-    // one card at a time into combinations that may not form a legal world.
-    let Some(worlds) = prospective_source_hand_worlds(source, profile) else {
+    // not. Stream joint, card-count-consistent giver hands and stop at the
+    // first counterexample. A traversal limit is not a proof of safety.
+    let mut unsafe_world_found = false;
+    let Some(visit) =
+        PerspectiveProjector::new(source, profile).visit_source_hand_worlds(256, |world| {
+            let after_clue = prospective_clue_view(world, target, clue, touched);
+            let unsafe_world =
+                PerspectiveProjector::project_resolved_owned(after_clue, profile, target)
+                    .is_none_or(|(deductions, replay)| {
+                        replay.cards.chop_moved.contains(&focus)
+                            || !infer_h_group_from_replay(&deductions, replay, profile)
+                                .is_saved(focus)
+                    });
+            unsafe_world_found = unsafe_world;
+            unsafe_world
+        })
+    else {
+        cache_save_validation(source, profile, key, false);
         return false;
     };
-    let unsafe_world = worlds.iter().any(|world| {
-        let after_clue = prospective_clue_view(world, target, clue, touched);
-        PerspectiveProjector::project_resolved_owned(after_clue, profile, target).is_none_or(
-            |(deductions, replay)| {
-                replay.cards.chop_moved.contains(&focus)
-                    || !infer_h_group_from_replay(&deductions, replay, profile).is_saved(focus)
-            },
-        )
-    });
-    !unsafe_world
+    let safe = exhaustive_world_validation_is_safe(visit.end, unsafe_world_found);
+    cache_save_validation(source, profile, key, safe);
+    safe
 }
 
 /// Exact convention signals the recipient would attach to a hypothetical

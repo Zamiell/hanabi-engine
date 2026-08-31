@@ -36,7 +36,7 @@ use super::{
 /// How far observer projection may recurse while interpreting conventions.
 /// A named mode prevents call sites from silently disagreeing about the
 /// meaning of a bare boolean.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) enum PerspectiveDepth {
     ObserverOnly,
     NestedRecipients,

@@ -6,6 +6,7 @@
 //! rare moves in the extras chapters of the pinned ruleset.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use hanabi_core::{
@@ -805,29 +806,107 @@ pub const H_GROUP_LEVELS: [HGroupLevelDescriptor; 26] = [
 /// critical-card forms.
 #[allow(clippy::too_many_lines)]
 fn replay_h_group(deductions: &LogicalDeductions, profile: HGroupProfile) -> HGroupState {
-    let ordinary = replay_h_group_inner(
-        deductions,
-        profile,
-        PerspectiveDepth::NestedRecipients,
-        false,
-    );
-    let current = deductions.view().current_player;
-    let mut hypotheses = InterpretationHypotheses::ordinary(ordinary);
-    if hypotheses.ordinary_gives_actor_a_live_connection(current) {
-        return hypotheses.resolve_for_actor(current);
+    with_replay_memo(|| {
+        let ordinary = replay_h_group_inner(
+            deductions,
+            profile,
+            PerspectiveDepth::NestedRecipients,
+            false,
+        );
+        let current = deductions.view().current_player;
+        let mut hypotheses = InterpretationHypotheses::ordinary(ordinary);
+        if hypotheses.ordinary_gives_actor_a_live_connection(current) {
+            return hypotheses.resolve_for_actor(current);
+        }
+        let empathetic = replay_h_group_inner(
+            deductions,
+            profile,
+            PerspectiveDepth::NestedRecipients,
+            true,
+        );
+        hypotheses.add(InterpretationSource::BlindReverseEmpathy, empathetic);
+        hypotheses.resolve_for_actor(current)
+    })
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct ReplayMemoKey {
+    view: PlayerView,
+    profile: HGroupProfile,
+    perspective_depth: PerspectiveDepth,
+    allow_blind_reverse_empathy: bool,
+}
+
+thread_local! {
+    static H_GROUP_REPLAY_MEMO: RefCell<Option<HashMap<ReplayMemoKey, HGroupState>>> =
+        const { RefCell::new(None) };
+}
+
+struct ReplayMemoGuard;
+
+impl Drop for ReplayMemoGuard {
+    fn drop(&mut self) {
+        H_GROUP_REPLAY_MEMO.with(|memo| {
+            memo.replace(None);
+        });
     }
-    let empathetic = replay_h_group_inner(
-        deductions,
-        profile,
-        PerspectiveDepth::NestedRecipients,
-        true,
-    );
-    hypotheses.add(InterpretationSource::BlindReverseEmpathy, empathetic);
-    hypotheses.resolve_for_actor(current)
+}
+
+/// Shares immutable prefix reductions across one recursive replay. Historical
+/// actor-perspective queries repeatedly ask for overlapping prefixes; without
+/// this scope, a length-N replay recursively rebuilds the same length-0..N
+/// histories for every later discard.
+fn with_replay_memo<T>(operation: impl FnOnce() -> T) -> T {
+    let already_active = H_GROUP_REPLAY_MEMO.with(|memo| memo.borrow().is_some());
+    if already_active {
+        return operation();
+    }
+    H_GROUP_REPLAY_MEMO.with(|memo| {
+        memo.replace(Some(HashMap::new()));
+    });
+    let _guard = ReplayMemoGuard;
+    operation()
 }
 
 #[allow(clippy::too_many_lines)]
 fn replay_h_group_inner(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+    perspective_depth: PerspectiveDepth,
+    allow_blind_reverse_empathy: bool,
+) -> HGroupState {
+    with_replay_memo(|| {
+        let key = ReplayMemoKey {
+            view: deductions.view().clone(),
+            profile,
+            perspective_depth,
+            allow_blind_reverse_empathy,
+        };
+        if let Some(replay) = H_GROUP_REPLAY_MEMO.with(|memo| {
+            memo.borrow()
+                .as_ref()
+                .and_then(|memo| memo.get(&key).cloned())
+        }) {
+            return replay;
+        }
+        let replay = replay_h_group_inner_uncached(
+            deductions,
+            profile,
+            perspective_depth,
+            allow_blind_reverse_empathy,
+        );
+        H_GROUP_REPLAY_MEMO.with(|memo| {
+            memo.borrow_mut()
+                .as_mut()
+                .expect("replay memo scope is active")
+                .insert(key, replay.clone());
+        });
+        replay
+    })
+}
+
+#[allow(clippy::too_many_lines)]
+fn replay_h_group_inner_uncached(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
     perspective_depth: PerspectiveDepth,

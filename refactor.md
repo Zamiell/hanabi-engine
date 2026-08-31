@@ -29,6 +29,50 @@ preserve. Commit hashes refer to this repository's Git history.
 - Caches are scoped to one immutable position or exact solve. They may reuse a
   pure semantic result, but may not become a second mutable convention state.
 
+## 2026-08-31: prefix replay memoization and bounded world validation
+
+### Why
+
+The representative Max-profile rollout had grown to 782 seconds. Convention
+reduction repeatedly rebuilt the same actor-relative history prefixes, first
+for ordinary interpretation and again for blind-reverse empathy. Prospective
+Save validation compounded that work by materializing as many as 256 complete
+hidden-hand worlds for every candidate, replaying each world, and then treating
+reaching the cap as if every legal world had been checked. The latter was both
+slow and an unsound safety proof.
+
+### Changes
+
+- Added a thread-local replay memo scoped to one top-level immutable reduction.
+  Its key contains the complete `PlayerView`, profile, perspective depth, and
+  empathy mode, so recursive actor-prefix queries reuse an `HGroupState`
+  without leaking results between positions or solves.
+- Replaced the collected prospective-world vector with a streaming visitor
+  that stops at the first unsafe contextual Save world. A contextual Save is
+  accepted only when enumeration reports `Exhausted`; `LimitReached` and
+  `VisitorStopped` are not proofs of safety.
+- Kept ordinary Level-1 rank-2/rank-5 Save precedence and critical Saves on a
+  typed invariant path. Their recipient reading can be `Save` or
+  `PlayOrSave`, but resolving the giver's hidden hand cannot remove the Save
+  branch. Eight-Clue and other contextual Saves continue through exact world
+  validation.
+- Cached each prospective Save verdict inside the existing per-position
+  analysis scope and added a regression test for traversal termination
+  semantics.
+
+The isolated Max-profile rollout fell from 782.08 seconds to 7.23 seconds
+(about 108x faster). Memoization alone reduced it to 51.75 seconds; streaming
+and bypassing irrelevant hidden-world enumeration provided the remaining
+improvement.
+
+### Preserve
+
+Replay memo keys must contain every semantic input and the cache lifetime must
+not outlive one top-level reduction. Do not use a sample limit as evidence that
+a contextual clue is safe. Add a typed, convention-level invariance proof when
+a clue meaning does not depend on hidden worlds; otherwise require exhaustive
+enumeration or conservatively reject the candidate.
+
 ## 2026-08-31: compiled actions, owned connection queries, and scoped semantic caches
 
 ### Why
