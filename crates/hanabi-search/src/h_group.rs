@@ -2213,6 +2213,11 @@ fn replay_h_group_inner(
 /// an immediate play. Keeping this precedence in one typed transition avoids
 /// each recognizer independently deciding whether an old promise survived.
 fn clue_permits_direct_play_deferral(signals: &ConventionJournal, turn: u32) -> bool {
+    // A recognized clue action does not falsify an older playable card merely
+    // because its owner spent this turn giving the clue. In particular, a
+    // Finesse with a Lie Component is a team obligation, so performing it can
+    // legitimately defer an otherwise-due direct Play promise.
+    // Source: https://hanabi.github.io/extras/special-finesses/#finesses-with-a-lie-component
     signals.iter().any(|signal| {
         signal.turn == turn
             && matches!(
@@ -2226,6 +2231,7 @@ fn clue_permits_direct_play_deferral(signals: &ConventionJournal, turn: u32) -> 
                     | HGroupMoveKind::DoubleDiscardAvoidance
                     | HGroupMoveKind::LockedHandSave
                     | HGroupMoveKind::EightClueSave
+                    | HGroupMoveKind::LieComponentFinesse
             )
     })
 }

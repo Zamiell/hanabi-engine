@@ -236,7 +236,7 @@ fn third_expert_replay_matches_engine() {
 }
 
 #[test]
-#[ignore = "pending expert review: first unresolved disagreement is move 23"]
+#[ignore = "pending expert review: first unresolved disagreement is move 24"]
 fn fourth_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine(&expert_replay_p4v0s3());
 }
@@ -652,6 +652,30 @@ fn fourth_replay_move_twenty_rejects_the_redundant_rank_five_fill_in() {
             target: PlayerId::new(0),
             clue: Clue::Suit(Suit::Yellow),
         }),
+    );
+}
+
+#[test]
+fn fourth_replay_move_twenty_three_plays_the_five_for_clue_recovery() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(22).expect("fixture prefix is legal");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("Cathy has a view"),
+    )
+    .expect("valid deductions");
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    let ordered = ordered_playable_cards(deductions.view(), &inferred, HGroupProfile::Max);
+
+    assert_eq!(
+        ordered.first().copied(),
+        Some(CardId::new(8)),
+        "Level 25 gives the known playable yellow 5 Priority over an ordinary purple 4 because the 5 recovers a clue; ordered={ordered:?}; inferred={inferred:#?}",
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(8))),
     );
 }
 
