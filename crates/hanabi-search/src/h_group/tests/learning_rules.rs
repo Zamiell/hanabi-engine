@@ -281,7 +281,7 @@ fn second_replay_move_thirty_one_can_defer_to_a_more_efficient_clue() {
         candidates
             .iter()
             .find(|candidate| candidate.action == green)
-            .map(|candidate| candidate.action_coverage),
+            .map(|candidate| candidate.action_coverage()),
         Some(2),
         "green promises green 3 and green 4: {candidates:#?}"
     );
@@ -293,7 +293,7 @@ fn second_replay_move_thirty_one_can_defer_to_a_more_efficient_clue() {
         candidates
             .iter()
             .find(|candidate| candidate.action == current_rank_four)
-            .map(|candidate| candidate.action_coverage),
+            .map(|candidate| candidate.action_coverage()),
         Some(2),
         "Cathy sees Donald's nearer green 3, so her rank-4 clue is only a two-action line: {candidates:#?}"
     );
@@ -344,7 +344,7 @@ fn second_replay_move_thirty_one_can_defer_to_a_more_efficient_clue() {
         next_candidates
             .iter()
             .find(|candidate| candidate.action == rank_four)
-            .map(|candidate| candidate.action_coverage),
+            .map(|candidate| candidate.action_coverage()),
         Some(3),
         "Donald sees the blue-3, green-3, green-4 Layered Finesse: candidates={next_candidates:#?}; pending={:#?}; signals={:#?}",
         alice_replay.pending_connections,
@@ -648,7 +648,7 @@ fn second_replay_rank_one_trash_chop_move_is_admitted() {
     assert!(
         candidates.iter().any(|candidate| {
             candidate.action == replay_action_at_turn(&fixture, 14)
-                && candidate.recognition == ClueRecognition::RecipientReplay
+                && candidate.recognition() == ClueRecognition::RecipientReplay
         }),
         "rank 1 on Alice's trash purple 1 must be admitted as a Trash Chop Move: {candidates:#?}"
     );
@@ -797,7 +797,7 @@ fn second_replay_move_twenty_admits_the_visible_reverse_finesse() {
     assert!(
         candidates.iter().any(|candidate| {
             candidate.action == expected
-                && candidate.recognition == ClueRecognition::RecipientReplay
+                && candidate.recognition() == ClueRecognition::RecipientReplay
                 && candidate.score() == 373
         }),
         "the Yellow-2 Reverse Finesse must retain its full strategic value: {candidates:#?}"

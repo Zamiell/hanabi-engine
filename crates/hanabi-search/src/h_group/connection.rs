@@ -1,6 +1,4 @@
-use core::ops::Deref;
-
-use hanabi_core::{Card, CardId, PlayerId};
+use hanabi_core::{Card, CardId, Clue, PlayerId};
 
 use super::HGroupConnectionKind;
 
@@ -101,15 +99,82 @@ pub(super) struct ConnectionManager {
     next_promise: u32,
 }
 
-impl Deref for ConnectionManager {
-    type Target = [ConnectionObligation];
-
-    fn deref(&self) -> &Self::Target {
-        &self.active
-    }
+/// Semantic relationship between a clue and an existing connection chain.
+///
+/// Keeping this classification inside the lifecycle owner prevents callers
+/// from independently (and inconsistently) reconstructing whether a touched
+/// card is due now or is merely queued behind an earlier layer.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum ConnectionClueMatch {
+    Unrelated,
+    ActiveRedundant,
+    LaterContinuation,
 }
 
 impl ConnectionManager {
+    pub(super) fn iter(&self) -> impl Iterator<Item = &ConnectionObligation> {
+        self.active.iter()
+    }
+
+    pub(super) fn len(&self) -> usize {
+        self.active.len()
+    }
+
+    #[cfg(test)]
+    pub(super) fn is_empty(&self) -> bool {
+        self.active.is_empty()
+    }
+
+    /// Whether this obligation is the first unresolved step for its focus.
+    pub(super) fn is_active(&self, candidate: &ConnectionObligation) -> bool {
+        !self.active.iter().any(|other| {
+            other.focus == candidate.focus && other.step < candidate.step && !other.cards.is_empty()
+        })
+    }
+
+    pub(super) fn active(&self) -> impl Iterator<Item = &ConnectionObligation> {
+        self.active
+            .iter()
+            .filter(|connection| self.is_active(connection))
+    }
+
+    pub(super) fn actor_has_active(&self, actor: PlayerId) -> bool {
+        self.active().any(|connection| connection.actor == actor)
+    }
+
+    pub(super) fn identity_is_queued(&self, identity: Card) -> bool {
+        self.active.iter().any(|connection| {
+            connection.expected == identity || connection.focus_identity == identity
+        })
+    }
+
+    /// Classifies a clue against the existing promise lifecycle. A clue that
+    /// touches the due step is a redundant restatement; one that touches only
+    /// a blocked suffix can be a valid Continuation Clue.
+    pub(super) fn match_clue(
+        &self,
+        actor: PlayerId,
+        clue: Clue,
+        touched: &[CardId],
+    ) -> ConnectionClueMatch {
+        let matches = |connection: &ConnectionObligation| {
+            connection.actor == actor
+                && connection.cards.iter().any(|card| touched.contains(card))
+                && clue.matches(connection.expected)
+        };
+        if self.active().any(matches) {
+            ConnectionClueMatch::ActiveRedundant
+        } else if self
+            .active
+            .iter()
+            .any(|connection| matches(connection) && !self.is_active(connection))
+        {
+            ConnectionClueMatch::LaterContinuation
+        } else {
+            ConnectionClueMatch::Unrelated
+        }
+    }
+
     pub(super) fn transitions(&self) -> &[ConnectionTransition] {
         &self.transitions
     }
@@ -654,12 +719,13 @@ mod tests {
         manager.start(3, replacement.clone());
 
         assert_eq!(manager.len(), 1);
-        assert_eq!(manager[0].cards, replacement.cards);
-        assert_eq!(manager[0].expected, replacement.expected);
-        assert_ne!(manager[0].promise, PromiseId::UNASSIGNED);
+        let active = manager.iter().next().expect("replacement remains active");
+        assert_eq!(active.cards, replacement.cards);
+        assert_eq!(active.expected, replacement.expected);
+        assert_ne!(active.promise, PromiseId::UNASSIGNED);
         assert_eq!(
             manager
-                .provenance(manager[0].promise)
+                .provenance(active.promise)
                 .map(|origin| origin.created_turn),
             Some(3)
         );
@@ -685,7 +751,10 @@ mod tests {
         );
 
         assert_eq!(manager.len(), 1);
-        assert_eq!(manager[0].cards, [CardId::new(7)]);
+        assert_eq!(
+            manager.iter().next().expect("connection remains").cards,
+            [CardId::new(7)]
+        );
         assert_eq!(
             manager.demonstrated_focus_identity(focus),
             Some(Card::new(Suit::Red, Rank::Three))
@@ -695,6 +764,34 @@ mod tests {
                 && transition.from == ConnectionStatus::Pending
                 && transition.to == ConnectionStatus::Pending
         }));
+    }
+
+    #[test]
+    fn clue_matching_distinguishes_due_and_queued_layers() {
+        let mut manager = ConnectionManager::default();
+        let first = obligation(vec![CardId::new(5)]);
+        manager.start(3, first.clone());
+        manager.start(
+            3,
+            ConnectionObligation {
+                cards: vec![CardId::new(7)],
+                step: 1,
+                ..first
+            },
+        );
+
+        assert_eq!(
+            manager.match_clue(PlayerId::new(1), Clue::Suit(Suit::Red), &[CardId::new(5)]),
+            ConnectionClueMatch::ActiveRedundant
+        );
+        assert_eq!(
+            manager.match_clue(PlayerId::new(1), Clue::Suit(Suit::Red), &[CardId::new(7)]),
+            ConnectionClueMatch::LaterContinuation
+        );
+        assert_eq!(
+            manager.match_clue(PlayerId::new(0), Clue::Suit(Suit::Red), &[CardId::new(5)]),
+            ConnectionClueMatch::Unrelated
+        );
     }
 
     #[test]

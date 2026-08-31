@@ -550,10 +550,13 @@ fn third_replay_final_play_clues_advance_before_surplus_known_trash() {
             .find(|candidate| candidate.action == action)
             .expect("both direct yellow-5 clues are candidates")
     };
-    assert_eq!(candidate(actions[0]).purpose, candidate(actions[1]).purpose);
     assert_eq!(
-        candidate(actions[0]).action_coverage,
-        candidate(actions[1]).action_coverage
+        candidate(actions[0]).purpose(),
+        candidate(actions[1]).purpose()
+    );
+    assert_eq!(
+        candidate(actions[0]).action_coverage(),
+        candidate(actions[1]).action_coverage()
     );
     assert_eq!(
         candidate(actions[0]).score(),

@@ -1,6 +1,6 @@
 use hanabi_core::PlayerId;
 
-use super::{HGroupState, pending_is_active};
+use super::HGroupState;
 
 /// Why one complete convention interpretation exists.
 ///
@@ -24,10 +24,7 @@ impl InterpretationHypothesis {
     }
 
     fn gives_actor_a_live_connection(&self, actor: PlayerId) -> bool {
-        self.state.pending_connections.iter().any(|connection| {
-            connection.actor == actor
-                && pending_is_active(connection, &self.state.pending_connections)
-        })
+        self.state.pending_connections.actor_has_active(actor)
     }
 }
 

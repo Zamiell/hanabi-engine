@@ -3,8 +3,8 @@ use super::{
     HGroupClueInterpretation, HGroupClueKind, HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext,
     IdentitySet, ObservedEvent, ObservedHistoryEntry, PlayerId, PlayerView, Rank, card_is_trash,
     chop, finesse_position_id, focus, four_charm_blind_plays, has_higher_basic_priority,
-    identity_of, is_playable_at, is_trash_at, next_player, pending_identity_is_queued,
-    protected_cards, push_signal, same_turn_signal, was_clued_before,
+    identity_of, is_playable_at, is_trash_at, next_player, protected_cards, push_signal,
+    same_turn_signal, was_clued_before,
 };
 use crate::h_group::ProvenancedCardSet;
 
@@ -802,7 +802,7 @@ pub(in crate::h_group) fn apply_charm_effects(
                 // focus owner misplay their directly clued card.
                 return;
             }
-            if pending_identity_is_queued(pending, connector) {
+            if pending.identity_is_queued(connector) {
                 // Hesitation calls for a genuinely missing connector. The
                 // focus owner may discard while an earlier teammate's queued
                 // connection is still waiting for its next turn; that does

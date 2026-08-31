@@ -1,6 +1,6 @@
 use super::{
-    Action, ClueCandidate, CluePurpose, ClueRecognition, ConventionRejectionReason, HGroupClueKind,
-    HGroupMoveKind, HGroupProfile, HGroupState, LogicalDeductions, PlayerView,
+    Action, CluePurpose, ClueRecognition, CompiledClueAction, ConventionRejectionReason,
+    HGroupClueKind, HGroupMoveKind, HGroupProfile, HGroupState, LogicalDeductions, PlayerView,
     RejectedConventionAction, chop, focus, identity_of, prospective_clue_primary_kind,
     prospective_team_clue_signal_kinds,
 };
@@ -69,7 +69,7 @@ pub(crate) fn h_group_rejected_clues_from_replay(
 pub(in crate::h_group) fn recipient_replay_assessment(
     view: &PlayerView,
     profile: HGroupProfile,
-    candidate: &ClueCandidate,
+    candidate: &CompiledClueAction,
 ) -> ClueRecognition {
     let Action::Clue { target, clue } = candidate.action else {
         return ClueRecognition::GeneratorProof;
@@ -81,7 +81,7 @@ pub(in crate::h_group) fn recipient_replay_assessment(
         .collect::<Vec<_>>();
     let signals = prospective_team_clue_signal_kinds(view, profile, target, clue, &touched);
     let primary = prospective_clue_primary_kind(view, profile, target, clue, &touched);
-    let recognized = match candidate.purpose {
+    let recognized = match candidate.purpose() {
         CluePurpose::Play => {
             matches!(
                 primary,
@@ -99,7 +99,9 @@ pub(in crate::h_group) fn recipient_replay_assessment(
                 HGroupMoveKind::TempoClue | HGroupMoveKind::TempoClueChopMove
             )
         }),
-        CluePurpose::Advanced | CluePurpose::Fallback => !signals.is_empty(),
+        CluePurpose::Advanced | CluePurpose::FallbackPlay | CluePurpose::FallbackSave => {
+            !signals.is_empty()
+        }
     };
     if recognized {
         ClueRecognition::RecipientReplay

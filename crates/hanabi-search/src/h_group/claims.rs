@@ -1,8 +1,8 @@
 use hanabi_core::{Card, CardId, PlayerView};
 
 use super::{
-    CardSet, ClueFacts, ConnectionObligation, ConventionFacts, HGroupClueInterpretation,
-    HGroupState, HistoricalView, IdentitySet,
+    CardSet, ClueFacts, ConnectionManager, ConventionFacts, HGroupClueInterpretation, HGroupState,
+    HistoricalView, IdentitySet,
 };
 
 /// Observer-safe authority for exact convention identity claims. Relational
@@ -76,7 +76,7 @@ pub(super) fn claimed_identities_at_clue(
     convention_facts: &ConventionFacts,
     clues: &[HGroupClueInterpretation],
     gotten: &CardSet,
-    pending: &[ConnectionObligation],
+    pending: &ConnectionManager,
 ) -> IdentitySet {
     let live_cards = hands.iter().flatten().copied().collect::<CardSet>();
     let claimed = gotten

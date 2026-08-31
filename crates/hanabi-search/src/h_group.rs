@@ -55,17 +55,20 @@ mod symbolic_line;
 mod transition;
 mod turn_context;
 
-use action_analysis::{HGroupActionKind, HGroupActionSet, HGroupAnalyzedAction};
+use action_analysis::{CompiledHGroupAction, HGroupActionKind, HGroupActionSet};
 use action_schedule::{ActionSchedule, StackTimeline};
 use bluff::{
     BluffTargetKind, bluff_play_connects, bluff_target_kind_at, bluff_target_order_is_legal,
 };
-use candidate::{ClueCandidate, CluePurpose, ClueRecognition, ClueSchedule, ClueValue};
+use candidate::{CluePurpose, ClueRecognition, ClueSchedule, ClueValue, CompiledClueAction};
 use candidate_pipeline::SemanticallyAdmittedCandidates;
 use claims::{IdentityClaims, claimed_identities_at_clue};
-use connection::{ConnectionManager, ConnectionObligation, ConnectionTransitionReason, PromiseId};
+use connection::{
+    ConnectionClueMatch, ConnectionManager, ConnectionObligation, ConnectionTransitionReason,
+    PromiseId,
+};
 use constraint_graph::ConventionConstraintGraph;
-use constraints::{ConstraintReason, ConventionConstraints};
+use constraints::{ConventionConstraints, ConventionRequirementKind};
 pub use coverage::{H_GROUP_DOCUMENTATION_SECTIONS, HGroupDocumentationSection};
 pub(crate) use decision::analyze_h_group_convention;
 pub use decision::infer_h_group;
@@ -120,7 +123,8 @@ use primary::{ClueInterpretationPlan, PrimaryClueInputs};
 #[cfg(test)]
 use prospective::prospective_clue_hazard;
 use prospective::{
-    CachedProspectiveProjection, SubjectiveReplayRequest, TeamConventionSnapshot,
+    CompiledObserverProjection, CompiledProspectiveClue, SubjectiveReplayRequest,
+    TeamConventionSnapshot, compiled_baseline_team, compiled_prospective_clue,
     projected_h_group_replay, prospective_clue_has_unsafe_connection,
     prospective_clue_marks_focus_saved, prospective_clue_primary_interpretation,
     prospective_clue_primary_kind, prospective_clue_signal_kinds, prospective_clue_view,
@@ -907,7 +911,7 @@ fn replay_h_group_inner(
                 }
                 let promised_card_fix = pending_connections.iter().any(|connection| {
                     connection.actor == *target
-                        && pending_is_active(connection, &pending_connections)
+                        && pending_connections.is_active(connection)
                         && !clue.matches(connection.expected)
                         && connection
                             .cards
@@ -1139,7 +1143,7 @@ fn replay_h_group_inner(
                             connection.actor == *target
                                 && connection.cards.first() == Some(&focus)
                                 && clue.matches(connection.expected)
-                                && pending_is_active(connection, &pending_connections)
+                                && pending_connections.is_active(connection)
                         })
                         .map(|connection| connection.expected);
                     let clue_promptable = previously_promptable
@@ -1321,15 +1325,14 @@ fn replay_h_group_inner(
                                 || no_information_reclue)
                     );
                     let target_already_loaded = pending_connections.iter().any(|connection| {
-                        connection.actor == *target
-                            && pending_is_active(connection, &pending_connections)
+                        connection.actor == *target && pending_connections.is_active(connection)
                     });
                     let direct_play = IdentitySet::from_mask(
                         play_identities
                             .iter()
                             .filter(|identity| {
                                 is_playable_at(stack_heights, *identity)
-                                    && !pending_identity_is_queued(&pending_connections, *identity)
+                                    && !pending_connections.identity_is_queued(*identity)
                             })
                             .fold(0, |mask, identity| mask | (1 << identity.index())),
                     );
@@ -1620,7 +1623,8 @@ fn replay_h_group_inner(
                         && !low_score_number_five
                         && !intermediate_bluff
                     {
-                        let previous_connections = pending_connections.to_vec();
+                        let previous_connections =
+                            pending_connections.iter().cloned().collect::<Vec<_>>();
                         let committed_plan = ConnectionPlanningContext {
                             profile,
                             view,
@@ -1866,7 +1870,7 @@ fn replay_h_group_inner(
                     && !pending_connections.iter().any(|connection| {
                         connection.actor == *player
                             && connection.cards.first() == Some(card)
-                            && pending_is_active(connection, &pending_connections)
+                            && pending_connections.is_active(connection)
                     }))
                 .then(|| {
                     pending_connections
@@ -1877,7 +1881,7 @@ fn replay_h_group_inner(
                                 && connection.actor != view.observer
                                 && connection.actor == next_player(view.observer, hands.len())
                                 && connection.expected != *identity
-                                && pending_is_active(connection, &pending_connections)
+                                && pending_connections.is_active(connection)
                         })
                         .cloned()
                 })
@@ -2170,7 +2174,7 @@ fn replay_h_group_inner(
         for pending in pending_connections.iter().filter(|pending| {
             pending.actor == view.observer
                 && pending.kind == HGroupConnectionKind::Finesse
-                && pending_is_active(pending, &pending_connections)
+                && pending_connections.is_active(pending)
         }) {
             let Some(blind) = pending.cards.first() else {
                 continue;
@@ -2724,11 +2728,11 @@ fn schedule_connection(
             && already_playing
                 .iter()
                 .any(|card| !declined_direct_plays.contains(card) && matches_expected(*card));
-        if pending_identity_is_queued(pending, expected) {
+        if pending.identity_is_queued(expected) {
             let giver_is_deferring_this_connection = pending.iter().any(|connection| {
                 connection.actor == giver
                     && connection.expected == expected
-                    && pending_is_active(connection, pending)
+                    && pending.is_active(connection)
             });
             if giver_is_deferring_this_connection {
                 // By giving the connecting clue instead of taking their own
@@ -3219,7 +3223,7 @@ fn extend_queued_finesse_with_playable_layers(
         .find(|connection| {
             connection.expected == expected
                 && connection.kind == HGroupConnectionKind::Finesse
-                && pending_is_active(connection, pending)
+                && pending.is_active(connection)
         })?
         .clone();
     let current_position = *connection.cards.first()?;
@@ -3329,20 +3333,8 @@ fn convention_focus_is_live_identity(
         || (allow_ambiguous_owned_identity && live.contains(expected))
 }
 
-fn pending_is_active(candidate: &ConnectionObligation, pending: &[ConnectionObligation]) -> bool {
-    !pending.iter().any(|other| {
-        other.focus == candidate.focus && other.step < candidate.step && !other.cards.is_empty()
-    })
-}
-
-fn pending_identity_is_queued(pending: &[ConnectionObligation], identity: Card) -> bool {
-    pending
-        .iter()
-        .any(|connection| connection.expected == identity || connection.focus_identity == identity)
-}
-
 fn pending_card_allows_identity(
-    pending: &[ConnectionObligation],
+    pending: &ConnectionManager,
     convention_facts: &ConventionFacts,
     card: CardId,
     identity: Card,
@@ -3417,7 +3409,7 @@ fn identity_is_queued_before_target(
     giver: PlayerId,
     target: PlayerId,
     already_playing: &CardSet,
-    pending: &[ConnectionObligation],
+    pending: &ConnectionManager,
     identity: Card,
 ) -> bool {
     let player_count = view.hands.len();
@@ -3453,7 +3445,7 @@ fn replay_identity_is_queued(view: &PlayerView, replay: &HGroupState, identity: 
             .iter()
             .any(|hand| hand.iter().any(|candidate| candidate.id == card))
     };
-    pending_identity_is_queued(&replay.pending_connections, identity)
+    replay.pending_connections.identity_is_queued(identity)
         || replay.cards.already_playing.iter().any(|card| {
             identity_of(view, *card) == Some(identity)
                 || replay.clues.iter().rev().any(|clue| {

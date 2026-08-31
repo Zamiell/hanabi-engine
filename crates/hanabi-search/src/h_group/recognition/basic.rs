@@ -2,8 +2,8 @@ use super::{
     CardSet, Clue, ConnectionTransitionReason, ConventionJournal, HGroupConnectionKind,
     HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, IdentitySet, ObservedEvent,
     ObservedHistoryEntry, PlayerView, Rank, chop, five_chop_moved_card, focus, identity_of,
-    identity_set, is_playable_at, is_playable_now, next_player, pending_is_active, protected_cards,
-    push_signal, same_turn_signal, was_clued_before,
+    identity_set, is_playable_at, is_playable_now, next_player, protected_cards, push_signal,
+    same_turn_signal, was_clued_before,
 };
 
 pub(in crate::h_group) fn apply_level_two_effects(
@@ -240,7 +240,7 @@ pub(super) fn apply_fill_in_fix(
                     .iter()
                     .all(|identity| !is_playable_at(context.after.stack_heights, identity))
                 && !effects.pending.iter().any(|connection| {
-                    connection.focus == *card && pending_is_active(connection, effects.pending)
+                    connection.focus == *card && effects.pending.is_active(connection)
                 })
         }
     });

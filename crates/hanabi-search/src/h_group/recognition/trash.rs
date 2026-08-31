@@ -3,8 +3,8 @@ use super::{
     ConnectionTransitionReason, ConventionJournal, HGroupClueInterpretation, HGroupConnectionKind,
     HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, IdentitySet, ObservedEvent,
     ObservedHistoryEntry, PlayerId, PlayerView, PromiseId, Rank, chop, finesse_position_id,
-    identity_of, is_playable_at, is_playable_now, is_trash_at, next_player, pending_is_active,
-    protected_cards, push_signal, same_turn_signal, was_clued_before,
+    identity_of, is_playable_at, is_playable_now, is_trash_at, next_player, protected_cards,
+    push_signal, same_turn_signal, was_clued_before,
 };
 use crate::h_group::{EffectSource, ProvenancedCardSet};
 
@@ -481,7 +481,7 @@ pub(in crate::h_group) fn apply_ejection_discharge_effects(
             .filter(|connection| {
                 connection.actor == ejection_actor
                     && !pending.was_created_on(connection, entry.turn)
-                    && pending_is_active(connection, pending)
+                    && pending.is_active(connection)
             })
             .filter_map(|connection| connection.cards.first().copied())
             .collect::<CardSet>()
@@ -499,7 +499,7 @@ pub(in crate::h_group) fn apply_ejection_discharge_effects(
             pending.iter().find(|connection| {
                 connection.actor == ejection_actor
                     && !pending.was_created_on(connection, entry.turn)
-                    && pending_is_active(connection, pending)
+                    && pending.is_active(connection)
             })
         });
         let mut card = loaded_connection

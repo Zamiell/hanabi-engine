@@ -1,12 +1,23 @@
 use hanabi_core::Action;
 
 /// Why convention semantics restricted the set that strategy may score.
+/// These are hard obligations, not heuristic score adjustments.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum ConstraintReason {
-    UrgentClue,
+pub(super) enum ConventionRequirementKind {
+    UrgentProtection,
     ConnectionResponse,
     RequiredDiscard,
     MustClue,
+    EarlyFiveStall,
+}
+
+/// One typed convention requirement and all semantically equivalent ways to
+/// satisfy it. Strategy may rank alternatives inside this set but cannot
+/// compare an unrelated higher-scored action against it.
+#[derive(Clone, Debug)]
+pub(super) struct ConventionRequirement {
+    kind: ConventionRequirementKind,
+    alternatives: Vec<Action>,
 }
 
 /// Hard convention obligations, kept separate from heuristic utility.
@@ -15,43 +26,51 @@ pub(super) enum ConstraintReason {
 /// supplies requirements, numeric strategy may rank only those actions.
 #[derive(Clone, Debug, Default)]
 pub(super) struct ConventionConstraints {
-    required: Vec<Action>,
-    reason: Option<ConstraintReason>,
+    requirement: Option<ConventionRequirement>,
 }
 
 impl ConventionConstraints {
     pub(super) fn require(
-        reason: ConstraintReason,
+        kind: ConventionRequirementKind,
         actions: impl IntoIterator<Item = Action>,
     ) -> Self {
-        let mut required = Vec::new();
+        let mut alternatives = Vec::new();
         for action in actions {
-            if !required.contains(&action) {
-                required.push(action);
+            if !alternatives.contains(&action) {
+                alternatives.push(action);
             }
         }
         Self {
-            required,
-            reason: Some(reason),
+            requirement: Some(ConventionRequirement { kind, alternatives }),
         }
     }
 
     pub(super) fn allows(&self, action: Action) -> bool {
-        self.required.is_empty() || self.required.contains(&action)
+        self.requirement
+            .as_ref()
+            .is_none_or(|requirement| requirement.alternatives.contains(&action))
     }
 
-    pub(super) const fn reason(&self) -> Option<ConstraintReason> {
-        self.reason
+    pub(super) fn kind(&self) -> Option<ConventionRequirementKind> {
+        self.requirement
+            .as_ref()
+            .map(|requirement| requirement.kind)
     }
 
     /// Returns the action when convention semantics leave exactly one legal
     /// response. Planners must treat that response as forced rather than
     /// allowing a higher numeric heuristic to reintroduce excluded actions.
     pub(super) fn single_required(&self) -> Option<Action> {
-        self.required
+        self.requirement
+            .as_ref()?
+            .alternatives
             .first()
             .copied()
-            .filter(|_| self.required.len() == 1)
+            .filter(|_| {
+                self.requirement
+                    .as_ref()
+                    .is_some_and(|requirement| requirement.alternatives.len() == 1)
+            })
     }
 }
 
@@ -64,13 +83,15 @@ mod tests {
     #[test]
     fn hard_requirement_excludes_a_higher_scored_unrelated_action() {
         let required = Action::Play(CardId::new(1));
-        let constraints =
-            ConventionConstraints::require(ConstraintReason::ConnectionResponse, [required]);
+        let constraints = ConventionConstraints::require(
+            ConventionRequirementKind::ConnectionResponse,
+            [required],
+        );
         assert!(constraints.allows(required));
         assert!(!constraints.allows(Action::Discard(CardId::new(2))));
         assert_eq!(
-            constraints.reason(),
-            Some(ConstraintReason::ConnectionResponse)
+            constraints.kind(),
+            Some(ConventionRequirementKind::ConnectionResponse)
         );
     }
 }

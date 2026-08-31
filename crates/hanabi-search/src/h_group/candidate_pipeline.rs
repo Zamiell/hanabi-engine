@@ -1,23 +1,28 @@
 use super::{
-    ClueCandidate, HGroupProfile, LogicalDeductions, apply_strategic_clue_values,
+    CompiledClueAction, HGroupProfile, LogicalDeductions, apply_strategic_clue_values,
     recipient_replay_assessment,
 };
 
 /// Candidates that have passed legality, focus, semantic-admissibility, and
 /// convention-safety checks in the interpretation layer.
-pub(super) struct SemanticallyAdmittedCandidates(Vec<ClueCandidate>);
+pub(super) struct SemanticallyAdmittedCandidates(Vec<CompiledClueAction>);
 
 /// Candidates whose proposed meaning has an explicit recipient assessment.
 /// Generator-only candidates remain visible as correlated hidden-world
 /// branches; they are no longer mislabeled as recipient-confirmed.
-struct RecipientAssessedCandidates(Vec<ClueCandidate>);
+struct RecipientAssessedCandidates(Vec<CompiledClueAction>);
 
 /// Candidates after structured causal outcomes and strategic preferences
 /// have been compared.
-struct RankedCandidates(Vec<ClueCandidate>);
+struct RankedCandidates(Vec<CompiledClueAction>);
 
 impl SemanticallyAdmittedCandidates {
-    pub(super) fn new(candidates: Vec<ClueCandidate>) -> Self {
+    pub(super) fn new(candidates: Vec<CompiledClueAction>) -> Self {
+        debug_assert!(
+            candidates
+                .iter()
+                .all(|candidate| candidate.validate().is_ok())
+        );
         Self(candidates)
     }
 
@@ -37,7 +42,7 @@ impl SemanticallyAdmittedCandidates {
         self,
         deductions: &LogicalDeductions,
         profile: HGroupProfile,
-    ) -> Vec<ClueCandidate> {
+    ) -> Vec<CompiledClueAction> {
         self.check_recipient(deductions, profile)
             .compare_outcomes(deductions, profile)
             .into_vec()
@@ -56,7 +61,8 @@ impl RecipientAssessedCandidates {
 }
 
 impl RankedCandidates {
-    fn into_vec(self) -> Vec<ClueCandidate> {
+    fn into_vec(self) -> Vec<CompiledClueAction> {
+        debug_assert!(self.0.iter().all(|candidate| candidate.validate().is_ok()));
         self.0
     }
 }

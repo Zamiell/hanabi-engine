@@ -7,25 +7,25 @@
 #[cfg(test)]
 use super::decision::{analysis_clue_candidates, build_h_group_analysis};
 use super::{
-    Action, BluffTargetKind, Card, CardId, CardSet, Clue, ClueCandidate, ClueFacts, CluePurpose,
-    ClueRecognition, ClueSchedule, ClueValue, ConnectionObligation, ConventionFacts,
-    ConventionKnowledge, ConventionRejectionReason, FixCondition, HGroupCardInference,
-    HGroupClueInterpretation, HGroupClueKind, HGroupConnection, HGroupConnectionKind,
-    HGroupInferences, HGroupMoveKind, HGroupPlayObligation, HGroupProfile, HGroupRuleId,
-    HGroupState, HistoricalView, IdentityClaims, IdentitySet, KNOWN_TRASH_COLLATERAL_BONUS,
-    LogicalDeductions, MAX_CLUE_TOKENS, MaterializedCardFact, ObservedCard, ObservedEvent,
-    PlayerId, PlayerSet, PlayerView, Rank, RejectedConventionAction, RequiredFix,
-    SemanticallyAdmittedCandidates, StackTimeline, bluff_play_connects,
+    Action, BluffTargetKind, Card, CardId, CardSet, Clue, ClueFacts, CluePurpose, ClueRecognition,
+    ClueSchedule, ClueValue, CompiledClueAction, ConnectionClueMatch, ConnectionManager,
+    ConventionFacts, ConventionKnowledge, ConventionRejectionReason, FixCondition,
+    HGroupCardInference, HGroupClueInterpretation, HGroupClueKind, HGroupConnection,
+    HGroupConnectionKind, HGroupInferences, HGroupMoveKind, HGroupPlayObligation, HGroupProfile,
+    HGroupRuleId, HGroupState, HistoricalView, IdentityClaims, IdentitySet,
+    KNOWN_TRASH_COLLATERAL_BONUS, LogicalDeductions, MAX_CLUE_TOKENS, MaterializedCardFact,
+    ObservedCard, ObservedEvent, PlayerId, PlayerSet, PlayerView, Rank, RejectedConventionAction,
+    RequiredFix, SemanticallyAdmittedCandidates, StackTimeline, bluff_play_connects,
     bluff_target_order_is_legal, card_is_trash, chop, convention_information_value,
     finesse_position, five_chop_moved_card, five_pulled_card, focus,
     identity_is_queued_before_target, identity_of, identity_set, infer_h_group_from_replay,
     is_convention_trash, is_critical, is_eventually_useful, is_playable_at, is_playable_now,
     is_unique_visible, next_player, ordered_playable_cards, pending_card_allows_identity,
-    pending_identity_is_queued, pending_is_active, positional_discard_candidate,
-    preferred_due_play_card, projected_h_group_replay, prospective_clue_has_unsafe_connection,
-    prospective_clue_marks_focus_saved, prospective_clue_primary_interpretation,
-    prospective_clue_primary_kind, prospective_clue_signal_kinds, prospective_clue_view,
-    prospective_play_view, prospective_stacked_ejection_card, prospective_team_clue_signal_kinds,
+    positional_discard_candidate, preferred_due_play_card, projected_h_group_replay,
+    prospective_clue_has_unsafe_connection, prospective_clue_marks_focus_saved,
+    prospective_clue_primary_interpretation, prospective_clue_primary_kind,
+    prospective_clue_signal_kinds, prospective_clue_view, prospective_play_view,
+    prospective_stacked_ejection_card, prospective_team_clue_signal_kinds,
     replay_identity_is_queued, rule_enabled, subjective_convention_cards,
     subjective_playable_cards, was_clued_before, with_prospective_analysis_cache,
 };
@@ -47,7 +47,7 @@ pub(super) use knowledge::{
 pub(super) fn h_group_clue_candidates(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
-) -> Vec<ClueCandidate> {
+) -> Vec<CompiledClueAction> {
     let analysis = build_h_group_analysis(deductions, profile);
     analysis_clue_candidates(deductions, profile, &analysis).to_vec()
 }
@@ -57,7 +57,7 @@ pub(super) fn h_group_clue_candidates_from_replay(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
     replay: &HGroupState,
-) -> Vec<ClueCandidate> {
+) -> Vec<CompiledClueAction> {
     with_prospective_analysis_cache(deductions.view(), profile, || {
         h_group_clue_candidates_from_replay_inner(deductions, profile, replay)
     })
@@ -68,7 +68,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
     replay: &HGroupState,
-) -> Vec<ClueCandidate> {
+) -> Vec<CompiledClueAction> {
     let view = deductions.view();
     if view.clue_tokens == 0 {
         return Vec::new();
@@ -109,7 +109,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                     replay.pending_connections.iter().any(|connection| {
                         connection.actor == required.target
                             && connection.cards.contains(&required.focus)
-                            && pending_is_active(connection, &replay.pending_connections)
+                            && replay.pending_connections.is_active(connection)
                             && !clue.matches(connection.expected)
                     });
                 (target == required.target
@@ -135,20 +135,14 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                     let information =
                         convention_information_value(view, profile, replay, target, clue, &touched);
                     (
-                        ClueCandidate {
+                        CompiledClueAction::new(
                             action,
-                            move_kind: Some(HGroupMoveKind::FixClue),
-                            value: ClueValue::new(600),
-                            purpose: CluePurpose::Fix,
-                            target,
-                            save: false,
-                            schedule: ClueSchedule::new(false, false),
-                            connection_steps: 0,
-                            action_coverage: 0,
-                            convention_action_count: None,
-                            convention_connection_steps: None,
-                            recognition: ClueRecognition::GeneratorProof,
-                        },
+                            Some(HGroupMoveKind::FixClue),
+                            ClueValue::new(600),
+                            CluePurpose::Fix,
+                            ClueSchedule::new(false, false),
+                            0,
+                        ),
                         touched,
                         information,
                     )
@@ -172,7 +166,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                                 Action::Clue {
                                     target,
                                     clue: Clue::Rank(_),
-                                } if target == candidate.target
+                                } if target == candidate.target()
                             ) && other_touched == touched
                                 && other_information == information
                         },
@@ -221,7 +215,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
     let active_connection_cards = replay
         .pending_connections
         .iter()
-        .filter(|connection| pending_is_active(connection, &replay.pending_connections))
+        .filter(|connection| replay.pending_connections.is_active(connection))
         .flat_map(|connection| connection.cards.iter().copied())
         .collect::<CardSet>();
     let conditional_connection_cards = replay
@@ -318,21 +312,11 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 )
                 && prior.focus_identities == IdentitySet::singleton(focus_identity)
         });
-        let touches_active_connection = touched.iter().any(|card| {
-            replay.pending_connections.iter().any(|connection| {
-                connection.actor == target
-                    && connection.cards.contains(card)
-                    && clue.matches(connection.expected)
-                    && pending_is_active(connection, &replay.pending_connections)
-            })
-        });
-        let continues_inactive_connection = !touches_active_connection
-            && replay.pending_connections.iter().any(|connection| {
-                connection.actor == target
-                    && connection.cards.contains(&focus)
-                    && clue.matches(connection.expected)
-                    && !pending_is_active(connection, &replay.pending_connections)
-            });
+        let connection_match = replay
+            .pending_connections
+            .match_clue(target, clue, &touched);
+        let continues_inactive_connection =
+            connection_match == ConnectionClueMatch::LaterContinuation;
         if !repairs_required_fix
             && !repairs_focus_inversion
             && !continues_inactive_connection
@@ -363,20 +347,14 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             // for creating a brand-new Play Clue: successor fill-in,
             // self-prompt, and anxiety checks answer different questions and
             // can incorrectly erase the mandatory repair.
-            candidates.push(ClueCandidate {
+            candidates.push(CompiledClueAction::new(
                 action,
-                move_kind: Some(HGroupMoveKind::FixClue),
-                value: ClueValue::new(650),
-                purpose: CluePurpose::Fix,
-                target,
-                save: false,
-                schedule: ClueSchedule::new(false, is_playable_now(view, focus_identity)),
-                connection_steps: 0,
-                action_coverage: 0,
-                convention_action_count: None,
-                convention_connection_steps: None,
-                recognition: ClueRecognition::GeneratorProof,
-            });
+                Some(HGroupMoveKind::FixClue),
+                ClueValue::new(650),
+                CluePurpose::Fix,
+                ClueSchedule::new(false, is_playable_now(view, focus_identity)),
+                0,
+            ));
             continue;
         }
         let redundant_delayed_successor_fill_in = gotten.contains(&focus)
@@ -759,65 +737,53 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 // Level-25 "leads another play" priority rule.
                 score += 85;
             }
-            candidates.push(ClueCandidate {
+            candidates.push(CompiledClueAction::new(
                 action,
-                move_kind: Some(HGroupMoveKind::PlayClue),
-                value: ClueValue::new(score),
-                purpose: CluePurpose::Play,
-                target,
-                save: false,
+                Some(HGroupMoveKind::PlayClue),
+                ClueValue::new(score),
+                CluePurpose::Play,
                 // A Continuation Clue can focus an already-playable card while
                 // Information Lock still requires the recipient to finish the
                 // pre-existing layer first. The clue is a valid Play Clue, but
                 // its focus is not the recipient's immediate action.
                 // https://hanabi.github.io/extras/play-clues/#the-continuation-clue-touching-both-inside-and-outside-a-layer
-                schedule: ClueSchedule::new(
+                ClueSchedule::new(
                     false,
                     is_playable_now(view, focus_identity) && !is_continuation_clue,
                 ),
-                connection_steps: u8::try_from(
+                u8::try_from(
                     usize::from(focus_identity.rank.number())
                         .saturating_sub(view.play_stacks[focus_identity.suit.index()].len() + 1),
                 )
                 .expect("a standard connection has at most four steps"),
-                action_coverage: 0,
-                convention_action_count: None,
-                convention_connection_steps: None,
-                recognition: ClueRecognition::GeneratorProof,
-            });
+            ));
         } else if let Some(score) = save_score {
             if !prospective_clue_has_unsafe_connection(
                 view, profile, target, focus, clue, &touched, false,
             ) && prospective_clue_marks_focus_saved(view, profile, target, focus, clue, &touched)
             {
-                candidates.push(ClueCandidate {
+                candidates.push(CompiledClueAction::new(
                     action,
-                    move_kind: Some(HGroupMoveKind::SaveClue),
-                    value: ClueValue::new(score),
-                    purpose: CluePurpose::Save,
-                    target,
-                    save: true,
-                    schedule: ClueSchedule::new(
+                    Some(HGroupMoveKind::SaveClue),
+                    ClueValue::new(score),
+                    CluePurpose::Save,
+                    ClueSchedule::new(
                         focus_identity.rank == Rank::Five || is_critical(view, focus_identity),
                         false,
                     ),
-                    connection_steps: 0,
-                    action_coverage: 0,
-                    convention_action_count: None,
-                    convention_connection_steps: None,
-                    recognition: ClueRecognition::GeneratorProof,
-                });
+                    0,
+                ));
             }
         }
     }
 
     let immediately_endangered_targets = candidates
         .iter()
-        .filter(|candidate| candidate.save && candidate.target == next_player)
-        .map(|candidate| candidate.target)
+        .filter(|candidate| candidate.is_save() && candidate.target() == next_player)
+        .map(|candidate| candidate.target())
         .collect::<PlayerSet>();
     for candidate in &mut candidates {
-        if immediately_endangered_targets.contains(&candidate.target) {
+        if immediately_endangered_targets.contains(&candidate.target()) {
             // Only the next player's chop is time-sensitive on this turn.
             // This raises the clue's value when the actor is free, but
             // `urgent_save` separately controls whether it may preempt an
@@ -859,7 +825,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 // Sources:
                 // - https://hanabi.github.io/level-3/#the-fix-clue
                 // - https://hanabi.github.io/level-11/#mistaking-a-layered-finesse-for-a-bluff
-                let bluff_has_precedence = if candidate.purpose == CluePurpose::Advanced {
+                let bluff_has_precedence = if candidate.purpose() == CluePurpose::Advanced {
                     let Action::Clue { target, clue } = candidate.action else {
                         unreachable!("clue candidates always contain clues");
                     };
@@ -873,7 +839,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 } else {
                     false
                 };
-                if candidate.purpose == CluePurpose::Fix || bluff_has_precedence {
+                if candidate.purpose() == CluePurpose::Fix || bluff_has_precedence {
                     candidates[existing] = candidate;
                 }
             } else {
@@ -891,7 +857,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                     clue: Clue::Rank(Rank::Five),
                     ..
                 }
-            ) || candidate.save
+            ) || candidate.is_save()
                 || !candidate.immediate_play()
         });
     }
@@ -909,7 +875,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
         // respect the promise made by deliberately leaving the next player
         // locked at zero clues.
         candidates.retain(|candidate| {
-            candidate.purpose == CluePurpose::Fix
+            candidate.purpose() == CluePurpose::Fix
                 || (!creates_false_anxiety(view, profile, &gotten, candidate)
                     && !creates_false_anxiety_after_forced_play(view, profile, candidate))
         });
@@ -929,7 +895,7 @@ fn fix_condition_is_live(view: &PlayerView, condition: FixCondition) -> bool {
 pub(super) fn creates_false_anxiety_after_forced_play(
     view: &PlayerView,
     profile: HGroupProfile,
-    candidate: &ClueCandidate,
+    candidate: &CompiledClueAction,
 ) -> bool {
     let Action::Clue { target, clue } = candidate.action else {
         return false;
@@ -980,7 +946,7 @@ pub(super) fn creates_false_anxiety(
     view: &PlayerView,
     profile: HGroupProfile,
     gotten: &CardSet,
-    candidate: &ClueCandidate,
+    candidate: &CompiledClueAction,
 ) -> bool {
     let Action::Clue { target, clue } = candidate.action else {
         return false;
@@ -1043,7 +1009,7 @@ pub(super) fn advanced_clue_candidates(
     giver_has_playable_now: bool,
     convention_cards: &[HGroupCardInference],
     profile: HGroupProfile,
-) -> Vec<ClueCandidate> {
+) -> Vec<CompiledClueAction> {
     if view.clue_tokens == 0 {
         return Vec::new();
     }
@@ -1091,7 +1057,7 @@ pub(super) fn advanced_clue_candidates(
                     connection.actor == target
                         && connection.cards.contains(card)
                         && clue.matches(connection.expected)
-                        && pending_is_active(connection, &replay.pending_connections)
+                        && replay.pending_connections.is_active(connection)
                 })
             });
         if only_confirms_existing_connections {
@@ -1281,7 +1247,7 @@ pub(super) fn advanced_clue_candidates(
                     connection.actor == target
                         && connection.cards.contains(&card)
                         && clue.matches(connection.expected)
-                        && pending_is_active(connection, &replay.pending_connections)
+                        && replay.pending_connections.is_active(connection)
                 });
             has_existing_play
                 && !confirms_existing_promise
@@ -1290,7 +1256,7 @@ pub(super) fn advanced_clue_candidates(
                         && !convention_playable(view, gotten, card, identity)
                         && !replay.pending_connections.iter().any(|connection| {
                             connection.focus == card
-                                && pending_is_active(connection, &replay.pending_connections)
+                                && replay.pending_connections.is_active(connection)
                         })
                 })
         });
@@ -1501,8 +1467,7 @@ pub(super) fn advanced_clue_candidates(
                     return None;
                 }
                 let actor_is_loaded = replay.pending_connections.iter().any(|connection| {
-                    connection.actor == actor
-                        && pending_is_active(connection, &replay.pending_connections)
+                    connection.actor == actor && replay.pending_connections.is_active(connection)
                 }) || replay.hands[actor.index()].iter().any(|card| {
                     (gotten.contains(card) || replay.cards.forced_playable.contains(card))
                         && identity_of(view, *card)
@@ -1842,7 +1807,7 @@ pub(super) fn advanced_clue_candidates(
                 || replay.pending_connections.iter().any(|connection| {
                     connection.actor == target
                         && connection.cards.contains(card)
-                        && pending_is_active(connection, &replay.pending_connections)
+                        && replay.pending_connections.is_active(connection)
                 }))
                 && identity_of(view, *card).is_some_and(|identity| is_playable_now(view, identity))
         });
@@ -1853,7 +1818,7 @@ pub(super) fn advanced_clue_candidates(
                     || replay.pending_connections.iter().any(|connection| {
                         connection.actor == ejection_actor
                             && connection.cards.contains(card)
-                            && pending_is_active(connection, &replay.pending_connections)
+                            && replay.pending_connections.is_active(connection)
                     }))
                     && identity_of(view, *card)
                         .is_some_and(|identity| is_playable_now(view, identity))
@@ -1946,24 +1911,22 @@ pub(super) fn advanced_clue_candidates(
         } else {
             0
         };
-        candidates.push(ClueCandidate {
+        candidates.push(CompiledClueAction::new(
             action,
-            move_kind: Some(kind),
-            value: ClueValue::new(score + efficiency + u16::from(matches!(clue, Clue::Suit(_)))),
-            purpose: if matches!(kind, HGroupMoveKind::SaveClue | HGroupMoveKind::FakeSave) {
+            Some(kind),
+            ClueValue::new(score + efficiency + u16::from(matches!(clue, Clue::Suit(_)))),
+            if matches!(kind, HGroupMoveKind::SaveClue | HGroupMoveKind::FakeSave) {
                 CluePurpose::Save
             } else if kind == HGroupMoveKind::LieComponentFinesse {
                 CluePurpose::Play
             } else {
                 CluePurpose::Advanced
             },
-            target,
-            save: matches!(kind, HGroupMoveKind::SaveClue | HGroupMoveKind::FakeSave),
-            schedule: ClueSchedule::new(
+            ClueSchedule::new(
                 kind == HGroupMoveKind::FakeSave || urgently_protects_critical_chop,
                 playable > 0,
             ),
-            connection_steps: if kind == HGroupMoveKind::LieComponentFinesse {
+            if kind == HGroupMoveKind::LieComponentFinesse {
                 clue_focus
                     .and_then(|focus| identity_of(view, focus))
                     .map_or(0, |identity| {
@@ -1976,11 +1939,7 @@ pub(super) fn advanced_clue_candidates(
             } else {
                 0
             },
-            action_coverage: 0,
-            convention_action_count: None,
-            convention_connection_steps: None,
-            recognition: ClueRecognition::GeneratorProof,
-        });
+        ));
     }
     candidates
 }
@@ -2102,7 +2061,7 @@ pub(super) fn save_clue_score(
     }
     // Save Principle, with next-player timing as a deterministic tie-break.
     // Whether the Save may preempt an existing play obligation is represented
-    // separately on `ClueCandidate`.
+    // separately on `CompiledClueAction`.
     Some(if target == next_player { 450 } else { 400 })
 }
 
@@ -2135,7 +2094,7 @@ pub(super) fn play_clue_score(
     fixed_cards: &CardSet,
     invalidated_focuses: &CardSet,
     already_playing: &CardSet,
-    pending_connections: &[ConnectionObligation],
+    pending_connections: &ConnectionManager,
     convention_cards: &[HGroupCardInference],
     convention_facts: &ConventionFacts,
 ) -> Option<u16> {
@@ -2343,7 +2302,7 @@ pub(super) fn delayed_connection_score(
     allow_queued_prefix: bool,
     explicitly_clued: &CardSet,
     already_playing: &CardSet,
-    pending_connections: &[ConnectionObligation],
+    pending_connections: &ConnectionManager,
     convention_facts: &ConventionFacts,
 ) -> Option<u16> {
     let stack_height = view.play_stacks[focus_identity.suit.index()].len();
@@ -2354,10 +2313,8 @@ pub(super) fn delayed_connection_score(
     }
     let pending_wholly_queued = ((stack_height + 1)..usize::from(focus_identity.rank.number()))
         .all(|needed_rank| {
-            pending_identity_is_queued(
-                pending_connections,
-                Card::new(focus_identity.suit, Rank::ALL[needed_rank - 1]),
-            )
+            pending_connections
+                .identity_is_queued(Card::new(focus_identity.suit, Rank::ALL[needed_rank - 1]))
         });
     if pending_wholly_queued {
         if explicitly_clued.contains(&focus) && !focus_was_fixed {
@@ -2520,7 +2477,7 @@ pub(super) fn delayed_connection_score(
     for needed_rank in (first_unqueued_rank + 1)..usize::from(focus_identity.rank.number()) {
         let needed = Card::new(focus_identity.suit, Rank::ALL[needed_rank - 1]);
         let already_queued =
-            pending_identity_is_queued(pending_connections, needed)
+            pending_connections.identity_is_queued(needed)
                 || view.hands.iter().flatten().any(|card| {
                     already_playing.contains(&card.id) && card.identity == Some(needed)
                 });
@@ -2590,7 +2547,7 @@ pub(super) fn loaded_connection_plan(
     focus_identity: Card,
     gotten: &CardSet,
     already_playing: &CardSet,
-    pending: &[ConnectionObligation],
+    pending: &ConnectionManager,
     mut stack_heights: [u8; 5],
 ) -> Option<Option<RequiredFix>> {
     let visible_identity = |card| {
@@ -2609,7 +2566,7 @@ pub(super) fn loaded_connection_plan(
     };
     let target_loaded = pending
         .iter()
-        .any(|connection| connection.actor == target && pending_is_active(connection, pending))
+        .any(|connection| connection.actor == target && pending.is_active(connection))
         || (gotten.contains(&focus)
             && historical_facts.is_some_and(|facts| {
                 IdentitySet::from_mask(facts[focus.index()].identity_mask())
@@ -2625,7 +2582,7 @@ pub(super) fn loaded_connection_plan(
     let height = stack_heights[focus_identity.suit.index()];
     for rank in (height + 1)..focus_identity.rank.number() {
         let expected = Card::new(focus_identity.suit, Rank::ALL[usize::from(rank - 1)]);
-        if pending_identity_is_queued(pending, expected)
+        if pending.identity_is_queued(expected)
             || already_playing
                 .iter()
                 .any(|card| visible_identity(*card) == Some(expected))
@@ -2784,7 +2741,7 @@ pub(super) fn tempo_clue_candidates(
     replay: &HGroupState,
     gotten: &CardSet,
     profile: HGroupProfile,
-) -> Vec<ClueCandidate> {
+) -> Vec<CompiledClueAction> {
     let mut candidates = Vec::new();
     for action in view.legal_actions() {
         let Action::Clue { target, clue } = action else {
@@ -2825,20 +2782,14 @@ pub(super) fn tempo_clue_candidates(
             // A Tempo Clue accelerates an already-clued card that was not
             // already known to be playable. Re-cluing a card already bound to
             // play is a Burn Clue and is not admitted by this fallback.
-            candidates.push(ClueCandidate {
+            candidates.push(CompiledClueAction::new(
                 action,
-                move_kind: Some(HGroupMoveKind::TempoClue),
-                value: ClueValue::new(100 + u16::from(matches!(clue, Clue::Suit(_)))),
-                purpose: CluePurpose::Tempo,
-                target,
-                save: false,
-                schedule: ClueSchedule::new(false, true),
-                connection_steps: 0,
-                action_coverage: 0,
-                convention_action_count: None,
-                convention_connection_steps: None,
-                recognition: ClueRecognition::GeneratorProof,
-            });
+                Some(HGroupMoveKind::TempoClue),
+                ClueValue::new(100 + u16::from(matches!(clue, Clue::Suit(_)))),
+                CluePurpose::Tempo,
+                ClueSchedule::new(false, true),
+                0,
+            ));
         }
     }
     candidates

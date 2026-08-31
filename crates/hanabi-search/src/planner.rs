@@ -676,6 +676,11 @@ fn evaluate_exact_root(
     budget: &mut ExactBudget,
 ) -> Result<Vec<ExactActionValue>, ExactAbort> {
     let mut values = Vec::with_capacity(candidates.len());
+    // Exact branches repeatedly converge on the same public observation.
+    // Convention interpretation is a pure function of that observation, so
+    // compile it once for the whole solve instead of replaying H-Group history
+    // independently in every identity world and branch.
+    let mut analysis_cache = ConventionAnalysisCache::default();
     for action in candidates {
         budget.consume()?;
         let mut advanced = Vec::with_capacity(worlds.len());
@@ -685,7 +690,12 @@ fn evaluate_exact_root(
             advanced.push(state);
         }
         values.push(solve_partitioned(
-            advanced, convention, objective, budget, 1,
+            advanced,
+            convention,
+            objective,
+            budget,
+            &mut analysis_cache,
+            1,
         )?);
     }
     Ok(values)
@@ -696,6 +706,7 @@ fn solve_partitioned(
     convention: SupportedConvention,
     objective: PlanningObjective,
     budget: &mut ExactBudget,
+    analysis_cache: &mut ConventionAnalysisCache,
     depth: u16,
 ) -> Result<ExactActionValue, ExactAbort> {
     if depth > 512 {
@@ -727,7 +738,13 @@ fn solve_partitioned(
     }
     for (view, group) in groups {
         terminal.add(solve_observation_group(
-            view, &group, convention, objective, budget, depth,
+            view,
+            &group,
+            convention,
+            objective,
+            budget,
+            analysis_cache,
+            depth,
         )?);
     }
     Ok(terminal)
@@ -739,10 +756,10 @@ fn solve_observation_group(
     convention: SupportedConvention,
     objective: PlanningObjective,
     budget: &mut ExactBudget,
+    analysis_cache: &mut ConventionAnalysisCache,
     depth: u16,
 ) -> Result<ExactActionValue, ExactAbort> {
-    let deductions = LogicalDeductions::new(view).map_err(ExactAbort::InformationSet)?;
-    let analysis = convention.analyze(&deductions);
+    let analysis = analysis_cache.compile(view, convention)?;
     let preferred = analysis.preferred_action;
     let candidates = planning_candidates(&analysis);
     if candidates.is_empty() {
@@ -759,7 +776,14 @@ fn solve_observation_group(
             state.apply(action).map_err(ExactAbort::Rule)?;
             advanced.push(state);
         }
-        let value = solve_partitioned(advanced, convention, objective, budget, depth + 1)?;
+        let value = solve_partitioned(
+            advanced,
+            convention,
+            objective,
+            budget,
+            analysis_cache,
+            depth + 1,
+        )?;
         let priority = candidate.priority;
         let is_preferred = preferred == Some(action);
         let replace = best.as_ref().is_none_or(
@@ -778,6 +802,38 @@ fn solve_observation_group(
     }
     best.map(|(value, _, _, _)| value)
         .ok_or(ExactAbort::NoCandidateActions)
+}
+
+/// Per-solve cache for the pure observer-relative convention compiler.
+/// Keeping this local to one exact search avoids global mutable state while
+/// allowing identity-world branches with the same observation to share the
+/// expensive history reduction.
+#[derive(Default)]
+struct ConventionAnalysisCache {
+    entries: HashMap<PlayerView, ConventionAnalysis>,
+    #[cfg(test)]
+    compilations: usize,
+}
+
+impl ConventionAnalysisCache {
+    fn compile(
+        &mut self,
+        view: PlayerView,
+        convention: SupportedConvention,
+    ) -> Result<ConventionAnalysis, ExactAbort> {
+        if let Some(cached) = self.entries.get(&view) {
+            return Ok(cached.clone());
+        }
+        let deductions =
+            LogicalDeductions::new(view.clone()).map_err(ExactAbort::InformationSet)?;
+        let compiled = convention.analyze(&deductions);
+        self.entries.insert(view, compiled.clone());
+        #[cfg(test)]
+        {
+            self.compilations += 1;
+        }
+        Ok(compiled)
+    }
 }
 
 fn terminal_value(state: &FullState) -> ExactActionValue {
@@ -932,6 +988,21 @@ mod tests {
         ];
 
         assert_eq!(best_symbolic_index(&evaluations, None), Some(0));
+    }
+
+    #[test]
+    fn exact_solver_compiles_each_public_observation_once() {
+        let state = FullState::new_standard(2, standard_deck()).unwrap();
+        let view = state.view_for(PlayerId::new(0)).unwrap();
+        let mut cache = ConventionAnalysisCache::default();
+
+        cache
+            .compile(view.clone(), SupportedConvention::None)
+            .unwrap();
+        cache.compile(view, SupportedConvention::None).unwrap();
+
+        assert_eq!(cache.compilations, 1);
+        assert_eq!(cache.entries.len(), 1);
     }
 
     #[test]

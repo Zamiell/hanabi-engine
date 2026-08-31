@@ -1,9 +1,10 @@
 use super::{
-    Action, ActionCommitment, CachedProspectiveProjection, Card, CardId, ClueCandidate,
-    CluedCardSuperposition, EpistemicState, HGroupConnection, HGroupMoveKind, HGroupProfile,
-    HGroupRuleId, IdentitySet, LineOutcome, LogicalDeductions, PlayerId, PlayerView, Rank,
-    TeamConventionSnapshot, card_is_trash, identity_of, is_eventually_useful, is_playable_at,
-    is_playable_now, prospective_clue_view, prospective_team_clue_signal_kinds, rule_enabled,
+    Action, ActionCommitment, Card, CardId, CluedCardSuperposition, CompiledClueAction,
+    CompiledObserverProjection, CompiledProspectiveClue, EpistemicState, HGroupConnection,
+    HGroupMoveKind, HGroupProfile, HGroupRuleId, IdentitySet, LineOutcome, LogicalDeductions,
+    PlayerId, PlayerView, Rank, card_is_trash, compiled_baseline_team, compiled_prospective_clue,
+    identity_of, is_eventually_useful, is_playable_at, is_playable_now,
+    prospective_team_clue_signal_kinds, rule_enabled,
 };
 
 const TEAM_ACTION_COVERAGE_PENALTY: u16 = 80;
@@ -31,13 +32,13 @@ const STALLED_MULTI_STEP_CONNECTION_PENALTY: u16 = 280;
 pub(super) fn apply_strategic_clue_values(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
-    candidates: &mut [ClueCandidate],
+    candidates: &mut [CompiledClueAction],
 ) {
     if !rule_enabled(profile, HGroupRuleId::SpecialDiscards) {
         return;
     }
     let source = deductions.view();
-    let baseline_team = TeamConventionSnapshot::new(source.clone(), profile);
+    let baseline_team = compiled_baseline_team(source, profile);
     let baselines = (0..source.hands.len())
         .map(|player| {
             let observer = PlayerId::new(
@@ -128,7 +129,7 @@ pub(super) fn apply_strategic_clue_values(
         .max()
         .unwrap_or(0);
     let has_unoccupied_immediate_target = candidates.iter().any(|candidate| {
-        candidate.immediate_play() && !target_has_scheduled_play(candidate.target)
+        candidate.immediate_play() && !target_has_scheduled_play(candidate.target())
     });
     let mut best_immediate_action_count_by_target: Vec<Option<usize>> =
         vec![None; source.hands.len()];
@@ -143,7 +144,7 @@ pub(super) fn apply_strategic_clue_values(
             .convention_action_count
             .unwrap_or(value.action_coverage)
             .max(value.action_coverage);
-        let best = &mut best_immediate_action_count_by_target[candidate.target.index()];
+        let best = &mut best_immediate_action_count_by_target[candidate.target().index()];
         *best = Some(best.map_or(action_count, |prior| prior.max(action_count)));
     }
     for (index, candidate) in candidates.iter_mut().enumerate() {
@@ -154,13 +155,7 @@ pub(super) fn apply_strategic_clue_values(
             source, *candidate, &baselines,
         ));
         let action_coverage = value.action_coverage;
-        candidate.action_coverage = u8::try_from(action_coverage).unwrap_or(u8::MAX);
-        candidate.convention_action_count = value
-            .convention_action_count
-            .map(|count| u8::try_from(count).unwrap_or(u8::MAX));
-        candidate.convention_connection_steps = value
-            .convention_connection_steps
-            .map(|count| u8::try_from(count).unwrap_or(u8::MAX));
+        candidate.set_compiled_line(value);
         let candidate_action_count = value
             .convention_action_count
             .unwrap_or(value.action_coverage)
@@ -180,9 +175,9 @@ pub(super) fn apply_strategic_clue_values(
             );
         }
         let same_target_immediate_play_is_at_least_as_productive =
-            best_immediate_action_count_by_target[candidate.target.index()]
+            best_immediate_action_count_by_target[candidate.target().index()]
                 .is_some_and(|best| best >= candidate_action_count);
-        if candidate.save && same_target_immediate_play_is_at_least_as_productive {
+        if candidate.is_save() && same_target_immediate_play_is_at_least_as_productive {
             // An immediate Play Clue occupies the recipient, so their critical
             // chop cannot be discarded on this turn. Prefer advancing the
             // stack over spending the clue only to Save that same player,
@@ -238,7 +233,7 @@ pub(super) fn apply_strategic_clue_values(
                         })
             })
         });
-        if candidate.purpose == super::CluePurpose::Play
+        if candidate.purpose() == super::CluePurpose::Play
             && !candidate.immediate_play()
             && source.turn > 0
             && !extends_existing_owner_promise
@@ -290,7 +285,7 @@ pub(super) fn apply_strategic_clue_values(
         );
         if has_unoccupied_immediate_target
             && candidate.immediate_play()
-            && target_has_scheduled_play(candidate.target)
+            && target_has_scheduled_play(candidate.target())
             && action_coverage <= 1
         {
             // Giving a player a second immediate play delays the action they
@@ -406,7 +401,7 @@ fn secured_critical_chop_deadline_value(
 /// visible successors than the giver's current play.
 fn preserves_visible_continuation(
     source: &PlayerView,
-    candidate: ClueCandidate,
+    candidate: CompiledClueAction,
     baselines: &[ProjectedLineState],
 ) -> bool {
     let Action::Clue { target, clue } = candidate.action else {
@@ -569,14 +564,13 @@ fn clue_establishes_actor_recognized_action(
         .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
         .map(|card| card.id)
         .collect::<Vec<_>>();
-    let after = prospective_clue_view(source, target, clue, &touched);
-    let baseline_team = TeamConventionSnapshot::new(source.clone(), profile);
-    let after_team = TeamConventionSnapshot::new(after, profile);
+    let compiled = compiled_prospective_clue(source, profile, target, clue, &touched)?;
+    let baseline_team = compiled_baseline_team(source, profile);
     for player in 0..source.hands.len() {
         let observer =
             PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
         let baseline = baseline_team.projection(observer)?;
-        let projected = after_team.projection(observer)?;
+        let projected = compiled.projection(observer)?;
         let gained_play = projected
             .inferred
             .playable_now
@@ -716,7 +710,7 @@ impl ProjectedLineState {
 #[allow(clippy::too_many_lines)]
 fn projected_line_state(
     source: &PlayerView,
-    projection: CachedProspectiveProjection,
+    projection: CompiledObserverProjection,
 ) -> ProjectedLineState {
     let observer = projection.deductions.view().observer;
     let replay = projection.replay;
@@ -869,11 +863,11 @@ fn clue_line_value(
         .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
         .map(|card| card.id)
         .collect::<Vec<_>>();
-    let after_clue = prospective_clue_view(source, target, clue, &touched);
-    let after_team = TeamConventionSnapshot::new(after_clue.clone(), profile);
+    let compiled = compiled_prospective_clue(source, profile, target, clue, &touched)?;
+    let after_clue = compiled.after();
     let mut value = LineOutcome::default();
-    let named_line = canonical_named_line_metrics(source, &after_team);
-    let giver_projection = after_team.projection(source.observer)?;
+    let named_line = canonical_named_line_metrics(source, &compiled);
+    let giver_projection = compiled.projection(source.observer)?;
     let charm_focus = giver_projection
         .replay
         .signals
@@ -909,13 +903,13 @@ fn clue_line_value(
     for (player, baseline) in baselines.iter().enumerate() {
         let observer =
             PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
-        let projection = after_team.projection(observer)?;
+        let projection = compiled.projection(observer)?;
         let conflicts_with_giver = charm_focus.is_none()
             && projection
                 .replay
                 .signals
                 .has_at_turn(source.turn, HGroupMoveKind::Charm);
-        let after = projected_line_state(&after_clue, projection);
+        let after = projected_line_state(after_clue, projection);
         record_clued_superpositions(&mut value, observer, &after);
         let changed_connection_cards = after
             .connection_lines
@@ -1089,7 +1083,7 @@ fn clue_line_value(
 /// outcome comparison from adding mutually exclusive observer projections.
 fn canonical_named_line_metrics(
     source: &PlayerView,
-    team: &TeamConventionSnapshot,
+    team: &CompiledProspectiveClue,
 ) -> Option<(usize, usize)> {
     let mut bluff = None;
     let mut clandestine = None;

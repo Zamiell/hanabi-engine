@@ -3,8 +3,7 @@ use super::{
     ConnectionTransitionReason, ConventionJournal, HGroupClueKind, HGroupConnectionKind,
     HGroupMoveKind, HGroupRuleEffects, HGroupTurnSnapshot, IdentitySet, ObservedEvent,
     ObservedHistoryEntry, PlayerView, PromiseId, Rank, bluff_play_connects, bluff_target_kind_at,
-    finesse_position_id, identity_of, is_playable_at, next_player, pending_is_active, push_signal,
-    was_clued_before,
+    finesse_position_id, identity_of, is_playable_at, next_player, push_signal, was_clued_before,
 };
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -60,7 +59,7 @@ pub(in crate::h_group) fn apply_bluff_effects(
         let connector_is_already_promised = hands.iter().flatten().any(|card| {
             already_playing.contains(card) && identity_of(view, *card) == Some(expected_connector)
         }) || pending.iter().any(|connection| {
-            pending_is_active(connection, pending) && connection.expected == expected_connector
+            pending.is_active(connection) && connection.expected == expected_connector
         });
         if connector_is_already_promised {
             // A Self-Bluff supplies a missing connector. If that connector is
@@ -105,9 +104,7 @@ pub(in crate::h_group) fn apply_bluff_effects(
         return;
     }
     let actor_is_loaded = pending.iter().any(|connection| {
-        connection.actor == actor
-            && connection.focus != focus
-            && pending_is_active(connection, pending)
+        connection.actor == actor && connection.focus != focus && pending.is_active(connection)
     }) || hands[actor.index()].iter().any(|card| {
         explicitly_clued.contains(card)
             && identity_of(view, *card)
@@ -194,7 +191,7 @@ pub(in crate::h_group) fn apply_resolved_bluff_effects(
         || pending.iter().any(|connection| {
             connection.actor == player
                 && connection.cards.contains(&card)
-                && pending_is_active(connection, pending)
+                && pending.is_active(connection)
         });
     if had_preexisting_play_obligation {
         // A successful play that was already convention-bound before the

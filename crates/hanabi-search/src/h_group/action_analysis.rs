@@ -18,7 +18,7 @@ pub(super) enum HGroupActionKind {
 
 /// One canonical H-Group analysis consumed by planning and action selection.
 #[derive(Clone, Copy, Debug)]
-pub(super) struct HGroupAnalyzedAction {
+pub(super) struct CompiledHGroupAction {
     pub(super) action: Action,
     pub(super) kind: HGroupActionKind,
     pub(super) policy_tier: ConventionPolicyTier,
@@ -28,7 +28,7 @@ pub(super) struct HGroupAnalyzedAction {
 /// Complete convention decision for one observer-relative position.
 #[derive(Clone, Debug, Default)]
 pub(super) struct HGroupActionSet {
-    pub(super) actions: Vec<HGroupAnalyzedAction>,
+    pub(super) actions: Vec<CompiledHGroupAction>,
     pub(super) preferred: Option<Action>,
     pub(super) predictable: Option<Action>,
 }

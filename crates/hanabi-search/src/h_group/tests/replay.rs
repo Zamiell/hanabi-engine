@@ -855,7 +855,7 @@ fn third_replay_green_four_counterfactual_prefers_rank_four_to_bob() {
             .expect("both comparison clues are convention-valid")
     };
 
-    assert!(candidate(rank_four).action_coverage > candidate(rank_two).action_coverage);
+    assert!(candidate(rank_four).action_coverage() > candidate(rank_two).action_coverage());
     assert!(candidate(rank_four).score() > candidate(rank_two).score());
     assert_eq!(
         select_h_group_action(&deductions, HGroupProfile::Max),
@@ -953,7 +953,7 @@ fn third_replay_move_thirty_six_prefers_occupying_play_over_save() {
         !replay.cards.already_playing.contains(&CardId::new(34))
             && !replay.pending_connections.iter().any(|connection| {
                 connection.actor == PlayerId::new(1)
-                    && pending_is_active(connection, &replay.pending_connections)
+                    && replay.pending_connections.is_active(connection)
             }),
         "Bob has no pre-existing play obligation before Donald's clue: {replay:#?}",
     );
@@ -973,8 +973,8 @@ fn third_replay_move_thirty_six_prefers_occupying_play_over_save() {
             .expect("both ordinary clues remain convention-valid")
     };
 
-    assert!(candidate(five).save && !candidate(five).immediate_play());
-    assert!(candidate(red).immediate_play() && !candidate(red).save);
+    assert!(candidate(five).is_save() && !candidate(five).immediate_play());
+    assert!(candidate(red).immediate_play() && !candidate(red).is_save());
     assert!(
         candidate(red).score() > candidate(five).score(),
         "red occupies Bob with red 5, postponing any discard of his green-5 chop; red={:#?}; five={:#?}",
@@ -1260,16 +1260,16 @@ fn third_replay_move_two_distinguishes_bluff_from_clandestine_finesse() {
     };
     assert_eq!(
         (
-            candidate(red).convention_connection_steps,
-            candidate(two).convention_connection_steps,
+            candidate(red).convention_connection_steps(),
+            candidate(two).convention_connection_steps(),
         ),
         (Some(1), Some(2)),
         "the Bluff must supply one connector and the Clandestine Finesse two; red signals: {red_signals:?}; rank-2 signals: {two_signals:?}; candidates: {candidates:#?}",
     );
     assert_eq!(
         (
-            candidate(red).convention_action_count,
-            candidate(two).convention_action_count,
+            candidate(red).convention_action_count(),
+            candidate(two).convention_action_count(),
         ),
         (Some(2), Some(3)),
         "the engine must compare the Bluff as a 2-for-1 and the Clandestine Finesse as a 3-for-1",
@@ -1282,8 +1282,8 @@ fn third_replay_move_two_distinguishes_bluff_from_clandestine_finesse() {
     );
     assert_eq!(
         (
-            candidate(blue).convention_action_count,
-            candidate(blue).convention_connection_steps,
+            candidate(blue).convention_action_count(),
+            candidate(blue).convention_connection_steps(),
         ),
         (Some(2), Some(1)),
         "the Stacked Ejection promises its blind play and the blue 5, not the apparent Finesse chain",
@@ -1317,10 +1317,10 @@ fn third_replay_move_two_scores_rank_three_as_a_bluff_not_a_delayed_play() {
         .find(|candidate| candidate.action == rank_three)
         .expect("rank 3 remains a legal 3 Bluff");
 
-    assert_eq!(candidate.purpose, CluePurpose::Advanced);
-    assert_eq!(candidate.connection_steps, 0);
-    assert_eq!(candidate.convention_connection_steps, Some(1));
-    assert_eq!(candidate.convention_action_count, Some(1));
+    assert_eq!(candidate.purpose(), CluePurpose::Advanced);
+    assert_eq!(candidate.connection_steps(), 0);
+    assert_eq!(candidate.convention_connection_steps(), Some(1));
+    assert_eq!(candidate.convention_action_count(), Some(1));
     assert!(
         candidate.score() < 400,
         "a 3 Bluff gets Cathy's immediate blind play but does not promise purple 2 or make Alice's purple 3 playable: {candidate:#?}",

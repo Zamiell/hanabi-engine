@@ -1,7 +1,7 @@
 use super::{
     Card, CardId, CardSet, Clue, HGroupCardInference, HGroupIdentityStatus, HGroupProfile,
-    HGroupState, IdentitySet, PlayerId, PlayerView, Rank, is_critical, pending_is_active,
-    prospective_clue_view, subjective_convention_cards,
+    HGroupState, IdentitySet, PlayerId, PlayerView, Rank, is_critical, prospective_clue_view,
+    subjective_convention_cards,
 };
 
 /// Convention-aware value of the negative information supplied by a clue.
@@ -85,7 +85,7 @@ fn promised_cards(replay: &HGroupState, target: PlayerId) -> CardSet {
         .pending_connections
         .iter()
         .filter(|connection| {
-            connection.actor == target && pending_is_active(connection, &replay.pending_connections)
+            connection.actor == target && replay.pending_connections.is_active(connection)
         })
         .flat_map(|connection| connection.cards.iter().copied())
         .chain(replay.cards.forced_playable.iter().copied())

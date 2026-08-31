@@ -13,8 +13,7 @@ use super::{
     bluff_target_kind_at, bluff_target_order_is_legal, card_is_trash, chop, finesse_position_id,
     five_chop_moved_card, five_pulled_card, focus, has_higher_basic_priority, identity_of,
     identity_set, is_card_identity_accounted_trash, is_critical, is_playable_at, is_playable_now,
-    is_trash_at, next_player, pending_identity_is_queued, pending_is_active, protected_cards,
-    push_signal, was_clued_before,
+    is_trash_at, next_player, protected_cards, push_signal, was_clued_before,
 };
 
 mod advanced;

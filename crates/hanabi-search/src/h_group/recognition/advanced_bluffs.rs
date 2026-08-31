@@ -3,7 +3,7 @@ use super::{
     HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, IdentitySet, ObservedEvent, PlayerView,
     Rank, bluff_play_connects, bluff_target_kind_at, bluff_target_order_is_legal, chop,
     finesse_position_id, focus, identity_of, is_critical, is_playable_at, is_trash_at, next_player,
-    pending_is_active, protected_cards, push_signal, same_turn_signal, was_clued_before,
+    protected_cards, push_signal, same_turn_signal, was_clued_before,
 };
 
 #[allow(clippy::too_many_lines)]
@@ -258,9 +258,11 @@ pub(in crate::h_group) fn apply_intermediate_bluff_effects(
         && interpretation.focus_identities.iter().all(|identity| {
             bluff_target_kind_at(stack_heights, *clue, identity) == Some(BluffTargetKind::Three)
         });
-    if effects.pending.iter().any(|connection| {
-        connection.actor == actor && pending_is_active(connection, effects.pending)
-    }) {
+    if effects
+        .pending
+        .iter()
+        .any(|connection| connection.actor == actor && effects.pending.is_active(connection))
+    {
         // A loaded player must perform the play already promised to them.
         // The same guard is used by the ordinary Bluff rule; omitting it here
         // made a direct clue to a later player look like an Intermediate Bluff.

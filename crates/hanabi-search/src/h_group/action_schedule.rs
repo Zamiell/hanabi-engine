@@ -2,7 +2,7 @@ use hanabi_core::{Card, CardId, PlayerId, PlayerView};
 
 use super::{
     CardSet, HGroupState, IdentityClaims, IdentitySet, PromiseId, identity_of, is_playable_at,
-    next_player, pending_is_active,
+    next_player,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -49,7 +49,7 @@ impl ActionSchedule {
         for connection in replay
             .pending_connections
             .iter()
-            .filter(|connection| pending_is_active(connection, &replay.pending_connections))
+            .filter(|connection| replay.pending_connections.is_active(connection))
             .filter(|connection| {
                 !replay.is_exact_transfer(
                     connection
@@ -124,7 +124,7 @@ impl ActionSchedule {
             .flat_map(|pending| {
                 let blocked_candidates = if pending.actor != observer {
                     &[][..]
-                } else if pending_is_active(pending, &replay.pending_connections) {
+                } else if replay.pending_connections.is_active(pending) {
                     pending.cards.get(1..).unwrap_or_default()
                 } else {
                     pending.cards.as_slice()

@@ -1,10 +1,11 @@
 use super::{
-    Arc, Card, CardId, Clue, ClueFacts, ConnectionObligation, GameStatus, HGroupCardInference,
-    HGroupInferences, HGroupMoveKind, HGroupProfile, HGroupState, IdentitySet, LogicalDeductions,
-    MAX_CLUE_TOKENS, ObservedCard, ObservedEvent, ObservedHistoryEntry, PerspectiveDepth,
-    PerspectiveProjector, PlayerId, PlayerView, ProspectiveTransition, Rank, RefCell, chop,
-    convention_card_inferences, identity_of, infer_h_group, infer_h_group_from_replay,
-    is_playable_now, next_player, replay_h_group_inner, replay_identity_is_queued,
+    Action, Arc, Card, CardId, Clue, ClueFacts, ConnectionObligation, GameStatus,
+    HGroupCardInference, HGroupClueInterpretation, HGroupInferences, HGroupMoveKind, HGroupProfile,
+    HGroupState, IdentitySet, LogicalDeductions, MAX_CLUE_TOKENS, ObservedCard, ObservedEvent,
+    ObservedHistoryEntry, PerspectiveDepth, PerspectiveProjector, PlayerId, PlayerView,
+    ProspectiveTransition, Rank, RefCell, chop, convention_card_inferences, identity_of,
+    infer_h_group, infer_h_group_from_replay, is_playable_now, next_player, replay_h_group_inner,
+    replay_identity_is_queued,
 };
 use std::rc::Rc;
 
@@ -57,7 +58,7 @@ pub(super) fn projected_h_group_replay(
 }
 
 #[derive(Clone)]
-pub(super) struct CachedProspectiveProjection {
+pub(super) struct CompiledObserverProjection {
     pub(super) deductions: Arc<LogicalDeductions>,
     pub(super) replay: HGroupState,
     pub(super) inferred: HGroupInferences,
@@ -71,7 +72,7 @@ pub(super) struct CachedProspectiveProjection {
 pub(super) struct TeamConventionSnapshot {
     source: PlayerView,
     profile: HGroupProfile,
-    projections: Rc<RefCell<Vec<Option<CachedProspectiveProjection>>>>,
+    projections: Rc<RefCell<Vec<Option<CompiledObserverProjection>>>>,
 }
 
 impl TeamConventionSnapshot {
@@ -84,14 +85,14 @@ impl TeamConventionSnapshot {
         }
     }
 
-    pub(super) fn projection(&self, observer: PlayerId) -> Option<CachedProspectiveProjection> {
+    pub(super) fn projection(&self, observer: PlayerId) -> Option<CompiledObserverProjection> {
         if let Some(cached) = self.projections.borrow()[observer.index()].clone() {
             return Some(cached);
         }
         let (deductions, replay) = projected_h_group_replay(&self.source, self.profile, observer)?;
         let deductions = Arc::new(deductions);
         let inferred = infer_h_group_from_replay(&deductions, replay.clone(), self.profile);
-        let projection = CachedProspectiveProjection {
+        let projection = CompiledObserverProjection {
             deductions,
             replay,
             inferred,
@@ -108,10 +109,52 @@ struct ProspectiveClueKey {
     touched: Vec<CardId>,
 }
 
+/// One hypothetical clue transition compiled exactly once by the normal
+/// history reducer. Admission, recipient validation, hazard checks, and
+/// strategic evaluation all query this immutable result rather than
+/// independently reconstructing the clue's meaning.
 #[derive(Clone)]
-struct ProspectiveConventionSnapshot {
+pub(super) struct CompiledProspectiveClue {
+    action: Action,
+    turn: u32,
     after: PlayerView,
     team: TeamConventionSnapshot,
+}
+
+impl CompiledProspectiveClue {
+    pub(super) const fn after(&self) -> &PlayerView {
+        &self.after
+    }
+
+    pub(super) fn projection(&self, observer: PlayerId) -> Option<CompiledObserverProjection> {
+        self.team.projection(observer)
+    }
+
+    fn signal_kinds(&self, observer: PlayerId) -> Option<Vec<HGroupMoveKind>> {
+        let projection = self.projection(observer)?;
+        Some(
+            projection
+                .replay
+                .signals
+                .iter()
+                .filter(|signal| signal.turn == self.turn)
+                .map(|signal| signal.kind)
+                .collect(),
+        )
+    }
+
+    fn primary_interpretation(&self) -> Option<HGroupClueInterpretation> {
+        let Action::Clue { target, .. } = self.action else {
+            return None;
+        };
+        self.projection(target)?
+            .replay
+            .clues
+            .iter()
+            .rev()
+            .find(|interpretation| interpretation.turn == self.turn)
+            .cloned()
+    }
 }
 
 #[derive(Clone)]
@@ -124,7 +167,7 @@ struct ProspectiveAnalysisCache {
     source_address: usize,
     profile: HGroupProfile,
     baseline_team: TeamConventionSnapshot,
-    clue_snapshots: Vec<(ProspectiveClueKey, Option<ProspectiveConventionSnapshot>)>,
+    clue_snapshots: Vec<(ProspectiveClueKey, Option<CompiledProspectiveClue>)>,
     source_hand_worlds: ProspectiveCacheSlot<Arc<Vec<PlayerView>>>,
 }
 
@@ -170,7 +213,7 @@ fn prospective_baseline_projection(
     source: &PlayerView,
     profile: HGroupProfile,
     observer: PlayerId,
-) -> Option<CachedProspectiveProjection> {
+) -> Option<CompiledObserverProjection> {
     let source_address = core::ptr::from_ref(source).addr();
     let cached_team = PROSPECTIVE_ANALYSIS_CACHE.with(|cache| {
         let cache = cache.borrow();
@@ -186,17 +229,37 @@ fn prospective_baseline_projection(
     TeamConventionSnapshot::new(source.clone(), profile).projection(observer)
 }
 
+/// Reuses the current position's team projection inside one candidate
+/// compilation pass. Strategic comparison and safety validation therefore
+/// share the same observer reductions instead of building parallel baselines.
+pub(super) fn compiled_baseline_team(
+    source: &PlayerView,
+    profile: HGroupProfile,
+) -> TeamConventionSnapshot {
+    let source_address = core::ptr::from_ref(source).addr();
+    PROSPECTIVE_ANALYSIS_CACHE.with(|cache| {
+        cache
+            .borrow()
+            .as_ref()
+            .filter(|cache| cache.source_address == source_address && cache.profile == profile)
+            .map_or_else(
+                || TeamConventionSnapshot::new(source.clone(), profile),
+                |cache| cache.baseline_team.clone(),
+            )
+    })
+}
+
 /// Applies a hypothetical clue once and materializes the recipient-relative
 /// convention snapshot consumed by candidate admission, hazard checking, and
 /// strategic evaluation. All consumers therefore observe the same reducer
 /// result instead of independently replaying the hypothetical history.
-fn prospective_clue_snapshot(
+pub(super) fn compiled_prospective_clue(
     source: &PlayerView,
     profile: HGroupProfile,
     target: PlayerId,
     clue: Clue,
     touched: &[CardId],
-) -> Option<ProspectiveConventionSnapshot> {
+) -> Option<CompiledProspectiveClue> {
     let key = ProspectiveClueKey {
         target,
         clue,
@@ -223,9 +286,12 @@ fn prospective_clue_snapshot(
     #[cfg(test)]
     PROSPECTIVE_SNAPSHOT_REDUCTIONS.with(|count| count.set(count.get() + 1));
     let team = TeamConventionSnapshot::new(after.clone(), profile);
-    let computed = team
-        .projection(target)
-        .map(|_| ProspectiveConventionSnapshot { after, team });
+    let computed = team.projection(target).map(|_| CompiledProspectiveClue {
+        action: Action::Clue { target, clue },
+        turn: source.turn,
+        after,
+        team,
+    });
     PROSPECTIVE_ANALYSIS_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if let Some(cache) = cache.as_mut() {
@@ -435,20 +501,10 @@ pub(super) fn prospective_clue_signal_kinds(
     clue: Clue,
     touched: &[CardId],
 ) -> Vec<HGroupMoveKind> {
-    let turn = source.turn;
-    let Some(snapshot) = prospective_clue_snapshot(source, profile, target, clue, touched) else {
+    let Some(snapshot) = compiled_prospective_clue(source, profile, target, clue, touched) else {
         return Vec::new();
     };
-    let Some(recipient) = snapshot.team.projection(target) else {
-        return Vec::new();
-    };
-    recipient
-        .replay
-        .signals
-        .iter()
-        .filter(|signal| signal.turn == turn)
-        .map(|signal| signal.kind)
-        .collect()
+    snapshot.signal_kinds(target).unwrap_or_default()
 }
 
 /// Convention names recognized anywhere on the team after a hypothetical
@@ -464,24 +520,17 @@ pub(super) fn prospective_team_clue_signal_kinds(
     clue: Clue,
     touched: &[CardId],
 ) -> Vec<HGroupMoveKind> {
-    let turn = source.turn;
-    let Some(snapshot) = prospective_clue_snapshot(source, profile, target, clue, touched) else {
+    let Some(snapshot) = compiled_prospective_clue(source, profile, target, clue, touched) else {
         return Vec::new();
     };
     let mut kinds = Vec::new();
     for player in 0..source.hands.len() {
         let observer =
             PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
-        let Some(projection) = snapshot.team.projection(observer) else {
+        let Some(signals) = snapshot.signal_kinds(observer) else {
             continue;
         };
-        for kind in projection
-            .replay
-            .signals
-            .iter()
-            .filter(|signal| signal.turn == turn)
-            .map(|signal| signal.kind)
-        {
+        for kind in signals {
             if !kinds.contains(&kind) {
                 kinds.push(kind);
             }
@@ -500,7 +549,7 @@ pub(super) fn prospective_stacked_ejection_card(
     touched: &[CardId],
 ) -> Option<CardId> {
     let turn = source.turn;
-    let snapshot = prospective_clue_snapshot(source, profile, target, clue, touched)?;
+    let snapshot = compiled_prospective_clue(source, profile, target, clue, touched)?;
     for player in 0..source.hands.len() {
         let observer =
             PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
@@ -536,15 +585,8 @@ pub(super) fn prospective_clue_primary_kind(
     clue: Clue,
     touched: &[CardId],
 ) -> Option<super::HGroupClueKind> {
-    let turn = source.turn;
-    prospective_clue_snapshot(source, profile, target, clue, touched)?
-        .team
-        .projection(target)?
-        .replay
-        .clues
-        .iter()
-        .rev()
-        .find(|interpretation| interpretation.turn == turn)
+    compiled_prospective_clue(source, profile, target, clue, touched)?
+        .primary_interpretation()
         .map(|interpretation| interpretation.kind)
 }
 
@@ -558,16 +600,7 @@ pub(super) fn prospective_clue_primary_interpretation(
     clue: Clue,
     touched: &[CardId],
 ) -> Option<super::HGroupClueInterpretation> {
-    let turn = source.turn;
-    prospective_clue_snapshot(source, profile, target, clue, touched)?
-        .team
-        .projection(target)?
-        .replay
-        .clues
-        .iter()
-        .rev()
-        .find(|interpretation| interpretation.turn == turn)
-        .cloned()
+    compiled_prospective_clue(source, profile, target, clue, touched)?.primary_interpretation()
 }
 
 pub(super) fn prospective_clue_has_unsafe_connection(
@@ -613,7 +646,7 @@ fn duplicates_good_touch_superposition(
         .iter()
         .map(|card| card.id)
         .collect::<Vec<_>>();
-    let baseline_team = TeamConventionSnapshot::new(source.clone(), profile);
+    let baseline_team = compiled_baseline_team(source, profile);
     let mut baseline_possible_promises = IdentitySet::default();
     for player in 0..source.hands.len() {
         let observer =
@@ -687,7 +720,7 @@ pub(super) fn prospective_clue_hazard(
     touched: &[CardId],
     expect_immediate_focus: bool,
 ) -> Option<ProspectiveClueHazard> {
-    let Some(snapshot) = prospective_clue_snapshot(source, profile, target, clue, touched) else {
+    let Some(snapshot) = compiled_prospective_clue(source, profile, target, clue, touched) else {
         return Some(ProspectiveClueHazard::ProjectionFailed);
     };
     let after_clue = &snapshot.after;

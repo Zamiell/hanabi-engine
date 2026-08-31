@@ -248,7 +248,7 @@ fn paired_sample_zero_ordinary_chop_does_not_block_a_purple_three_save() {
     assert!(
         candidates
             .iter()
-            .any(|candidate| candidate.action == save_clue && candidate.save),
+            .any(|candidate| candidate.action == save_clue && candidate.is_save()),
         "the ordinary chop discard was falsely promoted to an Emergency Discard: {candidates:#?}"
     );
     state.apply(save_clue).unwrap();

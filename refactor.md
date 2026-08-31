@@ -21,6 +21,80 @@ preserve. Commit hashes refer to this repository's Git history.
   numeric utility only compares actions that remain semantically equivalent.
 - Unknown future cards remain blank until exact endgame enumeration is both
   sound and computationally bounded.
+- A prospective clue is compiled once. Admission, recipient validation,
+  strategic comparison, explanation, and planning consume that compiled
+  result rather than replaying the clue through independent semantic paths.
+- Connection lifecycle questions are answered by `ConnectionManager`; callers
+  may inspect obligations but must not reconstruct active-versus-queued status.
+- Caches are scoped to one immutable position or exact solve. They may reuse a
+  pure semantic result, but may not become a second mutable convention state.
+
+## 2026-08-31: compiled actions, owned connection queries, and scoped semantic caches
+
+### Why
+
+The fourth expert replay exposed several failures with a common cause. A clue
+could be classified during candidate generation, reconstructed again during
+recipient replay, and then partially reconstructed a third time for strategic
+comparison. Those paths disagreed about fixed Prompt candidates, whether a
+connection step was active or merely queued, whether a multi-step Finesse was
+a Bluff, and whether touching a later connection layer was a redundant clue or
+a valid Continuation Clue. `ClueCandidate` also stored its target, Save status,
+purpose, connection counts, and named move as independent fields, allowing
+internally contradictory values.
+
+`ConnectionManager` already owned promise mutation and provenance, but its
+slice `Deref` let every consumer independently implement lifecycle queries.
+Finally, required behavior such as the first 5 Stall was filtered in action
+ordering while other obligations used typed constraints, and exact identity
+branches repeatedly recompiled the same public observation.
+
+### Changes
+
+- Replaced the candidate bag with `CompiledClueAction`,
+  `CompiledClueSemantics`, and `CompiledClueLine`. The target is derived from
+  the `Action`; Save status is derived from `CluePurpose`; fallback play and
+  fallback Save are distinct variants; and recipient-derived line metrics are
+  committed together. Internal validation rejects inconsistent compiled
+  meanings before policy or planning consumes them.
+- Renamed the complete non-clue decision record to `CompiledHGroupAction` and
+  observer projections to `CompiledObserverProjection`, making the boundaries
+  between visible truth, observer-relative compilation, and final action
+  policy explicit.
+- Added `CompiledProspectiveClue`. The normal history reducer now applies each
+  hypothetical clue once, and candidate admission, recipient assessment,
+  hazard checks, named-line measurement, and strategic comparison share that
+  immutable transition and its lazy team projections. The existing
+  prospective-versus-observed replay invariant remains the transactional
+  equivalence check.
+- Removed `ConnectionManager`'s `Deref` implementation. Active-step checks,
+  queued-identity checks, actor occupancy, and clue matching now go through the
+  manager. `ConnectionClueMatch` distinguishes an active redundant touch from
+  a valid later-layer continuation in one place.
+- Replaced the loose constraint reason/action pair with a typed
+  `ConventionRequirement`. Hard alternatives are represented together, and
+  the early-game 5 Stall is now also installed as an `EarlyFiveStall`
+  requirement rather than relying only on candidate scores. Numeric utility
+  remains a tie-break among actions that satisfy the same requirement.
+- Reused the candidate pass's baseline and hypothetical team projections in
+  strategic evaluation. Added a per-solve `ConventionAnalysisCache` so exact
+  identity branches that converge on the same `PlayerView` compile convention
+  semantics once without introducing global mutable state.
+- Added architecture tests for the compiled-action boundary and connection
+  ownership, a lifecycle test for active-versus-queued clue matching, and a
+  planner test proving that a repeated public observation is compiled once.
+
+### Preserve
+
+New clue semantics belong in the compiled clue transition, not in a new
+consumer-side replay. Do not add stored `target` or `save` fields back to a
+compiled clue, expose `ConnectionManager` as a slice, or use numeric priority
+to enforce a mandatory convention response. Caches must either key on the
+complete immutable observation and convention profile or, as in one exact
+solve, be scoped to a single fixed profile; cached results must never be patched
+after compilation. The event-sourced knowledge program,
+branch-local clue hypotheses, and public-history-only interpretation rules
+from the previous refactors remain authoritative.
 
 ## 2026-08-29: branch-local clue plans and staged knowledge compilation
 

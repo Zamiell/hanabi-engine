@@ -2,14 +2,13 @@ use super::super::{
     HGroupIdentityStatus, IdentityClaimRelation, blind_reverse_finesse_is_eligible,
 };
 use super::{
-    Card, CardId, CardSet, Clue, ClueFacts, ConnectionObligation, ConventionFacts,
+    Card, CardId, CardSet, Clue, ClueFacts, ConnectionManager, ConventionFacts,
     ConventionKnowledge, HGroupCardInference, HGroupConnection, HGroupConnectionKind,
     HGroupMoveKind, HGroupPlayObligation, HGroupProfile, HGroupRuleId, HGroupState, HistoricalView,
     IdentityClaims, IdentitySet, LogicalDeductions, MaterializedCardFact, ObservedEvent, PlayerId,
     PlayerView, Rank, StackTimeline, chop, elimination_finesse_connection, identity_of,
     is_eventually_useful, is_playable_at, loaded_connection_plan, pending_card_allows_identity,
-    pending_identity_is_queued, pending_is_active, replay_identity_is_queued, rule_enabled,
-    was_clued_before,
+    replay_identity_is_queued, rule_enabled, was_clued_before,
 };
 use crate::h_group::knowledge_effects::{
     CardKnowledgeEffect, KnowledgeSource, effects_between, initial_card_inferences,
@@ -364,8 +363,7 @@ impl<'a> ConventionKnowledgeCompiler<'a> {
         // only the active head receives an action obligation.
         for pending in self.replay.pending_connections.iter().filter(|pending| {
             pending.actor == view.observer
-                && (pending.cards.len() == 1
-                    || !pending_is_active(pending, &self.replay.pending_connections))
+                && (pending.cards.len() == 1 || !self.replay.pending_connections.is_active(pending))
         }) {
             let Some(pending_card) = pending.cards.first().copied() else {
                 continue;
@@ -422,8 +420,7 @@ impl<'a> ConventionKnowledgeCompiler<'a> {
         let observer_turn_stack_heights =
             StackTimeline::before_player_turn(view, self.replay, view.observer).heights();
         for pending in self.replay.pending_connections.iter().filter(|pending| {
-            pending.actor == view.observer
-                && pending_is_active(pending, &self.replay.pending_connections)
+            pending.actor == view.observer && self.replay.pending_connections.is_active(pending)
         }) {
             let Some(pending_card) = pending.cards.first() else {
                 continue;
@@ -1098,7 +1095,7 @@ pub(in crate::h_group) fn snapshot_play_identities(
     facts: &[ClueFacts],
     gotten: &CardSet,
     already_playing: &CardSet,
-    pending_connections: &[ConnectionObligation],
+    pending_connections: &ConnectionManager,
     convention_facts: &ConventionFacts,
     chop_moved: &CardSet,
     stack_heights: [u8; 5],
@@ -1147,7 +1144,7 @@ pub(in crate::h_group) fn snapshot_playable(
     facts: &[ClueFacts],
     gotten: &CardSet,
     already_playing: &CardSet,
-    pending_connections: &[ConnectionObligation],
+    pending_connections: &ConnectionManager,
     convention_facts: &ConventionFacts,
     chop_moved: &CardSet,
     stack_heights: [u8; 5],
@@ -1184,7 +1181,7 @@ pub(in crate::h_group) fn snapshot_playable(
     let missing = ((height + 1)..rank)
         .filter_map(|needed_rank| {
             let needed = Card::new(identity.suit, Rank::ALL[needed_rank - 1]);
-            (!pending_identity_is_queued(pending_connections, needed)
+            (!pending_connections.identity_is_queued(needed)
                 && !snapshot_accounted(needed, focus, view, hands, facts, gotten))
             .then_some(needed)
         })
@@ -1241,7 +1238,7 @@ pub(in crate::h_group) fn snapshot_connection_exists(
     facts: &[ClueFacts],
     gotten: &CardSet,
     already_playing: &CardSet,
-    pending_connections: &[ConnectionObligation],
+    pending_connections: &ConnectionManager,
     convention_facts: &ConventionFacts,
     stack_heights: [u8; 5],
     allow_blind_reverse_empathy: bool,
@@ -1357,7 +1354,7 @@ fn snapshot_prompt_exists(
     facts: &[ClueFacts],
     gotten: &CardSet,
     already_playing: &CardSet,
-    pending_connections: &[ConnectionObligation],
+    pending_connections: &ConnectionManager,
     convention_facts: &ConventionFacts,
     stack_heights: [u8; 5],
     player_order: &[usize],

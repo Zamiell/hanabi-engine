@@ -2,8 +2,7 @@ use super::{
     CardId, CardSet, ConnectionObligation, HGroupClueKind, HGroupConnectionKind, HGroupMoveKind,
     HGroupRuleEffects, HGroupTurnContext, IdentitySet, MAX_CLUE_TOKENS, ObservedEvent, PlayerId,
     PlayerView, PromiseId, Rank, chop, focus, identity_of, is_playable_at, is_trash_at,
-    next_player, pending_is_active, protected_cards, push_signal, same_turn_signal,
-    was_clued_before,
+    next_player, protected_cards, push_signal, same_turn_signal, was_clued_before,
 };
 
 #[allow(clippy::too_many_lines)]
@@ -219,7 +218,7 @@ pub(in crate::h_group) fn apply_emergency_discard_effects(
         pending_connections.iter().any(|connection| {
             connection.actor == *player
                 && connection.cards.contains(candidate)
-                && pending_is_active(connection, pending_connections)
+                && pending_connections.is_active(connection)
         }) || {
             let identities = IdentitySet::from_mask(facts[candidate.index()].identity_mask());
             let live_identities = identities
@@ -364,7 +363,7 @@ pub(in crate::h_group) fn apply_emergency_discard_effects(
                             .iter()
                             .all(|identity| is_trash_at(stack_heights, identity))))
         }) || pending_connections.iter().any(|connection| {
-            connection.actor == actor && pending_is_active(connection, pending_connections)
+            connection.actor == actor && pending_connections.is_active(connection)
         })
     };
     let next_has_safe_action = has_safe_action(next);

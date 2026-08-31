@@ -273,6 +273,46 @@ fn owner_projection_cannot_resurrect_an_identity_rejected_by_canonical_focus() {
 }
 
 #[test]
+fn connection_lifecycle_queries_have_one_owner() {
+    let root = include_str!("../../h_group.rs");
+    let manager = include_str!("../connection.rs");
+    let production = [
+        root,
+        include_str!("../action_schedule.rs"),
+        include_str!("../decision.rs"),
+        include_str!("../hypothesis.rs"),
+        include_str!("../information_value.rs"),
+        include_str!("../interpretation.rs"),
+        include_str!("../interpretation/knowledge.rs"),
+        include_str!("../recognition/basic.rs"),
+        include_str!("../recognition/bluffs.rs"),
+        include_str!("../recognition/tempo.rs"),
+        include_str!("../recognition/trash.rs"),
+    ]
+    .concat();
+
+    assert!(!manager.contains("impl Deref for ConnectionManager"));
+    assert!(manager.contains("pub(super) fn is_active"));
+    assert!(manager.contains("pub(super) fn match_clue"));
+    assert!(
+        !production.contains("pending_is_active"),
+        "consumers must query ConnectionManager instead of rebuilding active-layer semantics"
+    );
+}
+
+#[test]
+fn admitted_clues_cross_one_compiled_semantic_boundary() {
+    let candidate = include_str!("../candidate.rs");
+    let prospective = include_str!("../prospective.rs");
+    assert!(candidate.contains("struct CompiledClueAction"));
+    assert!(candidate.contains("struct CompiledClueSemantics"));
+    assert!(!candidate.contains("pub(super) target: PlayerId"));
+    assert!(!candidate.contains("pub(super) save: bool"));
+    assert!(prospective.contains("struct CompiledProspectiveClue"));
+    assert!(!prospective.contains("ProspectiveConventionSnapshot"));
+}
+
+#[test]
 fn generated_legal_histories_preserve_knowledge_and_state_invariants() {
     for seed in 0..4_usize {
         let mut deck = standard_deck();
