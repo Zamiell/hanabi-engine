@@ -316,6 +316,16 @@ fn second_replay_move_thirty_one_can_defer_to_a_more_efficient_clue() {
         HGroupProfile::Max,
         &donald_replay,
     );
+    let admitted = next_candidates
+        .iter()
+        .map(|candidate| candidate.action)
+        .collect::<Vec<_>>();
+    let rejected = h_group_rejected_clues_from_replay(
+        &donald_deductions,
+        HGroupProfile::Max,
+        &donald_replay,
+        &admitted,
+    );
     let rank_four = Action::Clue {
         target: PlayerId::new(0),
         clue: Clue::Rank(Rank::Four),
@@ -346,7 +356,7 @@ fn second_replay_move_thirty_one_can_defer_to_a_more_efficient_clue() {
             .find(|candidate| candidate.action == rank_four)
             .map(|candidate| candidate.action_coverage()),
         Some(3),
-        "Donald sees the blue-3, green-3, green-4 Layered Finesse: candidates={next_candidates:#?}; pending={:#?}; signals={:#?}",
+        "Donald sees the blue-3, green-3, green-4 Layered Finesse: candidates={next_candidates:#?}; rejected={rejected:#?}; pending={:#?}; signals={:#?}",
         alice_replay.pending_connections,
         alice_replay.signals
     );

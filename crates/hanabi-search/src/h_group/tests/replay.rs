@@ -238,7 +238,7 @@ fn third_expert_replay_matches_engine() {
 }
 
 #[test]
-#[ignore = "pending expert review: first unresolved disagreement is move 36"]
+#[ignore = "pending expert review: first unresolved disagreement is move 44"]
 fn fourth_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine(&expert_replay_p4v0s3());
 }
@@ -362,6 +362,59 @@ fn fourth_replay_move_thirty_five_prompts_the_directly_clued_red_two_candidate()
         h_group_predictable_action(&deductions, HGroupProfile::Max),
         Some(Action::Play(CardId::new(9))),
         "the selected red 2 must play before any released alternative",
+    );
+}
+
+#[test]
+fn fourth_replay_ordinary_trash_discard_does_not_push_bobs_blue_two() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(35).expect("fixture prefix is legal");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("Donald has a view"),
+    )
+    .expect("valid deductions");
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
+    let blue_to_bob = Action::Clue {
+        target: PlayerId::new(1),
+        clue: Clue::Suit(Suit::Blue),
+    };
+
+    assert!(
+        !replay
+            .signals
+            .at_turn(28, HGroupMoveKind::TrashPush)
+            .any(|signal| signal.cards.contains(&CardId::new(30))),
+        "Alice's ordinary trash discard cannot push Bob's blue 2: {:#?}",
+        replay.signals,
+    );
+    assert!(
+        !replay
+            .signals
+            .at_turn(32, HGroupMoveKind::PatchFinesse)
+            .any(|signal| signal.cards.contains(&CardId::new(30))),
+        "the later blue-1 play cannot patch a connection that never existed: {:#?}",
+        replay.signals,
+    );
+    assert!(
+        replay
+            .pending_connections
+            .iter()
+            .all(|connection| !connection.cards.contains(&CardId::new(30))),
+        "Bob's blue 2 must not retain a promise fabricated from the discard: {:#?}",
+        replay.pending_connections,
+    );
+    assert!(
+        h_group_clue_candidates(&deductions, HGroupProfile::Max)
+            .iter()
+            .any(|candidate| candidate.action == blue_to_bob),
+        "blue to Bob is an ordinary direct Play Clue once blue 1 is down",
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(blue_to_bob),
+        "the direct blue-2 Play Clue must beat unrelated alternatives once the false promise is removed",
     );
 }
 

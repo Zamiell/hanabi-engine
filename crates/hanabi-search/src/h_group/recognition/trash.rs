@@ -2,9 +2,9 @@ use super::{
     Card, CardId, CardSet, Clue, ClueFacts, ConnectionManager, ConnectionObligation,
     ConnectionTransitionReason, ConventionJournal, HGroupClueInterpretation, HGroupConnectionKind,
     HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, IdentitySet, ObservedEvent,
-    ObservedHistoryEntry, PlayerId, PlayerView, PromiseId, Rank, chop, finesse_position_id,
-    identity_of, is_playable_at, is_playable_now, is_trash_at, next_player, protected_cards,
-    push_signal, same_turn_signal, was_clued_before,
+    ObservedHistoryEntry, PlayerId, PlayerView, Rank, chop, finesse_position_id, identity_of,
+    is_playable_at, is_trash_at, next_player, protected_cards, push_signal, same_turn_signal,
+    was_clued_before,
 };
 use crate::h_group::{EffectSource, ProvenancedCardSet};
 
@@ -114,44 +114,6 @@ pub(in crate::h_group) fn apply_trash_effects(
                         effects.chop_moved.insert(pushed);
                     }
                 }
-            }
-        }
-        ObservedEvent::Discarded {
-            player,
-            card,
-            identity,
-        } if is_trash_at(stack_heights, *identity)
-            && !was_clued_before(view, entry.turn, *card) =>
-        {
-            let target = next_player(*player, hands.len());
-            let playable_finesse = hands[target.index()].last().copied().and_then(|finesse| {
-                identity_of(view, finesse)
-                    .filter(|expected| is_playable_now(view, *expected))
-                    .map(|expected| (finesse, expected))
-            });
-            if let Some((finesse, expected)) = playable_finesse {
-                effects.pending.start(
-                    entry.turn,
-                    ConnectionObligation {
-                        promise: PromiseId::UNASSIGNED,
-                        actor: target,
-                        cards: vec![finesse],
-                        expected,
-                        focus_identity: expected,
-                        kind: HGroupConnectionKind::Finesse,
-                        focus: finesse,
-                        step: 0,
-                    },
-                );
-                push_signal(
-                    effects.signals,
-                    entry,
-                    *player,
-                    Some(target),
-                    HGroupMoveKind::TrashPush,
-                    vec![finesse],
-                    Some(expected),
-                );
             }
         }
         _ => {}

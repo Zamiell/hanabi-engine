@@ -2429,16 +2429,15 @@ pub(super) fn delayed_connection_score(
                     && prompt_allows(card, connector)
                     && card.identity == Some(connector)
             });
-            let finesse = view.hands[player]
-                .iter()
-                .rev()
-                .find(|card| {
-                    card.id != focus
-                        && !explicitly_clued.contains(&card.id)
-                        && !already_playing.contains(&card.id)
-                })
-                .and_then(|card| card.identity)
-                == Some(connector);
+            let finesse = visible_finesse_connects(
+                view,
+                &view.hands[player],
+                connector,
+                focus,
+                explicitly_clued,
+                already_playing,
+                rule_enabled(profile, HGroupRuleId::SpecialFinesses),
+            );
             prompt || finesse
         });
     let search_len = if explicitly_clued.contains(&focus) || direct_reverse_connection {
@@ -2447,10 +2446,10 @@ pub(super) fn delayed_connection_score(
         // beyond that recipient, as in a Green-4 reclue that finesses the
         // following player's Green 2 and Green 3. A newly clued card also
         // wraps when the recipient can see the exact connector either on a
-        // later player's immediate Finesse Position (a Level-2 Reverse
-        // Finesse) or as an already-clued Prompt. This prevents deeper hidden
-        // layers from manufacturing a reverse line while preserving direct,
-        // recipient-visible reverse connections.
+        // later player's visible Finesse Position (including playable layers
+        // before the connector) or as an already-clued Prompt. This prevents
+        // hidden layers from manufacturing a reverse line while preserving
+        // recipient-visible Reverse and Layered Finesses.
         view.hands.len()
     } else {
         ordinary_search_len
