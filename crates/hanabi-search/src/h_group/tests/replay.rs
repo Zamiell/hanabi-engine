@@ -236,7 +236,7 @@ fn third_expert_replay_matches_engine() {
 }
 
 #[test]
-#[ignore = "pending expert review: first unresolved disagreement is move 30"]
+#[ignore = "pending expert review: first unresolved disagreement is move 32"]
 fn fourth_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine(&expert_replay_p4v0s3());
 }
@@ -807,6 +807,32 @@ fn fourth_replay_move_twenty_eight_continues_the_red_chain_with_rank_two() {
     assert_eq!(
         select_h_group_action(&deductions, HGroupProfile::Max),
         Some(expected),
+    );
+}
+
+#[test]
+fn fourth_replay_unrelated_blue_clue_preserves_cathys_red_chain() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(30).expect("fixture prefix is legal");
+    let view = state.view_for(PlayerId::new(2)).expect("Cathy has a view");
+    let deductions = LogicalDeductions::new(view).expect("Cathy's view is logical");
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
+    let inferred = infer_h_group_from_replay(&deductions, replay.clone(), HGroupProfile::Max);
+    let red_one = inferred
+        .cards
+        .iter()
+        .find(|card| card.card == CardId::new(29))
+        .expect("Cathy still holds the promised red 1");
+
+    assert_eq!(
+        red_one.promised_identity,
+        Some(Card::new(Suit::Red, Rank::One)),
+        "an unrelated clue to Alice cannot rewrite Cathy's established red-1 connection: transitions={:#?}; replay={replay:#?}",
+        replay.pending_connections.transitions(),
+    );
+    assert!(
+        inferred.playable_now.contains(&CardId::new(29)),
+        "Cathy must continue the red chain by playing red 1: {inferred:#?}",
     );
 }
 

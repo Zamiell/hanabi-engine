@@ -2876,9 +2876,19 @@ fn schedule_connection(
             reverse_finesse_positions
                 .iter()
                 .any(|(candidate_index, card)| {
-                    identity_of(view, *card) == Some(expected)
+                    !visible_reverse_candidate_was_just_declined(
+                        view,
+                        turn,
+                        PlayerId::new(
+                            u8::try_from(*candidate_index)
+                                .expect("standard Hanabi has at most five players"),
+                        ),
+                        *card,
+                        expected,
+                        allow_blind_reverse_empathy,
+                    ) && (identity_of(view, *card) == Some(expected)
                         || (*candidate_index == view.observer.index()
-                            && facts[card.index()].identity_mask() == 1 << expected.index())
+                            && facts[card.index()].identity_mask() == 1 << expected.index()))
                 })
                 || rule_enabled(profile, HGroupRuleId::SpecialFinesses)
                     && (ordinary_search_len..hands.len()).any(|distance| {
@@ -2886,6 +2896,10 @@ fn schedule_connection(
                         if candidate_index == target.index() || candidate_index == giver.index() {
                             return false;
                         }
+                        let actor = PlayerId::new(
+                            u8::try_from(candidate_index)
+                                .expect("standard Hanabi has at most five players"),
+                        );
                         let gotten = promptable_before_clue
                             .union(invisibly_clued)
                             .copied()
@@ -2903,10 +2917,17 @@ fn schedule_connection(
                         unclued
                             .iter()
                             .position(|card| {
-                                identity_of(view, *card) == Some(expected)
+                                !visible_reverse_candidate_was_just_declined(
+                                    view,
+                                    turn,
+                                    actor,
+                                    *card,
+                                    expected,
+                                    allow_blind_reverse_empathy,
+                                ) && (identity_of(view, *card) == Some(expected)
                                     || (candidate_index == view.observer.index()
                                         && facts[card.index()].identity_mask()
-                                            == 1 << expected.index())
+                                            == 1 << expected.index()))
                             })
                             .is_some_and(|position| {
                                 position > 0
@@ -3119,6 +3140,17 @@ fn schedule_connection(
                             && !invisibly_clued.contains(card)
                             && !scheduled_cards.contains(card)
                             && *card != focus
+                            && !visible_reverse_candidate_was_just_declined(
+                                view,
+                                turn,
+                                PlayerId::new(
+                                    u8::try_from(candidate_index)
+                                        .expect("standard Hanabi has at most five players"),
+                                ),
+                                *card,
+                                expected,
+                                allow_blind_reverse_empathy,
+                            )
                     })?;
                     (identity_of(view, card) == Some(expected)).then_some((candidate_index, card))
                 })
@@ -3147,6 +3179,18 @@ fn schedule_connection(
                         !gotten.contains(card) && !scheduled_cards.contains(card) && *card != focus
                     })
                     .collect::<Vec<_>>();
+                if unclued.first().is_some_and(|card| {
+                    visible_reverse_candidate_was_just_declined(
+                        view,
+                        turn,
+                        actor,
+                        *card,
+                        expected,
+                        allow_blind_reverse_empathy,
+                    )
+                }) {
+                    continue;
+                }
                 let cards = if rule_enabled(profile, HGroupRuleId::SpecialFinesses) {
                     if actor == view.observer {
                         if giver == view.observer {
@@ -3365,6 +3409,34 @@ fn blind_reverse_finesse_is_eligible(
             view.history.last().map(|entry| &entry.event),
             Some(ObservedEvent::Clued { target, .. }) if *target == view.observer
         )
+}
+
+/// In an Ambiguous Reverse Finesse, a visible player who clues instead of
+/// taking their apparent blind play demonstrates that the connector is in a
+/// later player's hidden hand. The acting recipient may therefore use the
+/// blind-reverse empathy branch rather than continuing to trust the visible
+/// duplicate. This is intentionally limited to the immediately preceding
+/// clue: older actions need their own connection-lifecycle evidence.
+/// <https://hanabi.github.io/level-5/#the-ambiguous-finesse>
+fn visible_reverse_candidate_was_just_declined(
+    view: &PlayerView,
+    connection_turn: u32,
+    actor: PlayerId,
+    card: CardId,
+    expected: Card,
+    allow_blind_reverse_empathy: bool,
+) -> bool {
+    allow_blind_reverse_empathy
+        && actor != view.observer
+        && view.observer == view.current_player
+        && view.hands[actor.index()]
+            .iter()
+            .any(|candidate| candidate.id == card)
+        && view.play_stacks[expected.suit.index()].len() < usize::from(expected.rank.number())
+        && view.history.last().is_some_and(|entry| {
+            entry.turn > connection_turn
+                && matches!(entry.event, ObservedEvent::Clued { giver, .. } if giver == actor)
+        })
 }
 
 fn convention_focus_is_live_identity(
