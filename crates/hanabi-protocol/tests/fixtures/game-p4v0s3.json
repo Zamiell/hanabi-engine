@@ -103,7 +103,8 @@
     { "type": 0, "target": 21 },
     { "type": 0, "target": 3 },
     { "type": 3, "target": 0, "value": 1 },
-    { "type": 0, "target": 45 }
+    { "type": 0, "target": 45 },
+    { "type": 0, "target": 46 }
   ],
   "seed": "p4v0s3"
 }
