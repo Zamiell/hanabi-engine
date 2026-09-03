@@ -288,6 +288,7 @@ pub(in crate::h_group) fn apply_ejection_discharge_effects(
     entry: &ObservedHistoryEntry,
     view: &PlayerView,
     hands_before: &[Vec<CardId>],
+    older_play_obligations: &CardSet,
     hands: &[Vec<CardId>],
     facts: &[ClueFacts],
     clues: &[HGroupClueInterpretation],
@@ -315,6 +316,13 @@ pub(in crate::h_group) fn apply_ejection_discharge_effects(
         successful: true,
     } = &entry.event
     {
+        if older_play_obligations.contains(card) {
+            // A player proving an older connection after an intervening clue
+            // is not responding to that clue as a 5 Color Ejection. The
+            // connection may already have been marked satisfied by an
+            // earlier rule phase, so use the immutable pre-event snapshot.
+            return;
+        }
         let prior = view
             .history
             .iter()

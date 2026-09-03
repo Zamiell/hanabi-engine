@@ -175,7 +175,6 @@ pub(in crate::h_group) fn apply_resolved_bluff_effects(
     let stack_heights = before.stack_heights;
     let already_playing = &mut *effects.already_playing;
     let pending = &mut *effects.pending;
-    let forced_playable = &*effects.forced_playable;
     let signals = &mut *effects.signals;
     let ObservedEvent::Played {
         player,
@@ -186,13 +185,7 @@ pub(in crate::h_group) fn apply_resolved_bluff_effects(
     else {
         return;
     };
-    let had_preexisting_play_obligation = before.already_playing.contains(&card)
-        || forced_playable.contains(&card)
-        || pending.iter().any(|connection| {
-            connection.actor == player
-                && connection.cards.contains(&card)
-                && pending.is_active(connection)
-        });
+    let had_preexisting_play_obligation = before.older_play_obligations.contains(&card);
     if had_preexisting_play_obligation {
         // A successful play that was already convention-bound before the
         // immediately preceding clue resolves that older promise; it is not

@@ -236,9 +236,57 @@ fn third_expert_replay_matches_engine() {
 }
 
 #[test]
-#[ignore = "pending expert review: first unresolved disagreement is move 33"]
+#[ignore = "pending expert review: first unresolved disagreement is move 34"]
 fn fourth_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine(&expert_replay_p4v0s3());
+}
+
+#[test]
+fn fourth_replay_move_thirty_three_keeps_the_blue_one_play_due() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(32).expect("fixture prefix is legal");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("Alice has a view"),
+    )
+    .expect("valid deductions");
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
+    let inferred = infer_h_group_from_replay(&deductions, replay.clone(), HGroupProfile::Max);
+    let note = inferred
+        .cards
+        .iter()
+        .find(|note| note.card == CardId::new(32));
+
+    assert!(
+        !replay
+            .signals
+            .at_turn(30, HGroupMoveKind::Bluff)
+            .any(|signal| {
+                signal.cards.contains(&CardId::new(29)) && signal.cards.contains(&CardId::new(32))
+            }),
+        "Cathy's promised red-1 play cannot retroactively turn Bob's blue clue into a Bluff",
+    );
+    assert!(
+        !replay
+            .signals
+            .at_turn(30, HGroupMoveKind::FiveColorEjection)
+            .any(|signal| signal.cards.contains(&CardId::new(32))),
+        "the same pre-existing red-1 obligation cannot reinterpret Alice's blue 1 as blue 5",
+    );
+
+    assert!(
+        inferred.playable_now.contains(&CardId::new(32)),
+        "Bob's direct blue-1 Play Clue remains due after the promised red 1 plays and Donald discards; note={note:#?}; already_playing={:#?}; forced={:#?}; pending={:#?}; signals={:#?}",
+        replay.cards.already_playing,
+        replay.cards.forced_playable,
+        replay.pending_connections,
+        replay.signals,
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(32))),
+    );
 }
 
 #[test]

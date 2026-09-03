@@ -966,15 +966,46 @@ fn replay_h_group_inner_uncached(
         let action_is_settled = view.history[entry_index + 1..]
             .iter()
             .any(|later| later.turn > entry.turn);
-        let before = HGroupTurnSnapshot::new(
-            &hands,
-            &facts,
+        let preceding_turn = entry.turn.saturating_sub(1);
+        let source_predates_preceding_clue = |source: &EffectSource| match source {
+            EffectSource::Event(turn) | EffectSource::Rule { turn, .. } => *turn < preceding_turn,
+            EffectSource::Promise(promise) => pending_connections
+                .provenance(*promise)
+                .is_some_and(|origin| origin.created_turn < preceding_turn),
+        };
+        let older_play_obligations = already_playing
+            .iter()
+            .chain(forced_playable.iter())
+            .filter(|card| {
+                already_playing
+                    .sources(**card)
+                    .iter()
+                    .chain(forced_playable.sources(**card))
+                    .any(source_predates_preceding_clue)
+            })
+            .chain(
+                pending_connections
+                    .iter()
+                    .filter(|connection| {
+                        pending_connections.is_active(connection)
+                            && pending_connections
+                                .provenance(connection.promise)
+                                .is_some_and(|origin| origin.created_turn < preceding_turn)
+                    })
+                    .flat_map(|connection| connection.cards.iter()),
+            )
+            .copied()
+            .collect();
+        let before = HGroupTurnSnapshot {
+            hands: hands.clone(),
+            facts: facts.clone(),
             stack_heights,
-            historical_clue_tokens,
-            historical_deck_size,
+            clue_tokens: historical_clue_tokens,
+            deck_size: historical_deck_size,
             early_game,
-            already_playing.materialized().clone(),
-        );
+            already_playing: already_playing.materialized().clone(),
+            older_play_obligations,
+        };
         let clue_tokens_before = before.clue_tokens;
         match &entry.event {
             ObservedEvent::Clued {

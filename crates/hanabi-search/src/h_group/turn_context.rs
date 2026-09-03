@@ -78,28 +78,10 @@ pub(super) struct HGroupTurnSnapshot {
     /// Rule recognizers compare this snapshot with their mutable post-event
     /// effects instead of reconstructing a subtly different baseline.
     pub(super) already_playing: CardSet,
-}
-
-impl HGroupTurnSnapshot {
-    pub(super) fn new(
-        hands: &[Vec<CardId>],
-        facts: &[ClueFacts],
-        stack_heights: [u8; 5],
-        clue_tokens: u8,
-        deck_size: usize,
-        early_game: bool,
-        already_playing: CardSet,
-    ) -> Self {
-        Self {
-            hands: hands.to_vec(),
-            facts: facts.to_vec(),
-            stack_heights,
-            clue_tokens,
-            deck_size,
-            early_game,
-            already_playing,
-        }
-    }
+    /// Cards whose convention play obligations predate the immediately
+    /// preceding clue. A play from this set proves the older obligation; it
+    /// cannot retroactively demonstrate a Bluff or Ejection from that clue.
+    pub(super) older_play_obligations: CardSet,
 }
 
 /// Borrowed convention state after an observed event has been reduced.

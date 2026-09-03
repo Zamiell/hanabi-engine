@@ -295,6 +295,7 @@ fn apply_rule(
             context.entry,
             view,
             &context.before.hands,
+            &context.before.older_play_obligations,
             context.after.hands,
             context.after.facts,
             effects.clues,
