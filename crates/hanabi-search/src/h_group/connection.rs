@@ -64,6 +64,7 @@ pub(super) enum ConnectionTransitionReason {
     IdentitySatisfiedElsewhere,
     IdentityRevealed,
     LayerExtended,
+    PromptPrioritized,
 }
 
 /// Auditable lifecycle event for a connection. These records explain current
@@ -492,6 +493,52 @@ impl ConnectionManager {
         );
     }
 
+    /// Applies Prompt precedence when a connection layer becomes active.
+    ///
+    /// A later clue can make one candidate Promptable while the layer waits
+    /// behind an earlier blind play. The original alternatives remain a valid
+    /// superposition, but prompted cards must precede untouched Finesse
+    /// candidates once the layer is due.
+    ///
+    /// <https://hanabi.github.io/level-1/#the-prompt>
+    pub(super) fn prioritize_active_prompts(
+        &mut self,
+        turn: u32,
+        mut is_promptable: impl FnMut(&ConnectionObligation, CardId) -> bool,
+    ) {
+        let active = self
+            .active
+            .iter()
+            .enumerate()
+            .filter(|(_, connection)| self.is_active(connection))
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        let mut prioritized = Vec::new();
+        for index in active {
+            let connection = &mut self.active[index];
+            let first_prompt = connection
+                .cards
+                .iter()
+                .position(|card| is_promptable(connection, *card));
+            if first_prompt.is_none_or(|position| position == 0) {
+                continue;
+            }
+            connection
+                .cards
+                .rotate_left(first_prompt.expect("nonzero Prompt position exists"));
+            prioritized.push(connection.clone());
+        }
+        for connection in &prioritized {
+            self.record(
+                turn,
+                connection,
+                ConnectionStatus::Pending,
+                ConnectionStatus::Pending,
+                ConnectionTransitionReason::PromptPrioritized,
+            );
+        }
+    }
+
     /// Prepends newly demonstrated blind plays to an existing Finesse.
     ///
     /// A later clue can layer one or more currently playable cards in front
@@ -792,6 +839,40 @@ mod tests {
             manager.match_clue(PlayerId::new(0), Clue::Suit(Suit::Red), &[CardId::new(5)]),
             ConnectionClueMatch::Unrelated
         );
+    }
+
+    #[test]
+    fn newly_active_layer_prioritizes_a_prompt_over_a_finesse_candidate() {
+        let mut manager = ConnectionManager::default();
+        let first = obligation(vec![CardId::new(5)]);
+        manager.start(3, first.clone());
+        manager.start(
+            3,
+            ConnectionObligation {
+                cards: vec![CardId::new(7), CardId::new(9)],
+                step: 1,
+                ..first
+            },
+        );
+
+        manager.advance_play(
+            4,
+            PlayerId::new(1),
+            CardId::new(5),
+            Card::new(Suit::Red, Rank::Two),
+            true,
+        );
+        manager.prioritize_active_prompts(4, |_, card| card == CardId::new(9));
+        let later = manager
+            .iter()
+            .find(|connection| connection.step == 1)
+            .expect("later layer remains queued");
+        assert_eq!(later.cards, [CardId::new(9), CardId::new(7)]);
+        assert!(manager.is_active(later));
+        assert!(manager.transitions().iter().any(|transition| {
+            transition.promise == later.promise
+                && transition.reason == ConnectionTransitionReason::PromptPrioritized
+        }));
     }
 
     #[test]

@@ -1575,6 +1575,19 @@ pub(super) fn advanced_clue_candidates(
             })
             .flatten();
 
+        if max_signal == Some(HGroupMoveKind::LieComponentFinesse)
+            && clue_focus
+                .and_then(|focus| identity_of(view, focus))
+                .is_none_or(|identity| !is_eventually_useful(view, identity))
+        {
+            // Recipient-side uncertainty cannot make a lie-component line
+            // legal when the giver can see that its promised focus is already
+            // trash. Reject the whole clue rather than falling through to a
+            // lower-precedence advanced meaning.
+            // Source: https://hanabi.github.io/extras/special-finesses/#finesses-with-a-lie-component
+            continue;
+        }
+
         let all_previously_touched = newly_touched.is_empty();
         let all_touched_trash = identities.len() == touched.len()
             && identities
@@ -1672,7 +1685,16 @@ pub(super) fn advanced_clue_candidates(
         } else if rule_enabled(profile, HGroupRuleId::Elimination) && elimination {
             Some((HGroupMoveKind::Elimination, 230))
         } else if rule_enabled(profile, HGroupRuleId::OutOfOrderPlay) && out_of_order {
-            Some((HGroupMoveKind::OccupiedPlay, 220))
+            // The structural shape is not enough: an Out-of-Order Play Clue
+            // must add a physical clue fact to the wrongly focused card. A
+            // literal repeat creates no new play or protection and therefore
+            // fails Minimum Clue Value. Keep this as an explicit terminal
+            // classification so the same clue cannot fall through to a
+            // lower-precedence advanced label.
+            // Sources:
+            // - https://hanabi.github.io/level-1/#minimum-clue-value-principle
+            // - https://hanabi.github.io/level-20/#the-out-of-order-play-clue-triple-o--ooo
+            fills_in.then_some((HGroupMoveKind::OccupiedPlay, 220))
         } else if let Some(kind) = max_signal {
             let score = if matches!(
                 kind,

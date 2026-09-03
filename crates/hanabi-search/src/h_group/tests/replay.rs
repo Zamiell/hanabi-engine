@@ -69,6 +69,8 @@ fn first_replay_move_eight_keeps_a_loaded_clue_in_superposition() {
     assert_eq!(
         select_h_group_action(&deductions, HGroupProfile::Max),
         Some(Action::Play(CardId::new(14))),
+        "the older blind-play obligation remains mandatory: inference={inferred:#?}; candidates={:#?}",
+        h_group_clue_candidates(&deductions, HGroupProfile::Max),
     );
 }
 
@@ -236,7 +238,7 @@ fn third_expert_replay_matches_engine() {
 }
 
 #[test]
-#[ignore = "pending expert review: first unresolved disagreement is move 34"]
+#[ignore = "pending expert review: first unresolved disagreement is move 36"]
 fn fourth_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine(&expert_replay_p4v0s3());
 }
@@ -286,6 +288,80 @@ fn fourth_replay_move_thirty_three_keeps_the_blue_one_play_due() {
     assert_eq!(
         select_h_group_action(&deductions, HGroupProfile::Max),
         Some(Action::Play(CardId::new(32))),
+    );
+}
+
+#[test]
+fn fourth_replay_move_thirty_four_rejects_redundant_red_clue() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(33).expect("fixture prefix is legal");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("Bob has a view"),
+    )
+    .expect("valid deductions");
+    let redundant_red = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Suit(Suit::Red),
+    };
+    let false_lie_component = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Suit(Suit::Green),
+    };
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| candidate.action != redundant_red),
+        "Alice's red 3 is already scheduled and Good Touch identifies the red 4 after it plays, so repeating red creates no action and fails Minimum Clue Value: {candidates:#?}",
+    );
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| candidate.action != false_lie_component),
+        "a recipient-side hypothetical cannot turn Bob's visibly trash green focus into a Finesse with a Lie Component: {candidates:#?}",
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Discard(CardId::new(5))),
+        "the discard must beat all remaining clues after enforcing Minimum Clue Value: {candidates:#?}",
+    );
+}
+
+#[test]
+fn fourth_replay_move_thirty_five_prompts_the_directly_clued_red_two_candidate() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(34).expect("fixture prefix is legal");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("Cathy has a view"),
+    )
+    .expect("valid deductions");
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
+    let red_two = Card::new(Suit::Red, Rank::Two);
+    let obligations = replay
+        .pending_connections
+        .iter()
+        .filter(|connection| connection.actor == PlayerId::new(2) && connection.expected == red_two)
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        obligations.len(),
+        1,
+        "Cathy should have one live red-2 obligation: {obligations:#?}",
+    );
+    assert_eq!(
+        obligations[0].cards,
+        [CardId::new(9), CardId::new(26)],
+        "the directly rank-clued #9 must Prompt before the untouched Finesse candidate #26 once the red-2 layer becomes active: {obligations:#?}",
+    );
+    assert_eq!(
+        h_group_predictable_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(9))),
+        "the selected red 2 must play before any released alternative",
     );
 }
 

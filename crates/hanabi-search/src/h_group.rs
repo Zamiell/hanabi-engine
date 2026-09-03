@@ -2030,6 +2030,13 @@ fn replay_h_group_inner_uncached(
                     *identity,
                     *successful,
                 );
+                pending_connections.prioritize_active_prompts(
+                    entry.turn,
+                    |connection, candidate| {
+                        explicitly_clued.contains(&candidate)
+                            && facts[candidate.index()].allows(connection.expected)
+                    },
+                );
                 let failed_connections = advance.failed_focuses;
                 let released_candidates = advance.released_candidates;
                 for focus in failed_connections {
