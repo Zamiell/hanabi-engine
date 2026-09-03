@@ -236,7 +236,7 @@ fn third_expert_replay_matches_engine() {
 }
 
 #[test]
-#[ignore = "pending expert review: first unresolved disagreement is move 32"]
+#[ignore = "pending expert review: first unresolved disagreement is move 33"]
 fn fourth_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine(&expert_replay_p4v0s3());
 }
@@ -555,7 +555,7 @@ fn fourth_replay_move_fifteen_fixes_the_false_red_layer_without_cancelling_the_f
 }
 
 #[test]
-fn fourth_replay_time_travel_chop_move_is_observer_invariant() {
+fn fourth_replay_useful_yellow_two_prevents_time_travel_chop_move() {
     let fixture = expert_replay_p4v0s3();
     let state = fixture.state_at_turn(12).expect("fixture prefix is legal");
     for observer in (0..4).map(PlayerId::new) {
@@ -564,13 +564,18 @@ fn fourth_replay_time_travel_chop_move_is_observer_invariant() {
                 .expect("valid deductions");
         let replay = replay_h_group(&deductions, HGroupProfile::Max);
         assert!(
-            replay.signals.iter().any(|signal| {
+            !replay.signals.iter().any(|signal| {
                 signal.kind == HGroupMoveKind::TimeTravelChopMove
                     && signal.cards.contains(&CardId::new(15))
-                    && signal.cards.contains(&CardId::new(14))
             }),
-            "observer {observer:?} did not preserve Donald's Time Travel Chop Move: signals={:#?}",
+            "observer {observer:?} incorrectly treated Donald's useful yellow clue as a Time Travel Chop Move: signals={:#?}",
             replay.signals,
+        );
+        assert!(
+            !replay.cards.chop_moved.contains(&CardId::new(12))
+                && !replay.cards.chop_moved.contains(&CardId::new(14)),
+            "observer {observer:?} incorrectly chop-moved cards behind Donald's yellow 4: {:#?}",
+            replay.cards.chop_moved,
         );
         if observer != PlayerId::new(3) {
             assert!(

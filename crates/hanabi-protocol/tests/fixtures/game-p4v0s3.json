@@ -91,7 +91,19 @@
     { "type": 2, "target": 1, "value": 3 },
     { "type": 0, "target": 1 },
     { "type": 0, "target": 30 },
-    { "type": 2, "target": 1, "value": 3 }
+    { "type": 2, "target": 1, "value": 3 },
+    { "type": 1, "target": 14 },
+    { "type": 2, "target": 2, "value": 4 },
+    { "type": 0, "target": 39 },
+    { "type": 0, "target": 37 },
+    { "type": 3, "target": 0, "value": 4 },
+    { "type": 0, "target": 35 },
+    { "type": 1, "target": 25 },
+    { "type": 1, "target": 26 },
+    { "type": 0, "target": 21 },
+    { "type": 0, "target": 3 },
+    { "type": 3, "target": 0, "value": 1 },
+    { "type": 0, "target": 45 }
   ],
   "seed": "p4v0s3"
 }

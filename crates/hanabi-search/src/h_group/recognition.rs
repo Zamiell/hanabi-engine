@@ -38,6 +38,7 @@ pub(super) use advanced_bluffs::{
 pub(super) use basic::{apply_level_three_effects, apply_level_two_effects};
 pub(super) use bluffs::{apply_bluff_effects, apply_resolved_bluff_effects};
 pub(super) use chop_moves::apply_chop_move_effects;
+pub(super) use extras::lie_component_fix_connection;
 pub(super) use extras::{apply_extra_effects, apply_max_special_effects};
 pub(super) use late_game::{
     apply_charm_effects, apply_ignition_effects, apply_phantom_effects, apply_priority_effects,

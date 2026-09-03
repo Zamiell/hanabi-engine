@@ -555,7 +555,7 @@ pub(in crate::h_group) fn apply_duplication_effects(
                 context
                     .historical
                     .identity(extra)
-                    .is_some_and(|candidate| !is_trash_at(context.before.stack_heights, candidate))
+                    .is_some_and(|candidate| !is_trash_at(origin.stack_heights, candidate))
             });
             let filled_in = view
                 .history

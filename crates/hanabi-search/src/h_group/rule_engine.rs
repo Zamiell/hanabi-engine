@@ -19,6 +19,7 @@ use super::recognition::{
     apply_priority_effects, apply_resolved_bluff_effects, apply_special_finesse_discard_effects,
     apply_stall_effects, apply_tempo_effects, apply_transfer_effects,
     apply_trash_connection_refinements, apply_trash_effects, apply_unnecessary_move_effects,
+    lie_component_fix_connection,
 };
 use super::rules::POST_EVENT_RULES;
 use super::{
@@ -337,21 +338,38 @@ fn apply_rule(
             effects.signals,
         ),
         HGroupRuleId::Ignition => apply_ignition_effects(context, view, effects),
-        HGroupRuleId::Charms => apply_charm_effects(
-            context.entry,
-            view,
-            &context.before.hands,
-            context.after.hands,
-            effects.clues,
-            context.after.stack_heights,
-            effects.explicitly_clued,
-            effects.invisibly_clued,
-            effects.chop_moved,
-            effects.already_playing,
-            effects.pending,
-            effects.forced_playable,
-            effects.signals,
-        ),
+        HGroupRuleId::Charms => {
+            let suppress_charm = match &context.entry.event {
+                hanabi_core::ObservedEvent::Clued {
+                    giver,
+                    target,
+                    clue,
+                    touched,
+                    ..
+                } => {
+                    lie_component_fix_connection(context, effects, *giver, *target, *clue, touched)
+                        .is_some()
+                }
+                _ => false,
+            };
+            apply_charm_effects(
+                context.entry,
+                view,
+                &context.before.hands,
+                context.after.hands,
+                effects.clues,
+                context.after.stack_heights,
+                effects.explicitly_clued,
+                effects.invisibly_clued,
+                effects.chop_moved,
+                effects.required_fixes,
+                suppress_charm,
+                effects.already_playing,
+                effects.pending,
+                effects.forced_playable,
+                effects.signals,
+            );
+        }
         HGroupRuleId::UnnecessaryMoves => apply_unnecessary_move_effects(context, view, effects),
         HGroupRuleId::Extras => {
             apply_extra_effects(context, view, effects);

@@ -215,11 +215,26 @@ fn lie_component_plan(
                                 identity,
                             })
                     });
-                    choices.push((!blockers.is_empty(), distance, actor, cards, local, fix));
+                    choices.push((
+                        !blockers.is_empty(),
+                        std::cmp::Reverse(blockers.len()),
+                        distance,
+                        actor,
+                        cards,
+                        local,
+                        fix,
+                    ));
                 }
             }
-            choices.sort_by_key(|(needs_fix, distance, ..)| (*needs_fix, *distance));
-            let Some((needs_fix, _, actor, cards, local, fix)) = choices.into_iter().next() else {
+            // Prefer a clean line. If every line needs a Fix, prefer the Fix
+            // that resolves the most intervening cards before using turn
+            // order as the tie-breaker. One red Fix covering two layers is
+            // stronger than a one-card Fix on an earlier player.
+            choices.sort_by_key(|(needs_fix, fixed_layers, distance, ..)| {
+                (*needs_fix, *fixed_layers, *distance)
+            });
+            let Some((needs_fix, _, _, actor, cards, local, fix)) = choices.into_iter().next()
+            else {
                 failed = true;
                 break;
             };
@@ -255,14 +270,14 @@ fn lie_component_plan(
 }
 
 #[allow(clippy::too_many_lines)]
-fn apply_lie_component_fix(
+pub(in crate::h_group) fn lie_component_fix_connection(
     context: &HGroupTurnContext<'_>,
-    effects: &mut HGroupRuleEffects<'_>,
+    effects: &HGroupRuleEffects<'_>,
     giver: PlayerId,
     target: PlayerId,
     clue: Clue,
     touched: &[CardId],
-) -> bool {
+) -> Option<ConnectionObligation> {
     if effects.clues.last().is_some_and(|current| {
         current.turn == context.entry.turn && current.kind != HGroupClueKind::Unrecognized
     }) {
@@ -270,7 +285,7 @@ fn apply_lie_component_fix(
         // A clue with an ordinary Play/Save meaning cannot be repurposed as a
         // Fix merely because an older multi-touch clue resembles a lie line.
         // Source: <https://hanabi.github.io/extras/special-finesses/#finesses-with-a-lie-component>
-        return false;
+        return None;
     }
     let connection = effects.pending.iter().find(|connection| {
         connection.actor == target
@@ -284,7 +299,7 @@ fn apply_lie_component_fix(
                     && signal.cards.contains(&connection.focus)
             })
     });
-    let connection = connection.cloned().or_else(|| {
+    connection.cloned().or_else(|| {
         effects.clues.iter().rev().find_map(|prior| {
             let next_giver_turn = prior.turn
                 + u32::try_from(context.after.hands.len())
@@ -324,8 +339,20 @@ fn apply_lie_component_fix(
                 step: height,
             })
         })
-    });
-    let Some(connection) = connection else {
+    })
+}
+
+fn apply_lie_component_fix(
+    context: &HGroupTurnContext<'_>,
+    effects: &mut HGroupRuleEffects<'_>,
+    giver: PlayerId,
+    target: PlayerId,
+    clue: Clue,
+    touched: &[CardId],
+) -> bool {
+    let Some(connection) =
+        lie_component_fix_connection(context, effects, giver, target, clue, touched)
+    else {
         return false;
     };
     if connection.promise == PromiseId::UNASSIGNED {

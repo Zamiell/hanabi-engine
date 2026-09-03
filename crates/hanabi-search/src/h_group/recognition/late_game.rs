@@ -6,7 +6,7 @@ use super::{
     identity_of, is_playable_at, is_trash_at, next_player, protected_cards, push_signal,
     same_turn_signal, was_clued_before,
 };
-use crate::h_group::ProvenancedCardSet;
+use crate::h_group::{FixObligations, ProvenancedCardSet};
 
 #[allow(clippy::too_many_lines)]
 pub(in crate::h_group) fn apply_ignition_effects(
@@ -551,6 +551,8 @@ pub(in crate::h_group) fn apply_charm_effects(
     explicitly_clued: &CardSet,
     invisibly_clued: &CardSet,
     chop_moved: &CardSet,
+    required_fixes: &FixObligations,
+    suppress_charm: bool,
     already_playing: &mut ProvenancedCardSet,
     pending: &mut ConnectionManager,
     forced_playable: &mut CardSet,
@@ -575,10 +577,14 @@ pub(in crate::h_group) fn apply_charm_effects(
                         && !was_clued_before(view, entry.turn, clue.focus)
                 })
             });
-            let higher_priority_interpretation =
-                same_turn_signal(signals, entry.turn, HGroupMoveKind::FixClue)
-                    || same_turn_signal(signals, entry.turn, HGroupMoveKind::CriticalColorBluff)
-                    || same_turn_signal(signals, entry.turn, HGroupMoveKind::DoubleBluff);
+            let higher_priority_interpretation = suppress_charm
+                || same_turn_signal(signals, entry.turn, HGroupMoveKind::FixClue)
+                || required_fixes.iter().any(|obligation| {
+                    obligation.required.target == *target
+                        && touched.contains(&obligation.required.focus)
+                })
+                || same_turn_signal(signals, entry.turn, HGroupMoveKind::CriticalColorBluff)
+                || same_turn_signal(signals, entry.turn, HGroupMoveKind::DoubleBluff);
             if higher_priority_interpretation {
                 return;
             }
