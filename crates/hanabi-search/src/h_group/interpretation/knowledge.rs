@@ -224,7 +224,10 @@ impl<'a> ConventionKnowledgeCompiler<'a> {
     /// <https://hanabi.github.io/level-8/#the-distribution-clue>
     /// Distribution intentionally duplicates a queued play, so its exact
     /// promise must survive ordinary Good Touch duplicate elimination.
-    fn apply_transfer_claims(&mut self) {
+    /// Demonstrated Context reinterpretations (including a resolved 4 Charm)
+    /// likewise replace the old provisional identity in the owner's read model.
+    /// <https://hanabi.github.io/level-23/#the-4-charm>
+    fn apply_exact_reinterpretations(&mut self) {
         for claim in self
             .replay
             .cards
@@ -236,6 +239,7 @@ impl<'a> ConventionKnowledgeCompiler<'a> {
                     && matches!(
                         claim.source,
                         HGroupMoveKind::TransferDiscard
+                            | HGroupMoveKind::Context
                             | HGroupMoveKind::GentlemansDiscard
                             | HGroupMoveKind::LayeredGentlemansDiscard
                             | HGroupMoveKind::BatonDiscard
@@ -256,6 +260,43 @@ impl<'a> ConventionKnowledgeCompiler<'a> {
                     KnowledgeSource::Reinterpretation(claim.turn),
                     |card| card.identities = IdentitySet::singleton(claim.identity),
                 );
+            }
+        }
+    }
+
+    /// A Sarcastic Discard explicitly corrects an earlier duplicated touch.
+    /// Restore the transferred identity as a possibility on each matching
+    /// clued slot; the existing `OneOf` claim, not marginal notes, says that
+    /// exactly one of those slots holds the remaining copy.
+    /// <https://hanabi.github.io/level-3/#the-sarcastic-discard-sd>
+    fn apply_ambiguous_sarcastic_transfers(&mut self) {
+        for claim in self
+            .replay
+            .cards
+            .facts
+            .identity_claims()
+            .iter()
+            .filter(|claim| {
+                claim.source == HGroupMoveKind::SarcasticDiscard
+                    && claim.relation == IdentityClaimRelation::OneOf
+            })
+        {
+            for card in &claim.cards {
+                if self
+                    .deductions
+                    .possible_identities(*card)
+                    .is_some_and(|logical| logical.contains(claim.identity))
+                {
+                    self.knowledge.update(
+                        *card,
+                        KnowledgeSource::Reinterpretation(claim.turn),
+                        |note| {
+                            note.identities = note
+                                .identities
+                                .union(IdentitySet::singleton(claim.identity));
+                        },
+                    );
+                }
             }
         }
     }
@@ -426,7 +467,16 @@ impl<'a> ConventionKnowledgeCompiler<'a> {
         for pending in self.replay.pending_connections.iter().filter(|pending| {
             pending.actor == view.observer && self.replay.pending_connections.is_active(pending)
         }) {
-            let Some(pending_card) = pending.cards.first() else {
+            let Some(pending_card) = pending.cards.iter().find(|card| {
+                crate::h_group::model::connection_candidate_is_eligible(
+                    pending.kind,
+                    pending.expected,
+                    **card,
+                    &pending.cards,
+                    &self.knowledge.cards,
+                    self.deductions,
+                )
+            }) else {
                 continue;
             };
             let Some(card) = self
@@ -658,6 +708,18 @@ fn compile_convention_card_inferences(
     let knowledge = &mut compiler.knowledge;
 
     for clue in &replay.clues {
+        let previously_known = knowledge
+            .cards
+            .iter()
+            .filter(|note| {
+                note.card != clue.focus
+                    && clue.previously_gotten.contains(&note.card)
+                    && was_clued_before(view, clue.turn, note.card)
+                    && note.identities.len() == 1
+            })
+            .fold(IdentitySet::default(), |identities, note| {
+                identities.union(note.identities)
+            });
         let clue_stack_heights = StackTimeline::at_clue(clue.turn, clue.stack_heights).heights();
         let first_connector_was_played_before_target = |identity: Card| {
             let player_count = view.hands.len();
@@ -697,12 +759,12 @@ fn compile_convention_card_inferences(
                         .is_some_and(|card| card.identities.contains(connector))
                 })
             });
+        let resolved_bluff = replay.signals.of_kind(HGroupMoveKind::Bluff).any(|signal| {
+            signal.cards.len() >= 2
+                && signal.turn >= clue.turn
+                && signal.cards.last() == Some(&clue.focus)
+        });
         if !replay.cards.invalidated_focuses.contains(&clue.focus) {
-            let resolved_bluff = replay.signals.of_kind(HGroupMoveKind::Bluff).any(|signal| {
-                signal.cards.len() >= 2
-                    && signal.turn >= clue.turn
-                    && signal.cards.last() == Some(&clue.focus)
-            });
             let source = if resolved_bluff
                 || replay
                     .signals
@@ -715,10 +777,21 @@ fn compile_convention_card_inferences(
             knowledge.update(clue.focus, source, |card| {
                 card.identity_status = HGroupIdentityStatus::Settled;
                 if resolved_bluff {
-                    let one_away =
-                        identities_at_distance_at(card.identities, clue.stack_heights, 1);
-                    if !one_away.is_empty() {
-                        card.identities = one_away;
+                    let targets = IdentitySet::from_mask(
+                        card.identities
+                            .iter()
+                            .filter(|identity| {
+                                crate::h_group::bluff::bluff_target_kind_at(
+                                    clue.stack_heights,
+                                    clue.clue,
+                                    *identity,
+                                )
+                                .is_some()
+                            })
+                            .fold(0, |mask, identity| mask | (1 << identity.index())),
+                    );
+                    if !targets.is_empty() {
+                        card.identities = targets;
                     }
                     card.saved = false;
                 } else {
@@ -884,6 +957,25 @@ fn compile_convention_card_inferences(
                             narrowed = live;
                         }
                     }
+                    // Clarity cannot assign the focus an identity already
+                    // known on another clued card. Owner-visible promises
+                    // matter here even though the owner cannot see that card.
+                    // https://hanabi.github.io/level-1/#good-touch-principle
+                    if matches!(clue.clue, Clue::Suit(_))
+                        && clue.touched.len() > 1
+                        && narrowed.len() > 1
+                        && !replay
+                            .signals
+                            .has_at_turn(clue.turn, HGroupMoveKind::FixClue)
+                        && !replay
+                            .signals
+                            .has_at_turn(clue.turn, HGroupMoveKind::Duplication)
+                    {
+                        let nonduplicating = narrowed.without(previously_known);
+                        if !nonduplicating.is_empty() {
+                            narrowed = nonduplicating;
+                        }
+                    }
                     if matches!(clue.clue, Clue::Suit(_))
                         && clue.touched.len() > 1
                         && narrowed.len() > 1
@@ -934,7 +1026,7 @@ fn compile_convention_card_inferences(
         let clarity_resolved_focus = matches!(clue.clue, Clue::Suit(_))
             && clue.touched.len() > 1
             && clue.focus_identities.len() > 1;
-        let effective_focus_identities = if clarity_resolved_focus {
+        let effective_focus_identities = if clarity_resolved_focus || resolved_bluff {
             knowledge
                 .cards
                 .iter()
@@ -971,6 +1063,13 @@ fn compile_convention_card_inferences(
             }
         }
         for (non_focus, good_touch) in &clue.non_focus_identities {
+            // A resolved Bluff replaces the provisional focus. Its former
+            // singleton cannot continue excluding that identity from collateral.
+            let good_touch = if resolved_bluff {
+                IdentitySet::all()
+            } else {
+                *good_touch
+            };
             let convention_dupes = knowledge
                 .cards
                 .iter()
@@ -1016,7 +1115,8 @@ fn compile_convention_card_inferences(
 
     compiler.apply_established_good_touch();
     compiler.apply_promised_good_touch();
-    compiler.apply_transfer_claims();
+    compiler.apply_exact_reinterpretations();
+    compiler.apply_ambiguous_sarcastic_transfers();
     compiler.apply_lie_component_focus_claims();
     compiler.apply_resolved_ejections();
     compiler.apply_connection_promises();

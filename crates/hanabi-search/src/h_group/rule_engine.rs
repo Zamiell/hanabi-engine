@@ -220,9 +220,10 @@ fn apply_rule(
                 view,
                 context.after.hands,
                 context.after.stack_heights,
+                context.before.clue_tokens,
                 effects.signals,
             );
-            apply_elimination_resolution_effects(context, effects);
+            apply_elimination_resolution_effects(context, view, effects);
         }
         HGroupRuleId::ChopMoves => {
             if !rule_enabled(profile, HGroupRuleId::EndGame)

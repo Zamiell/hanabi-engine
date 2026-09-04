@@ -504,10 +504,16 @@ pub(super) fn prospective_clue_marks_focus_saved(
     let Some(compiled) = compiled_prospective_clue(source, profile, target, clue, touched) else {
         return false;
     };
-    if !compiled
-        .projection(target)
-        .is_some_and(|projection| projection.inferred.is_saved(focus))
-    {
+    if !compiled.projection(target).is_some_and(|projection| {
+        projection.inferred.is_saved(focus)
+            && identity_of(source, focus).is_some_and(|actual| {
+                projection
+                    .inferred
+                    .cards
+                    .iter()
+                    .any(|note| note.card == focus && note.identities.contains(actual))
+            })
+    }) {
         cache_save_validation(source, profile, key, false);
         return false;
     }

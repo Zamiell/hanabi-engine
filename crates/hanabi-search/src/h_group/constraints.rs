@@ -41,7 +41,8 @@ impl ConventionConstraints {
             }
         }
         Self {
-            requirement: Some(ConventionRequirement { kind, alternatives }),
+            requirement: (!alternatives.is_empty())
+                .then_some(ConventionRequirement { kind, alternatives }),
         }
     }
 
@@ -79,6 +80,13 @@ mod tests {
     use hanabi_core::CardId;
 
     use super::*;
+
+    #[test]
+    fn unavailable_obligation_does_not_forbid_every_emergency_action() {
+        let constraints = ConventionConstraints::require(ConventionRequirementKind::MustClue, []);
+        assert!(constraints.allows(Action::Discard(CardId::new(1))));
+        assert_eq!(constraints.kind(), None);
+    }
 
     #[test]
     fn hard_requirement_excludes_a_higher_scored_unrelated_action() {

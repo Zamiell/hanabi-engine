@@ -18,19 +18,53 @@ pub(super) struct GoodTouchContext<'a> {
     pub(super) convention_cards: &'a [HGroupCardInference],
 }
 
+fn known_identity(context: GoodTouchContext<'_>, card: CardId) -> Option<Card> {
+    identity_of(context.view, card).or_else(|| {
+        context
+            .convention_cards
+            .iter()
+            .find(|note| note.card == card && note.identities.len() == 1)
+            .and_then(|note| note.identities.iter().next())
+    })
+}
+
+fn accounts_for_one_new_copy(context: GoodTouchContext<'_>, identity: Card) -> bool {
+    context.clue.is_some_and(|(clue, touched)| {
+        clue_accounts_for_every_copy(context.view, clue, touched, identity)
+            && context
+                .newly_touched
+                .iter()
+                .filter(|card| known_identity(context, **card) == Some(identity))
+                .count()
+                == 1
+    })
+}
+
+/// Duplication Responsibility permits risking an ambiguous matching card, not
+/// knowingly touching a useful duplicate. Apply this to Save collateral too.
+/// Source: <https://hanabi.github.io/level-12/#duplication-responsibility>
+pub(super) fn duplicates_known_good_touch(context: GoodTouchContext<'_>) -> bool {
+    context.newly_touched.iter().copied().any(|card| {
+        let Some(identity) = known_identity(context, card) else {
+            return false;
+        };
+        is_eventually_useful(context.view, identity)
+            && !accounts_for_one_new_copy(context, identity)
+            && context.view.hands.iter().flatten().any(|other| {
+                other.id != card
+                    && (context.explicitly_clued.contains(&other.id)
+                        || context.newly_touched.contains(&other.id))
+                    && !context.fixed_cards.contains(&other.id)
+                    && known_identity(context, other.id) == Some(identity)
+            })
+    })
+}
+
 /// Compiles the behavioral consequences relevant to Good Touch and admits the
 /// clue only when no recipient would acquire an impossible duplicate play
 /// obligation.
 pub(super) fn good_touch(context: GoodTouchContext<'_>) -> bool {
-    let known_identity = |card: CardId| {
-        identity_of(context.view, card).or_else(|| {
-            context
-                .convention_cards
-                .iter()
-                .find(|note| note.card == card && note.identities.len() == 1)
-                .and_then(|note| note.identities.iter().next())
-        })
-    };
+    let known_identity = |card: CardId| known_identity(context, card);
     let consequences = context
         .newly_touched
         .iter()
@@ -56,15 +90,7 @@ pub(super) fn good_touch(context: GoodTouchContext<'_>) -> bool {
             .iter()
             .next()
             .expect("Good Touch consequences are exact");
-        let accounted_existing_copy = context.clue.is_some_and(|(clue, touched)| {
-            clue_accounts_for_every_copy(context.view, clue, touched, identity)
-                && context
-                    .newly_touched
-                    .iter()
-                    .filter(|candidate| known_identity(**candidate) == Some(identity))
-                    .count()
-                    == 1
-        });
+        let accounted_existing_copy = accounts_for_one_new_copy(context, identity);
         if newly_promised.contains(identity) && !accounted_existing_copy {
             return false;
         }

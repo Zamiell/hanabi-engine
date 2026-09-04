@@ -1018,6 +1018,7 @@ fn replay_h_group_inner_uncached(
             deck_size: historical_deck_size,
             early_game,
             already_playing: already_playing.materialized().clone(),
+            forced_playable: forced_playable.materialized().clone(),
             older_play_obligations,
         };
         let clue_tokens_before = before.clue_tokens;

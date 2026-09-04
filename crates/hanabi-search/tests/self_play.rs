@@ -74,7 +74,7 @@ fn action_json(action: Action) -> serde_json::Value {
     }
 }
 
-fn play(seed: usize) -> GameResult {
+fn play(seed: usize, active: &std::path::Path) -> GameResult {
     let started = Instant::now();
     let seed = format!("p4v0s{seed}");
     let json = serde_json::json!({"seed": seed, "players": ["Alice", "Bob", "Cathy", "Donald"], "actions": []});
@@ -87,6 +87,16 @@ fn play(seed: usize) -> GameResult {
     // Only the simulator has the seed and FullState. Decisions receive the
     // acting player's permitted observation and deterministic search budgets.
     while !state.is_terminal() {
+        // Cheap seed + action replay, written before planning so even a slow
+        // or interrupted decision has an independently reproducible position.
+        fs::write(
+            active.join(format!("{seed}.json")),
+            serde_json::json!({
+                "seed": seed, "players": ["Alice", "Bob", "Cathy", "Donald"], "actions": actions,
+            })
+            .to_string(),
+        )
+        .unwrap();
         if state.turn() >= 200 {
             error = Some("game exceeded 200 turns without reaching a terminal state".to_owned());
             break;
@@ -171,6 +181,8 @@ fn h_group_max_self_play_200() {
         |path| root.join(path),
     );
     fs::create_dir_all(output.parent().unwrap()).unwrap();
+    let active = output.with_extension("active");
+    fs::create_dir_all(&active).unwrap();
     let mut checkpoint = BufWriter::new(fs::File::create(output.with_extension("ndjson")).unwrap());
     let next = AtomicUsize::new(start);
     let started = Instant::now();
@@ -179,13 +191,14 @@ fn h_group_max_self_play_200() {
         for _ in 0..workers {
             let tx = tx.clone();
             let next = &next;
+            let active = &active;
             scope.spawn(move || {
                 loop {
                     let seed = next.fetch_add(1, Ordering::Relaxed);
                     if seed >= start + count {
                         break;
                     }
-                    if tx.send(play(seed)).is_err() {
+                    if tx.send(play(seed, active)).is_err() {
                         break;
                     }
                 }
@@ -293,6 +306,10 @@ fn finish_report(
         output.display()
     );
     assert_eq!(games.len(), count, "every requested seed must finish");
+    assert_eq!(
+        errors, 0,
+        "engine errors invalidate a clean strength baseline; inspect the report (aborted games receive zero credit)"
+    );
     if update {
         fs::create_dir_all(baseline_path.parent().unwrap()).unwrap();
         fs::write(
@@ -305,10 +322,6 @@ fn finish_report(
             previous.expect("no baseline; explicitly run with HANABI_SELF_PLAY_UPDATE=1");
         assert_no_regression(&previous, &measured);
     }
-    assert_eq!(
-        errors, 0,
-        "engine errors invalidate a clean strength baseline; inspect the report (aborted games receive zero credit)"
-    );
 }
 
 fn assert_no_regression(previous: &Baseline, measured: &Baseline) {

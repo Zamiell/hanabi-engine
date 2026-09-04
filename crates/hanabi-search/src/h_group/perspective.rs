@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use hanabi_core::{
-    Card, CardId, Clue, ClueFacts, MAX_CLUE_TOKENS, ObservedCard, ObservedEvent,
-    ObservedHistoryEntry, PlayerId, PlayerView, Rank,
+    Card, CardId, Clue, ClueFacts, EndReason, GameStatus, MAX_CLUE_TOKENS, MAX_STRIKES,
+    ObservedCard, ObservedEvent, ObservedHistoryEntry, PlayerId, PlayerView, Rank,
 };
 
 use crate::{HGroupProfile, LogicalDeductions, information_set::HandAssignmentVisit};
@@ -228,9 +228,8 @@ impl ProspectiveTransition {
                 untouched,
             },
         });
-        after.turn = after.turn.saturating_add(1);
-        after.current_player = next_player(source.current_player, source.hands.len());
         after.clue_tokens = after.clue_tokens.saturating_sub(1);
+        Self::finish_turn(source, &mut after, giver);
         after
     }
 
@@ -304,7 +303,12 @@ impl ProspectiveTransition {
         if !play || successful && identity.rank == Rank::Five {
             after.clue_tokens = after.clue_tokens.saturating_add(1).min(MAX_CLUE_TOKENS);
         }
-        if source.deck_size > 0 {
+        if after.strikes >= MAX_STRIKES {
+            after.status = GameStatus::Finished(EndReason::TooManyStrikes);
+        } else if after.play_stacks.iter().map(Vec::len).sum::<usize>() == 25 {
+            after.status = GameStatus::Finished(EndReason::PerfectScore);
+        }
+        if source.deck_size > 0 && after.status == GameStatus::InProgress {
             let drawn = CardId::new(50 - source.deck_size);
             after.hands[player.index()].push(ObservedCard {
                 id: drawn,
@@ -327,9 +331,26 @@ impl ProspectiveTransition {
                 );
             }
         }
-        after.turn = after.turn.saturating_add(1);
-        after.current_player = next_player(player, source.hands.len());
+        Self::finish_turn(source, &mut after, player);
         after
+    }
+
+    fn finish_turn(source: &PlayerView, after: &mut PlayerView, actor: PlayerId) {
+        if after.status == GameStatus::InProgress {
+            if let Some(remaining) = source.final_turns_remaining {
+                let remaining = remaining.saturating_sub(1);
+                after.final_turns_remaining = Some(remaining);
+                if remaining == 0 {
+                    after.status = GameStatus::Finished(EndReason::FinalRoundComplete);
+                }
+            }
+        }
+        after.turn = source.turn.saturating_add(1);
+        after.current_player = if after.status == GameStatus::InProgress {
+            next_player(actor, source.hands.len())
+        } else {
+            actor
+        };
     }
 }
 
@@ -339,6 +360,47 @@ mod tests {
 
     use super::*;
     use crate::{HGroupLevel, HGroupProfile};
+
+    #[test]
+    fn prospective_transitions_match_the_simulator_through_the_final_round() {
+        let mut state = FullState::new_standard(4, standard_deck()).unwrap();
+        while !state.is_terminal() {
+            let actor = state.current_player();
+            let source = state.view_for(actor).unwrap();
+            let legal = state.legal_actions();
+            let action = legal
+                .iter()
+                .find(|action| matches!(action, Action::Discard(_)))
+                .or_else(|| {
+                    legal
+                        .iter()
+                        .find(|action| matches!(action, Action::Clue { .. }))
+                })
+                .copied()
+                .unwrap();
+            let projected = match action {
+                Action::Discard(card) => {
+                    ProspectiveTransition::discard(&source, actor, card, state.card(card).unwrap())
+                }
+                Action::Clue { target, clue } => {
+                    let touched = source.hands[target.index()]
+                        .iter()
+                        .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
+                        .map(|card| card.id)
+                        .collect::<Vec<_>>();
+                    ProspectiveTransition::clue_by(&source, actor, target, clue, &touched)
+                }
+                Action::Play(_) => unreachable!(),
+            };
+            state.apply(action).unwrap();
+            assert_eq!(projected, state.view_for(actor).unwrap());
+        }
+        assert_eq!(state.final_turns_remaining(), Some(0));
+        assert_eq!(
+            state.status(),
+            GameStatus::Finished(EndReason::FinalRoundComplete)
+        );
+    }
 
     #[test]
     fn successful_play_projects_the_public_draw_shape() {

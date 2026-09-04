@@ -1,7 +1,8 @@
 use super::{
     CardSet, ConnectionManager, ConnectionObligation, ConventionJournal, HGroupConnectionKind,
     HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, ObservedEvent, PlayerId, PlayerView,
-    PromiseId, identity_of, is_playable_at, push_signal, same_turn_signal, was_clued_before,
+    PromiseId, identity_of, is_playable_at, is_trash_at, push_signal, same_turn_signal,
+    was_clued_before,
 };
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -31,7 +32,9 @@ pub(in crate::h_group) fn apply_transfer_effects(
     else {
         return;
     };
-    if context.actor_before.discarded_identity != Some(*identity) {
+    if is_trash_at(stack_heights, *identity)
+        || context.actor_before.discarded_identity != Some(*identity)
+    {
         // A revealed identity is not proof that the discarder knew it. Both
         // Gentleman's and Baton Discards require exact owner knowledge; an
         // observer may not manufacture a transfer from visible simulator
@@ -54,11 +57,60 @@ pub(in crate::h_group) fn apply_transfer_effects(
     for distance in 1..hands.len() {
         let index = (player.index() + distance) % hands.len();
         if let Some(target_card) = hands[index].iter().rev().copied().find(|candidate| {
-            explicitly_clued.contains(candidate) && identity_of(view, *candidate) == Some(*identity)
+            (explicitly_clued.contains(candidate) || invisibly_clued.contains(candidate))
+                && identity_of(view, *candidate)
+                    .or_else(|| signals.facts().known_identity(*candidate))
+                    .or_else(|| {
+                        let literal = context.before.facts[candidate.index()].identity_mask();
+                        literal
+                            .is_power_of_two()
+                            .then(|| crate::IdentitySet::from_mask(literal).iter().next())
+                            .flatten()
+                    })
+                    == Some(*identity)
         }) {
             transfer = Some((PlayerId::new(u8::try_from(index).unwrap_or(0)), target_card));
-            kind = HGroupMoveKind::SarcasticDiscard;
+            kind = if explicitly_clued.contains(&target_card) {
+                HGroupMoveKind::SarcasticDiscard
+            } else {
+                HGroupMoveKind::TransferDiscard
+            };
             break;
+        }
+    }
+    if transfer.is_none() && *player != view.observer {
+        // Sarcastic Discards take precedence over GDs/Batons, just as
+        // Prompts take precedence over Finesses. The recipient cannot see
+        // their own matching card; use its pre-discard information instead.
+        // Multiple matching clued slots remain a disjunction, not a promise
+        // on the newest unclued card.
+        // https://hanabi.github.io/level-3/#the-sarcastic-discard-sd
+        let candidates = hands[view.observer.index()]
+            .iter()
+            .copied()
+            .filter(|candidate| {
+                explicitly_clued.contains(candidate)
+                    && context.before.facts[candidate.index()].allows(*identity)
+                    && signals
+                        .facts()
+                        .known_identity(*candidate)
+                        .is_none_or(|known| known == *identity)
+            })
+            .collect::<Vec<_>>();
+        if candidates.len() == 1 {
+            transfer = Some((view.observer, candidates[0]));
+            kind = HGroupMoveKind::SarcasticDiscard;
+        } else if !candidates.is_empty() {
+            push_signal(
+                signals,
+                entry,
+                *player,
+                Some(view.observer),
+                HGroupMoveKind::SarcasticDiscard,
+                candidates,
+                Some(*identity),
+            );
+            return;
         }
     }
     if transfer.is_none() {

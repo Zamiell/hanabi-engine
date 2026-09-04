@@ -196,6 +196,8 @@ pub struct SymbolicLineOutcome {
 /// Why a deterministic symbolic continuation stopped.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum SymbolicStopReason {
+    /// The game ended; no subsequent action exists.
+    Terminal,
     /// No convention-forced action remained.
     #[default]
     Choice,
@@ -331,22 +333,20 @@ pub(crate) fn plan_move_with_analysis(
             used: 0,
             limit: config.exact_node_limit,
         };
-        let candidate_actions = candidates
-            .iter()
-            .map(|candidate| candidate.action)
-            .collect::<Vec<_>>();
         match evaluate_exact_root(
             &worlds,
             convention,
             objective,
-            &candidate_actions,
+            &evaluations,
+            preferred,
             &mut budget,
         ) {
-            Ok(values) => {
+            Ok((values, proven)) => {
                 for (evaluation, value) in evaluations.iter_mut().zip(values) {
-                    evaluation.exact = Some(value);
+                    evaluation.exact = value;
                 }
-                let best_index = best_exact_index(&evaluations, objective, preferred)
+                let best_index = proven
+                    .or_else(|| best_exact_index(&evaluations, objective, preferred))
                     .ok_or(PlannerError::NoCandidateActions)?;
                 return Ok(PlannerResult {
                     best_action: evaluations[best_index].action,
@@ -672,37 +672,54 @@ fn best_exact_index(
         .map(|(index, _)| index)
 }
 
+type ExactRootValues = (Vec<Option<ExactActionValue>>, Option<usize>);
+
 fn evaluate_exact_root(
     worlds: &[FullState],
     convention: SupportedConvention,
     objective: PlanningObjective,
-    candidates: &[Action],
+    candidates: &[PlannerActionEvaluation],
+    preferred: Option<Action>,
     budget: &mut ExactBudget,
-) -> Result<Vec<ExactActionValue>, ExactAbort> {
-    let mut values = Vec::with_capacity(candidates.len());
+) -> Result<ExactRootValues, ExactAbort> {
+    let mut values = vec![None; candidates.len()];
+    let upper = exact_value_upper_bound(worlds);
+    let mut ordered = candidates.iter().enumerate().collect::<Vec<_>>();
+    ordered.sort_by_key(|(index, candidate)| {
+        (
+            core::cmp::Reverse(candidate.policy_tier),
+            core::cmp::Reverse(candidate.convention_priority),
+            core::cmp::Reverse(preferred == Some(candidate.action)),
+            *index,
+        )
+    });
     // Exact branches repeatedly converge on the same public observation.
     // Convention interpretation is a pure function of that observation, so
     // compile it once for the whole solve instead of replaying H-Group history
     // independently in every identity world and branch.
     let mut analysis_cache = ConventionAnalysisCache::default();
-    for action in candidates {
+    for (index, candidate) in ordered {
         budget.consume()?;
         let mut advanced = Vec::with_capacity(worlds.len());
         for world in worlds {
             let mut state = world.clone();
-            state.apply(*action).map_err(ExactAbort::Rule)?;
+            state.apply(candidate.action).map_err(ExactAbort::Rule)?;
             advanced.push(state);
         }
-        values.push(solve_partitioned(
+        let value = solve_partitioned(
             advanced,
             convention,
             objective,
             budget,
             &mut analysis_cache,
             1,
-        )?);
+        )?;
+        values[index] = Some(value);
+        if value.compare(upper, objective) == Ordering::Equal {
+            return Ok((values, Some(index)));
+        }
     }
-    Ok(values)
+    Ok((values, None))
 }
 
 fn solve_partitioned(
@@ -763,6 +780,9 @@ fn solve_observation_group(
     analysis_cache: &mut ConventionAnalysisCache,
     depth: u16,
 ) -> Result<ExactActionValue, ExactAbort> {
+    if let Some(value) = equivalent_terminal_actions(&view, worlds, objective)? {
+        return Ok(value);
+    }
     let analysis = analysis_cache.compile(view, convention)?;
     let preferred = analysis.preferred_action;
     let candidates = planning_candidates(&analysis);
@@ -770,8 +790,20 @@ fn solve_observation_group(
         return Err(ExactAbort::NoCandidateActions);
     }
 
+    // No continuation can recover a lost stack or score above its current
+    // ceiling. Visit tie-break-preferred actions first, so reaching this bound
+    // proves that remaining candidates cannot improve either value or ties.
+    let upper_bound = exact_value_upper_bound(worlds);
+    let mut ordered = candidates.iter().copied().enumerate().collect::<Vec<_>>();
+    ordered.sort_by_key(|(index, candidate)| {
+        (
+            core::cmp::Reverse(candidate.priority),
+            core::cmp::Reverse(preferred == Some(candidate.action)),
+            *index,
+        )
+    });
     let mut best: Option<(ExactActionValue, i32, bool, usize)> = None;
-    for (index, candidate) in candidates.iter().copied().enumerate() {
+    for (index, candidate) in ordered {
         let action = candidate.action;
         budget.consume()?;
         let mut advanced = Vec::with_capacity(worlds.len());
@@ -803,9 +835,105 @@ fn solve_observation_group(
         if replace {
             best = Some((value, priority, is_preferred, index));
         }
+        if value.compare(upper_bound, objective) == Ordering::Equal {
+            break;
+        }
     }
     best.map(|(value, _, _, _)| value)
         .ok_or(ExactAbort::NoCandidateActions)
+}
+
+/// Avoid convention compilation only when every rules-legal action ends every
+/// world with the same utility. Any convention-admissible subset must then have
+/// that value too; this does not relax the root player's convention constraints.
+fn equivalent_terminal_actions(
+    view: &PlayerView,
+    worlds: &[FullState],
+    objective: PlanningObjective,
+) -> Result<Option<ExactActionValue>, ExactAbort> {
+    if view.final_turns_remaining != Some(1) {
+        return Ok(None);
+    }
+    let mut common: Option<ExactActionValue> = None;
+    for action in view.legal_actions() {
+        let mut value = ExactActionValue {
+            worlds: 0,
+            perfect_worlds: 0,
+            score_sum: 0,
+            strikeout_worlds: 0,
+            score_ceiling_sum: 0,
+        };
+        for world in worlds {
+            let mut advanced = world.clone();
+            advanced.apply(action).map_err(ExactAbort::Rule)?;
+            if !advanced.is_terminal() {
+                return Ok(None);
+            }
+            value.add(terminal_value(&advanced));
+        }
+        if common.is_some_and(|previous| value.compare(previous, objective) != Ordering::Equal) {
+            return Ok(None);
+        }
+        common = Some(value);
+    }
+    Ok(common)
+}
+
+/// Optimistic final-round score with omniscient players and free passes.
+/// Each remaining player acts at most once and there are no further draws.
+/// This is only an upper bound: actual decisions still share observations
+/// across worlds and must obey their convention constraints.
+fn exact_value_upper_bound(worlds: &[FullState]) -> ExactActionValue {
+    let mut bound = ExactActionValue {
+        worlds: 0,
+        perfect_worlds: 0,
+        score_sum: 0,
+        strikeout_worlds: 0,
+        score_ceiling_sum: 0,
+    };
+    for world in worlds {
+        let ceiling = u64::from(score_ceiling(world));
+        let reachable = final_round_score_bound(world).map_or(ceiling, |value| ceiling.min(value));
+        bound.worlds += 1;
+        bound.perfect_worlds += u64::from(reachable == 25);
+        bound.score_sum += reachable;
+        bound.score_ceiling_sum += ceiling;
+    }
+    bound
+}
+
+fn final_round_score_bound(world: &FullState) -> Option<u64> {
+    let remaining = world.final_turns_remaining()?;
+    let heights = world
+        .play_stacks()
+        .each_ref()
+        .map(|stack| u8::try_from(stack.len()).expect("standard stack"));
+    Some(
+        u64::from(world.score())
+            + u64::from(final_round_max_plays(
+                world,
+                heights,
+                world.current_player().index(),
+                remaining,
+            )),
+    )
+}
+
+fn final_round_max_plays(world: &FullState, heights: [u8; 5], actor: usize, remaining: u8) -> u8 {
+    if remaining == 0 {
+        return 0;
+    }
+    let next = (actor + 1) % world.hands().len();
+    let mut best = final_round_max_plays(world, heights, next, remaining - 1);
+    for card in &world.hands()[actor] {
+        let identity = world.card(*card).expect("world hand card");
+        if identity.rank.number() == heights[identity.suit.index()] + 1 {
+            let mut advanced = heights;
+            advanced[identity.suit.index()] += 1;
+            best = best.max(1 + final_round_max_plays(world, advanced, next, remaining - 1));
+        }
+    }
+    best
 }
 
 /// Per-solve cache for the pure observer-relative convention compiler.
@@ -1056,12 +1184,30 @@ mod tests {
         .unwrap();
         assert_eq!(result.phase, PlannerPhase::Exact);
         assert!(result.world_count.is_exact());
-        assert!(
-            result
-                .root_actions
-                .iter()
-                .all(|evaluation| evaluation.exact.is_some())
-        );
+        let best = result
+            .root_actions
+            .iter()
+            .find(|evaluation| evaluation.action == result.best_action)
+            .unwrap()
+            .exact
+            .unwrap();
+        if result
+            .root_actions
+            .iter()
+            .any(|evaluation| evaluation.exact.is_none())
+        {
+            let worlds = information
+                .collect_worlds_after_count(
+                    &crate::BeliefConstraints::default(),
+                    usize::try_from(result.world_count.worlds()).unwrap(),
+                )
+                .unwrap();
+            assert_eq!(
+                best,
+                exact_value_upper_bound(&worlds),
+                "unsearched roots require a proven global bound"
+            );
+        }
         let mut forced = SupportedConvention::None.analyze(information.deductions());
         forced.actions.truncate(1);
         let only_action = forced.actions[0].action;

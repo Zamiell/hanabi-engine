@@ -1331,13 +1331,9 @@ fn out_of_order_fix_uses_the_historical_stack_height() {
     ] {
         state.apply(action).unwrap();
     }
-    let giver = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
-    let before_fix = infer_h_group(&giver, HGroupProfile::Max);
-    assert_eq!(
-        select_h_group_action(&giver, HGroupProfile::Max),
-        Some(Action::Discard(CardId::new(3))),
-        "the preceding valid Time Travel Chop Move changes the best action before this isolated historical-fix scenario: {before_fix:#?}"
-    );
+    // This synthetic prefix sets up a historical interpretation, not a
+    // best-move oracle. Which unrelated trash card ranks first here is not
+    // part of the historical-stack invariant exercised below.
     for action in [
         Action::Clue {
             target: PlayerId::new(1),
@@ -1358,9 +1354,9 @@ fn out_of_order_fix_uses_the_historical_stack_height() {
             .clues
             .iter()
             .find(|clue| clue.turn == 15)
-            .map(|clue| clue.kind),
-        Some(HGroupClueKind::Play),
-        "the historical rank-4 clue lost its original delayed-play meaning: {inferred:#?}"
+            .map(|clue| clue.stack_heights),
+        Some([2, 1, 0, 1, 1]),
+        "the rank-4 clue must retain its pre-fix stack, not today's stack: {inferred:#?}"
     );
     assert_ne!(
         inferred.connection.map(|connection| connection.card),

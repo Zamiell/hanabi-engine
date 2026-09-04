@@ -171,6 +171,37 @@ pub struct HGroupConnectionPromise {
     pub identity: Card,
 }
 
+/// Literal certainty or an exact saved card resolves a Prompt without a blind sequence. Otherwise
+/// ambiguous candidates retain their order: convention notes may depend on
+/// the very connection being resolved and cannot independently select it.
+pub(super) fn connection_candidate_is_eligible(
+    kind: HGroupConnectionKind,
+    expected: Card,
+    card: CardId,
+    candidates: &[CardId],
+    notes: &[HGroupCardInference],
+    deductions: &crate::LogicalDeductions,
+) -> bool {
+    if kind != HGroupConnectionKind::Prompt {
+        return true;
+    }
+    let resolved = candidates.iter().find(|candidate| {
+        deductions.possible_identities(**candidate) == Some(IdentitySet::singleton(expected))
+            || notes.iter().any(|note| {
+                note.card == **candidate
+                    && note.saved
+                    && note.identities == IdentitySet::singleton(expected)
+            })
+    });
+    if let Some(resolved) = resolved {
+        return card == *resolved;
+    }
+    notes
+        .iter()
+        .find(|note| note.card == card)
+        .is_none_or(|note| note.identities.len() != 1 || note.identities.contains(expected))
+}
+
 /// Convention knowledge attached to one card in the observer's hand.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum HGroupIdentityStatus {

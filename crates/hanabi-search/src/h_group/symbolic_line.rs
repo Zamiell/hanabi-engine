@@ -30,6 +30,10 @@ fn project_h_group_plan(
     let mut action = Some(root);
 
     while let Some(current) = action {
+        if public.status != hanabi_core::GameStatus::InProgress {
+            plan.stop_at(PlanFrontier::Terminal);
+            break;
+        }
         if plan.len() >= usize::from(limit) {
             plan.stop_at(PlanFrontier::Limit);
             break;
@@ -60,6 +64,10 @@ fn project_h_group_plan(
             consequences,
         );
         public = after;
+        if public.status != hanabi_core::GameStatus::InProgress {
+            plan.stop_at(PlanFrontier::Terminal);
+            break;
+        }
         let next = public.current_player;
         let Some((next_deductions, _)) = PerspectiveProjector::new(&public, profile)
             .project(next, PerspectiveDepth::NestedRecipients)

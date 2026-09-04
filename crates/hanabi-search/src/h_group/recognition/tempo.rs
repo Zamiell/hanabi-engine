@@ -491,6 +491,8 @@ pub(in crate::h_group) fn apply_positional_effects(
         _ => return,
     };
     if historical_deck_size > view.hands.len()
+        || context.before.already_playing.contains(&card)
+        || context.before.forced_playable.contains(&card)
         || was_clued_before(view, entry.turn, card)
         || invisibly_clued.contains(&card)
         || chop_moved.contains(&card)

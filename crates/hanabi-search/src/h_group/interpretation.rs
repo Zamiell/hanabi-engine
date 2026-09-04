@@ -4,7 +4,9 @@
 //! generation of convention-admissible clue candidates. Public-history
 //! reduction and level-specific event recognition live in sibling modules.
 
-use super::admission::{GoodTouchContext, clue_accounts_for_every_copy, good_touch};
+use super::admission::{
+    GoodTouchContext, clue_accounts_for_every_copy, duplicates_known_good_touch, good_touch,
+};
 #[cfg(test)]
 use super::decision::{analysis_clue_candidates, build_h_group_analysis};
 use super::interpretation_resolution::{
@@ -827,7 +829,14 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 .expect("a standard connection has at most four steps"),
             ));
         } else if let Some(score) = save_score {
-            if !prospective_clue_has_unsafe_connection(
+            if !duplicates_known_good_touch(GoodTouchContext {
+                view,
+                newly_touched: &newly_informed,
+                clue: Some((clue, &touched)),
+                explicitly_clued: &promptable,
+                fixed_cards,
+                convention_cards: &convention_cards,
+            }) && !prospective_clue_has_unsafe_connection(
                 view, profile, target, focus, clue, &touched, false,
             ) && prospective_clue_marks_focus_saved(view, profile, target, focus, clue, &touched)
             {

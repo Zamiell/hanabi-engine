@@ -29,6 +29,45 @@ preserve. Commit hashes refer to this repository's Git history.
 - Caches are scoped to one immutable position or exact solve. They may reuse a
   pure semantic result, but may not become a second mutable convention state.
 
+## 2026-09-04: self-play causality and terminal proof bounds
+
+### Why
+
+Broader self-play exposed cases outside the expert replays: forced discards
+creating Elimination claims, relational Sarcastic transfers becoming exact
+per-card promises, stale identities surviving a demonstrated Bluff, and
+prospective games continuing after simulator termination. Exact search also
+spent time evaluating alternatives after a best possible result was proved.
+
+### Changes
+
+- Kept corrections in the existing fact journal and owner-knowledge compiler.
+  Retraction removes disproved Elimination claims; ambiguous Sarcastic transfers
+  remain `OneOf` and explicitly reopen the transferred identity where literal
+  information allows it. Demonstrated Bluffs replace their old focus claims.
+- Shared Prompt candidate eligibility between owner notes, action selection,
+  and constraint construction. Logical certainty and exact saved cards may
+  resolve a connector; an ambiguous connection's own interpretation is not
+  independent evidence for skipping earlier candidates.
+- Preserved the pre-event forced-play set separately from ordinary scheduled
+  plays, so a failed mandatory play cannot become a Positional Misplay merely
+  because its obligation was consumed during the event.
+- Made prospective terminal transitions match `FullState`, and introduced
+  admissible outcome bounds for exact-search pruning. Unsearched alternatives
+  remain explicitly unmeasured.
+- Added per-decision active replay snapshots. Failed measurements cannot
+  replace the strength baseline, and self-play reproductions are distinguished
+  from human-reviewed optimal-move fixtures.
+
+### Preserve
+
+These changes extend the existing causal and perspective boundaries; they do
+not add a second convention interpreter or allow hidden truth into decisions.
+Do not turn conditional identities into independent facts, treat hypothetical
+upper-bound play as a legal policy, or conceal unresolved self-play errors by
+resetting beliefs. The 200-game baseline is still unestablished, and the known
+blue-Clarity reproduction remains explicitly diagnostic until resolved.
+
 ## 2026-09-03: behavioral outcomes and centralized action semantics
 
 ### Why

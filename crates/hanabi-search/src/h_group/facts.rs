@@ -133,6 +133,13 @@ impl ConventionFacts {
     }
 
     pub(super) fn apply_identity_effect(&mut self, signal: &HGroupSignal) {
+        // A Bluff signal records the blind-played identity, not the identity
+        // of its final focus card. Resolving it also supersedes any earlier
+        // provisional direct Play claim on that focus.
+        if signal.kind == HGroupMoveKind::Bluff && signal.cards.len() >= 2 {
+            self.apply_bluff_identity_effect(signal);
+            return;
+        }
         let Some(identity) = signal.identity else {
             return;
         };
@@ -177,7 +184,8 @@ impl ConventionFacts {
         let ambiguous_connection = signal.cards.len() > 1
             && matches!(
                 signal.kind,
-                HGroupMoveKind::Prompt
+                HGroupMoveKind::SarcasticDiscard
+                    | HGroupMoveKind::Prompt
                     | HGroupMoveKind::Finesse
                     | HGroupMoveKind::ReverseFinesse
                     | HGroupMoveKind::SelfFinesse
@@ -235,6 +243,19 @@ impl ConventionFacts {
 
     pub(super) const fn fixed_cards(&self) -> &CardSet {
         &self.fixed_cards
+    }
+
+    fn apply_bluff_identity_effect(&mut self, signal: &HGroupSignal) {
+        let focus = *signal.cards.last().expect("a Bluff has a focus");
+        self.identity_claims.retain(|claim| {
+            !(claim.source == HGroupMoveKind::PlayClue
+                && claim.turn <= signal.turn
+                && claim.cards.contains(&focus))
+        });
+        self.rebuild_known_identity(focus);
+        let mut blind = signal.clone();
+        blind.cards.truncate(1);
+        self.apply_identity_effect(&blind);
     }
 
     pub(super) fn known_identity(&self, card: CardId) -> Option<Card> {

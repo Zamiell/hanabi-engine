@@ -78,6 +78,8 @@ pub(super) struct HGroupTurnSnapshot {
     /// Rule recognizers compare this snapshot with their mutable post-event
     /// effects instead of reconstructing a subtly different baseline.
     pub(super) already_playing: CardSet,
+    /// Positional/Ignition and other blind-play obligations before removal.
+    pub(super) forced_playable: CardSet,
     /// Cards whose convention play obligations predate the immediately
     /// preceding clue. A play from this set proves the older obligation; it
     /// cannot retroactively demonstrate a Bluff or Ejection from that clue.

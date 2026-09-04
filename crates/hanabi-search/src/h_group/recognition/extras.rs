@@ -459,7 +459,13 @@ pub(in crate::h_group) fn apply_extra_effects(
             let pending_cards = effects
                 .pending
                 .iter()
-                .filter(|connection| connection.actor == *target)
+                .filter(|connection| {
+                    connection.actor == *target
+                        && effects
+                            .pending
+                            .provenance(connection.promise)
+                            .is_some_and(|origin| origin.created_turn < entry.turn)
+                })
                 .flat_map(|connection| connection.cards.iter().copied())
                 .collect::<CardSet>();
             let continuation = touched.iter().any(|card| pending_cards.contains(card))
@@ -1318,6 +1324,7 @@ pub(in crate::h_group) fn apply_extra_effects(
             identity,
         } => {
             let prior_same_one = identity.rank == Rank::One
+                && is_playable_at(context.before.stack_heights, *identity)
                 && view.history.iter().any(|prior| {
                     prior.turn < entry.turn
                         && matches!(

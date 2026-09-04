@@ -289,6 +289,17 @@ pub(in crate::h_group) fn apply_ignition_effects(
     let (Some(first_card), Some((_, second_card))) = (first_card, second) else {
         return;
     };
+    // An observer cannot interpret this as two successful blind plays when
+    // the mandatory first card is visibly trash. In particular, an ordinary
+    // endgame trash clue must not invent a second hidden playable identity
+    // merely because the second target happens to be the observer.
+    if context
+        .historical
+        .identity(first_card)
+        .is_some_and(|identity| is_trash_at(stack_heights, identity))
+    {
+        return;
+    }
 
     effects.forced_playable.insert(first_card);
     effects.forced_playable.insert(second_card);

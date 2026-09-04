@@ -13,6 +13,7 @@ pub(in crate::h_group) fn apply_elimination_effects(
     view: &PlayerView,
     hands: &[Vec<CardId>],
     stack_heights: [u8; 5],
+    clue_tokens: u8,
     signals: &mut ConventionJournal,
 ) {
     // Sources: https://hanabi.github.io/level-18/#elimination--elimination-notes
@@ -24,28 +25,10 @@ pub(in crate::h_group) fn apply_elimination_effects(
             player,
             card,
             identity,
-        } if !is_trash_at(stack_heights, *identity)
+        } if clue_tokens > 0
+            && !is_trash_at(stack_heights, *identity)
             && (identity.rank == Rank::Two || is_playable_at(stack_heights, *identity))
-            && view
-                .history
-                .iter()
-                .filter(|prior| prior.turn < entry.turn)
-                .filter(|prior| {
-                    matches!(
-                        prior.event,
-                        ObservedEvent::Discarded {
-                            identity: removed,
-                            ..
-                        } | ObservedEvent::Played {
-                            identity: removed,
-                            successful: false,
-                            ..
-                        } if removed == *identity
-                    )
-                })
-                .count()
-                + 1
-                < usize::from(identity.rank.copies())
+            && another_copy_survives_discard(view, entry.turn, *identity)
             && !hands.iter().enumerate().any(|(owner, hand)| {
                 owner != player.index()
                     && hand
@@ -121,8 +104,25 @@ pub(in crate::h_group) fn apply_elimination_effects(
     }
 }
 
+fn another_copy_survives_discard(view: &PlayerView, turn: u32, identity: Card) -> bool {
+    view.history
+        .iter()
+        .filter(|prior| prior.turn < turn)
+        .filter(|prior| {
+            matches!(prior.event,
+            ObservedEvent::Discarded { identity: removed, .. }
+            | ObservedEvent::Played { identity: removed, successful: false, .. }
+            if removed == identity)
+        })
+        .count()
+        + 1
+        < usize::from(identity.rank.copies())
+}
+
+#[allow(clippy::too_many_lines)]
 pub(in crate::h_group) fn apply_elimination_resolution_effects(
     context: &HGroupTurnContext<'_>,
+    view: &PlayerView,
     effects: &mut HGroupRuleEffects<'_>,
 ) {
     // Sources:
@@ -135,6 +135,7 @@ pub(in crate::h_group) fn apply_elimination_resolution_effects(
         .facts()
         .identity_claims()
         .iter()
+        .filter(|claim| claim.target.is_some())
         .filter(|claim| {
             matches!(
                 claim.source,
@@ -144,17 +145,27 @@ pub(in crate::h_group) fn apply_elimination_resolution_effects(
         .cloned()
         .collect::<Vec<_>>();
     for claim in claims {
-        let Some(target) = claim.target else {
+        let target = claim
+            .target
+            .expect("only targeted Elimination claims are selected");
+        let candidates_after =
+            remaining_elimination_candidates(context, view, target, &claim.cards, claim.identity);
+        // Elimination is an inference about the remaining hand, not a rule
+        // that can overrule later literal clues. If every original slot has
+        // left the hand or been explicitly ruled out, retire the claim rather
+        // than passing an impossible existential constraint to world building.
+        if candidates_after.is_empty() {
+            push_signal(
+                effects.signals,
+                entry,
+                claim.actor,
+                Some(target),
+                HGroupMoveKind::Retraction,
+                claim.cards.clone(),
+                Some(claim.identity),
+            );
             continue;
-        };
-        let candidates_after = context.after.hands[target.index()]
-            .iter()
-            .copied()
-            .filter(|card| {
-                claim.cards.contains(card)
-                    && context.after.facts[card.index()].allows(claim.identity)
-            })
-            .collect::<Vec<_>>();
+        }
         if is_trash_at(context.after.stack_heights, claim.identity) {
             for card in &claim.cards {
                 effects.forced_playable.remove(card);
@@ -198,14 +209,12 @@ pub(in crate::h_group) fn apply_elimination_resolution_effects(
         if player != target || !claim.cards.contains(&card) {
             continue;
         }
-        let candidates_before = context.before.hands[target.index()]
-            .iter()
-            .copied()
-            .filter(|candidate| {
-                claim.cards.contains(candidate)
-                    && context.before.facts[candidate.index()].allows(claim.identity)
-            })
-            .collect::<Vec<_>>();
+        let candidates_before = compatible_elimination_candidates(
+            &context.before.hands[target.index()],
+            &context.before.facts,
+            &claim.cards,
+            claim.identity,
+        );
         let kind = if candidates_before.len() == 1 {
             Some(HGroupMoveKind::EliminationBlindPlay)
         } else if candidates_before.len() == 2
@@ -227,6 +236,61 @@ pub(in crate::h_group) fn apply_elimination_resolution_effects(
             );
         }
     }
+}
+
+fn remaining_elimination_candidates(
+    context: &HGroupTurnContext<'_>,
+    view: &PlayerView,
+    target: hanabi_core::PlayerId,
+    cards: &[CardId],
+    identity: Card,
+) -> Vec<CardId> {
+    if known_copies_outside_hand(context, view, identity, target)
+        >= usize::from(identity.rank.copies())
+    {
+        return Vec::new();
+    }
+    compatible_elimination_candidates(
+        &context.after.hands[target.index()],
+        context.after.facts,
+        cards,
+        identity,
+    )
+}
+
+fn compatible_elimination_candidates(
+    hand: &[CardId],
+    facts: &[hanabi_core::ClueFacts],
+    cards: &[CardId],
+    identity: Card,
+) -> Vec<CardId> {
+    hand.iter()
+        .copied()
+        .filter(|card| cards.contains(card) && facts[card.index()].allows(identity))
+        .collect()
+}
+
+fn known_copies_outside_hand(
+    context: &HGroupTurnContext<'_>,
+    view: &PlayerView,
+    identity: Card,
+    target: hanabi_core::PlayerId,
+) -> usize {
+    let removed = view.history.iter().filter(|entry| entry.turn <= context.entry.turn)
+        .filter(|entry| matches!(entry.event,
+            ObservedEvent::Played { identity: card, .. } | ObservedEvent::Discarded { identity: card, .. } if card == identity
+        )).count();
+    let historical = crate::h_group::HistoricalView::new(view, context.entry.turn + 1);
+    removed
+        + context
+            .after
+            .hands
+            .iter()
+            .enumerate()
+            .filter(|(owner, _)| *owner != target.index())
+            .flat_map(|(_, hand)| hand.iter())
+            .filter(|card| historical.identity(**card) == Some(identity))
+            .count()
 }
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub(in crate::h_group) fn apply_five_tech_effects(

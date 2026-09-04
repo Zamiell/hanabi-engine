@@ -34,6 +34,7 @@ pub(super) struct PlanStep {
 /// Unresolved frontier at which deterministic projection stopped.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) enum PlanFrontier {
+    Terminal,
     #[default]
     Choice,
     IdentityBranch,
@@ -72,6 +73,7 @@ impl ConditionalPlan {
         let mut outcome = SymbolicLineOutcome {
             actions: u8::try_from(self.steps.len()).unwrap_or(u8::MAX),
             stop_reason: match self.frontier {
+                PlanFrontier::Terminal => SymbolicStopReason::Terminal,
                 PlanFrontier::Choice => SymbolicStopReason::Choice,
                 PlanFrontier::IdentityBranch => SymbolicStopReason::UnknownIdentity,
                 PlanFrontier::Limit => SymbolicStopReason::Limit,

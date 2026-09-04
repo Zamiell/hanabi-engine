@@ -135,7 +135,21 @@ pub(super) fn infer_h_group_from_replay(
                 })
         })
         .map(|pending| HGroupConnectionPromise {
-            cards: pending.cards.clone(),
+            cards: pending
+                .cards
+                .iter()
+                .copied()
+                .filter(|card| {
+                    super::model::connection_candidate_is_eligible(
+                        pending.kind,
+                        pending.expected,
+                        *card,
+                        &pending.cards,
+                        &inferred.cards,
+                        deductions,
+                    )
+                })
+                .collect(),
             identity: pending.expected,
         })
         .collect();
@@ -283,10 +297,25 @@ pub(super) fn infer_h_group_from_replay(
                 .and_then(|pending| {
                     // A disjunctive Prompt is an ordered obligation: play its newest
                     // candidate first, then continue left-to-right if that card was
-                    // merely playable. Independent per-card notes cannot safely skip
+                    // merely playable. Ambiguous per-card notes cannot safely skip
                     // a candidate because Good Touch creates correlated alternatives
                     // ("if the focus is R1 this card is not R1", and vice versa).
-                    pending.cards.first().copied().map(|card| (pending, card))
+                    // An exact known different identity does rule a candidate out.
+                    pending
+                        .cards
+                        .iter()
+                        .copied()
+                        .find(|card| {
+                            super::model::connection_candidate_is_eligible(
+                                pending.kind,
+                                pending.expected,
+                                *card,
+                                &pending.cards,
+                                &inferred.cards,
+                                deductions,
+                            )
+                        })
+                        .map(|card| (pending, card))
                 })
         })
         .flatten();
@@ -1116,6 +1145,16 @@ fn derive_convention_constraints(
                         || (candidate.target() == urgent.target() && candidate.immediate_play())
                 })
                 .map(|candidate| candidate.action),
+        );
+    }
+    // A queued connection can coexist with an obligation to clue (for
+    // example while its connector is not yet playable). Match the ordering
+    // used by ordered_h_group_actions_from_analysis: do not remove every
+    // required clue merely because there is also a pending connection.
+    if inferred.must_clue.contains(&view.observer) && !clues.is_empty() {
+        return ConventionConstraints::require(
+            ConventionRequirementKind::MustClue,
+            clues.iter().map(|candidate| candidate.action),
         );
     }
     if inferred.connection.is_some() {

@@ -1,0 +1,113 @@
+{
+  "seed": "p4v0s25",
+  "players": [
+    "Alice",
+    "Bob",
+    "Cathy",
+    "Donald"
+  ],
+  "actions": [
+    {
+      "target": 1,
+      "type": 3,
+      "value": 2
+    },
+    {
+      "target": 2,
+      "type": 3,
+      "value": 1
+    },
+    {
+      "target": 11,
+      "type": 0
+    },
+    {
+      "target": 1,
+      "type": 2,
+      "value": 4
+    },
+    {
+      "target": 3,
+      "type": 0
+    },
+    {
+      "target": 5,
+      "type": 0
+    },
+    {
+      "target": 8,
+      "type": 0
+    },
+    {
+      "target": 0,
+      "type": 3,
+      "value": 3
+    },
+    {
+      "target": 1,
+      "type": 3,
+      "value": 4
+    },
+    {
+      "target": 4,
+      "type": 0
+    },
+    {
+      "target": 3,
+      "type": 3,
+      "value": 5
+    },
+    {
+      "target": 12,
+      "type": 1
+    },
+    {
+      "target": 2,
+      "type": 0
+    },
+    {
+      "target": 7,
+      "type": 0
+    },
+    {
+      "target": 0,
+      "type": 2,
+      "value": 2
+    },
+    {
+      "target": 2,
+      "type": 2,
+      "value": 2
+    },
+    {
+      "target": 22,
+      "type": 0
+    },
+    {
+      "target": 18,
+      "type": 1
+    },
+    {
+      "target": 16,
+      "type": 0
+    },
+    {
+      "target": 1,
+      "type": 2,
+      "value": 3
+    },
+    {
+      "target": 0,
+      "type": 0
+    },
+    {
+      "target": 0,
+      "type": 2,
+      "value": 0
+    },
+    {
+      "target": 9,
+      "type": 1
+    }
+  ]
+}

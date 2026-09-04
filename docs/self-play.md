@@ -18,12 +18,12 @@ and uploads its report even on failure.
 
 The baseline will live in
 `crates/hanabi-search/tests/fixtures/h_group_max_self_play_200.json`.
-It has not yet been established: the initial broad measurement was interrupted
-after 54 completed games because of very slow remaining games. The flushed
-checkpoint preserves those results locally; it is not a 200-game baseline.
-Use `HANABI_SELF_PLAY_UPDATE=1 scripts/check-self-play.sh` for the first complete
-measurement. Engine errors already occurred in the partial run, so convention
-failures also need investigation before this can become a passing strength gate.
+It has not yet been established. Broad diagnostic runs have exposed convention
+contradictions, and some exact endgames remain slow. Local partial checkpoints
+are diagnostic measurements, not a passing 200-game baseline.
+Use `HANABI_SELF_PLAY_UPDATE=1 scripts/check-self-play.sh` for the first complete,
+error-free measurement. Convention failures still need investigation before
+this can become a passing strength gate.
 The test fails if total score or perfect-game count decreases. Any engine error
 also fails the run, including contradictory beliefs, no candidate actions,
 illegal actions, panics, or failure to finish within 200 turns. Three strikes
@@ -34,7 +34,10 @@ nonzero `engineErrors` is provisional and does not make the test pass.
 Reports go to `target/self-play/report.json`, with per-seed scores, turns,
 strikes, errors, runtimes, complete action histories, and differences from the
 baseline. `report.ndjson` is flushed after each game so completed results survive
-an interruption. Results are sorted by seed before comparison; worker completion
+an interruption. `report.active/<seed>.json` is also rewritten before each
+decision; these seed-and-action replays reproduce a stalled or failing position
+without waiting for that game to finish. Custom report names use the equivalent
+`<name>.active` directory. Results are sorted by seed before comparison; worker completion
 order cannot affect decisions. Action histories are cheap to retain and allow
 reconstruction of the position before an error. Detailed rejected-clue diagnostics
 can then be obtained by analyzing that replay position.
@@ -56,9 +59,9 @@ HANABI_SELF_PLAY_START=14 HANABI_SELF_PLAY_GAMES=1 scripts/check-self-play.sh
 HANABI_SELF_PLAY_UPDATE=1 scripts/check-self-play.sh
 ```
 
-Baseline updates still fail the test if engine errors occurred; the written
-measurement retains their count for investigation. Normal checks never replace
-the baseline automatically. Review changed seeds even if aggregate performance
+Baseline updates fail before replacing the baseline if engine errors occurred;
+the diagnostic report still retains their count and action histories. Normal
+checks never replace the baseline automatically. Review changed seeds even if aggregate performance
 improves. This benchmark supplements expert convention tests; shared convention
 mistakes can remain hidden when all four players use the same engine.
 
@@ -84,3 +87,20 @@ pilot, with identical action histories. These bypasses were removed; the engine
 API remains unchanged. The pilot's action histories also
 matched with four versus eight game workers. Parallel games improve throughput,
 but a single slow endgame can dominate elapsed time.
+
+Exact search now orders the convention-preferred action first and stops when a
+candidate reaches a proved outcome upper bound. In the final round, that bound
+uses an optimistic full-information, free-pass continuation; it is only a
+pruning bound, never a player policy. Skipped root alternatives have no measured
+outcome rather than a fabricated value. Prospective transitions also stop at
+the same terminal point as the simulator, including final-round countdowns and
+the absence of a draw after a terminal action.
+
+## Self-play bug reproductions
+
+`crates/hanabi-search/tests/self_play_regressions.rs` checks focused invariants
+from failed self-play seeds. These are not expert optimal-move fixtures: an
+earlier engine move may itself be wrong. The ignored blue-Clarity diagnostic
+explicitly records one unresolved giver/recipient disagreement; it is not part
+of the passing correctness gate. The full 200-game benchmark still fails on
+that contradiction and all other engine errors.
