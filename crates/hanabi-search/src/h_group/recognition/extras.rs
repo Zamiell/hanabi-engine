@@ -936,6 +936,7 @@ pub(in crate::h_group) fn apply_extra_effects(
                     && matches!(
                         signal.kind,
                         HGroupMoveKind::ReplayDoubleIgnition
+                            | HGroupMoveKind::UnnecessaryIgnition
                             | HGroupMoveKind::TrashDoubleIgnition
                             | HGroupMoveKind::PokeDoubleIgnition
                             | HGroupMoveKind::ChopMoveIgnition

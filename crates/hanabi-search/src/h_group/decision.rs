@@ -519,9 +519,13 @@ fn ordered_h_group_actions_from_analysis(
     actions.retain(|action| legal_actions.contains(action));
     if inferred.phase == HGroupPhase::EndGame {
         let ordinary_chop = inferred.chops[view.observer.index()];
+        let ordinary_trash = convention_known_trash_discard(view, inferred);
         actions.retain(|action| match action {
             Action::Discard(card) => {
-                ordinary_chop == Some(*card) || positional_discard_is_valid(view, *card)
+                // A normal known-trash discard is not a positional signal.
+                ordinary_chop == Some(*card)
+                    || ordinary_trash == Some(*card)
+                    || positional_discard_is_valid(view, *card)
             }
             Action::Play(_) | Action::Clue { .. } => true,
         });
@@ -576,20 +580,10 @@ fn ordered_h_group_actions_from_analysis(
     let gotten = inferred.gotten();
     let own_hand = &view.hands[view.observer.index()];
     if view.clue_tokens < MAX_CLUE_TOKENS {
-        if let Some(trash) = own_hand.iter().find(|card| {
-            gotten.contains(&card.id)
-                && inferred
-                    .cards
-                    .iter()
-                    .find(|knowledge| knowledge.card == card.id)
-                    .is_some_and(|knowledge| {
-                        !knowledge.identities.is_empty()
-                            && knowledge.identities.iter().all(|identity| {
-                                is_convention_trash(view, identity, &gotten, &inferred.cards)
-                            })
-                    })
-        }) {
-            return vec![Action::Discard(trash.id)];
+        if let Some(trash) =
+            convention_known_trash_discard(view, inferred).filter(|card| gotten.contains(card))
+        {
+            return vec![Action::Discard(trash)];
         }
     }
     if view.clue_tokens < MAX_CLUE_TOKENS {
@@ -1559,19 +1553,35 @@ fn convention_known_trash_discard(
     inferred: &HGroupInferences,
 ) -> Option<CardId> {
     let gotten = inferred.gotten();
-    view.hands[view.observer.index()].iter().find_map(|card| {
+    // Hands are stored oldest first; leftmost means newest first.
+    // https://hanabi.github.io/level-14/#known-trash-discard-order
+    // Required discharge discards are handled before this ordinary fallback.
+    let hand = &view.hands[view.observer.index()];
+    let is_trash = |card: &hanabi_core::ObservedCard| {
         inferred
             .cards
             .iter()
             .find(|note| note.card == card.id)
-            .filter(|note| {
+            .is_some_and(|note| {
                 !note.identities.is_empty()
                     && note.identities.iter().all(|identity| {
                         is_convention_trash(view, identity, &gotten, &inferred.cards)
                     })
             })
-            .map(|_| card.id)
-    })
+    };
+    hand.iter()
+        .rev()
+        .find(|card| {
+            let positively_clued = Suit::ALL
+                .iter()
+                .any(|suit| card.clues.has_positive_clue(Clue::Suit(*suit)))
+                || Rank::ALL
+                    .iter()
+                    .any(|rank| card.clues.has_positive_clue(Clue::Rank(*rank)));
+            positively_clued && is_trash(card)
+        })
+        .or_else(|| hand.iter().find(|card| is_trash(card)))
+        .map(|card| card.id)
 }
 
 /// Returns the remaining visible 5s whose owners do not yet know to play.
@@ -2240,19 +2250,7 @@ fn select_h_group_action_from_analysis(
                 .expect("two-strike inference was initialized");
             let own_hand = &view.hands[view.observer.index()];
             let gotten = inferred.gotten();
-            let known_trash = own_hand.iter().find_map(|card| {
-                inferred
-                    .cards
-                    .iter()
-                    .find(|note| note.card == card.id)
-                    .filter(|note| {
-                        !note.identities.is_empty()
-                            && note.identities.iter().all(|identity| {
-                                is_convention_trash(view, identity, &gotten, &inferred.cards)
-                            })
-                    })
-                    .map(|_| card.id)
-            });
+            let known_trash = convention_known_trash_discard(view, inferred);
             if let Some(discard) = known_trash
                 .or_else(|| {
                     inferred.chops[view.observer.index()].filter(|card| !inferred.is_saved(*card))

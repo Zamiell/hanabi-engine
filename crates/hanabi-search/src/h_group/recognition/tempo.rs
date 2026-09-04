@@ -251,6 +251,9 @@ pub(in crate::h_group) fn apply_emergency_discard_effects(
     });
     let known_trash_order = actor_hand
         .iter()
+        // Storage is oldest first; count skips from the leftmost (newest).
+        // https://hanabi.github.io/level-14/#known-trash-discard-order
+        .rev()
         .copied()
         .filter(|candidate| {
             let possibilities = IdentitySet::from_mask(facts[candidate.index()].identity_mask());

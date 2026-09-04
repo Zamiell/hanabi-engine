@@ -401,6 +401,14 @@ pub(in crate::h_group) fn apply_ejection_discharge_effects(
     // Merely touching an already-played duplicate as a useful non-focus card is
     // an ordinary multi-card clue and must not eject the next player's slot 3.
     let unknown_discharge = touched.len() >= 2
+        // A clue whose entire touch is already provably trash cannot be an
+        // Unknown Trash Discharge: there is no unknown useful interpretation
+        // to disambiguate. Preserve the ordinary Trash Push/Chop Move meaning.
+        // https://hanabi.github.io/level-16/#the-unknown-trash-discharge-2-for-1-form-utd
+        && !touched.iter().all(|card| {
+            let possibilities = IdentitySet::from_mask(facts[card.index()].identity_mask());
+            !possibilities.is_empty() && possibilities.iter().all(|identity| is_trash_at(stack_heights, identity))
+        })
         && !same_turn_signal(signals, entry.turn, HGroupMoveKind::PlayClue)
         && interpretation.is_none_or(|interpretation| interpretation.save_identities.is_empty())
         && interpretation.is_some_and(|interpretation| {

@@ -1045,7 +1045,17 @@ fn trash_order_chop_move_uses_the_number_of_skipped_known_trash_cards() {
         .unwrap();
     let player_two_chop = state.hands()[2][0];
     state.apply(Action::Discard(player_two_chop)).unwrap();
-    state.apply(Action::Discard(CardId::new(1))).unwrap();
+    // #1 is the leftmost trash; discarding it normally must not signal a skip.
+    let mut ordinary = state.clone();
+    ordinary.apply(Action::Discard(CardId::new(1))).unwrap();
+    let ordinary_deductions = LogicalDeductions::new(
+        ordinary.view_for(ordinary.current_player()).unwrap(),
+    ).unwrap();
+    assert!(!replay_h_group(&ordinary_deductions, HGroupProfile::Max)
+        .signals.iter().any(|signal| signal.turn == 6
+            && signal.kind == HGroupMoveKind::TrashOrderChopMove));
+    // #0 skips #1, the opposite of oldest-first storage order.
+    state.apply(Action::Discard(CardId::new(0))).unwrap();
 
     let observer = state.current_player();
     assert_eq!(observer, PlayerId::new(1));

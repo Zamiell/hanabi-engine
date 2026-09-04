@@ -323,13 +323,17 @@ fn fifth_replay_unnecessary_trash_push_announces_both_plays_at_clue_time() {
             .expect("logical");
         let inferred = infer_h_group(&d, HGroupProfile::Max);
         assert!(
+            inferred.discard_now.is_empty(),
+            "known-trash push must not create an Unknown Trash Discharge discard: {inferred:#?}"
+        );
+        assert!(
             inferred.playable_now.contains(&CardId::new(card)),
             "promised play #{card}: {inferred:#?}"
         );
         if player == 0 {
             assert!(
                 !inferred.playable_now.contains(&CardId::new(35)),
-                "superseded discharge must not force the trash card"
+                "superseded discharge must not force the trash card: {inferred:#?}"
             );
         }
     }
@@ -415,12 +419,9 @@ fn fifth_replay_cathy_draws_for_faster_green_completion() {
     );
 }
 
-// Move 51 onward remains under review; only the confirmed prefix is an oracle.
 #[test]
-fn fifth_expert_replay_agrees_through_move_50() {
-    let mut replay = expert_replay_p4v0s1();
-    replay.actions.truncate(50);
-    assert_expert_replay_matches_engine(&replay);
+fn fifth_expert_replay_matches_engine() {
+    assert_expert_replay_matches_engine(&expert_replay_p4v0s1());
 }
 
 #[test]
