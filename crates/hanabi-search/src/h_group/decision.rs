@@ -149,7 +149,29 @@ pub(super) fn infer_h_group_from_replay(
                             .iter()
                             .all(|identity| is_playable_now(view, identity))
                 });
-        if (!fixed_cards.contains(&card.card) || replay.cards.forced_playable.contains(&card.card))
+        let fixed_before_identity_became_playable = logically_playable
+            && inferred
+                .signals
+                .iter()
+                .rev()
+                .find(|signal| {
+                    signal.kind == HGroupMoveKind::FixClue && signal.cards.contains(&card.card)
+                })
+                .and_then(|signal| {
+                    inferred
+                        .clues
+                        .iter()
+                        .find(|clue| clue.turn == signal.turn && clue.touched.contains(&card.card))
+                })
+                .is_some_and(|clue| {
+                    card.identities.iter().all(|identity| {
+                        usize::from(identity.rank.number())
+                            > usize::from(clue.stack_heights[identity.suit.index()]) + 1
+                    })
+                });
+        if (!fixed_cards.contains(&card.card)
+            || replay.cards.forced_playable.contains(&card.card)
+            || fixed_before_identity_became_playable)
             && !replay.cards.invalidated_focuses.contains(&card.card)
             && !replay.cards.declined_direct_plays.contains(&card.card)
             && (!blocked_connection_cards.contains(&card.card)
@@ -1573,8 +1595,19 @@ fn endgame_progress_priority(
     candidate: &CompiledClueAction,
 ) -> Option<i32> {
     let view = deductions.view();
-    if candidate.purpose() != CluePurpose::Play
-        || !candidate.immediate_play()
+    let is_multi_action_ignition = matches!(
+        candidate.move_kind(),
+        Some(
+            HGroupMoveKind::ReplayDoubleIgnition
+                | HGroupMoveKind::TrashDoubleIgnition
+                | HGroupMoveKind::PokeDoubleIgnition
+                | HGroupMoveKind::ChopMoveIgnition
+                | HGroupMoveKind::BombDoubleIgnition
+                | HGroupMoveKind::BombTripleIgnition
+        )
+    ) && candidate.action_coverage() >= 2;
+    if !((candidate.purpose() == CluePurpose::Play && candidate.immediate_play())
+        || is_multi_action_ignition)
         || convention_known_trash_discard(view, &analysis.inferences).is_none()
     {
         return None;
@@ -1588,16 +1621,33 @@ fn endgame_progress_priority(
     let Action::Clue { target, clue } = candidate.action else {
         return None;
     };
-    let advances_plan = view.hands[target.index()].iter().any(|card| {
-        plan.unresolved_fives.contains(&card.id)
-            && card.identity.is_some_and(|identity| clue.matches(identity))
-    });
+    let advances_plan = (is_multi_action_ignition
+        && candidate.action_coverage()
+            >= u8::try_from(plan.unresolved_fives.len()).unwrap_or(u8::MAX))
+        || view.hands[target.index()].iter().any(|card| {
+            plan.unresolved_fives.contains(&card.id)
+                && card.identity.is_some_and(|identity| clue.matches(identity))
+        });
     if !advances_plan {
+        return None;
+    }
+    let best_clue_coverage = analysis_clue_candidates(deductions, profile, analysis)
+        .iter()
+        .map(|candidate| candidate.action_coverage())
+        .max()
+        .unwrap_or(0);
+    if candidate.action_coverage() < best_clue_coverage {
+        // The endgame-progress override exists to prefer completing the plan
+        // over manufacturing an unnecessary clue token. It must not promote
+        // a direct one-for-one 5 clue above an available convention line that
+        // deterministically advances more of that same plan (for example, a
+        // Trash Double Ignition of two final 5s).
         return None;
     }
     let (_, discard_score) = scored_discard_candidate(view, &analysis.inferences, profile)?;
     let ordinary_priority = 100 + i32::from(candidate.score());
-    Some(ordinary_priority.max(101 + i32::from(discard_score)))
+    let progress_priority = 101 + i32::from(discard_score) + i32::from(candidate.score());
+    Some(ordinary_priority.max(progress_priority))
 }
 
 fn raw_h_group_action_priority(
@@ -2096,7 +2146,7 @@ pub(super) fn ordered_playable_cards(
     cards
 }
 
-type PlayableOrderKey = (bool, bool, bool, bool, usize, u8, u8);
+type PlayableOrderKey = (bool, bool, bool, bool, bool, usize, u8, u8);
 
 struct PlayableOrderContext<'a> {
     view: &'a PlayerView,
@@ -2105,6 +2155,16 @@ struct PlayableOrderContext<'a> {
     own_hand: &'a [ObservedCard],
     initial_cards: usize,
     gotten: &'a CardSet,
+}
+
+#[derive(Clone, Copy)]
+struct PlayableOrderTraits {
+    singleton: Option<Card>,
+    blind: bool,
+    accounted_rank_focus: bool,
+    saved_five_focus: bool,
+    rank: u8,
+    position: usize,
 }
 
 fn playable_order_key(context: &PlayableOrderContext<'_>, card: CardId) -> PlayableOrderKey {
@@ -2137,6 +2197,19 @@ fn playable_order_key(context: &PlayableOrderContext<'_>, card: CardId) -> Playa
         clue.focus == card && clue.focus_was_chop && clue.clue == Clue::Rank(Rank::Five)
     });
     let blind = note.is_some_and(|note| note.play_obligation.is_some());
+    let accounted_rank_focus = note.is_some_and(|note| note.focused)
+        && context.inferred.clues.last().is_some_and(|clue| {
+            clue.target == context.view.observer
+                && clue.focus == card
+                && matches!(clue.clue, Clue::Rank(rank) if rank != Rank::One)
+                && clue
+                    .touched
+                    .iter()
+                    .filter(|touched| context.inferred.playable_now.contains(touched))
+                    .take(2)
+                    .count()
+                    >= 2
+        });
     if !rule_enabled(context.profile, HGroupRuleId::Priority)
         || context.inferred.phase == HGroupPhase::EndGame
     {
@@ -2147,28 +2220,44 @@ fn playable_order_key(context: &PlayableOrderContext<'_>, card: CardId) -> Playa
         } else {
             position + 1
         };
-        return (!blind, !chop_focused, !fresh_one, false, age, 0, 0);
+        return (
+            !blind,
+            !accounted_rank_focus,
+            !chop_focused,
+            !fresh_one,
+            false,
+            age,
+            0,
+            0,
+        );
     }
     priority_playable_order_key(
         context,
         card,
-        singleton,
-        blind,
-        saved_five_focus,
-        rank,
-        position,
+        PlayableOrderTraits {
+            singleton,
+            blind,
+            accounted_rank_focus,
+            saved_five_focus,
+            rank,
+            position,
+        },
     )
 }
 
 fn priority_playable_order_key(
     context: &PlayableOrderContext<'_>,
     card: CardId,
-    singleton: Option<Card>,
-    blind: bool,
-    saved_five_focus: bool,
-    rank: u8,
-    position: usize,
+    traits: PlayableOrderTraits,
 ) -> PlayableOrderKey {
+    let PlayableOrderTraits {
+        singleton,
+        blind,
+        accounted_rank_focus,
+        saved_five_focus,
+        rank,
+        position,
+    } = traits;
     // When a 5 Save lands on two already-playable 5s, play the chop-focused
     // card first: that is the card the clue specifically secured. Other ranks
     // retain the normal Priority ordering (notably the touched-1 ordering),
@@ -2209,6 +2298,7 @@ fn priority_playable_order_key(
     });
     (
         !blind,
+        !accounted_rank_focus,
         !saved_five_focus,
         !leads_other,
         !leads_self,

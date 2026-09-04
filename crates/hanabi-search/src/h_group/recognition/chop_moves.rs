@@ -195,7 +195,22 @@ pub(crate) fn apply_chop_move_effects(
         },
         |card| vec![card],
     );
-    if moved.is_empty() {
+    if moved.is_empty()
+        || (all_trash
+            && moved
+                .iter()
+                .all(|card| card_is_accounted_trash(context, view, effects, &gotten, *card)))
+    {
+        // A Trash Chop Move must actually protect something. Moving only
+        // cards that the recipient already knows are safe discards changes
+        // neither their chop nor their future obligations, so it fails
+        // Minimum Clue Value. In the endgame this distinction is especially
+        // important: the same useless clue can instead be a Trash Double
+        // Ignition.
+        // Sources:
+        // - https://hanabi.github.io/level-1/#minimum-clue-value-principle
+        // - https://hanabi.github.io/level-4/#the-trash-chop-move-tcm
+        // - https://hanabi.github.io/level-21/#the-trash-double-ignition-tdi
         return;
     }
     effects.chop_moved.extend(moved.iter().copied());

@@ -813,12 +813,24 @@ pub(in crate::h_group) fn apply_extra_effects(
                         .identity(*card)
                         .is_some_and(|identity| is_trash_at(context.before.stack_heights, identity))
                 });
-            let unknown_trash_charm = non_focus_all_trash
+            let ignition_already_recognized = effects.signals.iter().any(|signal| {
+                signal.turn == entry.turn
+                    && matches!(
+                        signal.kind,
+                        HGroupMoveKind::ReplayDoubleIgnition
+                            | HGroupMoveKind::TrashDoubleIgnition
+                            | HGroupMoveKind::PokeDoubleIgnition
+                            | HGroupMoveKind::ChopMoveIgnition
+                    )
+            });
+            let unknown_trash_charm = !ignition_already_recognized
+                && non_focus_all_trash
                 && effects.signals.iter().any(|signal| {
                     signal.turn == entry.turn
                         && signal.kind == HGroupMoveKind::UnknownTrashDischarge
                 });
-            let junk_charm = non_focus_all_trash
+            let junk_charm = !ignition_already_recognized
+                && non_focus_all_trash
                 && *clue == Clue::Rank(Rank::One)
                 && current_interpretation.is_some_and(|meaning| {
                     context

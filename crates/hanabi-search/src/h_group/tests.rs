@@ -543,7 +543,10 @@ fn third_replay_final_play_clues_advance_before_surplus_known_trash() {
         );
         clue_priorities.push(clue_priority);
     }
-    assert_eq!(clue_priorities[0], clue_priorities[1]);
+    assert!(
+        clue_priorities[0] > clue_priorities[1],
+        "the suit clue's known-trash collateral remains useful after both clues clear the discard threshold"
+    );
     let candidate = |action| {
         candidates
             .iter()
@@ -558,9 +561,9 @@ fn third_replay_final_play_clues_advance_before_surplus_known_trash() {
         candidate(actions[0]).action_coverage(),
         candidate(actions[1]).action_coverage()
     );
-    assert_eq!(
-        candidate(actions[0]).score(),
-        candidate(actions[1]).score() + 1
+    assert!(
+        candidate(actions[0]).score() > candidate(actions[1]).score(),
+        "the suit clue also creates a known-trash discard, so it must remain strictly preferable to the rank clue"
     );
 }
 

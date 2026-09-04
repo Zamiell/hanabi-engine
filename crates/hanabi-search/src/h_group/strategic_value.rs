@@ -868,6 +868,23 @@ fn clue_line_value(
     let mut value = LineOutcome::default();
     let named_line = canonical_named_line_metrics(source, &compiled);
     let giver_projection = compiled.projection(source.observer)?;
+    let ignition_cards = giver_projection
+        .replay
+        .signals
+        .iter()
+        .find(|signal| {
+            signal.turn == source.turn
+                && matches!(
+                    signal.kind,
+                    HGroupMoveKind::ReplayDoubleIgnition
+                        | HGroupMoveKind::TrashDoubleIgnition
+                        | HGroupMoveKind::PokeDoubleIgnition
+                        | HGroupMoveKind::BombDoubleIgnition
+                        | HGroupMoveKind::BombTripleIgnition
+                )
+        })
+        .map(|signal| signal.cards.clone())
+        .unwrap_or_default();
     let charm_focus = giver_projection
         .replay
         .signals
@@ -1051,6 +1068,11 @@ fn clue_line_value(
             record_new_connection(&mut value, source, connection);
         }
     }
+    giver_public_actions.extend(ignition_cards.into_iter().filter_map(|card| {
+        identity_of(source, card)
+            .and_then(|identity| card_owner(source, card).map(|owner| (card, owner, identity)))
+            .map(|(card, owner, identity)| ActionCommitment::exact(card, owner, identity))
+    }));
     if let Some(focus) = charm_focus {
         // A Charm immediately schedules the Fourth-Finesse-Position card.
         // Its untouched 4 remains a valuable long-term promise, but is not a
@@ -1089,6 +1111,7 @@ fn canonical_named_line_metrics(
     let mut clandestine = None;
     let mut layered = None;
     let mut ejection = None;
+    let mut ignition = None;
     for player in 0..source.hands.len() {
         let observer =
             PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
@@ -1144,11 +1167,22 @@ fn canonical_named_line_metrics(
                     // Source: https://hanabi.github.io/level-23/#the-4-charm
                     ejection = Some((1, 1));
                 }
+                HGroupMoveKind::ReplayDoubleIgnition
+                | HGroupMoveKind::TrashDoubleIgnition
+                | HGroupMoveKind::PokeDoubleIgnition
+                | HGroupMoveKind::BombDoubleIgnition
+                | HGroupMoveKind::BombTripleIgnition => {
+                    // Every card named by an Ignition signal is an immediate
+                    // blind-play obligation. These remain real line actions
+                    // even when the clue giver sees that the physical cards
+                    // happen to be playable.
+                    ignition = Some((signal.cards.len(), signal.cards.len()));
+                }
                 _ => {}
             }
         }
     }
-    ejection.or(bluff).or(clandestine).or(layered)
+    ignition.or(ejection).or(bluff).or(clandestine).or(layered)
 }
 
 fn view_distance_from_playable(source: &PlayerView, identity: Card) -> usize {

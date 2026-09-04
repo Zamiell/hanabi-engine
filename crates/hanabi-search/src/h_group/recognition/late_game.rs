@@ -233,6 +233,25 @@ pub(in crate::h_group) fn apply_ignition_effects(
         return;
     };
 
+    // Ignition is the complete meaning of this otherwise-useless clue. Any
+    // provisional Ejection/Discharge scheduled by an earlier rule pass is an
+    // apparent interpretation, not an additional play layered on top of the
+    // Ignition line.
+    for superseded in effects.signals.iter().filter(|signal| {
+        signal.turn == entry.turn
+            && matches!(
+                signal.kind,
+                HGroupMoveKind::UnknownTrashDischarge
+                    | HGroupMoveKind::UnknownDupeDischarge
+                    | HGroupMoveKind::OutOfPositionDischarge
+                    | HGroupMoveKind::StackedDischarge
+            )
+    }) {
+        effects
+            .forced_playable
+            .retain(|card| !superseded.cards.contains(card));
+    }
+
     let player_count = context.after.hands.len();
     let ordered_players = (1..player_count)
         .map(|distance| {

@@ -238,7 +238,29 @@ fn third_expert_replay_matches_engine() {
 }
 
 #[test]
-#[ignore = "pending expert review: first unresolved disagreement is move 44"]
+fn third_replay_two_new_duplicate_fours_still_violate_good_touch() {
+    let fixture = expert_replay_p4v0s2();
+    let state = fixture.state_at_turn(38).expect("fixture prefix is legal");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("Cathy has a view"),
+    )
+    .expect("valid deductions");
+    let rank_four = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Rank(Rank::Four),
+    };
+
+    assert!(
+        !h_group_clue_candidates(&deductions, HGroupProfile::Max)
+            .iter()
+            .any(|candidate| candidate.action == rank_four),
+        "two newly touched copies would both look like future plays, so accounting for every physical copy does not excuse Good Touch",
+    );
+}
+
+#[test]
 fn fourth_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine(&expert_replay_p4v0s3());
 }
@@ -416,6 +438,171 @@ fn fourth_replay_ordinary_trash_discard_does_not_push_bobs_blue_two() {
         Some(blue_to_bob),
         "the direct blue-2 Play Clue must beat unrelated alternatives once the false promise is removed",
     );
+}
+
+#[test]
+fn fourth_replay_accounted_rank_fours_are_a_valid_play_clue() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(43).expect("fixture prefix is legal");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("Donald has a view"),
+    )
+    .expect("valid deductions");
+    let rank_four = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Rank(Rank::Four),
+    };
+
+    assert!(
+        h_group_clue_candidates(&deductions, HGroupProfile::Max)
+            .iter()
+            .any(|candidate| candidate.action == rank_four),
+        "touching every copy accounts for the duplicate blue 4 rather than creating a later Good Touch play",
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(rank_four),
+    );
+}
+
+#[test]
+fn fourth_replay_accounted_rank_clue_plays_its_focus_first() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(44).expect("fixture clue is legal");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("Alice has a view"),
+    )
+    .expect("valid deductions");
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+
+    assert!(inferred.playable_now.contains(&CardId::new(22)));
+    assert!(inferred.playable_now.contains(&CardId::new(35)));
+    assert!(
+        inferred
+            .cards
+            .iter()
+            .any(|card| card.card == CardId::new(35) && card.focused),
+        "the newly rank-clued card remains the transient focus",
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(35))),
+        "the newly focused 4 must resolve before the older card made playable by elimination",
+    );
+}
+
+#[test]
+fn fourth_replay_accounted_duplicate_leaves_the_other_suit_playable() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(48).expect("fixture prefix is legal");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("Alice has a view"),
+    )
+    .expect("valid deductions");
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
+    let inferred = infer_h_group_from_replay(&deductions, replay.clone(), HGroupProfile::Max);
+
+    assert_eq!(
+        deductions.possible_identities(CardId::new(3)),
+        Some(IdentitySet::singleton(Card::new(Suit::Red, Rank::Four))),
+    );
+    assert!(
+        inferred.playable_now.contains(&CardId::new(3)),
+        "playing the focused blue 4 makes the older duplicate blue 4 trash, but cannot erase the directly known red 4: card={:#?}; playable={:#?}; invalidated={:#?}; declined={:#?}",
+        inferred
+            .cards
+            .iter()
+            .find(|card| card.card == CardId::new(3)),
+        inferred.playable_now,
+        replay.cards.invalidated_focuses,
+        replay.cards.declined_direct_plays,
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(3))),
+    );
+}
+
+#[test]
+fn fourth_replay_final_rank_one_is_a_trash_double_ignition() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(49).expect("fixture prefix is legal");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("Bob has a view"),
+    )
+    .expect("valid deductions");
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
+    let gotten = replay.gotten_from(&replay.promptable());
+    let rank_one = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Rank(Rank::One),
+    };
+    let touched = deductions.view().hands[0]
+        .iter()
+        .filter(|card| {
+            card.identity
+                .is_some_and(|identity| Clue::Rank(Rank::One).matches(identity))
+        })
+        .map(|card| card.id)
+        .collect::<Vec<_>>();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let signals = prospective_team_clue_signal_kinds(
+        deductions.view(),
+        HGroupProfile::Max,
+        PlayerId::new(0),
+        Clue::Rank(Rank::One),
+        &touched,
+    );
+
+    assert!(
+        candidates.iter().any(|candidate| {
+            candidate.action == rank_one
+                && candidate.move_kind() == Some(HGroupMoveKind::TrashDoubleIgnition)
+                && candidate.action_coverage() == 2
+        }),
+        "rank 1 on Alice's accounted trash must ignite Cathy's red 5 and Donald's green 5: touched={touched:?}; gotten={:?}; chop_moved={:?}; signals={signals:?}; candidates={candidates:#?}",
+        gotten,
+        replay.cards.chop_moved,
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(rank_one),
+        "Trash Double Ignition should outrank either direct one-for-one 5 clue: {candidates:#?}",
+    );
+}
+
+#[test]
+fn fourth_replay_first_ignition_play_has_consistent_beliefs() {
+    let fixture = expert_replay_p4v0s3();
+    let state = fixture.state_at_turn(50).expect("fixture prefix is legal");
+    let deductions = LogicalDeductions::new(
+        state
+            .view_for(state.current_player())
+            .expect("Cathy has a view"),
+    )
+    .expect("valid deductions");
+    let decision = analyze_h_group_convention(&deductions, HGroupProfile::Max);
+    let result = crate::analyze_position(
+        deductions.view(),
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    );
+
+    let analysis = result.unwrap_or_else(|error| {
+        panic!(
+            "the TDI must not leave contradictory ordinary-clue constraints: error={error:?}; constraints={:#?}; inferences={:#?}",
+            decision.belief_constraints, decision.inferences,
+        )
+    });
+    assert_eq!(analysis.planner.best_action, Action::Play(CardId::new(45)));
 }
 
 #[test]

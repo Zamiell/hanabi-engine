@@ -397,7 +397,20 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
         } else {
             None
         };
+        let accounts_for_uncommitted_duplicate =
+            clue_accounts_for_every_copy(view, clue, &touched, focus_identity)
+                && newly_informed
+                    .iter()
+                    .filter(|card| identity_of(view, **card) == Some(focus_identity))
+                    .count()
+                    == 1
+                && !view.hands.iter().flatten().any(|card| {
+                    card.id != focus
+                        && card.identity == Some(focus_identity)
+                        && baseline_playing.contains(&card.id)
+                });
         let duplicates_existing_good_touch = is_eventually_useful(view, focus_identity)
+            && !accounts_for_uncommitted_duplicate
             && (convention_cards.iter().any(|card| {
                 card.card != focus
                     // Later cards in an ordered Finesse are conditional
@@ -460,6 +473,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             focus_identity,
             clue,
             &newly_informed,
+            &touched,
             touched
                 .iter()
                 .filter(|card| {
@@ -825,6 +839,9 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 // Sources:
                 // - https://hanabi.github.io/level-3/#the-fix-clue
                 // - https://hanabi.github.io/level-11/#mistaking-a-layered-finesse-for-a-bluff
+                let advanced_has_precedence = candidate
+                    .move_kind()
+                    .is_some_and(advanced_kind_replaces_ordinary_play);
                 let bluff_has_precedence = if candidate.purpose() == CluePurpose::Advanced {
                     let Action::Clue { target, clue } = candidate.action else {
                         unreachable!("clue candidates always contain clues");
@@ -839,7 +856,10 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 } else {
                     false
                 };
-                if candidate.purpose() == CluePurpose::Fix || bluff_has_precedence {
+                if candidate.purpose() == CluePurpose::Fix
+                    || advanced_has_precedence
+                    || bluff_has_precedence
+                {
                     candidates[existing] = candidate;
                 }
             } else {
@@ -1360,6 +1380,31 @@ pub(super) fn advanced_clue_candidates(
                                 .all(|identity| card_is_trash(view, identity))
                     })
             });
+        let all_touched_trash = identities.len() == touched.len()
+            && identities
+                .iter()
+                .all(|identity| card_is_trash(view, *identity));
+        let trash_ignition = !newly_touched.is_empty()
+            && all_touched_trash
+            && view.deck_size <= view.hands.len()
+            && layout
+                .iter()
+                .copied()
+                .find(|card| !gotten.contains(card) && !touched.contains(card))
+                .is_none_or(|card| {
+                    identity_of(view, card).is_some_and(|identity| {
+                        card_is_trash(view, identity) || is_playable_now(view, identity)
+                    })
+                });
+        let double_ignition_available = (1..view.hands.len())
+            .filter_map(|distance| {
+                let player = (view.current_player.index() + distance) % view.hands.len();
+                finesse_position(&view.hands[player], gotten, 0)
+                    .and_then(|card| card.identity)
+                    .filter(|identity| is_playable_now(view, *identity))
+            })
+            .count()
+            >= 2;
         let discharge_playable = finesse_position(
             &view.hands[ejection_actor.index()],
             &replay.cards.explicitly_clued,
@@ -1370,6 +1415,9 @@ pub(super) fn advanced_clue_candidates(
         if rule_enabled(profile, HGroupRuleId::EjectionsAndDischarges)
             && unknown_discharge
             && !discharge_playable
+            && !(rule_enabled(profile, HGroupRuleId::Ignition)
+                && trash_ignition
+                && double_ignition_available)
         {
             // A Discharge is a promise that the next player's Third Finesse
             // Position will play. The clue giver can see that card and must
@@ -1419,6 +1467,7 @@ pub(super) fn advanced_clue_candidates(
         let respects_good_touch = good_touch(
             view,
             &newly_informed,
+            None,
             &promptable,
             previously_fixed,
             convention_cards,
@@ -1589,33 +1638,8 @@ pub(super) fn advanced_clue_candidates(
         }
 
         let all_previously_touched = newly_touched.is_empty();
-        let all_touched_trash = identities.len() == touched.len()
-            && identities
-                .iter()
-                .all(|identity| card_is_trash(view, *identity));
         let replay_ignition = all_previously_touched && every_touched_card_is_playable && !stalling;
         let poke_ignition = all_previously_touched && all_touched_trash && !stalling;
-        let trash_ignition = !all_previously_touched
-            && all_touched_trash
-            && view.deck_size <= view.hands.len()
-            && layout
-                .iter()
-                .copied()
-                .find(|card| !gotten.contains(card) && !touched.contains(card))
-                .is_none_or(|card| {
-                    identity_of(view, card).is_some_and(|identity| {
-                        card_is_trash(view, identity) || is_playable_now(view, identity)
-                    })
-                });
-        let double_ignition_available = (1..view.hands.len())
-            .filter_map(|distance| {
-                let player = (view.current_player.index() + distance) % view.hands.len();
-                finesse_position(&view.hands[player], gotten, 0)
-                    .and_then(|card| card.identity)
-                    .filter(|identity| is_playable_now(view, *identity))
-            })
-            .count()
-            >= 2;
         let distribution = rule_enabled(profile, HGroupRuleId::EndGame)
             && view.deck_size <= view.hands.len()
             && touched.iter().copied().any(|card| {
@@ -1928,7 +1952,15 @@ pub(super) fn advanced_clue_candidates(
             // Validate the recipient's complete post-clue inference as well.
             continue;
         }
-        let efficiency = if kind == HGroupMoveKind::Ignition {
+        let efficiency = if matches!(
+            kind,
+            HGroupMoveKind::ReplayDoubleIgnition
+                | HGroupMoveKind::TrashDoubleIgnition
+                | HGroupMoveKind::PokeDoubleIgnition
+                | HGroupMoveKind::ChopMoveIgnition
+                | HGroupMoveKind::BombDoubleIgnition
+                | HGroupMoveKind::BombTripleIgnition
+        ) {
             2 * u16::try_from(newly_touched.len()).unwrap_or(0)
         } else {
             0
@@ -1989,6 +2021,12 @@ fn advanced_kind_replaces_ordinary_play(kind: HGroupMoveKind) -> bool {
             | HGroupMoveKind::PokeEjection
             | HGroupMoveKind::LieComponentFinesse
             | HGroupMoveKind::Charm
+            | HGroupMoveKind::ReplayDoubleIgnition
+            | HGroupMoveKind::TrashDoubleIgnition
+            | HGroupMoveKind::PokeDoubleIgnition
+            | HGroupMoveKind::ChopMoveIgnition
+            | HGroupMoveKind::BombDoubleIgnition
+            | HGroupMoveKind::BombTripleIgnition
     )
 }
 
@@ -2111,6 +2149,7 @@ pub(super) fn play_clue_score(
     focus_identity: Card,
     clue: Clue,
     newly_touched: &[CardId],
+    clue_touched: &[CardId],
     clue_touch_count: usize,
     explicitly_clued: &CardSet,
     fixed_cards: &CardSet,
@@ -2129,6 +2168,7 @@ pub(super) fn play_clue_score(
     if !good_touch(
         view,
         &ordinary_touches,
+        Some((clue, clue_touched)),
         explicitly_clued,
         fixed_cards,
         convention_cards,
@@ -2206,6 +2246,7 @@ pub(super) fn known_trash_collateral(
 pub(super) fn good_touch(
     view: &PlayerView,
     newly_touched: &[CardId],
+    accounted_duplicate_clue: Option<(Clue, &[CardId])>,
     explicitly_clued: &CardSet,
     fixed_cards: &CardSet,
     convention_cards: &[HGroupCardInference],
@@ -2223,25 +2264,69 @@ pub(super) fn good_touch(
         let Some(identity) = known_identity(*card) else {
             return false;
         };
-        if !is_eventually_useful(view, identity) || identities.contains(identity) {
+        let every_copy_is_touched = accounted_duplicate_clue.is_some_and(|(clue, touched)| {
+            clue_accounts_for_every_copy(view, clue, touched, identity)
+                && newly_touched
+                    .iter()
+                    .filter(|candidate| known_identity(**candidate) == Some(identity))
+                    .count()
+                    == 1
+        });
+        if !is_eventually_useful(view, identity)
+            || identities.contains(identity) && !every_copy_is_touched
+        {
             return false;
         }
         identities = identities.union(IdentitySet::singleton(identity));
-        if view.hands.iter().flatten().any(|candidate| {
-            candidate.id != *card
-                && explicitly_clued.contains(&candidate.id)
-                && !fixed_cards.contains(&candidate.id)
-                && (known_identity(candidate.id) == Some(identity)
-                    || (identity.rank == Rank::One
-                        && candidate.identity.is_none()
-                        && convention_cards.iter().any(|note| {
-                            note.card == candidate.id && note.identities.contains(identity)
-                        })))
-        }) {
+        if !every_copy_is_touched
+            && view.hands.iter().flatten().any(|candidate| {
+                candidate.id != *card
+                    && explicitly_clued.contains(&candidate.id)
+                    && !fixed_cards.contains(&candidate.id)
+                    && (known_identity(candidate.id) == Some(identity)
+                        || (identity.rank == Rank::One
+                            && candidate.identity.is_none()
+                            && convention_cards.iter().any(|note| {
+                                note.card == candidate.id && note.identities.contains(identity)
+                            })))
+            })
+        {
             return false;
         }
     }
     true
+}
+
+/// A duplicate touch does not violate Good Touch when this clue gets only one
+/// new copy, establishes its rank, and also touches every physical copy of that
+/// identity. Once the newly focused copy plays, card-count elimination makes
+/// every previously gotten copy known trash instead of a future play promise.
+/// Two newly touched copies remain a violation: the recipient could reasonably
+/// treat both as future plays. Merely touching every copy with a suit clue is
+/// likewise insufficient when their ranks remain unknown.
+/// Source: <https://hanabi.github.io/level-1/#good-touch-principle>
+fn clue_accounts_for_every_copy(
+    view: &PlayerView,
+    clue: Clue,
+    touched: &[CardId],
+    identity: Card,
+) -> bool {
+    let matching = touched
+        .iter()
+        .copied()
+        .filter(|card| identity_of(view, *card) == Some(identity))
+        .collect::<Vec<_>>();
+    matching.len() == usize::from(identity.rank.copies())
+        && (clue == Clue::Rank(identity.rank)
+            || matching.iter().all(|card| {
+                view.hands
+                    .iter()
+                    .flatten()
+                    .find(|candidate| candidate.id == *card)
+                    .is_some_and(|candidate| {
+                        candidate.clues.has_positive_clue(Clue::Rank(identity.rank))
+                    })
+            }))
 }
 
 /// Finds the card promised by an Elimination Finesse for `focus_identity`.
