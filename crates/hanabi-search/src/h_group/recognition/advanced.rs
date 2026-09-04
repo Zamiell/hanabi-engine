@@ -477,6 +477,17 @@ pub(in crate::h_group) fn apply_out_of_order_effects(
                 || (clue.kind == HGroupClueKind::Unrecognized && clue.save_identities.is_empty())
         });
     let four_charm = interpretation.is_some_and(|meaning| {
+        if meaning.hypotheses.iter().any(|hypothesis| {
+            hypothesis.connection_steps.iter().any(|step| {
+                step.kind == HGroupConnectionKind::Prompt
+                    && step
+                        .cards
+                        .iter()
+                        .any(|card| was_clued_before(view, entry.turn, *card))
+            })
+        }) {
+            return false;
+        }
         if *target == next_player(*giver, hands.len())
             || was_clued_before(view, entry.turn, meaning.focus)
         {

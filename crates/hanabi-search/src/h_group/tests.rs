@@ -47,6 +47,13 @@ fn expert_replay_p4v0s3() -> HanabiLiveReplay {
     .expect("fourth expert replay fixture is valid")
 }
 
+fn expert_replay_p4v0s1() -> HanabiLiveReplay {
+    HanabiLiveReplay::from_json(include_str!(
+        "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .expect("fifth expert replay fixture is valid")
+}
+
 fn replay_action_at_turn(replay: &HanabiLiveReplay, turn: u32) -> Action {
     replay
         .state_at_turn(turn + 1)

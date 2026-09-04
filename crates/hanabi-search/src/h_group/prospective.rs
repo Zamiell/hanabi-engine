@@ -709,11 +709,49 @@ pub(super) enum ProspectiveClueHazard {
     FalseConnectionIdentity,
 }
 
+fn prospective_new_good_touch_identities(
+    source: &PlayerView,
+    replay: &HGroupState,
+    inferred: &HGroupInferences,
+    target: PlayerId,
+    focus: CardId,
+) -> (IdentitySet, Vec<CardId>) {
+    let interpretation = replay.clues.iter().rev().find(|interpretation| {
+        interpretation.turn == source.turn
+            && interpretation.target == target
+            && interpretation.focus == focus
+    });
+    let interpreted_focus = interpretation.map_or_else(IdentitySet::default, |interpretation| {
+        interpretation.play_identities
+    });
+    let connection_cards = interpretation.map_or_else(Vec::new, |interpretation| {
+        interpretation
+            .hypotheses
+            .iter()
+            .filter(|hypothesis| interpreted_focus.contains(hypothesis.focus_identity))
+            .flat_map(|hypothesis| &hypothesis.connection_steps)
+            .flat_map(|step| step.cards.iter().copied())
+            .collect()
+    });
+    if !inferred.playable_now.contains(&focus) {
+        return (interpreted_focus, connection_cards);
+    }
+    let focus_identities = inferred
+        .cards
+        .iter()
+        .find(|card| card.card == focus)
+        .map_or(interpreted_focus, |card| {
+            interpreted_focus.intersection(card.identities)
+        });
+    (focus_identities, connection_cards)
+}
+
 fn duplicates_good_touch_superposition(
     source: &PlayerView,
     profile: HGroupProfile,
     focus: CardId,
     new_play_identities: IdentitySet,
+    new_connection_cards: &[CardId],
 ) -> Option<bool> {
     let giver_hand = source.hands[source.observer.index()]
         .iter()
@@ -751,6 +789,15 @@ fn duplicates_good_touch_superposition(
                 });
             let interpretation_is_still_possible = settled_identity
                 .is_none_or(|identity| interpretation.play_identities.contains(identity));
+            if focus_is_live
+                && interpretation.focus != focus
+                && giver_hand.contains(&interpretation.focus)
+                && new_play_identities.len() == 1
+                && settled_identity.is_some_and(|identity| new_play_identities.contains(identity))
+                && !new_connection_cards.contains(&interpretation.focus)
+            {
+                return Some(true);
+            }
             if focus_is_live
                 && interpretation_is_still_possible
                 && interpretation.focus != focus
@@ -837,45 +884,30 @@ pub(super) fn prospective_clue_hazard(
     ) {
         return Some(hazard);
     }
-    let interpreted_play_identities = replay
-        .clues
-        .iter()
-        .rev()
-        .find(|interpretation| {
-            interpretation.turn == source.turn
-                && interpretation.target == target
-                && interpretation.focus == focus
-        })
-        .map_or_else(IdentitySet::default, |interpretation| {
-            interpretation.play_identities
-        });
     // Candidate safety must use the recipient's resolved action note, not the
     // raw set of every clue-time branch. A rank clue can initially admit both
     // direct and delayed identities, then settle to its sole direct play after
     // connection validation. Treating a discarded delayed branch as a live
     // Good Touch promise incorrectly rejects the direct clue as duplication.
-    let new_play_identities = if inferred.playable_now.contains(&focus) {
-        inferred
-            .cards
-            .iter()
-            .find(|card| card.card == focus)
-            .map_or(interpreted_play_identities, |card| {
-                interpreted_play_identities.intersection(card.identities)
-            })
-    } else {
-        interpreted_play_identities
-    };
-    let Some(duplicates_existing_promise) =
-        duplicates_good_touch_superposition(source, profile, focus, new_play_identities)
-    else {
+    let (new_play_identities, new_connection_cards) =
+        prospective_new_good_touch_identities(source, replay, inferred, target, focus);
+    let Some(duplicates_existing_promise) = duplicates_good_touch_superposition(
+        source,
+        profile,
+        focus,
+        new_play_identities,
+        &new_connection_cards,
+    ) else {
         return Some(ProspectiveClueHazard::ProjectionFailed);
     };
     if duplicates_existing_promise {
         // Good Touch reserves every delayed branch of a clue's convention
         // superposition, not just the focus card's visible face in the
         // giver's hand. Immediate multi-1 alternatives are not independent
-        // identity promises. A promise in the giver's own hand is also exempt
-        // because the recipient sees that card and resolves the correlation.
+        // identity promises. An unresolved promise in the giver's own hand is
+        // exempt because the recipient sees its identity and resolves the
+        // correlation. Once the giver also knows its exact identity, however,
+        // Good Touch forbids creating the same promise in another hand.
         // Source: https://hanabi.github.io/level-1/#good-touch-principle
         return Some(ProspectiveClueHazard::DuplicateGoodTouchPromise);
     }

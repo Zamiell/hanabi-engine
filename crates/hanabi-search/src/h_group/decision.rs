@@ -17,7 +17,7 @@ use super::{
     owner_knowledge_read_model, projected_h_group_replay, prospective_clue_has_unsafe_connection,
     prospective_clue_marks_focus_saved, prospective_clue_primary_kind, prospective_clue_view,
     prospective_play_has_unsafe_inference, prospective_team_clue_signal_kinds, replay_h_group,
-    rule_enabled,
+    rule_enabled, was_clued_before,
 };
 
 #[derive(Clone, Debug)]
@@ -470,13 +470,16 @@ fn ordered_h_group_actions_from_analysis(
         return actions;
     }
 
+    let permission_to_discard_target =
+        permission_to_discard_target(view, &analysis.replay, profile);
     let early_game_has_extinguishing_clue = first_five_stall_is_due
         || analysis.replay.early_game
             && inferred.discard_now.is_empty()
             && inferred.playable_now.is_empty()
-            && clue_candidates
-                .iter()
-                .any(|candidate| candidate.purpose() == CluePurpose::Play || candidate.is_save());
+            && clue_candidates.iter().any(|candidate| {
+                Some(candidate.target()) != permission_to_discard_target
+                    && (candidate.purpose() == CluePurpose::Play || candidate.is_save())
+            });
 
     let mut actions = inferred
         .discard_now
@@ -669,6 +672,67 @@ fn candidate_is_five_stall(candidate: &CompiledClueAction) -> bool {
     candidate.move_kind() == Some(HGroupMoveKind::FiveStall)
 }
 
+fn guided_blind_play(kind: HGroupMoveKind) -> bool {
+    matches!(
+        kind,
+        HGroupMoveKind::Finesse
+            | HGroupMoveKind::ReverseFinesse
+            | HGroupMoveKind::SelfFinesse
+            | HGroupMoveKind::LayeredFinesse
+            | HGroupMoveKind::HiddenFinesse
+            | HGroupMoveKind::ClandestineFinesse
+            | HGroupMoveKind::QueuedFinesse
+            | HGroupMoveKind::AmbiguousFinesse
+            | HGroupMoveKind::Bluff
+            | HGroupMoveKind::SelfBluff
+    )
+}
+
+/// The current player may end the Early Game without extinguishing a clue to
+/// the player who acted immediately before them. The exception is a previous
+/// player who was blind-playing into a Finesse or Bluff under Guide Principle:
+/// that action did not communicate that the current player's hand was safe.
+///
+/// Sources:
+/// - <https://hanabi.github.io/level-9/#permission-to-discard-ptd>
+/// - <https://hanabi.github.io/level-11/#guide-principle>
+fn permission_to_discard_target(
+    view: &PlayerView,
+    replay: &HGroupState,
+    profile: HGroupProfile,
+) -> Option<PlayerId> {
+    if !replay.early_game || !rule_enabled(profile, HGroupRuleId::Stalling) {
+        return None;
+    }
+    let player_count = view.hands.len();
+    let previous = PlayerId::new(
+        u8::try_from((view.observer.index() + player_count - 1) % player_count)
+            .expect("standard Hanabi has at most five players"),
+    );
+    let previous_action = view
+        .history
+        .iter()
+        .rev()
+        .find(|entry| !matches!(entry.event, ObservedEvent::Drew { .. }))?;
+    match &previous_action.event {
+        ObservedEvent::Discarded { player, .. } if *player == previous => Some(previous),
+        ObservedEvent::Played { player, card, .. } if *player == previous => {
+            let guide_exception = rule_enabled(profile, HGroupRuleId::Bluffs)
+                && !was_clued_before(view, previous_action.turn, *card)
+                && replay.signals.iter().any(|signal| {
+                    signal.turn < previous_action.turn
+                        && signal.cards.contains(card)
+                        && guided_blind_play(signal.kind)
+                });
+            (!guide_exception).then_some(previous)
+        }
+        // A clue to the current player is an explicit instruction, not the
+        // previous player's silent indication that no useful clue existed.
+        ObservedEvent::Clued { giver, .. } if *giver == previous => None,
+        _ => None,
+    }
+}
+
 fn required_first_five_stall_actions(
     view: &PlayerView,
     inferred: &HGroupInferences,
@@ -677,6 +741,7 @@ fn required_first_five_stall_actions(
     clues: &[CompiledClueAction],
 ) -> Option<Vec<Action>> {
     let gotten = inferred.gotten();
+    let permission_to_discard_target = permission_to_discard_target(view, replay, profile);
     let actor_has_known_safe_discard = !inferred.discard_now.is_empty()
         || replay.hands[view.observer.index()].iter().any(|card| {
             inferred
@@ -707,7 +772,10 @@ fn required_first_five_stall_actions(
     }
     let closest = clues
         .iter()
-        .filter(|candidate| candidate_is_five_stall(candidate))
+        .filter(|candidate| {
+            candidate_is_five_stall(candidate)
+                && Some(candidate.target()) != permission_to_discard_target
+        })
         .map(|candidate| five_stall_distance_from_chop(view, candidate, &gotten))
         .min()?;
     // https://hanabi.github.io/level-9/#5-stalls-closest-to-chop
@@ -719,6 +787,7 @@ fn required_first_five_stall_actions(
             .filter(|candidate| {
                 candidate.move_kind() == Some(HGroupMoveKind::TrashChopMove)
                     || candidate_is_five_stall(candidate)
+                        && Some(candidate.target()) != permission_to_discard_target
                         && five_stall_distance_from_chop(view, candidate, &gotten) == closest
             })
             .map(|candidate| candidate.action)

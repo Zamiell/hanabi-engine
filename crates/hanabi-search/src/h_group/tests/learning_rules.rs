@@ -1937,7 +1937,8 @@ fn out_of_order_fix_obligation_selects_the_repairing_rank_clue() {
             target: PlayerId::new(0),
             clue: Clue::Rank(Rank::Two),
         }),
-        "inference: {inferred:#?}"
+        "inference: {inferred:#?}; candidates={:#?}",
+        h_group_clue_candidates(&deductions, profile),
     );
 }
 
@@ -3145,7 +3146,9 @@ fn duplicate_rank_ones_are_fixed_before_optional_play_clues() {
         Some(Action::Clue {
             target: PlayerId::new(2),
             clue: Clue::Suit(Suit::Red),
-        })
+        }),
+        "candidates={:#?}",
+        h_group_clue_candidates(&deductions, HGroupProfile::Max),
     );
 }
 

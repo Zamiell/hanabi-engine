@@ -1,10 +1,11 @@
 use super::{
-    Action, ActionCommitment, Card, CardId, CluedCardSuperposition, CompiledClueAction,
-    CompiledObserverProjection, CompiledProspectiveClue, EpistemicState, HGroupConnection,
-    HGroupMoveKind, HGroupProfile, HGroupRuleId, IdentitySet, LineOutcome, LogicalDeductions,
-    PlayerId, PlayerView, Rank, RecipientCardConsequence, RecipientCardDisposition, card_is_trash,
-    compiled_baseline_team, compiled_prospective_clue, identity_of, is_eventually_useful,
-    is_playable_at, is_playable_now, prospective_team_clue_signal_kinds, rule_enabled,
+    Action, ActionCommitment, Card, CardId, CluePurpose, CluedCardSuperposition,
+    CompiledClueAction, CompiledObserverProjection, CompiledProspectiveClue, EpistemicState,
+    HGroupConnection, HGroupMoveKind, HGroupProfile, HGroupRuleId, IdentitySet, LineOutcome,
+    LogicalDeductions, PlayerId, PlayerView, Rank, RecipientCardConsequence,
+    RecipientCardDisposition, card_is_trash, compiled_baseline_team, compiled_prospective_clue,
+    identity_of, is_eventually_useful, is_playable_at, is_playable_now,
+    prospective_team_clue_signal_kinds, rule_enabled,
 };
 
 const TEAM_ACTION_COVERAGE_PENALTY: u16 = 80;
@@ -15,6 +16,7 @@ const TEAM_ACTION_DELAY_PENALTY: u16 = 2;
 const TEAM_OCCUPIED_TARGET_PENALTY: u16 = 20;
 const PLAY_OVER_SAVE_PENALTY: u16 = 80;
 const CRITICAL_CHOP_DEADLINE_PENALTY: u16 = 80;
+const BOTTOM_DECK_RISK_DEFICIT_PENALTY: u16 = 80;
 const INDIRECT_CONNECTION_PENALTY: u16 = 24;
 const STALLED_MULTI_STEP_CONNECTION_PENALTY: u16 = 280;
 
@@ -125,6 +127,16 @@ pub(super) fn apply_strategic_clue_values(
         .copied()
         .max()
         .unwrap_or(0);
+    let bottom_deck_risk_values = values
+        .iter()
+        .zip(candidates.iter())
+        .map(|(value, candidate)| {
+            value.as_ref().map_or(0, |value| {
+                bottom_deck_risk_protection(source, *candidate, value)
+            })
+        })
+        .collect::<Vec<_>>();
+    let best_bottom_deck_risk_value = bottom_deck_risk_values.iter().copied().max().unwrap_or(0);
     let has_unoccupied_immediate_target = candidates.iter().any(|candidate| {
         candidate.immediate_play() && !target_has_scheduled_play(candidate.target())
     });
@@ -153,6 +165,22 @@ pub(super) fn apply_strategic_clue_values(
         ));
         let action_coverage = value.action_coverage;
         candidate.set_compiled_line(value);
+        // Save and Fix semantics are protection obligations, not optional
+        // strategic protection choices. Risk valuation must not let an
+        // unrelated clue outrank the clue that satisfies such an obligation.
+        if source.turn == 0
+            && !matches!(candidate.purpose(), CluePurpose::Fix | CluePurpose::Save)
+            && candidate.move_kind() != Some(HGroupMoveKind::FixClue)
+        {
+            candidate.value.penalize_teamwork(
+                BOTTOM_DECK_RISK_DEFICIT_PENALTY.saturating_mul(
+                    u16::try_from(
+                        best_bottom_deck_risk_value.saturating_sub(bottom_deck_risk_values[index]),
+                    )
+                    .unwrap_or(u16::MAX),
+                ),
+            );
+        }
         let candidate_action_count = value
             .convention_action_count
             .unwrap_or(value.action_coverage)
@@ -342,6 +370,45 @@ pub(super) fn apply_strategic_clue_values(
                 .saturating_mul(u16::try_from(unnecessary_connections).unwrap_or(u16::MAX)),
         );
     }
+}
+
+/// Counts distinct, not-yet-playable identities that this clue protects from
+/// bottom-deck risk. If every physical copy is already visible, the team can
+/// trivially give a normal Save Clue later; protecting that identity now does
+/// not mitigate a hidden-copy ordering risk.
+fn bottom_deck_risk_protection(
+    source: &PlayerView,
+    candidate: CompiledClueAction,
+    value: &LineOutcome,
+) -> usize {
+    let Action::Clue { target, clue } = candidate.action else {
+        return 0;
+    };
+    value
+        .protected_cards
+        .iter()
+        .filter(|protected| {
+            source.hands[target.index()].iter().any(|card| {
+                card.id == **protected
+                    && card.identity.is_some_and(|identity| clue.matches(identity))
+            })
+        })
+        .filter_map(|card| identity_of(source, *card))
+        .filter(|identity| {
+            is_eventually_useful(source, *identity)
+                && !is_playable_now(source, *identity)
+                && source
+                    .hands
+                    .iter()
+                    .flatten()
+                    .filter(|card| card.identity == Some(*identity))
+                    .count()
+                    < usize::from(identity.rank.copies())
+        })
+        .fold(IdentitySet::default(), |identities, identity| {
+            identities.union(IdentitySet::singleton(identity))
+        })
+        .len()
 }
 
 /// Values protection by the turn on which an otherwise-unoccupied player

@@ -316,6 +316,13 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 )
                 && prior.focus_identities == IdentitySet::singleton(focus_identity)
         });
+        let recipient_knows_exact_clued_playable = was_clued_before(view, view.turn, focus)
+            && is_playable_now(view, focus_identity)
+            && subjective_convention_cards(view, profile, target).is_some_and(|cards| {
+                cards.iter().any(|card| {
+                    card.card == focus && card.identities == IdentitySet::singleton(focus_identity)
+                })
+            });
         let connection_match = replay
             .pending_connections
             .match_clue(target, clue, &touched);
@@ -326,6 +333,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             && !continues_inactive_connection
             && gotten.contains(&focus)
             && (repeats_exact_play_promise
+                || recipient_knows_exact_clued_playable
                 || baseline_playing.contains(&focus)
                     && (replay.pending_connections.iter().any(|pending| {
                         pending.focus == focus && pending.focus_identity == focus_identity
@@ -538,12 +546,41 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
         let fallback_signals =
             prospective_team_clue_signal_kinds(view, profile, target, clue, &touched);
         let recipient_focus_inversion = fallback_signals.contains(&HGroupMoveKind::FocusInversion);
+        let recipient_out_of_order = fallback_signals.iter().any(|kind| {
+            matches!(
+                kind,
+                HGroupMoveKind::OutOfOrderPlay | HGroupMoveKind::OutOfOrderFinesse
+            )
+        });
+        let recipient_visible_connection = fallback_signals.contains(&HGroupMoveKind::Prompt)
+            && fallback_signals.iter().any(|kind| {
+                matches!(
+                    kind,
+                    HGroupMoveKind::Finesse
+                        | HGroupMoveKind::ReverseFinesse
+                        | HGroupMoveKind::SelfFinesse
+                        | HGroupMoveKind::LayeredFinesse
+                        | HGroupMoveKind::HiddenFinesse
+                        | HGroupMoveKind::QueuedFinesse
+                        | HGroupMoveKind::AmbiguousFinesse
+                )
+            });
         let mixed_touch_continuation = matches!(clue, Clue::Suit(_))
             && touched.len() > newly_informed.len()
             && !gotten.contains(&focus);
+        let giver_has_scheduled_play = view.hands[view.observer.index()]
+            .iter()
+            .any(|card| baseline_playing.contains(&card.id));
+        let novel_recipient_visible_connection = recipient_visible_connection
+            && focus_identity.rank == Rank::Four
+            && !gotten.contains(&focus)
+            && !giver_has_scheduled_play
+            && !recipient_out_of_order;
         if play_score.is_none()
             && save_score.is_none()
-            && (recipient_focus_inversion || mixed_touch_continuation)
+            && (recipient_focus_inversion
+                || novel_recipient_visible_connection
+                || mixed_touch_continuation)
             && prospective_clue_primary_interpretation(view, profile, target, clue, &touched)
                 .is_some_and(|interpretation| {
                     let height = view.play_stacks[focus_identity.suit.index()].len();
@@ -570,7 +607,20 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                                 && interpretation
                                     .hypotheses
                                     .iter()
-                                    .any(|hypothesis| !hypothesis.connection_steps.is_empty())))
+                                    .any(|hypothesis| !hypothesis.connection_steps.is_empty()))
+                            || (novel_recipient_visible_connection
+                                && interpretation.hypotheses.iter().any(|hypothesis| {
+                                    hypothesis.focus_identity == focus_identity
+                                        && hypothesis.required_fix.is_none()
+                                        && hypothesis
+                                            .connection_steps
+                                            .iter()
+                                            .any(|step| step.kind == HGroupConnectionKind::Prompt)
+                                        && hypothesis
+                                            .connection_steps
+                                            .iter()
+                                            .any(|step| step.kind != HGroupConnectionKind::Prompt)
+                                })))
                 })
         {
             // Recipient replay is the canonical semantic compiler. It can
@@ -652,6 +702,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             )
             .is_some_and(|fix| fix.is_some());
         let retouches_older_delayed_focus = is_playable_now(view, focus_identity)
+            && focus_identity.rank != Rank::One
             && touched.iter().copied().any(|card| {
                 card != focus
                     && promptable.contains(&card)
@@ -1166,6 +1217,20 @@ pub(super) fn advanced_clue_candidates(
                 }
             });
         let clue_focus = focus(layout, &touched, chop(layout, gotten), gotten);
+        let recipient_known_playable = subjective_convention_cards(view, profile, target)
+            .map_or_else(CardSet::default, |cards| {
+                cards
+                    .into_iter()
+                    .filter(|card| {
+                        !card.identities.is_empty()
+                            && card
+                                .identities
+                                .iter()
+                                .all(|identity| is_playable_now(view, identity))
+                    })
+                    .map(|card| card.card)
+                    .collect()
+            });
         let mut recipient_playing = subjective_playable_cards(view, profile, target).map_or_else(
             || replay.cards.already_playing.materialized().clone(),
             |cards| cards.into_iter().collect::<CardSet>(),
@@ -1184,6 +1249,7 @@ pub(super) fn advanced_clue_candidates(
             && touched.iter().any(|card| {
                 !previously_fixed.contains(card)
                     && !recipient_playing.contains(card)
+                    && !recipient_known_playable.contains(card)
                     && !replay.cards.forced_playable.contains(card)
                     && !replay.pending_connections.iter().any(|connection| {
                         connection.actor == target && connection.cards.contains(card)

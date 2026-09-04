@@ -1,10 +1,10 @@
 use super::{
     Card, CardId, CardSet, Clue, ConnectionManager, ConnectionTransitionReason, ConventionJournal,
-    HGroupClueInterpretation, HGroupClueKind, HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext,
-    IdentitySet, ObservedEvent, ObservedHistoryEntry, PlayerId, PlayerView, Rank, card_is_trash,
-    chop, finesse_position_id, focus, four_charm_blind_plays, has_higher_basic_priority,
-    identity_of, is_playable_at, is_trash_at, next_player, protected_cards, push_signal,
-    same_turn_signal, was_clued_before,
+    HGroupClueInterpretation, HGroupClueKind, HGroupConnectionKind, HGroupMoveKind,
+    HGroupRuleEffects, HGroupTurnContext, IdentitySet, ObservedEvent, ObservedHistoryEntry,
+    PlayerId, PlayerView, Rank, card_is_trash, chop, finesse_position_id, focus,
+    four_charm_blind_plays, has_higher_basic_priority, identity_of, is_playable_at, is_trash_at,
+    next_player, protected_cards, push_signal, same_turn_signal, was_clued_before,
 };
 use crate::h_group::interpretation_resolution::supersedes;
 use crate::h_group::{FixObligations, ProvenancedCardSet};
@@ -593,6 +593,17 @@ pub(in crate::h_group) fn apply_charm_effects(
                 })
             });
             let higher_priority_interpretation = suppress_charm
+                || interpretation.is_some_and(|meaning| {
+                    meaning.hypotheses.iter().any(|hypothesis| {
+                        hypothesis.connection_steps.iter().any(|step| {
+                            step.kind == HGroupConnectionKind::Prompt
+                                && step
+                                    .cards
+                                    .iter()
+                                    .any(|card| was_clued_before(view, entry.turn, *card))
+                        })
+                    })
+                })
                 || same_turn_signal(signals, entry.turn, HGroupMoveKind::FixClue)
                 || required_fixes.iter().any(|obligation| {
                     obligation.required.target == *target
