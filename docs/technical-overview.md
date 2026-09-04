@@ -197,6 +197,18 @@ gives or interprets clues.
 Turn `N` is the position after `N` completed actions; turn zero is the initial
 deal.
 
+Replays can specify either an explicit `deck` or a canonical Hanabi Live `seed`
+such as `p4v0s1`, alongside `players`, `actions`, and optional `options`.
+Seed generation supports No Variant (`v0`) and 2–5 players; the seed's player
+count must match `players`. Custom or legacy seed strings are not supported.
+An explicit deck takes precedence over seed metadata, preserving custom deals.
+The loader materializes the deck once, so downstream replay APIs are unchanged.
+
+The seeded shuffle reproduces Hanabi Live's CRC64-ECMA hashing, Go's legacy
+`math/rand` generator, and ascending swaps (including the first RNG call).
+It requires neither Go nor a network connection. Compact, fixed full-deck
+golden tests retain all five original export orders independently of generation.
+
 ```sh
 cargo run --release -p hanabi-cli --bin hanabi-engine -- \
   analyze /path/to/replay.json --turn 17 \
@@ -285,11 +297,10 @@ overflow checks. The repository pins cargo-nextest 0.9.143 for fail-fast test
 scheduling; nextest's missing rustdoc support is covered by the separate
 `cargo test --doc` command.
 
-The curated `game-p4v0s415.json` and `game-p4v0s9.json` replays are active
+The five curated replays (`game-p4v0s415.json`, `game-p4v0s9.json`,
+`game-p4v0s2.json`, `game-p4v0s3.json`, and `game-p4v0s1.json`) are active
 golden oracles: the planner must choose the fixture action at every position.
-The third expert replay, `game-p4v0s2.json`, is active while its remaining
-positions are reviewed. It currently agrees through move 36; move 37 is the
-first unresolved convention interpretation.
+Their decks are specified by seed; custom replay tests can still use explicit decks.
 
 The Python development requirements pin ty, and `ty.toml` checks every Python
 bridge and test module against Python 3.10. The test suite also rejects any

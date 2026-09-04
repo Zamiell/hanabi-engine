@@ -6,13 +6,53 @@ use hanabi_core::{
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// The compact JSON replay exported by Hanabi Live's `/copy` command.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HanabiLiveReplay {
     pub players: Vec<String>,
     pub deck: Vec<HanabiLiveCard>,
     pub actions: Vec<HanabiLiveAction>,
-    #[serde(default)]
     pub options: Option<HanabiLiveOptions>,
+}
+
+impl<'de> Deserialize<'de> for HanabiLiveReplay {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct WireReplay {
+            players: Vec<String>,
+            deck: Option<Vec<HanabiLiveCard>>,
+            seed: Option<String>,
+            actions: Vec<HanabiLiveAction>,
+            options: Option<HanabiLiveOptions>,
+        }
+        let wire = WireReplay::deserialize(deserializer)?;
+        // Explicit decks remain authoritative, including custom/edited deals
+        // whose original seed is still present as descriptive metadata.
+        let deck = if let Some(deck) = wire.deck {
+            deck
+        } else {
+            if wire
+                .options
+                .as_ref()
+                .is_some_and(|options| options.variant != "No Variant")
+            {
+                return Err(serde::de::Error::custom(
+                    "seed generation only supports No Variant",
+                ));
+            }
+            let seed = wire
+                .seed
+                .as_deref()
+                .ok_or_else(|| serde::de::Error::custom("replay requires a deck or seed"))?;
+            crate::seed::deck_from_seed(seed, wire.players.len())
+                .map_err(serde::de::Error::custom)?
+        };
+        Ok(Self {
+            players: wire.players,
+            deck,
+            actions: wire.actions,
+            options: wire.options,
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
