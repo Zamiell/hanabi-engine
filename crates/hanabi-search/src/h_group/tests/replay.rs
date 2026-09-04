@@ -265,6 +265,14 @@ fn fourth_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine(&expert_replay_p4v0s3());
 }
 
+// Move 42 onward remains under review; only the confirmed prefix is an oracle.
+#[test]
+fn fifth_expert_replay_agrees_through_move_41() {
+    let mut replay = expert_replay_p4v0s1();
+    replay.actions.truncate(41);
+    assert_expert_replay_matches_engine(&replay);
+}
+
 #[test]
 fn fifth_replay_move_one_prefers_protecting_bottom_deck_risk() {
     let fixture = expert_replay_p4v0s1();
