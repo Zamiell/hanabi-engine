@@ -142,7 +142,7 @@ recipient modeling.
 - `outcome.rs` retains clue consequences before strategy converts genuine
   preferences to numeric ordering. Giver-visible team coverage and
   owner-relative promised-action and clued-card-superposition equivalence for
-  Directness remain separate projections of one outcome.
+  Clarity comparisons remain separate projections of one outcome.
 - `rule_engine.rs` owns ordered post-event execution. Real replay and
   prospective transitions both enter this registry through the same history
   reducer. Each `RuleSpec` declares its semantic phase and dependencies, and
@@ -216,7 +216,7 @@ recipient modeling.
   Human-readable signals remain explanations and recognizer history rather
   than an alternative source of current decision truth.
 - `strategic_value.rs` compares structured `LineOutcome` values. It may use
-  teammate identities visible to the giver for team coverage, but Directness
+  teammate identities visible to the giver for team coverage, but Clarity
   uses only each card owner's `EpistemicState`.
 
 Shared card and hand semantics live in focused modules. New rule families go

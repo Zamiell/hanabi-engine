@@ -242,7 +242,7 @@ fn apply_rule(
                 apply_chop_move_effects(context, view, effects);
             }
         }
-        HGroupRuleId::TempoClues => apply_tempo_effects(context, view, effects),
+        HGroupRuleId::TempoCluesAndClarity => apply_tempo_effects(context, view, effects),
         HGroupRuleId::EmergencyDiscards => apply_emergency_discard_effects(
             context,
             view,

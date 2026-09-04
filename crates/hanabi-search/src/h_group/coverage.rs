@@ -347,8 +347,13 @@ pub const H_GROUP_DOCUMENTATION_SECTIONS: [HGroupDocumentationSection; 357] = [
     },
     HGroupDocumentationSection {
         profile: HGroupProfile::Level(HGroupLevel::Level6),
-        title: "Clarity Principle",
-        source_url: "https://hanabi.github.io/level-6/#clarity-principle",
+        title: "Clarity Principle (Part 1)",
+        source_url: "https://hanabi.github.io/level-6/#clarity-principle-part-1",
+    },
+    HGroupDocumentationSection {
+        profile: HGroupProfile::Level(HGroupLevel::Level6),
+        title: "Clarity Principle (Part 2)",
+        source_url: "https://hanabi.github.io/level-6/#clarity-principle-part-2",
     },
     HGroupDocumentationSection {
         profile: HGroupProfile::Level(HGroupLevel::Level7),
@@ -524,11 +529,6 @@ pub const H_GROUP_DOCUMENTATION_SECTIONS: [HGroupDocumentationSection; 357] = [
         profile: HGroupProfile::Level(HGroupLevel::Level10),
         title: "The Composition Finesse",
         source_url: "https://hanabi.github.io/level-10/#the-composition-finesse",
-    },
-    HGroupDocumentationSection {
-        profile: HGroupProfile::Level(HGroupLevel::Level10),
-        title: "Directness Principle",
-        source_url: "https://hanabi.github.io/level-10/#directness-principle",
     },
     HGroupDocumentationSection {
         profile: HGroupProfile::Level(HGroupLevel::Level10),
@@ -1830,7 +1830,7 @@ mod tests {
     #[test]
     fn pinned_subsection_counts_cover_every_numbered_level_and_max() {
         let expected = [
-            19, 11, 9, 9, 9, 9, 8, 10, 11, 8, 11, 10, 7, 9, 8, 6, 6, 11, 15, 7, 9, 8, 4, 5, 11,
+            19, 11, 9, 9, 9, 10, 8, 10, 11, 7, 11, 10, 7, 9, 8, 6, 6, 11, 15, 7, 9, 8, 4, 5, 11,
         ];
         for (index, expected_count) in expected.into_iter().enumerate() {
             let level = HGroupLevel::try_from(

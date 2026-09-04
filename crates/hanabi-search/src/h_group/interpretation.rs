@@ -1812,7 +1812,7 @@ pub(super) fn advanced_clue_candidates(
                 145
             };
             Some((kind, score))
-        } else if rule_enabled(profile, HGroupRuleId::TempoClues) && tempo {
+        } else if rule_enabled(profile, HGroupRuleId::TempoCluesAndClarity) && tempo {
             // https://hanabi.github.io/level-6/#the-valuable-tempo-clue
             // https://hanabi.github.io/level-6/#the-tempo-clue-chop-move-tccm
             // Tempo is valuable only for the three enumerated reasons. Merely
@@ -1975,11 +1975,11 @@ pub(super) fn advanced_clue_candidates(
             // the recipient's next action, it has the urgency of a Save while
             // retaining its advanced meaning. A generic Ejection does not add
             // an action when its blind player was already scheduled to make
-            // that same play; in that case Directness prefers the ordinary
+            // that same play; in that case Clarity prefers the ordinary
             // Save. A Stacked Ejection is the exception because it explicitly
             // changes which loaded card is due first. This special boost is
             // needed only when the clue must beat the giver's otherwise-due
-            // play; without that conflict, Directness prefers an available
+            // play; without that conflict, Clarity prefers an available
             // ordinary Save over the more complicated Ejection line.
             score = score.max(450);
         }

@@ -255,8 +255,8 @@ pub enum HGroupMoveKind {
     CertainDiscard,
     /// [Composition Finesse](https://hanabi.github.io/level-10/#the-composition-finesse)
     CompositionFinesse,
-    /// [Directness Principle](https://hanabi.github.io/level-10/#directness-principle)
-    Directness,
+    /// [Clarity Principle](https://hanabi.github.io/level-6/#clarity-principle-part-1)
+    Clarity,
     /// [Bluff](https://hanabi.github.io/level-11/#the-bluff)
     Bluff,
     /// [Self-Bluff](https://hanabi.github.io/level-11/#the-self-bluff)
@@ -552,7 +552,11 @@ pub const H_GROUP_LEVELS: [HGroupLevelDescriptor; 26] = [
     HGroupLevelDescriptor {
         profile: HGroupProfile::Level(HGroupLevel::Level6),
         title: "Tempo clues",
-        effects: &[HGroupMoveKind::TempoClue, HGroupMoveKind::TempoClueChopMove],
+        effects: &[
+            HGroupMoveKind::TempoClue,
+            HGroupMoveKind::TempoClueChopMove,
+            HGroupMoveKind::Clarity,
+        ],
     },
     HGroupLevelDescriptor {
         profile: HGroupProfile::Level(HGroupLevel::Level7),
@@ -599,7 +603,6 @@ pub const H_GROUP_LEVELS: [HGroupLevelDescriptor; 26] = [
             HGroupMoveKind::CertainFinesse,
             HGroupMoveKind::CertainDiscard,
             HGroupMoveKind::CompositionFinesse,
-            HGroupMoveKind::Directness,
         ],
     },
     HGroupLevelDescriptor {

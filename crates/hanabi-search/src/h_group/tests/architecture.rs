@@ -109,7 +109,7 @@ fn every_semantic_move_has_a_production_implementation_reference() {
             continue;
         }
         let variant = trimmed.trim_end_matches(',');
-        if matches!(variant, "Retraction" | "Directness") {
+        if matches!(variant, "Retraction" | "Clarity") {
             continue;
         }
         let needle = format!("HGroupMoveKind::{variant}");
@@ -119,10 +119,10 @@ fn every_semantic_move_has_a_production_implementation_reference() {
         );
     }
 
-    // Directness is a scoring principle rather than a journal signal.
+    // Clarity is a scoring principle rather than a journal signal.
     assert!(
         include_str!("../strategic_value.rs")
-            .contains("https://hanabi.github.io/level-10/#directness-principle")
+            .contains("https://hanabi.github.io/level-6/#clarity-principle-part-1")
     );
 }
 

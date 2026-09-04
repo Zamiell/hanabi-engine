@@ -950,7 +950,7 @@ fn recognizes_expert_replay_red_three_continuation() {
 }
 
 #[test]
-fn optimal_replay_move_26_compares_directness_and_team_tempo() {
+fn optimal_replay_move_26_compares_clarity_and_team_tempo() {
     let state = expert_replay_p4v0s415()
         .state_at_turn(25)
         .expect("turn exists");
@@ -990,7 +990,7 @@ fn optimal_replay_move_26_compares_directness_and_team_tempo() {
     };
     assert!(
         score(yellow) > score(five),
-        "Directness must prefer the direct route to the same Y4/Y5 outcome: {candidates:#?}"
+        "Clarity must prefer the direct route to the same Y4/Y5 outcome: {candidates:#?}"
     );
     assert!(
         score(yellow) > score(blue),

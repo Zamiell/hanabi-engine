@@ -884,13 +884,13 @@ fn compile_convention_card_inferences(
                         && clue.touched.len() > 1
                         && narrowed.len() > 1
                     {
-                        // Directness assigns the focus the earliest identity
+                        // Clarity assigns the focus the earliest identity
                         // reachable without using another card touched by the
                         // same clue as a connector. Otherwise a loaded color
                         // clue can needlessly route through its older touched
                         // card. In p4v0s415, the queued purple 2 and 3 reach
                         // the focused purple 4; the older card is purple 5.
-                        // https://hanabi.github.io/level-10/#directness-principle
+                        // https://hanabi.github.io/level-6/#clarity-principle-part-1
                         let external_gotten = clue
                             .previously_gotten
                             .iter()
@@ -927,10 +927,10 @@ fn compile_convention_card_inferences(
         let intentionally_duplicates = [HGroupMoveKind::FixClue, HGroupMoveKind::Duplication]
             .into_iter()
             .any(|kind| replay.signals.has_at_turn(clue.turn, kind));
-        let directness_resolved_focus = matches!(clue.clue, Clue::Suit(_))
+        let clarity_resolved_focus = matches!(clue.clue, Clue::Suit(_))
             && clue.touched.len() > 1
             && clue.focus_identities.len() > 1;
-        let effective_focus_identities = if directness_resolved_focus {
+        let effective_focus_identities = if clarity_resolved_focus {
             knowledge
                 .cards
                 .iter()

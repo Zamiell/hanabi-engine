@@ -1,7 +1,7 @@
 # H-Group documentation coverage
 
 The engine's convention inventory is pinned to `hanabi.github.io` revision
-`7ec4381a6a01803cafa73bf925be3daec4c14d02`. It contains every level-three
+`dd55b51aa622f709059a17e0d6afc2adb8402408`. It contains every level-three
 heading in levels 1–25 and the Max extras pages: 357 unique sections in total.
 The machine-readable inventory, including an exact website URL for every
 section, lives in `H_GROUP_DOCUMENTATION_SECTIONS`.
@@ -25,11 +25,11 @@ compositions such as a Trash Push Finesse.
 | 3 | Basic strategy | 9 | Fixes, repeated 1s, Sarcastic Discard, efficiency constraints |
 | 4 | Chop moves | 9 | TCM, 5CM, OCM, chop-move precedence |
 | 5 | Special finesses | 9 | Hidden, Layered, Clandestine, Queued, Ambiguous Finesses |
-| 6 | Tempo clues | 9 | Tempo Clue and Tempo Clue Chop Move |
+| 6 | Tempo clues | 10 | Tempo Clue, Tempo Clue Chop Move, and both parts of the Clarity Principle |
 | 7 | Emergency discards | 8 | Scream, Shout, Generation, riding/permission checks |
 | 8 | End-game | 10 | positional discard/misplay, distribution, end-game phase |
 | 9 | Stalling | 11 | severity ordering, DDA, locked-hand, fill-in, anxiety, 8CS, burn |
-| 10 | Special discards | 8 | Gentleman/Baton transfers, Sarcastic/Certain/Composition Finesse, Directness |
+| 10 | Special discards | 7 | Gentleman/Baton transfers and Sarcastic/Certain/Composition Finesses |
 | 11 | Bluffs | 11 | Bluff, Self-Bluff, connecting and precedence constraints |
 | 12 | Context | 10 | Selfish Clue/Finesse, stale 1s, Focus Inversion |
 | 13 | Intermediate bluffs | 7 | 3, Critical Color, Hard, Hard-3, Known, Good Touch Bluff |

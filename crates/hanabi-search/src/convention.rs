@@ -6,7 +6,7 @@ use crate::{BeliefConstraints, ConventionAgnosticPolicy, HGroupInferences, Logic
 ///
 /// Keeping the source revision next to the convention implementation makes
 /// analyses reproducible as the living convention framework changes.
-pub const H_GROUP_RULESET_REVISION: &str = "7ec4381a6a01803cafa73bf925be3daec4c14d02";
+pub const H_GROUP_RULESET_REVISION: &str = "dd55b51aa622f709059a17e0d6afc2adb8402408";
 
 /// One numbered level in the cumulative H-Group learning path.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]

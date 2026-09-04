@@ -40,7 +40,7 @@ fn trash_flags_only_record_convention_knowledge() {
 }
 
 #[test]
-fn directness_resolves_turn_37_purple_focus_to_four() {
+fn clarity_resolves_turn_37_purple_focus_to_four() {
     let purple_four = Card::new(Suit::Purple, Rank::Four);
     let purple_five = Card::new(Suit::Purple, Rank::Five);
     for turn in [36, 40] {

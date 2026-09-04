@@ -50,7 +50,7 @@ impl ClueSchedule {
 ///
 /// The total deliberately reproduces the previous integer ordering while the
 /// engine migrates comparisons onto semantic outcomes. Keeping adjustments in
-/// separate fields prevents an information or directness rule from silently
+/// separate fields prevents an information or clarity rule from silently
 /// overwriting an unrelated teamwork adjustment.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) struct ClueValue {
@@ -59,7 +59,7 @@ pub(super) struct ClueValue {
     teamwork_bonus: u16,
     teamwork_penalty: u16,
     delay_penalty: u16,
-    indirectness_penalty: u16,
+    complexity_penalty: u16,
 }
 
 impl ClueValue {
@@ -70,7 +70,7 @@ impl ClueValue {
             teamwork_bonus: 0,
             teamwork_penalty: 0,
             delay_penalty: 0,
-            indirectness_penalty: 0,
+            complexity_penalty: 0,
         }
     }
 
@@ -80,7 +80,7 @@ impl ClueValue {
             .saturating_add(self.teamwork_bonus)
             .saturating_sub(self.teamwork_penalty)
             .saturating_sub(self.delay_penalty)
-            .saturating_sub(self.indirectness_penalty)
+            .saturating_sub(self.complexity_penalty)
     }
 
     pub(super) fn semantic_strength(self) -> u16 {
@@ -109,8 +109,8 @@ impl ClueValue {
         self.delay_penalty = self.delay_penalty.saturating_add(value);
     }
 
-    pub(super) fn penalize_indirectness(&mut self, value: u16) {
-        self.indirectness_penalty = self.indirectness_penalty.saturating_add(value);
+    pub(super) fn penalize_complexity(&mut self, value: u16) {
+        self.complexity_penalty = self.complexity_penalty.saturating_add(value);
     }
 }
 

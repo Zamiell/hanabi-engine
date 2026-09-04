@@ -152,7 +152,7 @@ H-Group uses shared internal boundaries to keep these answers consistent:
   planner boundary.
 - `LineOutcome` retains promised actions, protected cards, known trash, and
   connections so strategic comparisons operate on semantics before scores.
-  Teamwork compares public action coverage and protection; Directness compares
+  Teamwork compares public action coverage and protection; Clarity compares
   owner-relative promised actions and the identity superpositions on every
   clued card.
 - `LineOutcome` causality comes from transition deltas, not by mining the

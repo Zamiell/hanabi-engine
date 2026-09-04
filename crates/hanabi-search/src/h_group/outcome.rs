@@ -13,7 +13,7 @@ pub(super) struct ActionCommitment {
 }
 
 /// The complete identity superposition that a card's owner retains after a
-/// clue line. Directness may compare two lines only when these domains agree
+/// clue line. Clarity may compare two lines only when these domains agree
 /// for every explicitly or invisibly clued card.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct CluedCardSuperposition {
@@ -59,7 +59,7 @@ impl ActionCommitment {
 pub(super) struct LineOutcome {
     /// Publicly secured actions, used for team coverage and tempo.
     pub(super) public_actions: Vec<ActionCommitment>,
-    /// Actions known by each card's owner, used for Directness equivalence.
+    /// Actions known by each card's owner, used for Clarity equivalence.
     pub(super) owner_actions: Vec<ActionCommitment>,
     /// Owner-visible identity domains for every clued card after the line.
     pub(super) clued_superpositions: Vec<CluedCardSuperposition>,
@@ -149,7 +149,7 @@ impl LineOutcome {
             .unwrap_or(player_count)
     }
 
-    pub(super) fn has_same_direct_outcome(&self, other: &Self) -> bool {
+    pub(super) fn has_same_clarity_outcome(&self, other: &Self) -> bool {
         self.owner_actions == other.owner_actions
             && self.clued_superpositions == other.clued_superpositions
     }
@@ -162,7 +162,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn directness_requires_identical_clued_card_superpositions() {
+    fn clarity_requires_identical_clued_card_superpositions() {
         let card = CardId::new(3);
         let owner = PlayerId::new(1);
         let action = ActionCommitment::exact(card, owner, Card::new(Suit::Red, Rank::Three));
@@ -181,8 +181,8 @@ mod tests {
             IdentitySet::singleton(Card::new(Suit::Red, Rank::Three))
                 .union(IdentitySet::singleton(Card::new(Suit::Red, Rank::Four)));
 
-        assert!(!direct.has_same_direct_outcome(&ambiguous));
-        assert!(direct.has_same_direct_outcome(&direct.clone()));
+        assert!(!direct.has_same_clarity_outcome(&ambiguous));
+        assert!(direct.has_same_clarity_outcome(&direct.clone()));
     }
 
     #[test]

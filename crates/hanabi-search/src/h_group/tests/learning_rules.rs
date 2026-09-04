@@ -7,9 +7,9 @@ fn learning_path_metadata_covers_every_cumulative_level() {
         assert!(!descriptor.effects.is_empty());
     }
     assert!(
-        H_GROUP_LEVELS[9]
+        H_GROUP_LEVELS[5]
             .effects
-            .contains(&HGroupMoveKind::Directness)
+            .contains(&HGroupMoveKind::Clarity)
     );
     assert_eq!(HGroupProfile::Max.effective_level(), 26);
 }
@@ -579,7 +579,7 @@ fn second_replay_rank_four_secures_more_than_purple_to_donald() {
     assert_eq!(
         select_h_group_action(&deductions, HGroupProfile::Max),
         Some(replay_action_at_turn(&fixture, 9)),
-        "rank 4 uniquely secures Cathy's purple 4 and must not receive a Directness penalty: {candidates:#?}"
+        "rank 4 uniquely secures Cathy's purple 4 and must not receive a Clarity penalty: {candidates:#?}"
     );
 }
 

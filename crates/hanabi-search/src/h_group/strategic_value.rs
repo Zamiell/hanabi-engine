@@ -17,26 +17,26 @@ const TEAM_OCCUPIED_TARGET_PENALTY: u16 = 20;
 const PLAY_OVER_SAVE_PENALTY: u16 = 80;
 const CRITICAL_CHOP_DEADLINE_PENALTY: u16 = 80;
 const BOTTOM_DECK_RISK_DEFICIT_PENALTY: u16 = 80;
-const INDIRECT_CONNECTION_PENALTY: u16 = 24;
+const UNNECESSARY_CONNECTION_COMPLEXITY_PENALTY: u16 = 24;
 const STALLED_MULTI_STEP_CONNECTION_PENALTY: u16 = 280;
 
 /// Compares whole clue outcomes after ordinary legality and convention
 /// interpretation have produced the candidate set.
 ///
-/// [Level 10's Directness Principle](https://hanabi.github.io/level-10/#directness-principle)
-/// prefers the least complicated route only when both the promised actions and
-/// every clued card's owner-visible identity superposition are identical. Team
-/// action coverage separately rewards a clue that establishes useful future
-/// actions for more than one teammate; this keeps a token-refunding play from
-/// winning when the extra token has no immediate job but another line prepares
-/// the rest of the team.
+/// [Level 6's Clarity Principle](https://hanabi.github.io/level-6/#clarity-principle-part-1)
+/// prefers the least complicated route when both the promised actions and
+/// every clued card's owner-visible identity superposition are identical. Its
+/// broader [Part 2](https://hanabi.github.io/level-6/#clarity-principle-part-2)
+/// is represented by the general penalties for confusing, stalled multi-step
+/// connections. Team action coverage separately rewards a clue that establishes
+/// useful future actions for more than one teammate.
 #[allow(clippy::too_many_lines)]
 pub(super) fn apply_strategic_clue_values(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
     candidates: &mut [CompiledClueAction],
 ) {
-    if !rule_enabled(profile, HGroupRuleId::SpecialDiscards) {
+    if !rule_enabled(profile, HGroupRuleId::TempoCluesAndClarity) {
         return;
     }
     let source = deductions.view();
@@ -358,15 +358,15 @@ pub(super) fn apply_strategic_clue_values(
         let fewest_equivalent_connections = values
             .iter()
             .filter_map(Option::as_ref)
-            .filter(|other| other.has_same_direct_outcome(value))
+            .filter(|other| other.has_same_clarity_outcome(value))
             .map(|other| other.new_connections)
             .min()
             .unwrap_or(value.new_connections);
         let unnecessary_connections = value
             .new_connections
             .saturating_sub(fewest_equivalent_connections);
-        candidate.value.penalize_indirectness(
-            INDIRECT_CONNECTION_PENALTY
+        candidate.value.penalize_complexity(
+            UNNECESSARY_CONNECTION_COMPLEXITY_PENALTY
                 .saturating_mul(u16::try_from(unnecessary_connections).unwrap_or(u16::MAX)),
         );
     }
@@ -676,7 +676,7 @@ struct ProjectedLineState {
 impl ProjectedLineState {
     /// Team coverage is evaluated by the clue giver, who may legally use the
     /// visible identities in teammates' hands. This projection is kept
-    /// separate from owner knowledge so it can never establish Directness.
+    /// separate from owner knowledge so it can never establish Clarity equivalence.
     fn closed_public_commitments(&self, source: &PlayerView) -> Vec<(CardId, Card)> {
         let mut closed = self.giver_visible_commitments.clone();
         loop {
@@ -709,7 +709,7 @@ impl ProjectedLineState {
     }
 
     /// Owner-relative counterpart used only to decide whether two clues have
-    /// identical outcomes for the Directness Principle. Team coverage retains
+    /// identical outcomes for the Clarity Principle. Team coverage retains
     /// the established public projection above; equivalence is stricter and
     /// must not use identities visible only to another player.
     fn closed_owner_commitments(&self, source: &PlayerView) -> Vec<(CardId, Card)> {
