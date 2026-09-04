@@ -32,6 +32,7 @@ mod constraint_graph;
 mod constraints;
 mod coverage;
 mod decision;
+mod distribution;
 mod draw_distribution;
 mod effects;
 mod epistemic;

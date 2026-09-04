@@ -13,7 +13,7 @@ Named H-Group moves are compositions of a smaller set of typed state effects. Th
 | 5 | Special finesses | hidden/layered/queued/ambiguous connection disjunctions |
 | 6 | Tempo clues | valuable tempo, stall tempo, TCCM, focus shifting, and Clarity |
 | 7 | Emergency discards | Scream/Shout chop movement and must-clue obligations |
-| 8 | End-game | pace phase, no chop moves, positional play signals |
+| 8 | End-game | pace phase, no chop moves, positional play signals, Distribution Clues |
 | 9 | Stalling | severity-gated stalls, fill-ins, locked-hand saves, Anxiety Play |
 | 10 | Special discards | sarcastic/gentleman/baton transfer and Certain Discard |
 | 11 | Bluffs | immediate unrelated blind-play and clue-target reinterpretation |
@@ -47,3 +47,10 @@ Named H-Group moves are compositions of a smaller set of typed state effects. Th
 8. Use the same selected framework for belief constraints, action availability, priorities, and predictable continuations.
 
 The current simulator is standard five-suit Hanabi. Rules whose only observable trigger exists in a non-standard variant remain unreachable until that variant is represented by `hanabi-core`; they are not guessed from a standard-game state.
+
+Distribution Clues use one shared recognition path for historical interpretation and
+candidate admission. A seating-order schedule compares completion of a known stack
+sequence with and without the intentionally duplicated card. This includes queued
+plays, not just cards playable immediately, and requires an earlier completion
+without inventing missing predecessors. The named interpretation permits the
+purposeful duplication under the [Distribution Clue rule](https://hanabi.github.io/level-8/#the-distribution-clue).

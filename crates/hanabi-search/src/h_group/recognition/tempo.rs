@@ -473,50 +473,8 @@ pub(in crate::h_group) fn apply_positional_effects(
     let pending = &mut *effects.pending;
     let forced_playable = &mut *effects.forced_playable;
     let signals = &mut *effects.signals;
-    if let ObservedEvent::Clued {
-        giver,
-        target,
-        touched,
-        ..
-    } = &entry.event
-    {
-        // Source: https://hanabi.github.io/level-8/#the-distribution-clue
-        if historical_deck_size <= hands.len() {
-            let distributed = touched.iter().copied().find(|card| {
-                context.historical.identity(*card).is_some_and(|identity| {
-                    is_playable_at(stack_heights, identity)
-                        && hands.iter().enumerate().any(|(player, hand)| {
-                            player != target.index()
-                                && hand.iter().copied().any(|other| {
-                                    effects.already_playing.contains(&other)
-                                        && context.historical.identity(other) == Some(identity)
-                                })
-                                && hand
-                                    .iter()
-                                    .filter(|other| {
-                                        effects.already_playing.contains(other)
-                                            && context.historical.identity(**other).is_some_and(
-                                                |known| is_playable_at(stack_heights, known),
-                                            )
-                                    })
-                                    .count()
-                                    >= 2
-                        })
-                })
-            });
-            if let Some(card) = distributed {
-                effects.already_playing.insert(card);
-                push_signal(
-                    signals,
-                    entry,
-                    *giver,
-                    Some(*target),
-                    HGroupMoveKind::DistributionClue,
-                    vec![card],
-                    context.historical.identity(card),
-                );
-            }
-        }
+    if matches!(entry.event, ObservedEvent::Clued { .. }) {
+        crate::h_group::distribution::recognize(context, view, effects);
         return;
     }
     let (player, card, is_misplay) = match &entry.event {

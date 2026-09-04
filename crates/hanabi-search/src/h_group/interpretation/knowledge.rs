@@ -221,6 +221,9 @@ impl<'a> ConventionKnowledgeCompiler<'a> {
 
     /// <https://hanabi.github.io/level-10/#the-gentlemans-discard-gd>
     /// <https://hanabi.github.io/level-10/#the-baton-discard-bd>
+    /// <https://hanabi.github.io/level-8/#the-distribution-clue>
+    /// Distribution intentionally duplicates a queued play, so its exact
+    /// promise must survive ordinary Good Touch duplicate elimination.
     fn apply_transfer_claims(&mut self) {
         for claim in self
             .replay
@@ -236,6 +239,7 @@ impl<'a> ConventionKnowledgeCompiler<'a> {
                             | HGroupMoveKind::GentlemansDiscard
                             | HGroupMoveKind::LayeredGentlemansDiscard
                             | HGroupMoveKind::BatonDiscard
+                            | HGroupMoveKind::DistributionClue
                     )
             })
         {

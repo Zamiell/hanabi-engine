@@ -56,6 +56,7 @@ pub(super) const fn named_interpretation_replaces_ordinary(kind: HGroupMoveKind)
     matches!(
         kind,
         HGroupMoveKind::Ejection
+            | HGroupMoveKind::DistributionClue
             | HGroupMoveKind::UnnecessaryIgnition
             | HGroupMoveKind::Discharge
             | HGroupMoveKind::FiveColorEjection

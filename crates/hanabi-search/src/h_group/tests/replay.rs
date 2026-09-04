@@ -266,6 +266,30 @@ fn fourth_expert_replay_matches_engine() {
 }
 
 #[test]
+fn fifth_replay_distributes_a_queued_green_four() {
+    let fixture = expert_replay_p4v0s1();
+    let state = fixture.state_at_turn(46).expect("legal clue");
+    for player in [1, 3] {
+        let d = LogicalDeductions::new(state.view_for(PlayerId::new(player)).expect("view"))
+            .expect("logical");
+        let replay = replay_h_group(&d, HGroupProfile::Max);
+        assert!(
+            replay
+                .signals
+                .has_at_turn(45, HGroupMoveKind::DistributionClue)
+        );
+    }
+    let state = fixture.state_at_turn(47).expect("green 3 has played");
+    let deductions =
+        LogicalDeductions::new(state.view_for(PlayerId::new(3)).expect("Donald's view"))
+            .expect("valid deductions");
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(41)))
+    );
+}
+
+#[test]
 fn fifth_replay_unnecessary_trash_push_announces_both_plays_at_clue_time() {
     let fixture = expert_replay_p4v0s1();
     let before = fixture.state_at_turn(43).expect("before");
@@ -391,11 +415,11 @@ fn fifth_replay_cathy_draws_for_faster_green_completion() {
     );
 }
 
-// Move 46 onward remains under review; only the confirmed prefix is an oracle.
+// Move 51 onward remains under review; only the confirmed prefix is an oracle.
 #[test]
-fn fifth_expert_replay_agrees_through_move_45() {
+fn fifth_expert_replay_agrees_through_move_50() {
     let mut replay = expert_replay_p4v0s1();
-    replay.actions.truncate(45);
+    replay.actions.truncate(50);
     assert_expert_replay_matches_engine(&replay);
 }
 

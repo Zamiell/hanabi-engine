@@ -1715,28 +1715,9 @@ pub(super) fn advanced_clue_candidates(
         let poke_ignition = all_previously_touched && all_touched_trash && !stalling;
         let distribution = rule_enabled(profile, HGroupRuleId::EndGame)
             && view.deck_size <= view.hands.len()
-            && touched.iter().copied().any(|card| {
-                let Some(identity) = identity_of(view, card) else {
-                    return false;
-                };
-                is_playable_now(view, identity)
-                    && replay.hands.iter().enumerate().any(|(player, other_hand)| {
-                        player != target.index()
-                            && other_hand.iter().copied().any(|other| {
-                                replay.cards.already_playing.contains(&other)
-                                    && identity_of(view, other) == Some(identity)
-                            })
-                            && other_hand
-                                .iter()
-                                .filter(|other| {
-                                    replay.cards.already_playing.contains(other)
-                                        && identity_of(view, **other)
-                                            .is_some_and(|known| is_playable_now(view, known))
-                                })
-                                .count()
-                                >= 2
-                    })
-            });
+            && super::prospective::compiled_prospective_clue(view, profile, target, clue, &touched)
+                .and_then(|compiled| compiled.signal_kinds(view.observer))
+                .is_some_and(|kinds| kinds.contains(&HGroupMoveKind::DistributionClue));
         let classification = if unnecessary_ignition {
             Some((HGroupMoveKind::UnnecessaryIgnition, 360))
         } else if rule_enabled(profile, HGroupRuleId::Ignition)
