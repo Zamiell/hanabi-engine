@@ -320,11 +320,36 @@ fn fifth_replay_draw_distribution_preserves_ambiguous_green_card() {
     no_bonus(&d, &due_play, HGroupProfile::Max);
 }
 
-// Move 43 onward remains under review; only the confirmed prefix is an oracle.
 #[test]
-fn fifth_expert_replay_agrees_through_move_42() {
+fn fifth_replay_cathy_draws_for_faster_green_completion() {
+    let state = expert_replay_p4v0s1()
+        .state_at_turn(42)
+        .expect("legal prefix");
+    let d = LogicalDeductions::new(state.view_for(state.current_player()).expect("Cathy view"))
+        .expect("logical position");
+    let notes = infer_h_group(&d, HGroupProfile::Max);
+    let times = super::super::draw_distribution::completion_times(
+        &d,
+        &notes,
+        HGroupProfile::Max,
+        Card::new(Suit::Green, Rank::Three),
+    );
+    assert_eq!(
+        times,
+        Some((7, 11)),
+        "conditional green completion respects seating order"
+    );
+    assert_eq!(
+        select_h_group_action(&d, HGroupProfile::Max),
+        Some(Action::Discard(CardId::new(26)))
+    );
+}
+
+// Move 44 onward remains under review; only the confirmed prefix is an oracle.
+#[test]
+fn fifth_expert_replay_agrees_through_move_43() {
     let mut replay = expert_replay_p4v0s1();
-    replay.actions.truncate(42);
+    replay.actions.truncate(43);
     assert_expert_replay_matches_engine(&replay);
 }
 
