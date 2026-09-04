@@ -20,7 +20,9 @@ use crate::{
 };
 
 mod action_analysis;
+mod action_preference;
 mod action_schedule;
+mod admission;
 mod bluff;
 mod candidate;
 mod candidate_pipeline;
@@ -39,12 +41,14 @@ mod hypothesis;
 mod identity;
 mod information_value;
 mod interpretation;
+mod interpretation_resolution;
 mod knowledge_effects;
 mod ledger;
 mod model;
 mod outcome;
 mod perspective;
 mod plan;
+mod play_order;
 mod primary;
 mod prospective;
 mod rationality;
@@ -57,6 +61,7 @@ mod transition;
 mod turn_context;
 
 use action_analysis::{CompiledHGroupAction, HGroupActionKind, HGroupActionSet};
+use action_preference::{ActionPreference, TerminalPlanProgress};
 use action_schedule::{ActionSchedule, StackTimeline};
 use bluff::{
     BluffTargetKind, bluff_play_connects, bluff_target_kind_at, bluff_target_order_is_legal,
@@ -74,8 +79,8 @@ pub use coverage::{H_GROUP_DOCUMENTATION_SECTIONS, HGroupDocumentationSection};
 pub(crate) use decision::analyze_h_group_convention;
 pub use decision::infer_h_group;
 use decision::{
-    h_group_predictable_action, infer_h_group_from_replay, ordered_playable_cards,
-    positional_discard_candidate, positional_discard_is_valid_snapshot, preferred_due_play_card,
+    h_group_predictable_action, infer_h_group_from_replay, positional_discard_candidate,
+    positional_discard_is_valid_snapshot, preferred_due_play_card,
 };
 #[cfg(test)]
 use decision::{ordered_h_group_actions, select_h_group_action};
@@ -117,9 +122,13 @@ pub use model::{
     HGroupConnectionKind, HGroupConnectionPromise, HGroupIdentityStatus, HGroupInferences,
     HGroupPhase, HGroupPlayObligation, HGroupSaveKind, HGroupSignal,
 };
-use outcome::{ActionCommitment, CluedCardSuperposition, LineOutcome};
+use outcome::{
+    ActionCommitment, CluedCardSuperposition, LineOutcome, RecipientCardConsequence,
+    RecipientCardDisposition,
+};
 use perspective::{PerspectiveProjector, ProspectiveTransition};
 use plan::{ConditionalPlan, PlanFrontier, ProjectedAction, ProjectedConsequences};
+use play_order::ordered_playable_cards;
 use primary::{ClueInterpretationPlan, PrimaryClueInputs};
 #[cfg(test)]
 use prospective::prospective_clue_hazard;

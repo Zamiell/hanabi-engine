@@ -6,6 +6,7 @@ use super::{
     identity_of, is_playable_at, is_trash_at, next_player, protected_cards, push_signal,
     same_turn_signal, was_clued_before,
 };
+use crate::h_group::interpretation_resolution::supersedes;
 use crate::h_group::{FixObligations, ProvenancedCardSet};
 
 #[allow(clippy::too_many_lines)]
@@ -237,16 +238,11 @@ pub(in crate::h_group) fn apply_ignition_effects(
     // provisional Ejection/Discharge scheduled by an earlier rule pass is an
     // apparent interpretation, not an additional play layered on top of the
     // Ignition line.
-    for superseded in effects.signals.iter().filter(|signal| {
-        signal.turn == entry.turn
-            && matches!(
-                signal.kind,
-                HGroupMoveKind::UnknownTrashDischarge
-                    | HGroupMoveKind::UnknownDupeDischarge
-                    | HGroupMoveKind::OutOfPositionDischarge
-                    | HGroupMoveKind::StackedDischarge
-            )
-    }) {
+    for superseded in effects
+        .signals
+        .iter()
+        .filter(|signal| signal.turn == entry.turn && supersedes(kind, signal.kind))
+    {
         effects
             .forced_playable
             .retain(|card| !superseded.cards.contains(card));

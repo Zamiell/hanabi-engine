@@ -223,6 +223,14 @@ pub struct HGroupInferences {
     pub chops: Vec<Option<CardId>>,
     /// Own cards promised playable now by an H-Group interpretation.
     pub playable_now: Vec<CardId>,
+    /// Decision-facing order constraints derived by `ActionSchedule`. This is
+    /// intentionally not reconstructed from historical signals by consumers.
+    pub(crate) priority_plays: Vec<CardId>,
+    /// Demonstrated connection steps and completed focuses are lifecycle
+    /// projections owned by `ActionSchedule`, not deductions reconstructed
+    /// from the signal log by action selection.
+    pub(crate) demonstrated_connections: Vec<CardId>,
+    pub(crate) completed_connection_focuses: Vec<CardId>,
     /// An immediate Prompt or Finesse obligation for the acting player.
     pub connection: Option<HGroupConnection>,
     /// Convention-narrowed notes for cards in the observer's own hand.

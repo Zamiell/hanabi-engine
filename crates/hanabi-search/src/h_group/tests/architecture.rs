@@ -57,6 +57,8 @@ fn every_semantic_move_has_a_production_implementation_reference() {
         .0;
     let production = [
         root,
+        include_str!("../admission.rs"),
+        include_str!("../action_preference.rs"),
         include_str!("../action_schedule.rs"),
         include_str!("../bluff.rs"),
         include_str!("../candidate.rs"),
@@ -71,12 +73,14 @@ fn every_semantic_move_has_a_production_implementation_reference() {
         include_str!("../identity.rs"),
         include_str!("../information_value.rs"),
         include_str!("../interpretation.rs"),
+        include_str!("../interpretation_resolution.rs"),
         include_str!("../interpretation/candidate_validation.rs"),
         include_str!("../interpretation/knowledge.rs"),
         include_str!("../knowledge_effects.rs"),
         include_str!("../model.rs"),
         include_str!("../outcome.rs"),
         include_str!("../perspective.rs"),
+        include_str!("../play_order.rs"),
         include_str!("../prospective.rs"),
         include_str!("../recognition.rs"),
         include_str!("../recognition/advanced.rs"),
@@ -119,6 +123,39 @@ fn every_semantic_move_has_a_production_implementation_reference() {
     assert!(
         include_str!("../strategic_value.rs")
             .contains("https://hanabi.github.io/level-10/#directness-principle")
+    );
+}
+
+#[test]
+fn semantic_lifecycle_has_single_module_owners() {
+    let decision = include_str!("../decision.rs");
+    let interpretation = include_str!("../interpretation.rs");
+    let extras = include_str!("../recognition/extras.rs");
+    let late_game = include_str!("../recognition/late_game.rs");
+
+    assert!(
+        !decision.contains("HGroupMoveKind::FixClue"),
+        "Fix lifecycle belongs to ActionSchedule, not decision-side signal scans"
+    );
+    assert!(
+        !decision.contains("HGroupMoveKind::SuboptimalConnection"),
+        "completed connection lifecycle belongs to ActionSchedule"
+    );
+    assert!(
+        !interpretation.contains("fn good_touch("),
+        "Good Touch admission belongs to admission.rs"
+    );
+    assert!(
+        !interpretation.contains("fn advanced_kind_replaces_ordinary_play("),
+        "interpretation precedence belongs to interpretation_resolution.rs"
+    );
+    assert!(
+        extras.contains("is_ignition(signal.kind)"),
+        "recognizers must consume the canonical Ignition family"
+    );
+    assert!(
+        late_game.contains("supersedes(kind, signal.kind)"),
+        "recognizers must consume the canonical conflict relation"
     );
 }
 

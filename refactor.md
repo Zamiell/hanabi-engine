@@ -29,6 +29,64 @@ preserve. Commit hashes refer to this repository's Git history.
 - Caches are scoped to one immutable position or exact solve. They may reuse a
   pure semantic result, but may not become a second mutable convention state.
 
+## 2026-09-03: behavioral outcomes and centralized action semantics
+
+### Why
+
+The fourth expert replay exposed several related architectural leaks. Good
+Touch validation counted physical card identities even when the recipient
+would treat a touched card as known trash or protection rather than a play.
+Ignition, Discharge, Charm, and ordinary clues resolved conflicts in several
+recognizers with slightly different precedence rules. Decision code also
+reconstructed Fix age, demonstrated connection layers, completed connection
+focuses, and transient play ordering by scanning the signal journal. Finally,
+terminal-plan progress was encoded directly into the same numeric priority as
+ordinary strategic comparison, obscuring which dimension actually decided an
+action.
+
+These were not isolated scoring mistakes. They allowed the same compiled clue
+or connection history to acquire different meanings depending on which
+consumer inspected it.
+
+### Changes
+
+- Added typed `RecipientCardConsequence` values to `LineOutcome`. Each affected
+  card now records an observable disposition: play now, play after a
+  connection, known trash, or protected. Good Touch admission and strategic
+  team coverage consume these behavioral consequences instead of inferring
+  intent from physical identity counts.
+- Moved Good Touch admission into `admission.rs`, interpretation conflict rules
+  into `interpretation_resolution.rs`, final action ordering into
+  `action_preference.rs`, and playable-card ordering into `play_order.rs`.
+  This reduces the semantic responsibilities of the already-large
+  `interpretation.rs` and `decision.rs` modules.
+- Extended `ActionSchedule` to derive historical Fixes, the preferred rank
+  focus, demonstrated connection layers, and completed connection focuses once
+  from the event journal. `HGroupInferences` carries those projections to
+  consumers; decision code no longer replays the journal for lifecycle
+  answers.
+- Added a canonical interpretation conflict relation. Ignition-family checks
+  and late-game named-move replacement now share the same precedence rules.
+- Added `ActionPreference` and `TerminalPlanProgress`. Policy tier, terminal
+  plan advancement, and within-category comparison are separate named fields;
+  the legacy scalar remains only as a boundary encoding for the generic
+  planner.
+- Added architectural tests that prevent lifecycle scans, Good Touch logic,
+  and interpretation precedence from drifting back into consumer modules, plus
+  an outcome test proving that team coverage follows recipient behavior.
+
+### Preserve
+
+Good Touch is a statement about what the recipient is expected to do with a
+card, not merely how many physical copies of an identity are visible. Add new
+recipient effects as typed dispositions and make all downstream metrics consume
+the compiled outcome. Interpretation families and supersession belong in the
+central conflict relation, not in recognizer-local conditionals. Signal
+journals remain provenance; lifecycle queries must be materialized by
+`ActionSchedule` rather than reconstructed in `decision.rs`. Mandatory policy,
+terminal progress, and ordinary utility must stay separate dimensions even
+when an integration boundary requires a numeric priority.
+
 ## 2026-08-31: prefix replay memoization and bounded world validation
 
 ### Why

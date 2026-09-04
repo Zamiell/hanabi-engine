@@ -1,8 +1,8 @@
-use hanabi_core::{Card, CardId, PlayerId, PlayerView};
+use hanabi_core::{Card, CardId, Clue, PlayerId, PlayerView, Rank};
 
 use super::{
-    CardSet, HGroupState, IdentityClaims, IdentitySet, PromiseId, identity_of, is_playable_at,
-    next_player,
+    CardSet, HGroupConnection, HGroupMoveKind, HGroupState, IdentityClaims, IdentitySet, PromiseId,
+    identity_of, is_playable_at, next_player,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -38,106 +38,35 @@ pub(super) struct ActionObligation {
 pub(super) struct ActionSchedule {
     obligations: Vec<ActionObligation>,
     blocked_cards: CardSet,
+    historical_fixes: Vec<(CardId, [u8; 5])>,
+    latest_rank_focus: Option<(CardId, Vec<CardId>)>,
+    demonstrated_layers: Vec<(CardId, Card)>,
+    suboptimal_connection_focuses: CardSet,
 }
 
 impl ActionSchedule {
     pub(super) fn from_replay(view: &PlayerView, replay: &HGroupState) -> Self {
-        let claims = IdentityClaims::new(view, replay);
-        let mut obligations = Vec::new();
-        let mut scheduled = CardSet::default();
-
-        for connection in replay
-            .pending_connections
+        let (obligations, blocked_cards) = scheduled_actions(view, replay);
+        let historical_fixes = historical_fixes(replay);
+        let latest_rank_focus = latest_rank_focus(view, replay);
+        let demonstrated_layers = demonstrated_layers(view, replay);
+        let suboptimal_connection_focuses = replay
+            .clues
             .iter()
-            .filter(|connection| replay.pending_connections.is_active(connection))
-            .filter(|connection| {
-                !replay.is_exact_transfer(
-                    connection
-                        .cards
-                        .first()
-                        .copied()
-                        .unwrap_or(connection.focus),
-                    connection.expected,
-                )
+            .filter(|clue| {
+                replay
+                    .signals
+                    .has_at_turn(clue.turn, HGroupMoveKind::SuboptimalConnection)
             })
-        {
-            let Some(card) = connection.cards.first().copied() else {
-                continue;
-            };
-            if scheduled.insert(card) {
-                obligations.push(ActionObligation {
-                    actor: connection.actor,
-                    card,
-                    action: ScheduledAction::Play,
-                    identities: IdentitySet::singleton(connection.expected),
-                    promised_identity: Some(connection.expected),
-                    source: ObligationSource::Connection(connection.promise),
-                });
-            }
-        }
-        for (cards, source) in [
-            (&replay.cards.forced_playable, ObligationSource::ForcedPlay),
-            (&replay.cards.already_playing, ObligationSource::DirectPlay),
-        ] {
-            for card in cards {
-                let Some(actor) = owner_of(replay, *card) else {
-                    continue;
-                };
-                if scheduled.insert(*card) {
-                    let identities = claims
-                        .exact_identity(*card)
-                        .map_or_else(IdentitySet::default, IdentitySet::singleton);
-                    obligations.push(ActionObligation {
-                        actor,
-                        card: *card,
-                        action: ScheduledAction::Play,
-                        identities,
-                        promised_identity: None,
-                        source,
-                    });
-                }
-            }
-        }
-        for card in &replay.cards.discard_now {
-            let Some(actor) = owner_of(replay, *card) else {
-                continue;
-            };
-            obligations.push(ActionObligation {
-                actor,
-                card: *card,
-                action: ScheduledAction::Discard,
-                identities: IdentitySet::default(),
-                promised_identity: None,
-                source: ObligationSource::RequiredDiscard,
-            });
-        }
-        let observer = view.observer;
-        let blocked_cards = replay
-            .pending_connections
-            .iter()
-            .filter(|pending| {
-                pending
-                    .cards
-                    .first()
-                    .is_none_or(|card| !replay.is_exact_transfer(*card, pending.expected))
-            })
-            .flat_map(|pending| {
-                let blocked_candidates = if pending.actor != observer {
-                    &[][..]
-                } else if replay.pending_connections.is_active(pending) {
-                    pending.cards.get(1..).unwrap_or_default()
-                } else {
-                    pending.cards.as_slice()
-                };
-                blocked_candidates
-                    .iter()
-                    .copied()
-                    .chain(core::iter::once(pending.focus))
-            })
+            .map(|clue| clue.focus)
             .collect();
         Self {
             obligations,
             blocked_cards,
+            historical_fixes,
+            latest_rank_focus,
+            demonstrated_layers,
+            suboptimal_connection_focuses,
         }
     }
 
@@ -152,6 +81,51 @@ impl ActionSchedule {
     /// consumers must not rebuild connection suffix semantics themselves.
     pub(super) const fn blocked_cards(&self) -> &CardSet {
         &self.blocked_cards
+    }
+
+    /// Whether a historical Fix named a card before every identity in its
+    /// current domain could legally play. The schedule owns this lifecycle
+    /// query so decision code does not reconstruct it from raw signals.
+    pub(super) fn fix_predated_playability(&self, card: CardId, identities: IdentitySet) -> bool {
+        self.historical_fixes
+            .iter()
+            .rev()
+            .find(|(fixed, _)| *fixed == card)
+            .is_some_and(|(_, stack_heights)| {
+                identities.iter().all(|identity| {
+                    usize::from(identity.rank.number())
+                        > usize::from(stack_heights[identity.suit.index()]) + 1
+                })
+            })
+    }
+
+    /// The transient rank-clue focus that must resolve before other cards
+    /// made playable by the same accounting elimination.
+    pub(super) fn preferred_rank_focus(&self, playable: &[CardId]) -> Option<CardId> {
+        self.latest_rank_focus
+            .as_ref()
+            .filter(|(_, touched)| {
+                touched
+                    .iter()
+                    .filter(|card| playable.contains(card))
+                    .take(2)
+                    .count()
+                    >= 2
+            })
+            .map(|(focus, _)| *focus)
+    }
+
+    pub(super) fn connection_layer_demonstrated(&self, connection: HGroupConnection) -> bool {
+        self.demonstrated_layers
+            .contains(&(connection.card, connection.identity))
+    }
+
+    pub(super) fn completed_connection_focuses(&self, playable: &[CardId]) -> CardSet {
+        self.suboptimal_connection_focuses
+            .iter()
+            .copied()
+            .filter(|card| playable.contains(card))
+            .collect()
     }
 
     pub(super) fn required_discards_for(
@@ -188,6 +162,167 @@ impl ActionSchedule {
         }
         heights
     }
+}
+
+fn scheduled_actions(view: &PlayerView, replay: &HGroupState) -> (Vec<ActionObligation>, CardSet) {
+    let claims = IdentityClaims::new(view, replay);
+    let mut obligations = Vec::new();
+    let mut scheduled = CardSet::default();
+
+    for connection in replay
+        .pending_connections
+        .iter()
+        .filter(|connection| replay.pending_connections.is_active(connection))
+        .filter(|connection| {
+            !replay.is_exact_transfer(
+                connection
+                    .cards
+                    .first()
+                    .copied()
+                    .unwrap_or(connection.focus),
+                connection.expected,
+            )
+        })
+    {
+        let Some(card) = connection.cards.first().copied() else {
+            continue;
+        };
+        if scheduled.insert(card) {
+            obligations.push(ActionObligation {
+                actor: connection.actor,
+                card,
+                action: ScheduledAction::Play,
+                identities: IdentitySet::singleton(connection.expected),
+                promised_identity: Some(connection.expected),
+                source: ObligationSource::Connection(connection.promise),
+            });
+        }
+    }
+    for (cards, source) in [
+        (&replay.cards.forced_playable, ObligationSource::ForcedPlay),
+        (&replay.cards.already_playing, ObligationSource::DirectPlay),
+    ] {
+        for card in cards {
+            let Some(actor) = owner_of(replay, *card) else {
+                continue;
+            };
+            if scheduled.insert(*card) {
+                let identities = claims
+                    .exact_identity(*card)
+                    .map_or_else(IdentitySet::default, IdentitySet::singleton);
+                obligations.push(ActionObligation {
+                    actor,
+                    card: *card,
+                    action: ScheduledAction::Play,
+                    identities,
+                    promised_identity: None,
+                    source,
+                });
+            }
+        }
+    }
+    for card in &replay.cards.discard_now {
+        let Some(actor) = owner_of(replay, *card) else {
+            continue;
+        };
+        obligations.push(ActionObligation {
+            actor,
+            card: *card,
+            action: ScheduledAction::Discard,
+            identities: IdentitySet::default(),
+            promised_identity: None,
+            source: ObligationSource::RequiredDiscard,
+        });
+    }
+    let observer = view.observer;
+    let blocked_cards = replay
+        .pending_connections
+        .iter()
+        .filter(|pending| {
+            pending
+                .cards
+                .first()
+                .is_none_or(|card| !replay.is_exact_transfer(*card, pending.expected))
+        })
+        .flat_map(|pending| {
+            let blocked_candidates = if pending.actor != observer {
+                &[][..]
+            } else if replay.pending_connections.is_active(pending) {
+                pending.cards.get(1..).unwrap_or_default()
+            } else {
+                pending.cards.as_slice()
+            };
+            blocked_candidates
+                .iter()
+                .copied()
+                .chain(core::iter::once(pending.focus))
+        })
+        .collect();
+    (obligations, blocked_cards)
+}
+
+fn historical_fixes(replay: &HGroupState) -> Vec<(CardId, [u8; 5])> {
+    replay
+        .signals
+        .of_kind(HGroupMoveKind::FixClue)
+        .flat_map(|signal| {
+            replay
+                .clues
+                .iter()
+                .find(|clue| clue.turn == signal.turn)
+                .into_iter()
+                .flat_map(move |clue| {
+                    signal
+                        .cards
+                        .iter()
+                        .copied()
+                        .map(move |card| (card, clue.stack_heights))
+                })
+        })
+        .collect()
+}
+
+fn latest_rank_focus(view: &PlayerView, replay: &HGroupState) -> Option<(CardId, Vec<CardId>)> {
+    replay.clues.last().and_then(|clue| {
+        (clue.target == view.observer && matches!(clue.clue, Clue::Rank(rank) if rank != Rank::One))
+            .then(|| (clue.focus, clue.touched.clone()))
+    })
+}
+
+fn demonstrated_layers(view: &PlayerView, replay: &HGroupState) -> Vec<(CardId, Card)> {
+    let mut demonstrated = Vec::new();
+    for layered in replay
+        .signals
+        .of_kind(HGroupMoveKind::LayeredFinesse)
+        .filter(|signal| signal.target == Some(view.observer))
+    {
+        let Some(identity) = layered.identity else {
+            continue;
+        };
+        let predecessor_played = replay.signals.iter().any(|predecessor| {
+            predecessor.turn == layered.turn
+                && predecessor.target == layered.target
+                && predecessor.identity.is_some_and(|candidate| {
+                    candidate.suit == identity.suit
+                        && candidate.rank.number() < identity.rank.number()
+                })
+                && predecessor.cards.iter().any(|candidate| {
+                    view.play_stacks
+                        .iter()
+                        .flatten()
+                        .any(|(played, _)| played == candidate)
+                })
+        });
+        demonstrated.extend(
+            layered
+                .cards
+                .iter()
+                .copied()
+                .filter(|card| layered.cards.first() != Some(card) || predecessor_played)
+                .map(|card| (card, identity)),
+        );
+    }
+    demonstrated
 }
 
 fn owner_of(replay: &HGroupState, card: CardId) -> Option<PlayerId> {

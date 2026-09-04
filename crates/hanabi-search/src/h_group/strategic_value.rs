@@ -2,9 +2,9 @@ use super::{
     Action, ActionCommitment, Card, CardId, CluedCardSuperposition, CompiledClueAction,
     CompiledObserverProjection, CompiledProspectiveClue, EpistemicState, HGroupConnection,
     HGroupMoveKind, HGroupProfile, HGroupRuleId, IdentitySet, LineOutcome, LogicalDeductions,
-    PlayerId, PlayerView, Rank, card_is_trash, compiled_baseline_team, compiled_prospective_clue,
-    identity_of, is_eventually_useful, is_playable_at, is_playable_now,
-    prospective_team_clue_signal_kinds, rule_enabled,
+    PlayerId, PlayerView, Rank, RecipientCardConsequence, RecipientCardDisposition, card_is_trash,
+    compiled_baseline_team, compiled_prospective_clue, identity_of, is_eventually_useful,
+    is_playable_at, is_playable_now, prospective_team_clue_signal_kinds, rule_enabled,
 };
 
 const TEAM_ACTION_COVERAGE_PENALTY: u16 = 80;
@@ -65,13 +65,10 @@ pub(super) fn apply_strategic_clue_values(
         .iter()
         .map(|value| {
             value.as_ref().is_some_and(|value| {
-                !value.public_actions.is_empty()
-                    && value.public_actions.iter().all(|commitment| {
-                        !commitment.identities.is_empty()
-                            && commitment
-                                .identities
-                                .iter()
-                                .all(|identity| is_playable_now(source, identity))
+                let mut actions = value.play_consequences().peekable();
+                actions.peek().is_some()
+                    && actions.all(|consequence| {
+                        consequence.disposition == RecipientCardDisposition::PlayNow
                     })
             })
         })
@@ -217,10 +214,10 @@ pub(super) fn apply_strategic_clue_values(
             clue_establishes_actor_recognized_action(source, profile, candidate.action);
         let giver_commitments =
             baselines[source.observer.index()].closed_public_commitments(source);
-        let continues_established_suit = value.public_actions.iter().any(|commitment| {
-            let identity = commitment.identities.iter().next();
+        let continues_established_suit = value.play_consequences().any(|consequence| {
+            let identity = consequence.identities.iter().next();
             identity.is_some_and(|identity| {
-                commitment.identities.len() == 1
+                consequence.identities.len() == 1
                     && usize::from(identity.rank.number())
                         > source.play_stacks[identity.suit.index()].len() + 1
                     && ((source.play_stacks[identity.suit.index()].len() + 1)
@@ -377,11 +374,11 @@ fn secured_critical_chop_deadline_value(
             if identity.rank != Rank::Five && !super::is_critical(source, identity) {
                 return None;
             }
-            let protected = value.protected_cards.contains(&chop);
-            let occupied = value.public_actions.iter().any(|commitment| {
-                commitment.owner == actor
-                    && !commitment.identities.is_empty()
-                    && commitment
+            let protected = value.protects(chop);
+            let occupied = value.play_consequences().any(|consequence| {
+                consequence.owner == actor
+                    && !consequence.identities.is_empty()
+                    && consequence
                         .identities
                         .iter()
                         .all(|identity| is_playable_at(stack_heights, identity))
@@ -1087,6 +1084,45 @@ fn clue_line_value(
     giver_public_actions
         .sort_unstable_by_key(|commitment| (commitment.card.index(), commitment.owner.index()));
     giver_public_actions.dedup();
+    value
+        .recipient_consequences
+        .extend(value.public_actions.iter().map(|commitment| {
+            RecipientCardConsequence {
+                card: commitment.card,
+                owner: commitment.owner,
+                identities: commitment.identities,
+                disposition: if !commitment.identities.is_empty()
+                    && commitment
+                        .identities
+                        .iter()
+                        .all(|identity| is_playable_now(source, identity))
+                {
+                    RecipientCardDisposition::PlayNow
+                } else {
+                    RecipientCardDisposition::PlayAfterConnection
+                },
+            }
+        }));
+    value
+        .recipient_consequences
+        .extend(value.known_trash.iter().filter_map(|card| {
+            card_owner(source, *card).map(|owner| RecipientCardConsequence {
+                card: *card,
+                owner,
+                identities: IdentitySet::default(),
+                disposition: RecipientCardDisposition::KnownTrash,
+            })
+        }));
+    value
+        .recipient_consequences
+        .extend(value.protected_cards.iter().filter_map(|card| {
+            card_owner(source, *card).map(|owner| RecipientCardConsequence {
+                card: *card,
+                owner,
+                identities: IdentitySet::default(),
+                disposition: RecipientCardDisposition::Protected,
+            })
+        }));
     value.action_coverage = giver_public_actions.len();
     if let Some((action_count, connection_steps)) = named_line {
         value.convention_action_count = Some(action_count);

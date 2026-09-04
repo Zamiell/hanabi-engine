@@ -1,6 +1,8 @@
 use crate::ConventionPolicyTier;
 use hanabi_core::{Action, PlayerId};
 
+use super::ActionPreference;
+
 /// Semantic role assigned to an action before policy ordering is applied.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum HGroupActionKind {
@@ -23,6 +25,7 @@ pub(super) struct CompiledHGroupAction {
     pub(super) kind: HGroupActionKind,
     pub(super) policy_tier: ConventionPolicyTier,
     pub(super) priority: i32,
+    pub(super) preference: ActionPreference,
 }
 
 /// Complete convention decision for one observer-relative position.

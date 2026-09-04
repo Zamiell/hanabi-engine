@@ -6,6 +6,7 @@ use super::{
     protected_cards, push_signal, same_turn_signal, was_clued_before,
 };
 use crate::h_group::EffectSource;
+use crate::h_group::interpretation_resolution::is_ignition;
 
 #[derive(Clone, Debug)]
 struct LieComponentPlan {
@@ -813,16 +814,10 @@ pub(in crate::h_group) fn apply_extra_effects(
                         .identity(*card)
                         .is_some_and(|identity| is_trash_at(context.before.stack_heights, identity))
                 });
-            let ignition_already_recognized = effects.signals.iter().any(|signal| {
-                signal.turn == entry.turn
-                    && matches!(
-                        signal.kind,
-                        HGroupMoveKind::ReplayDoubleIgnition
-                            | HGroupMoveKind::TrashDoubleIgnition
-                            | HGroupMoveKind::PokeDoubleIgnition
-                            | HGroupMoveKind::ChopMoveIgnition
-                    )
-            });
+            let ignition_already_recognized = effects
+                .signals
+                .iter()
+                .any(|signal| signal.turn == entry.turn && is_ignition(signal.kind));
             let unknown_trash_charm = !ignition_already_recognized
                 && non_focus_all_trash
                 && effects.signals.iter().any(|signal| {

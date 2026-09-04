@@ -22,6 +22,27 @@ pub(super) struct CluedCardSuperposition {
     pub(super) identities: IdentitySet,
 }
 
+/// What a clue causes one recipient to do with a card. This is deliberately
+/// behavioral: convention principles such as Good Touch care whether a player
+/// will try to play a duplicate, not merely whether two physical cards share
+/// an identity in the giver's view.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RecipientCardDisposition {
+    PlayNow,
+    PlayAfterConnection,
+    KnownTrash,
+    Protected,
+}
+
+/// One causal, owner-relative consequence of a compiled clue.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct RecipientCardConsequence {
+    pub(super) card: CardId,
+    pub(super) owner: PlayerId,
+    pub(super) identities: IdentitySet,
+    pub(super) disposition: RecipientCardDisposition,
+}
+
 impl ActionCommitment {
     pub(super) const fn exact(card: CardId, owner: PlayerId, identity: Card) -> Self {
         Self {
@@ -44,6 +65,9 @@ pub(super) struct LineOutcome {
     pub(super) clued_superpositions: Vec<CluedCardSuperposition>,
     pub(super) protected_cards: Vec<CardId>,
     pub(super) known_trash: Vec<CardId>,
+    /// Canonical behavioral consequences. Aggregate metrics are derived from
+    /// this collection instead of separately reinterpreting card identities.
+    pub(super) recipient_consequences: Vec<RecipientCardConsequence>,
     pub(super) new_connections: usize,
     /// Number of actions in the line as interpreted by the clue recipient.
     /// Other observer projections remain useful for owner knowledge, but must
@@ -58,6 +82,22 @@ pub(super) struct LineOutcome {
 }
 
 impl LineOutcome {
+    pub(super) fn play_consequences(&self) -> impl Iterator<Item = &RecipientCardConsequence> {
+        self.recipient_consequences.iter().filter(|consequence| {
+            matches!(
+                consequence.disposition,
+                RecipientCardDisposition::PlayNow | RecipientCardDisposition::PlayAfterConnection
+            )
+        })
+    }
+
+    pub(super) fn protects(&self, card: CardId) -> bool {
+        self.recipient_consequences.iter().any(|consequence| {
+            consequence.card == card
+                && consequence.disposition == RecipientCardDisposition::Protected
+        })
+    }
+
     pub(super) fn normalize(&mut self) {
         let key =
             |commitment: &ActionCommitment| (commitment.card.index(), commitment.owner.index());
@@ -73,13 +113,21 @@ impl LineOutcome {
         self.protected_cards.dedup();
         self.known_trash.sort_unstable_by_key(|card| card.index());
         self.known_trash.dedup();
+        self.recipient_consequences
+            .sort_unstable_by_key(|consequence| {
+                (
+                    consequence.owner.index(),
+                    consequence.card.index(),
+                    consequence.disposition as u8,
+                )
+            });
+        self.recipient_consequences.dedup();
     }
 
     pub(super) fn covered_players(&self) -> usize {
         let mut players = self
-            .public_actions
-            .iter()
-            .map(|commitment| commitment.owner)
+            .play_consequences()
+            .map(|consequence| consequence.owner)
             .collect::<Vec<_>>();
         players.sort_unstable_by_key(|player| player.index());
         players.dedup();
@@ -87,11 +135,10 @@ impl LineOutcome {
     }
 
     pub(super) fn first_action_distance(&self, current: PlayerId, player_count: usize) -> usize {
-        self.public_actions
-            .iter()
-            .map(|commitment| {
+        self.play_consequences()
+            .map(|consequence| {
                 let distance =
-                    (commitment.owner.index() + player_count - current.index()) % player_count;
+                    (consequence.owner.index() + player_count - current.index()) % player_count;
                 if distance == 0 {
                     player_count
                 } else {
@@ -136,5 +183,32 @@ mod tests {
 
         assert!(!direct.has_same_direct_outcome(&ambiguous));
         assert!(direct.has_same_direct_outcome(&direct.clone()));
+    }
+
+    #[test]
+    fn behavioral_consequences_drive_team_coverage() {
+        let playing = PlayerId::new(1);
+        let protected = PlayerId::new(2);
+        let outcome = LineOutcome {
+            recipient_consequences: vec![
+                RecipientCardConsequence {
+                    card: CardId::new(1),
+                    owner: playing,
+                    identities: IdentitySet::singleton(Card::new(Suit::Red, Rank::One)),
+                    disposition: RecipientCardDisposition::PlayNow,
+                },
+                RecipientCardConsequence {
+                    card: CardId::new(2),
+                    owner: protected,
+                    identities: IdentitySet::singleton(Card::new(Suit::Blue, Rank::Five)),
+                    disposition: RecipientCardDisposition::Protected,
+                },
+            ],
+            ..LineOutcome::default()
+        };
+
+        assert_eq!(outcome.covered_players(), 1);
+        assert_eq!(outcome.first_action_distance(PlayerId::new(0), 4), 1);
+        assert!(outcome.protects(CardId::new(2)));
     }
 }
