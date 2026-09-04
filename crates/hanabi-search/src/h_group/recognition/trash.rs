@@ -63,8 +63,14 @@ pub(in crate::h_group) fn apply_trash_effects(
             ..
         } if !touched.is_empty()
             && touched.iter().all(|card| {
+                let identities =
+                    IdentitySet::from_mask(context.after.facts[card.index()].identity_mask());
                 identity_of(view, *card)
                     .is_some_and(|identity| is_trash_at(stack_heights, identity))
+                    || !identities.is_empty()
+                        && identities
+                            .iter()
+                            .all(|identity| is_trash_at(stack_heights, identity))
             }) =>
         {
             let hand = &hands[target.index()];
@@ -84,16 +90,14 @@ pub(in crate::h_group) fn apply_trash_effects(
                 effects.invisibly_clued,
                 effects.chop_moved,
             );
-            let focus = touched
-                .iter()
-                .filter_map(|card| {
-                    hand.iter()
-                        .position(|candidate| candidate == card)
-                        .map(|p| (p, *card))
-                })
-                .max_by_key(|(position, _)| *position)
-                .map(|(_, card)| card);
-            if let Some(focus) = focus.filter(|focus| chop(hand, &gotten_before) == Some(*focus)) {
+            let last_touch = hand.iter().rposition(|card| touched.contains(card));
+            let focus = chop(hand, &gotten_before).filter(|card| touched.contains(card));
+            let no_intervening_chop_move = last_touch.is_some_and(|last| {
+                hand[..=last]
+                    .iter()
+                    .all(|card| gotten_before.contains(card) || touched.contains(card))
+            });
+            if let Some(focus) = focus.filter(|_| no_intervening_chop_move) {
                 // A known-trash clue is a Trash Push only when the trash
                 // itself is on chop. Off-chop trash retains the lower-level
                 // Trash Chop Move meaning and moves every intervening card.
@@ -109,9 +113,24 @@ pub(in crate::h_group) fn apply_trash_effects(
                     vec![focus],
                     identity_of(view, focus),
                 );
-                if let Some(position) = hand.iter().position(|card| *card == focus) {
-                    if let Some(pushed) = hand.get(position + 1).copied() {
+                if let Some(position) = last_touch {
+                    if let Some(pushed) = hand[position + 1..]
+                        .iter()
+                        .copied()
+                        .find(|card| !gotten_before.contains(card))
+                    {
                         effects.chop_moved.insert(pushed);
+                        if touched.iter().all(|card| {
+                            IdentitySet::from_mask(
+                                context.after.facts[card.index()].identity_mask(),
+                            )
+                            .iter()
+                            .all(|identity| is_trash_at(stack_heights, identity))
+                        }) && identity_of(view, pushed)
+                            .is_none_or(|identity| is_playable_at(stack_heights, identity))
+                        {
+                            effects.forced_playable.insert(pushed);
+                        }
                     }
                 }
             }

@@ -1469,6 +1469,14 @@ pub(super) fn advanced_clue_candidates(
             })
             .count()
             >= 2;
+        let unnecessary_ignition = rule_enabled(profile, HGroupRuleId::UnnecessaryMoves)
+            && !identities.is_empty()
+            && identities
+                .iter()
+                .all(|identity| !is_eventually_useful(view, *identity))
+            && super::prospective::compiled_prospective_clue(view, profile, target, clue, &touched)
+                .and_then(|compiled| compiled.signal_kinds(view.observer))
+                .is_some_and(|kinds| kinds.contains(&HGroupMoveKind::UnnecessaryIgnition));
         let discharge_playable = finesse_position(
             &view.hands[ejection_actor.index()],
             &replay.cards.explicitly_clued,
@@ -1479,6 +1487,7 @@ pub(super) fn advanced_clue_candidates(
         if rule_enabled(profile, HGroupRuleId::EjectionsAndDischarges)
             && unknown_discharge
             && !discharge_playable
+            && !unnecessary_ignition
             && !(rule_enabled(profile, HGroupRuleId::Ignition)
                 && trash_ignition
                 && double_ignition_available)
@@ -1728,7 +1737,9 @@ pub(super) fn advanced_clue_candidates(
                                 >= 2
                     })
             });
-        let classification = if rule_enabled(profile, HGroupRuleId::Ignition)
+        let classification = if unnecessary_ignition {
+            Some((HGroupMoveKind::UnnecessaryIgnition, 360))
+        } else if rule_enabled(profile, HGroupRuleId::Ignition)
             && (replay_ignition || poke_ignition || trash_ignition)
             && double_ignition_available
         {
@@ -2019,6 +2030,7 @@ pub(super) fn advanced_clue_candidates(
         let efficiency = if matches!(
             kind,
             HGroupMoveKind::ReplayDoubleIgnition
+                | HGroupMoveKind::UnnecessaryIgnition
                 | HGroupMoveKind::TrashDoubleIgnition
                 | HGroupMoveKind::PokeDoubleIgnition
                 | HGroupMoveKind::ChopMoveIgnition

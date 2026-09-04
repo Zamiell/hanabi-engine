@@ -131,7 +131,7 @@ impl CompiledProspectiveClue {
         self.team.projection(observer)
     }
 
-    fn signal_kinds(&self, observer: PlayerId) -> Option<Vec<HGroupMoveKind>> {
+    pub(super) fn signal_kinds(&self, observer: PlayerId) -> Option<Vec<HGroupMoveKind>> {
         let projection = self.projection(observer)?;
         Some(
             projection

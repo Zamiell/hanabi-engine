@@ -266,6 +266,52 @@ fn fourth_expert_replay_matches_engine() {
 }
 
 #[test]
+fn fifth_replay_unnecessary_trash_push_announces_both_plays_at_clue_time() {
+    let fixture = expert_replay_p4v0s1();
+    let before = fixture.state_at_turn(43).expect("before");
+    let d = LogicalDeductions::new(
+        before
+            .view_for(before.current_player())
+            .expect("giver view"),
+    )
+    .expect("logical view");
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    let action = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Rank(Rank::One),
+    };
+    let candidate = candidates
+        .iter()
+        .find(|candidate| candidate.action == action)
+        .expect("admitted unnecessary Trash Push");
+    assert_eq!(
+        candidate.move_kind(),
+        Some(HGroupMoveKind::UnnecessaryIgnition)
+    );
+    assert!(
+        candidate.action_coverage() >= 3,
+        "counts the unlocked continuation too"
+    );
+    assert_eq!(select_h_group_action(&d, HGroupProfile::Max), Some(action));
+    let state = fixture.state_at_turn(44).expect("legal clue");
+    for (player, card) in [(0, 42), (2, 44)] {
+        let d = LogicalDeductions::new(state.view_for(PlayerId::new(player)).expect("view"))
+            .expect("logical");
+        let inferred = infer_h_group(&d, HGroupProfile::Max);
+        assert!(
+            inferred.playable_now.contains(&CardId::new(card)),
+            "promised play #{card}: {inferred:#?}"
+        );
+        if player == 0 {
+            assert!(
+                !inferred.playable_now.contains(&CardId::new(35)),
+                "superseded discharge must not force the trash card"
+            );
+        }
+    }
+}
+
+#[test]
 fn fifth_replay_draw_distribution_preserves_ambiguous_green_card() {
     let state = expert_replay_p4v0s1()
         .state_at_turn(41)
@@ -345,11 +391,11 @@ fn fifth_replay_cathy_draws_for_faster_green_completion() {
     );
 }
 
-// Move 44 onward remains under review; only the confirmed prefix is an oracle.
+// Move 46 onward remains under review; only the confirmed prefix is an oracle.
 #[test]
-fn fifth_expert_replay_agrees_through_move_43() {
+fn fifth_expert_replay_agrees_through_move_45() {
     let mut replay = expert_replay_p4v0s1();
-    replay.actions.truncate(43);
+    replay.actions.truncate(45);
     assert_expert_replay_matches_engine(&replay);
 }
 

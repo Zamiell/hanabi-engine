@@ -982,11 +982,162 @@ pub(in crate::h_group) fn apply_charm_effects(
     }
 }
 #[allow(clippy::too_many_lines)]
+/// Resolve the extra Ignition immediately: it can precede the Trash Push.
+/// <https://hanabi.github.io/level-24/#unnecessary-moves-with-known-trash--ignition>
+fn apply_unnecessary_trash_push_at_clue(
+    context: &HGroupTurnContext<'_>,
+    view: &PlayerView,
+    effects: &mut HGroupRuleEffects<'_>,
+) {
+    let entry = context.entry;
+    let ObservedEvent::Clued {
+        giver,
+        target,
+        touched,
+        ..
+    } = &entry.event
+    else {
+        return;
+    };
+    if !same_turn_signal(effects.signals, entry.turn, HGroupMoveKind::TrashPush)
+        || !touched.iter().all(|card| {
+            IdentitySet::from_mask(context.after.facts[card.index()].identity_mask())
+                .iter()
+                .all(|identity| is_trash_at(context.before.stack_heights, identity))
+        })
+        || touched
+            .iter()
+            .any(|card| was_clued_before(view, entry.turn, *card))
+        || same_turn_signal(effects.signals, entry.turn, HGroupMoveKind::FixClue)
+    {
+        return;
+    }
+    let hand = &context.after.hands[target.index()];
+    let Some(last) = hand.iter().rposition(|card| touched.contains(card)) else {
+        return;
+    };
+    let Some(pushed) = hand[last + 1..].iter().copied().find(|card| {
+        !effects.explicitly_clued.contains(card) && !effects.invisibly_clued.contains(card)
+    }) else {
+        return;
+    };
+    let Some(identity) = context
+        .historical
+        .identity(pushed)
+        .filter(|identity| is_playable_at(context.before.stack_heights, *identity))
+    else {
+        return;
+    };
+    let mut gotten = protected_cards(
+        effects.explicitly_clued,
+        effects.invisibly_clued,
+        effects.chop_moved,
+    );
+    gotten.remove(&pushed);
+    for card in touched {
+        gotten.remove(card);
+    }
+    let direct_available = [Clue::Suit(identity.suit), Clue::Rank(identity.rank)]
+        .iter()
+        .any(|clue| {
+            let direct_touched = hand
+                .iter()
+                .copied()
+                .filter(|card| {
+                    context
+                        .historical
+                        .identity(*card)
+                        .is_some_and(|known| clue.matches(known))
+                })
+                .collect::<Vec<_>>();
+            focus(hand, &direct_touched, chop(hand, &gotten), &gotten) == Some(pushed)
+                && direct_touched.iter().all(|card| {
+                    context
+                        .historical
+                        .identity(*card)
+                        .is_some_and(|known| !is_trash_at(context.before.stack_heights, known))
+                })
+        });
+    if !direct_available {
+        return;
+    }
+    let first = next_player(*giver, context.after.hands.len());
+    let first_loaded = context.before.hands[first.index()].iter().any(|card| {
+        context.before.already_playing.contains(card)
+            && context
+                .historical
+                .identity(*card)
+                .is_some_and(|known| is_playable_at(context.before.stack_heights, known))
+    });
+    let ignited_player = if first == *target || first_loaded {
+        (1..context.after.hands.len()).rev().find_map(|distance| {
+            let player = PlayerId::new(
+                u8::try_from((giver.index() + distance) % context.after.hands.len()).ok()?,
+            );
+            if player == *target {
+                return None;
+            }
+            let card = finesse_position_id(&context.after.hands[player.index()], &gotten, 0)?;
+            context
+                .historical
+                .identity(card)
+                .is_some_and(|known| is_playable_at(context.before.stack_heights, known))
+                .then_some(player)
+        })
+    } else {
+        Some(first)
+    };
+    let Some(player) = ignited_player else {
+        return;
+    };
+    let Some(card) = finesse_position_id(&context.after.hands[player.index()], &gotten, 0) else {
+        return;
+    };
+    if context
+        .historical
+        .identity(card)
+        .is_some_and(|identity| !is_playable_at(context.before.stack_heights, identity))
+    {
+        return;
+    }
+    for superseded in effects.signals.iter().filter(|signal| {
+        signal.turn == entry.turn && supersedes(HGroupMoveKind::UnnecessaryIgnition, signal.kind)
+    }) {
+        effects
+            .forced_playable
+            .retain(|card| !superseded.cards.contains(card));
+    }
+    effects.forced_playable.insert(card);
+    push_signal(
+        effects.signals,
+        entry,
+        *giver,
+        Some(player),
+        HGroupMoveKind::UnnecessaryIgnition,
+        vec![card],
+        None,
+    );
+    push_signal(
+        effects.signals,
+        entry,
+        *giver,
+        Some(*target),
+        HGroupMoveKind::UnnecessaryMove,
+        vec![pushed],
+        Some(identity),
+    );
+}
+
+#[allow(clippy::too_many_lines)]
 pub(in crate::h_group) fn apply_unnecessary_move_effects(
     context: &HGroupTurnContext<'_>,
     view: &PlayerView,
     effects: &mut HGroupRuleEffects<'_>,
 ) {
+    if matches!(context.entry.event, ObservedEvent::Clued { .. }) {
+        apply_unnecessary_trash_push_at_clue(context, view, effects);
+        return;
+    }
     // Sources:
     // - https://hanabi.github.io/level-24/#trash-finesses-and-trash-bluffs-are-always-unnecessary
     // - https://hanabi.github.io/level-24/#unnecessary-moves-with-known-trash--ignition

@@ -936,19 +936,21 @@ fn clue_line_value(
         .replay
         .signals
         .iter()
-        .find(|signal| {
+        .filter(|signal| {
             signal.turn == source.turn
                 && matches!(
                     signal.kind,
                     HGroupMoveKind::ReplayDoubleIgnition
+                        | HGroupMoveKind::UnnecessaryIgnition
+                        | HGroupMoveKind::UnnecessaryMove
                         | HGroupMoveKind::TrashDoubleIgnition
                         | HGroupMoveKind::PokeDoubleIgnition
                         | HGroupMoveKind::BombDoubleIgnition
                         | HGroupMoveKind::BombTripleIgnition
                 )
         })
-        .map(|signal| signal.cards.clone())
-        .unwrap_or_default();
+        .flat_map(|signal| signal.cards.iter().copied())
+        .collect::<Vec<_>>();
     let charm_focus = giver_projection
         .replay
         .signals
@@ -966,12 +968,16 @@ fn clue_line_value(
     let mut giver_public_actions = Vec::new();
     let caused_by_clue = |card: CardId, identity: Card| {
         touched.contains(&card)
-            || touched.iter().copied().any(|touched_card| {
-                identity_of(source, touched_card).is_some_and(|touched_identity| {
-                    touched_identity.suit == identity.suit
-                        && touched_identity.rank.number() < identity.rank.number()
+            || touched
+                .iter()
+                .chain(&ignition_cards)
+                .copied()
+                .any(|touched_card| {
+                    identity_of(source, touched_card).is_some_and(|touched_identity| {
+                        touched_identity.suit == identity.suit
+                            && touched_identity.rank.number() < identity.rank.number()
+                    })
                 })
-            })
     };
     let connects_to_clue_focus = |identity: Card| {
         touched.iter().copied().any(|touched_card| {
@@ -1269,6 +1275,19 @@ fn canonical_named_line_metrics(
                     // still depends on its ordinary intervening stack cards.
                     // Source: https://hanabi.github.io/level-23/#the-4-charm
                     ejection = Some((1, 1));
+                }
+                HGroupMoveKind::UnnecessaryIgnition => {
+                    let pushed = projection
+                        .replay
+                        .signals
+                        .iter()
+                        .filter(|other| {
+                            other.turn == source.turn
+                                && other.kind == HGroupMoveKind::UnnecessaryMove
+                        })
+                        .map(|other| other.cards.len())
+                        .sum::<usize>();
+                    ignition = Some((signal.cards.len() + pushed, signal.cards.len() + pushed));
                 }
                 HGroupMoveKind::ReplayDoubleIgnition
                 | HGroupMoveKind::TrashDoubleIgnition

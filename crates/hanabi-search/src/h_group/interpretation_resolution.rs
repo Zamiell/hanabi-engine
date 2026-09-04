@@ -7,6 +7,7 @@ pub(super) const fn is_ignition(kind: HGroupMoveKind) -> bool {
     matches!(
         kind,
         HGroupMoveKind::Ignition
+            | HGroupMoveKind::UnnecessaryIgnition
             | HGroupMoveKind::ReplayDoubleIgnition
             | HGroupMoveKind::TrashDoubleIgnition
             | HGroupMoveKind::PokeDoubleIgnition
@@ -55,6 +56,7 @@ pub(super) const fn named_interpretation_replaces_ordinary(kind: HGroupMoveKind)
     matches!(
         kind,
         HGroupMoveKind::Ejection
+            | HGroupMoveKind::UnnecessaryIgnition
             | HGroupMoveKind::Discharge
             | HGroupMoveKind::FiveColorEjection
             | HGroupMoveKind::UnknownTrashDischarge
