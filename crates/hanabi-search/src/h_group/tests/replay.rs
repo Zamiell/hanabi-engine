@@ -265,11 +265,66 @@ fn fourth_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine(&expert_replay_p4v0s3());
 }
 
-// Move 42 onward remains under review; only the confirmed prefix is an oracle.
 #[test]
-fn fifth_expert_replay_agrees_through_move_41() {
+fn fifth_replay_draw_distribution_preserves_ambiguous_green_card() {
+    let state = expert_replay_p4v0s1()
+        .state_at_turn(41)
+        .expect("legal prefix");
+    let d = LogicalDeductions::new(state.view_for(state.current_player()).expect("Bob view"))
+        .expect("logical position");
+    let inferred = infer_h_group(&d, HGroupProfile::Max);
+    let green = inferred
+        .cards
+        .iter()
+        .find(|card| card.card == CardId::new(19))
+        .expect("green note");
+    assert_eq!(green.identities.len(), 2);
+    assert!(
+        green
+            .identities
+            .contains(Card::new(Suit::Green, Rank::Three))
+    );
+    assert!(
+        green
+            .identities
+            .contains(Card::new(Suit::Green, Rank::Five))
+    );
+    assert_eq!(
+        select_h_group_action(&d, HGroupProfile::Max),
+        Some(Action::Discard(CardId::new(31)))
+    );
+
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    let no_bonus = |deductions: &LogicalDeductions, notes: &HGroupInferences, profile| {
+        assert_eq!(
+            super::super::draw_distribution::discard_priority(
+                deductions,
+                notes,
+                profile,
+                &candidates,
+                CardId::new(31),
+            ),
+            None
+        );
+    };
+    no_bonus(&d, &inferred, HGroupProfile::Level(HGroupLevel::Level7));
+    let mut no_draws = d.view().clone();
+    no_draws.deck_size = 0;
+    no_bonus(
+        &LogicalDeductions::new(no_draws).expect("no-draw view"),
+        &inferred,
+        HGroupProfile::Max,
+    );
+    let mut due_play = inferred.clone();
+    due_play.playable_now.push(CardId::new(19));
+    no_bonus(&d, &due_play, HGroupProfile::Max);
+}
+
+// Move 43 onward remains under review; only the confirmed prefix is an oracle.
+#[test]
+fn fifth_expert_replay_agrees_through_move_42() {
     let mut replay = expert_replay_p4v0s1();
-    replay.actions.truncate(41);
+    replay.actions.truncate(42);
     assert_expert_replay_matches_engine(&replay);
 }
 

@@ -1797,6 +1797,15 @@ fn raw_h_group_action_priority(
             scored_discard_candidate(deductions.view(), inferred, profile)
         {
             if candidate == card {
+                if let Some(priority) = super::draw_distribution::discard_priority(
+                    deductions,
+                    inferred,
+                    profile,
+                    analysis_clue_candidates(deductions, profile, analysis),
+                    card,
+                ) {
+                    return priority;
+                }
                 if let Some(priority) =
                     deferred_teamwork_priority(deductions, profile, analysis, card)
                 {
