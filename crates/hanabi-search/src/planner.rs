@@ -308,7 +308,11 @@ pub(crate) fn plan_move_with_analysis(
             });
         }
     }
-    let full_exact_search = count.is_exact()
+    // With one admissible action, searching its continuations cannot change
+    // the choice. Still validate current beliefs and retain terminal proofs
+    // above; only omit the otherwise unnecessary exhaustive continuation.
+    let full_exact_search = candidates.len() > 1
+        && count.is_exact()
         && counted_worlds > 0
         && exact_preflight(
             information_set.view(),
@@ -1058,5 +1062,27 @@ mod tests {
                 .iter()
                 .all(|evaluation| evaluation.exact.is_some())
         );
+        let mut forced = SupportedConvention::None.analyze(information.deductions());
+        forced.actions.truncate(1);
+        let only_action = forced.actions[0].action;
+        forced.preferred_action = Some(only_action);
+        let single = plan_move_with_analysis(
+            &information,
+            SupportedConvention::None,
+            &forced,
+            PlannerConfig {
+                exact_world_limit: 100_000,
+                exact_node_limit: 1_000_000,
+                ..PlannerConfig::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(single.best_action, only_action);
+        assert!(single.world_count.is_exact());
+        assert_eq!(
+            single.exact_nodes, 0,
+            "a forced action needs no continuation search"
+        );
+        assert_eq!(single.phase, PlannerPhase::Symbolic);
     }
 }

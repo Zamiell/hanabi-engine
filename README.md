@@ -94,6 +94,8 @@ written to `logs/hanabi-live/` by default.
 
 ## Documentation
 
+- [Self-play benchmark](docs/self-play.md): the opt-in 200-seed strength test,
+  reports, and baseline updates.
 - [Technical overview](docs/technical-overview.md): architecture, planning,
   conventions, APIs, bridge internals, diagnostics, and CI.
 - [H-Group architecture](docs/architecture.md): reducer boundaries,

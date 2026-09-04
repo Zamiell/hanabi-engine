@@ -20,6 +20,9 @@ fn assert_expert_replay_matches_engine(replay: &HanabiLiveReplay) {
             )
         });
         let expected = replay_action_at_turn(replay, turn);
+        if analysis.planner.best_action == expected {
+            continue;
+        }
         let deductions = LogicalDeductions::new(view).expect("fixture position is logical");
         let clue_candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
         let replay = replay_h_group(&deductions, HGroupProfile::Max);

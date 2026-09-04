@@ -1,0 +1,32 @@
+name: H-Group max self-play 200
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  self-play:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install stable Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Play 200 seeds and compare baseline
+        run: |
+          if [[ ! -f crates/hanabi-search/tests/fixtures/h_group_max_self_play_200.json ]]; then
+            export HANABI_SELF_PLAY_UPDATE=1
+          fi
+          scripts/check-self-play.sh
+      - name: Upload per-seed results and action histories
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: h-group-max-self-play-200
+          path: |
+            target/self-play/
+            crates/hanabi-search/tests/fixtures/h_group_max_self_play_200.json
