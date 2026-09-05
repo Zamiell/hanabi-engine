@@ -1,14 +1,14 @@
 # Refactor history
 
-This file records architectural changes whose intent is easy to lose when
-fixing an individual convention regression. Entries describe the problem, the
-boundary introduced to solve it, and the property that future changes should
-preserve. Commit hashes refer to this repository's Git history.
+This file records architectural changes whose intent is easy to lose when fixing
+an individual convention regression. Entries describe the problem, the boundary
+introduced to solve it, and the property that future changes should preserve.
+Commit hashes refer to this repository's Git history.
 
 ## Design guardrails
 
-- Public history is the only input to convention interpretation. Simulator
-  truth may validate a replay, but it may not select an action or interpretation.
+- Public history is the only input to convention interpretation. Simulator truth
+  may validate a replay, but it may not select an action or interpretation.
 - Time, observer, and ownership are part of a fact. Do not substitute a current
   visible identity for what an actor knew before an earlier event.
 - Mutually exclusive readings stay correlated. Do not merge their identities,
@@ -22,8 +22,8 @@ preserve. Commit hashes refer to this repository's Git history.
 - Unknown future cards remain blank until exact endgame enumeration is both
   sound and computationally bounded.
 - A prospective clue is compiled once. Admission, recipient validation,
-  strategic comparison, explanation, and planning consume that compiled
-  result rather than replaying the clue through independent semantic paths.
+  strategic comparison, explanation, and planning consume that compiled result
+  rather than replaying the clue through independent semantic paths.
 - Connection lifecycle questions are answered by `ConnectionManager`; callers
   may inspect obligations but must not reconstruct active-versus-queued status.
 - Caches are scoped to one immutable position or exact solve. They may reuse a
@@ -45,25 +45,25 @@ spent time evaluating alternatives after a best possible result was proved.
   Retraction removes disproved Elimination claims; ambiguous Sarcastic transfers
   remain `OneOf` and explicitly reopen the transferred identity where literal
   information allows it. Demonstrated Bluffs replace their old focus claims.
-- Shared Prompt candidate eligibility between owner notes, action selection,
-  and constraint construction. Logical certainty and exact saved cards may
-  resolve a connector; an ambiguous connection's own interpretation is not
-  independent evidence for skipping earlier candidates.
+- Shared Prompt candidate eligibility between owner notes, action selection, and
+  constraint construction. Logical certainty and exact saved cards may resolve a
+  connector; an ambiguous connection's own interpretation is not independent
+  evidence for skipping earlier candidates.
 - Preserved the pre-event forced-play set separately from ordinary scheduled
   plays, so a failed mandatory play cannot become a Positional Misplay merely
   because its obligation was consumed during the event.
 - Made prospective terminal transitions match `FullState`, and introduced
   admissible outcome bounds for exact-search pruning. Unsearched alternatives
   remain explicitly unmeasured.
-- Added per-decision active replay snapshots. Failed measurements cannot
-  replace the strength baseline, and self-play reproductions are distinguished
-  from human-reviewed optimal-move fixtures.
+- Added per-decision active replay snapshots. Failed measurements cannot replace
+  the strength baseline, and self-play reproductions are distinguished from
+  human-reviewed optimal-move fixtures.
 
 ### Preserve
 
-These changes extend the existing causal and perspective boundaries; they do
-not add a second convention interpreter or allow hidden truth into decisions.
-Do not turn conditional identities into independent facts, treat hypothetical
+These changes extend the existing causal and perspective boundaries; they do not
+add a second convention interpreter or allow hidden truth into decisions. Do not
+turn conditional identities into independent facts, treat hypothetical
 upper-bound play as a legal policy, or conceal unresolved self-play errors by
 resetting beliefs. The 200-game baseline is still unestablished, and the known
 blue-Clarity reproduction remains explicitly diagnostic until resolved.
@@ -72,47 +72,44 @@ blue-Clarity reproduction remains explicitly diagnostic until resolved.
 
 ### Why
 
-The fourth expert replay exposed several related architectural leaks. Good
-Touch validation counted physical card identities even when the recipient
-would treat a touched card as known trash or protection rather than a play.
-Ignition, Discharge, Charm, and ordinary clues resolved conflicts in several
-recognizers with slightly different precedence rules. Decision code also
-reconstructed Fix age, demonstrated connection layers, completed connection
-focuses, and transient play ordering by scanning the signal journal. Finally,
-terminal-plan progress was encoded directly into the same numeric priority as
-ordinary strategic comparison, obscuring which dimension actually decided an
-action.
+The fourth expert replay exposed several related architectural leaks. Good Touch
+validation counted physical card identities even when the recipient would treat
+a touched card as known trash or protection rather than a play. Ignition,
+Discharge, Charm, and ordinary clues resolved conflicts in several recognizers
+with slightly different precedence rules. Decision code also reconstructed Fix
+age, demonstrated connection layers, completed connection focuses, and transient
+play ordering by scanning the signal journal. Finally, terminal-plan progress
+was encoded directly into the same numeric priority as ordinary strategic
+comparison, obscuring which dimension actually decided an action.
 
-These were not isolated scoring mistakes. They allowed the same compiled clue
-or connection history to acquire different meanings depending on which
-consumer inspected it.
+These were not isolated scoring mistakes. They allowed the same compiled clue or
+connection history to acquire different meanings depending on which consumer
+inspected it.
 
 ### Changes
 
 - Added typed `RecipientCardConsequence` values to `LineOutcome`. Each affected
-  card now records an observable disposition: play now, play after a
-  connection, known trash, or protected. Good Touch admission and strategic
-  team coverage consume these behavioral consequences instead of inferring
-  intent from physical identity counts.
+  card now records an observable disposition: play now, play after a connection,
+  known trash, or protected. Good Touch admission and strategic team coverage
+  consume these behavioral consequences instead of inferring intent from
+  physical identity counts.
 - Moved Good Touch admission into `admission.rs`, interpretation conflict rules
   into `interpretation_resolution.rs`, final action ordering into
-  `action_preference.rs`, and playable-card ordering into `play_order.rs`.
-  This reduces the semantic responsibilities of the already-large
-  `interpretation.rs` and `decision.rs` modules.
+  `action_preference.rs`, and playable-card ordering into `play_order.rs`. This
+  reduces the semantic responsibilities of the already-large `interpretation.rs`
+  and `decision.rs` modules.
 - Extended `ActionSchedule` to derive historical Fixes, the preferred rank
   focus, demonstrated connection layers, and completed connection focuses once
   from the event journal. `HGroupInferences` carries those projections to
-  consumers; decision code no longer replays the journal for lifecycle
-  answers.
-- Added a canonical interpretation conflict relation. Ignition-family checks
-  and late-game named-move replacement now share the same precedence rules.
+  consumers; decision code no longer replays the journal for lifecycle answers.
+- Added a canonical interpretation conflict relation. Ignition-family checks and
+  late-game named-move replacement now share the same precedence rules.
 - Added `ActionPreference` and `TerminalPlanProgress`. Policy tier, terminal
   plan advancement, and within-category comparison are separate named fields;
-  the legacy scalar remains only as a boundary encoding for the generic
-  planner.
-- Added architectural tests that prevent lifecycle scans, Good Touch logic,
-  and interpretation precedence from drifting back into consumer modules, plus
-  an outcome test proving that team coverage follows recipient behavior.
+  the legacy scalar remains only as a boundary encoding for the generic planner.
+- Added architectural tests that prevent lifecycle scans, Good Touch logic, and
+  interpretation precedence from drifting back into consumer modules, plus an
+  outcome test proving that team coverage follows recipient behavior.
 
 ### Preserve
 
@@ -120,20 +117,20 @@ Good Touch is a statement about what the recipient is expected to do with a
 card, not merely how many physical copies of an identity are visible. Add new
 recipient effects as typed dispositions and make all downstream metrics consume
 the compiled outcome. Interpretation families and supersession belong in the
-central conflict relation, not in recognizer-local conditionals. Signal
-journals remain provenance; lifecycle queries must be materialized by
-`ActionSchedule` rather than reconstructed in `decision.rs`. Mandatory policy,
-terminal progress, and ordinary utility must stay separate dimensions even
-when an integration boundary requires a numeric priority.
+central conflict relation, not in recognizer-local conditionals. Signal journals
+remain provenance; lifecycle queries must be materialized by `ActionSchedule`
+rather than reconstructed in `decision.rs`. Mandatory policy, terminal progress,
+and ordinary utility must stay separate dimensions even when an integration
+boundary requires a numeric priority.
 
 ## 2026-08-31: prefix replay memoization and bounded world validation
 
 ### Why
 
 The representative Max-profile rollout had grown to 782 seconds. Convention
-reduction repeatedly rebuilt the same actor-relative history prefixes, first
-for ordinary interpretation and again for blind-reverse empathy. Prospective
-Save validation compounded that work by materializing as many as 256 complete
+reduction repeatedly rebuilt the same actor-relative history prefixes, first for
+ordinary interpretation and again for blind-reverse empathy. Prospective Save
+validation compounded that work by materializing as many as 256 complete
 hidden-hand worlds for every candidate, replaying each world, and then treating
 reaching the cap as if every legal world had been checked. The latter was both
 slow and an unsound safety proof.
@@ -142,32 +139,30 @@ slow and an unsound safety proof.
 
 - Added a thread-local replay memo scoped to one top-level immutable reduction.
   Its key contains the complete `PlayerView`, profile, perspective depth, and
-  empathy mode, so recursive actor-prefix queries reuse an `HGroupState`
-  without leaking results between positions or solves.
-- Replaced the collected prospective-world vector with a streaming visitor
-  that stops at the first unsafe contextual Save world. A contextual Save is
-  accepted only when enumeration reports `Exhausted`; `LimitReached` and
-  `VisitorStopped` are not proofs of safety.
+  empathy mode, so recursive actor-prefix queries reuse an `HGroupState` without
+  leaking results between positions or solves.
+- Replaced the collected prospective-world vector with a streaming visitor that
+  stops at the first unsafe contextual Save world. A contextual Save is accepted
+  only when enumeration reports `Exhausted`; `LimitReached` and `VisitorStopped`
+  are not proofs of safety.
 - Kept ordinary Level-1 rank-2/rank-5 Save precedence and critical Saves on a
-  typed invariant path. Their recipient reading can be `Save` or
-  `PlayOrSave`, but resolving the giver's hidden hand cannot remove the Save
-  branch. Eight-Clue and other contextual Saves continue through exact world
-  validation.
-- Cached each prospective Save verdict inside the existing per-position
-  analysis scope and added a regression test for traversal termination
-  semantics.
+  typed invariant path. Their recipient reading can be `Save` or `PlayOrSave`,
+  but resolving the giver's hidden hand cannot remove the Save branch.
+  Eight-Clue and other contextual Saves continue through exact world validation.
+- Cached each prospective Save verdict inside the existing per-position analysis
+  scope and added a regression test for traversal termination semantics.
 
-The isolated Max-profile rollout fell from 782.08 seconds to 7.23 seconds
-(about 108x faster). Memoization alone reduced it to 51.75 seconds; streaming
-and bypassing irrelevant hidden-world enumeration provided the remaining
+The isolated Max-profile rollout fell from 782.08 seconds to 7.23 seconds (about
+108x faster). Memoization alone reduced it to 51.75 seconds; streaming and
+bypassing irrelevant hidden-world enumeration provided the remaining
 improvement.
 
 ### Preserve
 
 Replay memo keys must contain every semantic input and the cache lifetime must
 not outlive one top-level reduction. Do not use a sample limit as evidence that
-a contextual clue is safe. Add a typed, convention-level invariance proof when
-a clue meaning does not depend on hidden worlds; otherwise require exhaustive
+a contextual clue is safe. Add a typed, convention-level invariance proof when a
+clue meaning does not depend on hidden worlds; otherwise require exhaustive
 enumeration or conservatively reject the candidate.
 
 ## 2026-08-31: compiled actions, owned connection queries, and scoped semantic caches
@@ -178,45 +173,45 @@ The fourth expert replay exposed several failures with a common cause. A clue
 could be classified during candidate generation, reconstructed again during
 recipient replay, and then partially reconstructed a third time for strategic
 comparison. Those paths disagreed about fixed Prompt candidates, whether a
-connection step was active or merely queued, whether a multi-step Finesse was
-a Bluff, and whether touching a later connection layer was a redundant clue or
-a valid Continuation Clue. `ClueCandidate` also stored its target, Save status,
+connection step was active or merely queued, whether a multi-step Finesse was a
+Bluff, and whether touching a later connection layer was a redundant clue or a
+valid Continuation Clue. `ClueCandidate` also stored its target, Save status,
 purpose, connection counts, and named move as independent fields, allowing
 internally contradictory values.
 
-`ConnectionManager` already owned promise mutation and provenance, but its
-slice `Deref` let every consumer independently implement lifecycle queries.
-Finally, required behavior such as the first 5 Stall was filtered in action
-ordering while other obligations used typed constraints, and exact identity
-branches repeatedly recompiled the same public observation.
+`ConnectionManager` already owned promise mutation and provenance, but its slice
+`Deref` let every consumer independently implement lifecycle queries. Finally,
+required behavior such as the first 5 Stall was filtered in action ordering
+while other obligations used typed constraints, and exact identity branches
+repeatedly recompiled the same public observation.
 
 ### Changes
 
-- Replaced the candidate bag with `CompiledClueAction`,
-  `CompiledClueSemantics`, and `CompiledClueLine`. The target is derived from
-  the `Action`; Save status is derived from `CluePurpose`; fallback play and
-  fallback Save are distinct variants; and recipient-derived line metrics are
-  committed together. Internal validation rejects inconsistent compiled
-  meanings before policy or planning consumes them.
+- Replaced the candidate bag with `CompiledClueAction`, `CompiledClueSemantics`,
+  and `CompiledClueLine`. The target is derived from the `Action`; Save status
+  is derived from `CluePurpose`; fallback play and fallback Save are distinct
+  variants; and recipient-derived line metrics are committed together. Internal
+  validation rejects inconsistent compiled meanings before policy or planning
+  consumes them.
 - Renamed the complete non-clue decision record to `CompiledHGroupAction` and
   observer projections to `CompiledObserverProjection`, making the boundaries
-  between visible truth, observer-relative compilation, and final action
-  policy explicit.
+  between visible truth, observer-relative compilation, and final action policy
+  explicit.
 - Added `CompiledProspectiveClue`. The normal history reducer now applies each
-  hypothetical clue once, and candidate admission, recipient assessment,
-  hazard checks, named-line measurement, and strategic comparison share that
-  immutable transition and its lazy team projections. The existing
+  hypothetical clue once, and candidate admission, recipient assessment, hazard
+  checks, named-line measurement, and strategic comparison share that immutable
+  transition and its lazy team projections. The existing
   prospective-versus-observed replay invariant remains the transactional
   equivalence check.
 - Removed `ConnectionManager`'s `Deref` implementation. Active-step checks,
   queued-identity checks, actor occupancy, and clue matching now go through the
-  manager. `ConnectionClueMatch` distinguishes an active redundant touch from
-  a valid later-layer continuation in one place.
+  manager. `ConnectionClueMatch` distinguishes an active redundant touch from a
+  valid later-layer continuation in one place.
 - Replaced the loose constraint reason/action pair with a typed
-  `ConventionRequirement`. Hard alternatives are represented together, and
-  the early-game 5 Stall is now also installed as an `EarlyFiveStall`
-  requirement rather than relying only on candidate scores. Numeric utility
-  remains a tie-break among actions that satisfy the same requirement.
+  `ConventionRequirement`. Hard alternatives are represented together, and the
+  early-game 5 Stall is now also installed as an `EarlyFiveStall` requirement
+  rather than relying only on candidate scores. Numeric utility remains a
+  tie-break among actions that satisfy the same requirement.
 - Reused the candidate pass's baseline and hypothetical team projections in
   strategic evaluation. Added a per-solve `ConventionAnalysisCache` so exact
   identity branches that converge on the same `PlayerView` compile convention
@@ -229,26 +224,25 @@ branches repeatedly recompiled the same public observation.
 
 New clue semantics belong in the compiled clue transition, not in a new
 consumer-side replay. Do not add stored `target` or `save` fields back to a
-compiled clue, expose `ConnectionManager` as a slice, or use numeric priority
-to enforce a mandatory convention response. Caches must either key on the
-complete immutable observation and convention profile or, as in one exact
-solve, be scoped to a single fixed profile; cached results must never be patched
-after compilation. The event-sourced knowledge program,
-branch-local clue hypotheses, and public-history-only interpretation rules
-from the previous refactors remain authoritative.
+compiled clue, expose `ConnectionManager` as a slice, or use numeric priority to
+enforce a mandatory convention response. Caches must either key on the complete
+immutable observation and convention profile or, as in one exact solve, be
+scoped to a single fixed profile; cached results must never be patched after
+compilation. The event-sourced knowledge program, branch-local clue hypotheses,
+and public-history-only interpretation rules from the previous refactors remain
+authoritative.
 
 ## 2026-08-29: branch-local clue plans and staged knowledge compilation
 
 ### Why
 
-Recent replay debugging exposed the same failure in several forms: an
-ambiguous clue was represented as a union of focus identities, while the
-connection, required Fix, and subsequent owner knowledge were taken from one
-selected identity. That flattened mutually exclusive worlds and allowed a
-repair inferred from visible card truth in one perspective to become an
-unconditional obligation in another. Connection searches also accepted cards
-newly touched by the current clue as if they had been Prompt candidates before
-the clue.
+Recent replay debugging exposed the same failure in several forms: an ambiguous
+clue was represented as a union of focus identities, while the connection,
+required Fix, and subsequent owner knowledge were taken from one selected
+identity. That flattened mutually exclusive worlds and allowed a repair inferred
+from visible card truth in one perspective to become an unconditional obligation
+in another. Connection searches also accepted cards newly touched by the current
+clue as if they had been Prompt candidates before the clue.
 
 The owner-knowledge compiler had meanwhile become a long sequence of inline
 mutations. Its semantic order was real but implicit, making it easy for a new
@@ -259,8 +253,8 @@ an existing pass.
 
 - `ClueInterpretationHypothesis` retains one branch per possible Play identity,
   including that branch's connection steps, optional repair, and loaded state.
-- `ConnectionPlanningContext` provides a shared immutable simulation path and
-  a single commit path. Its typed inputs distinguish pre-clue Prompt candidates
+- `ConnectionPlanningContext` provides a shared immutable simulation path and a
+  single commit path. Its typed inputs distinguish pre-clue Prompt candidates
   from current-clue touches and already protected cards. The event turn is an
   explicit required input; connection scheduling no longer guesses it from the
   last clue already stored in a partially reduced history.
@@ -322,8 +316,8 @@ endgame code and serializers to reconstruct different meanings. Relational
 
 ### Changes
 
-- Made `ConventionKnowledge` an event-sourced, provenance-indexed effect
-  program whose changes are attached to their causal public transition.
+- Made `ConventionKnowledge` an event-sourced, provenance-indexed effect program
+  whose changes are attached to their causal public transition.
 - Added the canonical owner `EpistemicState` read model used by production and
   regression serialization.
 - Added `ConventionConstraintGraph` as the one bridge from per-card and
@@ -341,17 +335,17 @@ of a relational claim to the same identity.
 
 ### Why
 
-Several consumers independently maintained card knowledge, playability, and
-Good Touch claims. A fix in clue interpretation therefore could leave action
+Several consumers independently maintained card knowledge, playability, and Good
+Touch claims. A fix in clue interpretation therefore could leave action
 selection, snapshot output, or prospective analysis with stale or wider facts.
 Current stack heights were also used accidentally when a clue-time or
 before-player horizon was required.
 
 ### Changes
 
-- Introduced typed `CardKnowledgeEffect` values and a pure
-  `ConventionKnowledge` reducer; ordinary deductions can only narrow a domain,
-  while an explicit reinterpretation is required to replace one.
+- Introduced typed `CardKnowledgeEffect` values and a pure `ConventionKnowledge`
+  reducer; ordinary deductions can only narrow a domain, while an explicit
+  reinterpretation is required to replace one.
 - Added `ActionSchedule` for direct plays, connections, forced plays, and
   required discards.
 - Added `StackTimeline` to label clue-time, current, and before-player stack

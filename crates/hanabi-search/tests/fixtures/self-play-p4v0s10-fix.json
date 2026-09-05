@@ -98,11 +98,6 @@
       "value": 4
     }
   ],
-  "players": [
-    "Alice",
-    "Bob",
-    "Cathy",
-    "Donald"
-  ],
+  "players": ["Alice", "Bob", "Cathy", "Donald"],
   "seed": "p4v0s10"
 }

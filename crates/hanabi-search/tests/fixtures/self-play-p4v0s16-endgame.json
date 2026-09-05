@@ -1,10 +1,5 @@
 {
-  "players": [
-    "Alice",
-    "Bob",
-    "Cathy",
-    "Donald"
-  ],
+  "players": ["Alice", "Bob", "Cathy", "Donald"],
   "seed": "p4v0s16",
   "actions": [
     {

@@ -1,9 +1,9 @@
 # H-Group max self-play benchmark
 
-`h_group_max_self_play_200` plays seeds `p4v0s1` through `p4v0s200`, with
-four H-Group max players and the normal perfect-score planner budgets
-(4,096 worlds and 50,000 exact nodes). Each decision receives only the acting
-player's legal view. The seed and hidden deck remain with the simulator.
+`h_group_max_self_play_200` plays seeds `p4v0s1` through `p4v0s200`, with four
+H-Group max players and the normal perfect-score planner budgets (4,096 worlds
+and 50,000 exact nodes). Each decision receives only the acting player's legal
+view. The seed and hidden deck remain with the simulator.
 
 Run from WSL after establishing the baseline:
 
@@ -17,30 +17,31 @@ there. A manually dispatched GitHub Actions workflow runs the complete benchmark
 and uploads its report even on failure.
 
 The baseline will live in
-`crates/hanabi-search/tests/fixtures/h_group_max_self_play_200.json`.
-It has not yet been established. Broad diagnostic runs have exposed convention
+`crates/hanabi-search/tests/fixtures/h_group_max_self_play_200.json`. It has not
+yet been established. Broad diagnostic runs have exposed convention
 contradictions, and some exact endgames remain slow. Local partial checkpoints
-are diagnostic measurements, not a passing 200-game baseline.
-Use `HANABI_SELF_PLAY_UPDATE=1 scripts/check-self-play.sh` for the first complete,
-error-free measurement. Convention failures still need investigation before
-this can become a passing strength gate.
-The test fails if total score or perfect-game count decreases. Any engine error
-also fails the run, including contradictory beliefs, no candidate actions,
-illegal actions, panics, or failure to finish within 200 turns. Three strikes
-score zero according to the game rules. Aborted games receive zero credit and
-are explicitly counted as errors, not as completed games. A baseline with
-nonzero `engineErrors` is provisional and does not make the test pass.
+are diagnostic measurements, not a passing 200-game baseline. Use
+`HANABI_SELF_PLAY_UPDATE=1 scripts/check-self-play.sh` for the first complete,
+error-free measurement. Convention failures still need investigation before this
+can become a passing strength gate. The test fails if total score or
+perfect-game count decreases. Any engine error also fails the run, including
+contradictory beliefs, no candidate actions, illegal actions, panics, or failure
+to finish within 200 turns. Three strikes score zero according to the game
+rules. Aborted games receive zero credit and are explicitly counted as errors,
+not as completed games. A baseline with nonzero `engineErrors` is provisional
+and does not make the test pass.
 
 Reports go to `target/self-play/report.json`, with per-seed scores, turns,
 strikes, errors, runtimes, complete action histories, and differences from the
-baseline. `report.ndjson` is flushed after each game so completed results survive
-an interruption. `report.active/<seed>.json` is also rewritten before each
-decision; these seed-and-action replays reproduce a stalled or failing position
-without waiting for that game to finish. Custom report names use the equivalent
-`<name>.active` directory. Results are sorted by seed before comparison; worker completion
-order cannot affect decisions. Action histories are cheap to retain and allow
-reconstruction of the position before an error. Detailed rejected-clue diagnostics
-can then be obtained by analyzing that replay position.
+baseline. `report.ndjson` is flushed after each game so completed results
+survive an interruption. `report.active/<seed>.json` is also rewritten before
+each decision; these seed-and-action replays reproduce a stalled or failing
+position without waiting for that game to finish. Custom report names use the
+equivalent `<name>.active` directory. Results are sorted by seed before
+comparison; worker completion order cannot affect decisions. Action histories
+are cheap to retain and allow reconstruction of the position before an error.
+Detailed rejected-clue diagnostics can then be obtained by analyzing that replay
+position.
 
 ## Configuration and measurements
 
@@ -61,9 +62,10 @@ HANABI_SELF_PLAY_UPDATE=1 scripts/check-self-play.sh
 
 Baseline updates fail before replacing the baseline if engine errors occurred;
 the diagnostic report still retains their count and action histories. Normal
-checks never replace the baseline automatically. Review changed seeds even if aggregate performance
-improves. This benchmark supplements expert convention tests; shared convention
-mistakes can remain hidden when all four players use the same engine.
+checks never replace the baseline automatically. Review changed seeds even if
+aggregate performance improves. This benchmark supplements expert convention
+tests; shared convention mistakes can remain hidden when all four players use
+the same engine.
 
 The benchmark calls the normal `plan_move` API once per turn and advances its
 simulator in place. It does not rerun convention inference to prepare failure
@@ -78,13 +80,13 @@ reduced game time from 178.97 to 99.83 seconds with all 58 actions unchanged.
 
 The expert replay assertion now computes additional failure diagnostics only
 when the selected move mismatches. On the development machine, the fifth replay
-test decreased from 31.07 to 17.93 seconds (optimized test profile). The separate
-release-mode equivalence audit measured 16.025 seconds with full diagnostics and
-16.854 seconds without them under concurrent load, so omitting rejection
-explanations did not demonstrate an additional speedup. Omitting them in exact
-descendants likewise took 196.64 seconds on seed 4 versus 178.97 seconds in the
-pilot, with identical action histories. These bypasses were removed; the engine
-API remains unchanged. The pilot's action histories also
+test decreased from 31.07 to 17.93 seconds (optimized test profile). The
+separate release-mode equivalence audit measured 16.025 seconds with full
+diagnostics and 16.854 seconds without them under concurrent load, so omitting
+rejection explanations did not demonstrate an additional speedup. Omitting them
+in exact descendants likewise took 196.64 seconds on seed 4 versus 178.97
+seconds in the pilot, with identical action histories. These bypasses were
+removed; the engine API remains unchanged. The pilot's action histories also
 matched with four versus eight game workers. Parallel games improve throughput,
 but a single slow endgame can dominate elapsed time.
 
@@ -92,9 +94,9 @@ Exact search now orders the convention-preferred action first and stops when a
 candidate reaches a proved outcome upper bound. In the final round, that bound
 uses an optimistic full-information, free-pass continuation; it is only a
 pruning bound, never a player policy. Skipped root alternatives have no measured
-outcome rather than a fabricated value. Prospective transitions also stop at
-the same terminal point as the simulator, including final-round countdowns and
-the absence of a draw after a terminal action.
+outcome rather than a fabricated value. Prospective transitions also stop at the
+same terminal point as the simulator, including final-round countdowns and the
+absence of a draw after a terminal action.
 
 ## Self-play bug reproductions
 
@@ -103,7 +105,7 @@ from failed self-play seeds. These are not expert optimal-move fixtures: an
 earlier engine move may itself be wrong. Unreviewed action assertions check
 admissibility, not strategic superiority. Exact move expectations are reserved
 for specific human-reviewed decisions; a review of one turn does not validate
-the rest of its recording. See [test provenance](testing.md). The ignored blue-Clarity diagnostic
-explicitly records one unresolved giver/recipient disagreement; it is not part
-of the passing correctness gate. The full 200-game benchmark still fails on
-that contradiction and all other engine errors.
+the rest of its recording. See [test provenance](testing.md). The ignored
+blue-Clarity diagnostic explicitly records one unresolved giver/recipient
+disagreement; it is not part of the passing correctness gate. The full 200-game
+benchmark still fails on that contradiction and all other engine errors.

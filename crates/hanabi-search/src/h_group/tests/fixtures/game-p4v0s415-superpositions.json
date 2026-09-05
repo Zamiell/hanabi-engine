@@ -9,9 +9,7 @@
         {
           "card": 0,
           "actual": "b1",
-          "flags": [
-            "chop"
-          ]
+          "flags": ["chop"]
         },
         {
           "card": 1,
@@ -33,9 +31,7 @@
         {
           "card": 4,
           "actual": "b4",
-          "flags": [
-            "chop"
-          ]
+          "flags": ["chop"]
         },
         {
           "card": 5,
@@ -57,9 +53,7 @@
         {
           "card": 8,
           "actual": "g1",
-          "flags": [
-            "chop"
-          ]
+          "flags": ["chop"]
         },
         {
           "card": 9,
@@ -81,9 +75,7 @@
         {
           "card": 12,
           "actual": "b2",
-          "flags": [
-            "chop"
-          ]
+          "flags": ["chop"]
         },
         {
           "card": 13,
@@ -110,19 +102,12 @@
             {
               "card": 8,
               "convention": "g1",
-              "addedFlags": [
-                "focused",
-                "playable"
-              ],
-              "removedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["focused", "playable"],
+              "removedFlags": ["chop"]
             },
             {
               "card": 9,
-              "addedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["chop"]
             }
           ]
         }
@@ -137,9 +122,7 @@
             {
               "card": 2,
               "convention": "y1 y2",
-              "addedFlags": [
-                "focused"
-              ]
+              "addedFlags": ["focused"]
             }
           ]
         },
@@ -149,10 +132,7 @@
             {
               "card": 15,
               "convention": "y1",
-              "addedFlags": [
-                "playable",
-                "finessed"
-              ]
+              "addedFlags": ["playable", "finessed"]
             }
           ],
           "connection": {
@@ -182,10 +162,7 @@
             {
               "card": 14,
               "convention": "y1",
-              "addedFlags": [
-                "playable",
-                "finessed"
-              ]
+              "addedFlags": ["playable", "finessed"]
             }
           ],
           "connection": {
@@ -207,9 +184,7 @@
             {
               "card": 16,
               "convention": "y3",
-              "addedFlags": [
-                "focused"
-              ]
+              "addedFlags": ["focused"]
             }
           ]
         }
@@ -224,10 +199,7 @@
             {
               "card": 3,
               "convention": "r1",
-              "addedFlags": [
-                "playable",
-                "finessed"
-              ]
+              "addedFlags": ["playable", "finessed"]
             }
           ],
           "connection": {
@@ -243,19 +215,13 @@
             {
               "card": 9,
               "convention": "r3",
-              "addedFlags": [
-                "finessed"
-              ],
-              "removedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["finessed"],
+              "removedFlags": ["chop"]
             },
             {
               "card": 11,
               "convention": "r2",
-              "addedFlags": [
-                "finessed"
-              ]
+              "addedFlags": ["finessed"]
             }
           ]
         },
@@ -265,9 +231,7 @@
             {
               "card": 17,
               "convention": "r1 r2 r3 r4",
-              "addedFlags": [
-                "focused"
-              ]
+              "addedFlags": ["focused"]
             }
           ]
         }
@@ -282,21 +246,13 @@
             {
               "card": 1,
               "convention": "r1",
-              "addedFlags": [
-                "playable",
-                "finessed"
-              ]
+              "addedFlags": ["playable", "finessed"]
             },
             {
               "card": 3,
               "convention": null,
-              "addedFlags": [
-                "focused"
-              ],
-              "removedFlags": [
-                "playable",
-                "finessed"
-              ]
+              "addedFlags": ["focused"],
+              "removedFlags": ["playable", "finessed"]
             }
           ],
           "connection": {
@@ -314,10 +270,7 @@
             {
               "card": 13,
               "convention": "y1",
-              "addedFlags": [
-                "playable",
-                "finessed"
-              ]
+              "addedFlags": ["playable", "finessed"]
             }
           ],
           "connection": {
@@ -338,9 +291,7 @@
           "cards": [
             {
               "card": 11,
-              "addedFlags": [
-                "playable"
-              ]
+              "addedFlags": ["playable"]
             }
           ],
           "connection": {
@@ -374,10 +325,7 @@
             {
               "card": 18,
               "convention": "b3",
-              "addedFlags": [
-                "focused",
-                "playable"
-              ]
+              "addedFlags": ["focused", "playable"]
             }
           ]
         }
@@ -391,15 +339,11 @@
           "cards": [
             {
               "card": 9,
-              "addedFlags": [
-                "playable"
-              ]
+              "addedFlags": ["playable"]
             },
             {
               "card": 20,
-              "addedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["chop"]
             }
           ],
           "connection": {
@@ -427,9 +371,7 @@
             {
               "card": 7,
               "convention": "g2 b4 p1",
-              "addedFlags": [
-                "playable"
-              ]
+              "addedFlags": ["playable"]
             }
           ]
         }
@@ -444,26 +386,17 @@
             {
               "card": 4,
               "convention": "b4",
-              "addedFlags": [
-                "focused",
-                "playable"
-              ],
-              "removedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["focused", "playable"],
+              "removedFlags": ["chop"]
             },
             {
               "card": 5,
-              "addedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["chop"]
             },
             {
               "card": 7,
               "convention": null,
-              "removedFlags": [
-                "playable"
-              ]
+              "removedFlags": ["playable"]
             }
           ]
         }
@@ -481,9 +414,7 @@
           "cards": [
             {
               "card": 17,
-              "addedFlags": [
-                "playable"
-              ]
+              "addedFlags": ["playable"]
             }
           ]
         }
@@ -497,9 +428,7 @@
           "cards": [
             {
               "card": 3,
-              "addedFlags": [
-                "focused"
-              ]
+              "addedFlags": ["focused"]
             }
           ]
         },
@@ -509,17 +438,12 @@
             {
               "card": 7,
               "convention": "g3",
-              "addedFlags": [
-                "finessed"
-              ]
+              "addedFlags": ["finessed"]
             },
             {
               "card": 22,
               "convention": "g2",
-              "addedFlags": [
-                "playable",
-                "finessed"
-              ]
+              "addedFlags": ["playable", "finessed"]
             }
           ],
           "connection": {
@@ -539,9 +463,7 @@
           "cards": [
             {
               "card": 19,
-              "addedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["chop"]
             }
           ]
         }
@@ -555,9 +477,7 @@
           "cards": [
             {
               "card": 7,
-              "addedFlags": [
-                "playable"
-              ]
+              "addedFlags": ["playable"]
             }
           ],
           "connection": {
@@ -576,13 +496,8 @@
             {
               "card": 19,
               "convention": "p1",
-              "addedFlags": [
-                "focused",
-                "playable"
-              ],
-              "removedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["focused", "playable"],
+              "removedFlags": ["chop"]
             },
             {
               "card": 24,
@@ -601,9 +516,7 @@
             {
               "card": 23,
               "convention": "r5 b5",
-              "addedFlags": [
-                "playable"
-              ]
+              "addedFlags": ["playable"]
             }
           ]
         }
@@ -617,9 +530,7 @@
           "cards": [
             {
               "card": 27,
-              "addedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["chop"]
             }
           ]
         },
@@ -642,9 +553,7 @@
           "cards": [
             {
               "card": 3,
-              "addedFlags": [
-                "playable"
-              ]
+              "addedFlags": ["playable"]
             }
           ]
         },
@@ -676,9 +585,7 @@
           "cards": [
             {
               "card": 2,
-              "addedFlags": [
-                "playable"
-              ]
+              "addedFlags": ["playable"]
             }
           ]
         },
@@ -696,9 +603,7 @@
           "cards": [
             {
               "card": 16,
-              "addedFlags": [
-                "playable"
-              ]
+              "addedFlags": ["playable"]
             }
           ]
         }
@@ -712,9 +617,7 @@
           "cards": [
             {
               "card": 31,
-              "addedFlags": [
-                "focused"
-              ]
+              "addedFlags": ["focused"]
             }
           ]
         },
@@ -743,9 +646,7 @@
           "cards": [
             {
               "card": 31,
-              "addedFlags": [
-                "playable"
-              ]
+              "addedFlags": ["playable"]
             }
           ]
         },
@@ -763,9 +664,7 @@
           "cards": [
             {
               "card": 21,
-              "addedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["chop"]
             }
           ]
         }
@@ -779,9 +678,7 @@
           "cards": [
             {
               "card": 10,
-              "addedFlags": [
-                "playable"
-              ]
+              "addedFlags": ["playable"]
             }
           ]
         }
@@ -796,19 +693,12 @@
             {
               "card": 27,
               "convention": "b5",
-              "addedFlags": [
-                "focused",
-                "playable"
-              ],
-              "removedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["focused", "playable"],
+              "removedFlags": ["chop"]
             },
             {
               "card": 34,
-              "addedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["chop"]
             }
           ]
         }
@@ -822,9 +712,7 @@
           "cards": [
             {
               "card": 26,
-              "addedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["chop"]
             }
           ]
         }
@@ -847,9 +735,7 @@
           "cards": [
             {
               "card": 6,
-              "addedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["chop"]
             }
           ]
         }
@@ -864,19 +750,12 @@
             {
               "card": 6,
               "convention": "p2",
-              "addedFlags": [
-                "playable",
-                "finessed"
-              ],
-              "removedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["playable", "finessed"],
+              "removedFlags": ["chop"]
             },
             {
               "card": 25,
-              "addedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["chop"]
             }
           ],
           "connection": {
@@ -892,9 +771,7 @@
             {
               "card": 33,
               "convention": "p3",
-              "addedFlags": [
-                "focused"
-              ]
+              "addedFlags": ["focused"]
             }
           ]
         }
@@ -913,18 +790,12 @@
             {
               "card": 34,
               "convention": "p4",
-              "addedFlags": [
-                "focused"
-              ],
-              "removedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["focused"],
+              "removedFlags": ["chop"]
             },
             {
               "card": 37,
-              "addedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["chop"]
             }
           ]
         }
@@ -942,9 +813,7 @@
           "cards": [
             {
               "card": 33,
-              "addedFlags": [
-                "playable"
-              ]
+              "addedFlags": ["playable"]
             }
           ]
         }
@@ -958,9 +827,7 @@
           "cards": [
             {
               "card": 29,
-              "addedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["chop"]
             }
           ]
         }
@@ -974,9 +841,7 @@
           "cards": [
             {
               "card": 34,
-              "addedFlags": [
-                "playable"
-              ]
+              "addedFlags": ["playable"]
             }
           ]
         }
@@ -990,9 +855,7 @@
           "cards": [
             {
               "card": 24,
-              "addedFlags": [
-                "playable"
-              ]
+              "addedFlags": ["playable"]
             }
           ]
         }
@@ -1006,9 +869,7 @@
           "cards": [
             {
               "card": 28,
-              "addedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["chop"]
             }
           ]
         }
@@ -1023,17 +884,12 @@
             {
               "card": 40,
               "convention": "g1",
-              "addedFlags": [
-                "trash"
-              ]
+              "addedFlags": ["trash"]
             },
             {
               "card": 44,
               "convention": "g5",
-              "addedFlags": [
-                "focused",
-                "playable"
-              ]
+              "addedFlags": ["focused", "playable"]
             }
           ]
         }
@@ -1047,9 +903,7 @@
           "cards": [
             {
               "card": 30,
-              "addedFlags": [
-                "chop"
-              ]
+              "addedFlags": ["chop"]
             }
           ]
         }
@@ -1064,9 +918,7 @@
             {
               "card": 40,
               "convention": null,
-              "removedFlags": [
-                "trash"
-              ]
+              "removedFlags": ["trash"]
             }
           ]
         }

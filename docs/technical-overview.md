@@ -6,8 +6,8 @@ Hanabi. For installation and common commands, start with the
 
 ## Workspace
 
-- `hanabi-core` implements cards, legal actions, authoritative game state,
-  event history, and player-safe observations.
+- `hanabi-core` implements cards, legal actions, authoritative game state, event
+  history, and player-safe observations.
 - `hanabi-protocol` reconstructs games from Hanabi Live replay and live-action
   formats.
 - `hanabi-search` derives logical knowledge, interprets conventions, and plans
@@ -25,13 +25,12 @@ Only Hanabi Live `No Variant` games are currently supported.
   clues, visible cards, and card-count elimination.
 - `InformationSet` represents correlated hidden identities and can count or
   enumerate complete consistent worlds.
-- `ConventionInferences` stores interpretations such as focus, saves,
-  finesses, chop movement, and connection promises separately from logical
-  facts.
+- `ConventionInferences` stores interpretations such as focus, saves, finesses,
+  chop movement, and connection promises separately from logical facts.
 - A Finesse card separately retains its convention-compatible physical domain
-  and its exact promised identity. For example, a card promised as yellow 1
-  may physically be another card that will successfully blind-play; the
-  connection still requires the player to act on the yellow-1 promise.
+  and its exact promised identity. For example, a card promised as yellow 1 may
+  physically be another card that will successfully blind-play; the connection
+  still requires the player to act on the yellow-1 promise.
 - Focus is event-local: it marks the card selected by the latest clue and is
   cleared after the next action. The identities and promises established from
   that focus remain locked in, while historical focus stays in the clue log.
@@ -47,20 +46,20 @@ history before the graph reaches exact world enumeration.
 ## Deterministic planning
 
 The engine has one planning path. In openings and midgames, unknown identities
-remain symbolic. Every convention-permitted root action receives a
-lexicographic semantic tier and a stable within-tier priority derived from
-convention semantics and public facts: certain
-playability or uselessness, newly touched cards, immediately playable touches,
-critical-card protection, and oldest-card protection. Identical input therefore
-produces identical output without a random seed or iteration budget.
+remain symbolic. Every convention-permitted root action receives a lexicographic
+semantic tier and a stable within-tier priority derived from convention
+semantics and public facts: certain playability or uselessness, newly touched
+cards, immediately playable touches, critical-card protection, and oldest-card
+protection. Identical input therefore produces identical output without a random
+seed or iteration budget.
 
 Hard convention constraints filter the action set before these priorities are
-compared. When policy tier, within-tier priority, and explicit preference do
-not separate root actions, the planner projects each convention-predictable continuation. Unknown draws
-remain blank rather than receiving sampled identities, and the projection stops
-at the first real policy or identity branch. The reported trajectory compares
-score gain, strikes, discards, and clue flow without pretending to know hidden
-cards.
+compared. When policy tier, within-tier priority, and explicit preference do not
+separate root actions, the planner projects each convention-predictable
+continuation. Unknown draws remain blank rather than receiving sampled
+identities, and the projection stops at the first real policy or identity
+branch. The reported trajectory compares score gain, strikes, discards, and clue
+flow without pretending to know hidden cards.
 
 Before attempting an exact endgame, the planner counts worlds only up to
 `--exact-world-limit` (4096 by default) and performs a conservative complexity
@@ -70,8 +69,8 @@ large, it stays entirely symbolic.
 When both gates pass, the planner enumerates every admitted own-hand and deck
 identity assignment and solves through the final turn. Exact recursion groups
 worlds by the acting player's complete `PlayerView` and selects one action per
-observation group. This avoids strategy fusion: a player cannot act on their
-own identity or a future draw before it becomes observable.
+observation group. This avoids strategy fusion: a player cannot act on their own
+identity or a future draw before it becomes observable.
 
 Convention-forced continuations collapse to one action. For `perfect-score`,
 exact values compare perfect worlds first, then total official score, fewer
@@ -114,12 +113,12 @@ H-Group uses shared internal boundaries to keep these answers consistent:
   materialized clue, protection, play, and chop-move fact one or more event,
   rule, or `PromiseId` sources. Cancelling a promise atomically retracts only
   its own consequences.
-- `ClueInterpretationPlan` is the single primary precedence decision for
-  Play, Save, Fix, 5 Chop Move, and Stall meanings.
+- `ClueInterpretationPlan` is the single primary precedence decision for Play,
+  Save, Fix, 5 Chop Move, and Stall meanings.
 - typed effects update a `ConventionJournal` incrementally: signals preserve
   provenance, while relational `ConventionFacts` indexes only current truth.
-- one executable rule registry dispatches historical and hypothetical events
-  in the same semantic order; rule phases and dependencies are validated.
+- one executable rule registry dispatches historical and hypothetical events in
+  the same semantic order; rule phases and dependencies are validated.
 - `ConventionCardState` exposes compact materialized indexes backed by the
   provenance ledger rather than independently maintained truth sets.
 - owner knowledge is compiled into an ordered, provenance-indexed
@@ -128,16 +127,16 @@ H-Group uses shared internal boundaries to keep these answers consistent:
   reducer projects identity restrictions, exact promises, typed fact changes,
   and blind-play obligations; no final-note source guessing remains. Named
   compiler passes make precedence explicit and keep Good Touch, transfer,
-  connection, focus, forced-play, and save inference from mutating the same
-  card through unrelated ad hoc loops.
+  connection, focus, forced-play, and save inference from mutating the same card
+  through unrelated ad hoc loops.
 - Declined-alternative inference handles a constrained form of retrospective
   reasoning: when a direct one-for-one clue is chosen over a uniquely stronger
   legal Finesse, Good Touch and Efficiency can prove which identity made the
   stronger clue unavailable. The deduction records both actions as provenance
   and does not assume that every unchosen engine-preferred move is informative.
 - one canonical owner epistemic read model separates logical identities from
-  convention identities and derived classifications. Production diagnostics
-  and the expert superposition regression consume that model directly.
+  convention identities and derived classifications. Production diagnostics and
+  the expert superposition regression consume that model directly.
 - `ActionSchedule` joins direct plays, connection responses, forced plays, and
   required discards behind one read boundary. `StackTimeline` distinguishes
   clue-time, current, and before-player playability.
@@ -153,8 +152,8 @@ H-Group uses shared internal boundaries to keep these answers consistent:
 - `LineOutcome` retains promised actions, protected cards, known trash, and
   connections so strategic comparisons operate on semantics before scores.
   Teamwork compares public action coverage and protection; Clarity compares
-  owner-relative promised actions and the identity superpositions on every
-  clued card.
+  owner-relative promised actions and the identity superpositions on every clued
+  card.
 - `LineOutcome` causality comes from transition deltas, not by mining the
   explanation signal journal or diffing unrelated observer reconstructions.
 - candidate primary-meaning checks, signal inspection, hazard checks, and
@@ -173,8 +172,8 @@ H-Group uses shared internal boundaries to keep these answers consistent:
 - clue selection has explicit semantic-admission, recipient-assessment, and
   causal outcome-ranking stages.
 - Convention-admissible Fix alternatives compare recipient-visible negative
-  information using active promises, likely play timing, criticality, and
-  future clue economy before applying the color-over-rank tie-break.
+  information using active promises, likely play timing, criticality, and future
+  clue economy before applying the color-over-rank tie-break.
 - `HGroupActionSet` is the canonical action analysis used by selection,
   candidate generation, priorities, safety checks, and continuation detection.
 - otherwise-equivalent candidates use a typed `ConditionalPlan` of
@@ -198,16 +197,16 @@ Turn `N` is the position after `N` completed actions; turn zero is the initial
 deal.
 
 Replays can specify either an explicit `deck` or a canonical Hanabi Live `seed`
-such as `p4v0s1`, alongside `players`, `actions`, and optional `options`.
-Seed generation supports No Variant (`v0`) and 2–5 players; the seed's player
-count must match `players`. Custom or legacy seed strings are not supported.
-An explicit deck takes precedence over seed metadata, preserving custom deals.
-The loader materializes the deck once, so downstream replay APIs are unchanged.
+such as `p4v0s1`, alongside `players`, `actions`, and optional `options`. Seed
+generation supports No Variant (`v0`) and 2–5 players; the seed's player count
+must match `players`. Custom or legacy seed strings are not supported. An
+explicit deck takes precedence over seed metadata, preserving custom deals. The
+loader materializes the deck once, so downstream replay APIs are unchanged.
 
 The seeded shuffle reproduces Hanabi Live's CRC64-ECMA hashing, Go's legacy
-`math/rand` generator, and ascending swaps (including the first RNG call).
-It requires neither Go nor a network connection. Compact, fixed full-deck
-golden tests retain all five original export orders independently of generation.
+`math/rand` generator, and ascending swaps (including the first RNG call). It
+requires neither Go nor a network connection. Compact, fixed full-deck golden
+tests retain all five original export orders independently of generation.
 
 ```sh
 cargo run --release -p hanabi-cli --bin hanabi-engine -- \
@@ -230,23 +229,23 @@ let result = hanabi_search::analyze_position(
 )?;
 ```
 
-The same closed convention enum is used by the library, CLI, and live bridge,
-so persisted selections and match dispatch remain exhaustive.
+The same closed convention enum is used by the library, CLI, and live bridge, so
+persisted selections and match dispatch remain exhaustive.
 
-Replay analysis defaults to the convention-free policy and the
-`expected-score` objective; H-Group analysis must specify both
-`--convention h-group` and `--h-group-level`. The live commands instead default
-to H-Group `max` and `perfect-score`. Add `--include-planning-details` to a live
-command to receive the diagnostic action envelope used by the bridge.
+Replay analysis defaults to the convention-free policy and the `expected-score`
+objective; H-Group analysis must specify both `--convention h-group` and
+`--h-group-level`. The live commands instead default to H-Group `max` and
+`perfect-score`. Add `--include-planning-details` to a live command to receive
+the diagnostic action envelope used by the bridge.
 
 ## Hanabi Live bridge
 
 The Python launcher owns authentication, the WebSocket, invitations, and
 reconnection. Small bridge modules separately own per-table state, persistent
-engine processes, and trace recording. A persistent
-`hanabi-engine live-session` process reconstructs a player-safe `PlayerView`
-from newline-delimited updates and returns one action. `live-action` is the
-one-shot equivalent used for testing and snapshot reproduction.
+engine processes, and trace recording. A persistent `hanabi-engine live-session`
+process reconstructs a player-safe `PlayerView` from newline-delimited updates
+and returns one action. `live-action` is the one-shot equivalent used for
+testing and snapshot reproduction.
 
 Live play defaults to H-Group `max` and the `perfect-score` objective. A failed
 engine session is rebuilt from the complete scrubbed snapshot. Reconnection
@@ -262,10 +261,10 @@ objective, engine path and timeout, server URL, and debug logging. At the table,
 
 ## Development and CI
 
-Install Node.js/npm and run `npm ci` once before running `scripts/check.sh`.
-The script runs `npm run format:check` across all Prettier-supported files in
-the repository, using `prettier.config.mjs` and respecting `.gitignore`.
-Use `npm run format` to apply formatting. Rust remains covered by `cargo fmt`.
+Install Node.js/npm and run `npm ci` once before running `scripts/check.sh`. The
+script runs `npm run format:check` across all Prettier-supported files in the
+repository, using `prettier.config.mjs` and respecting `.gitignore`. Use
+`npm run format` to apply formatting. Rust remains covered by `cargo fmt`.
 
 The workspace uses Rust 2024 and supports Rust 1.85 or newer. The checks used by
 GitHub Actions are:
@@ -291,30 +290,31 @@ scripts/check-exhaustive.sh
 .venv/bin/python -W error::ResourceWarning -m unittest discover -s scripts/tests -v
 ```
 
-Compatibility tests use the sibling `hanabi-live` repository when available
-and skip only those cross-repository assertions when it is absent.
+Compatibility tests use the sibling `hanabi-live` repository when available and
+skip only those cross-repository assertions when it is absent.
 
-The ordinary suite keeps representative full-game rollouts for Levels 1, 10,
-18, 25, and Max. The exhaustive script runs the independently scheduled
-full-game matrix for every cumulative profile; CI runs it in a separate job.
-Rust test binaries use `opt-level = 2` while retaining debug assertions and
-overflow checks. The repository pins cargo-nextest 0.9.143 for fail-fast test
-scheduling; nextest's missing rustdoc support is covered by the separate
-`cargo test --doc` command.
+The ordinary suite keeps representative full-game rollouts for Levels 1, 10, 18,
+25, and Max. The exhaustive script runs the independently scheduled full-game
+matrix for every cumulative profile; CI runs it in a separate job. Rust test
+binaries use `opt-level = 2` while retaining debug assertions and overflow
+checks. The repository pins cargo-nextest 0.9.143 for fail-fast test scheduling;
+nextest's missing rustdoc support is covered by the separate `cargo test --doc`
+command.
 
 The five curated replays (`game-p4v0s415.json`, `game-p4v0s9.json`,
 `game-p4v0s2.json`, `game-p4v0s3.json`, and `game-p4v0s1.json`) are active
 golden oracles: the planner must choose the fixture action at every position.
-Their decks are specified by seed; custom replay tests can still use explicit decks.
+Their decks are specified by seed; custom replay tests can still use explicit
+decks.
 
 The Python development requirements pin ty, and `ty.toml` checks every Python
 bridge and test module against Python 3.10. The test suite also rejects any
 function with a missing parameter or return annotation.
 
-The workspace also enables Rust's `dead_code` and `unreachable_pub` lints.
-Hawk treats the `hanabi-engine` binary declared in `hawk.toml` as the shipped
-product and fails CI for public items that are dead across that closed world.
+The workspace also enables Rust's `dead_code` and `unreachable_pub` lints. Hawk
+treats the `hanabi-engine` binary declared in `hawk.toml` as the shipped product
+and fails CI for public items that are dead across that closed world.
 Visibility-narrowing suggestions remain an optional manual audit because
-integration tests can legitimately require public APIs. CI pins Hawk 0.1.10
-and the Rust 1.97.1 toolchain embedded in its Linux release binary because Hawk
-uses version-specific compiler internals.
+integration tests can legitimately require public APIs. CI pins Hawk 0.1.10 and
+the Rust 1.97.1 toolchain embedded in its Linux release binary because Hawk uses
+version-specific compiler internals.

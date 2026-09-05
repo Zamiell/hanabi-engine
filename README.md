@@ -1,7 +1,7 @@
 # Hanabi Engine
 
-An engine for standard five-suit Hanabi. It analyzes legal player
-observations under a selected convention and can connect a bot to
+An engine for standard five-suit Hanabi. It analyzes legal player observations
+under a selected convention and can connect a bot to
 [hanab.live](https://hanab.live).
 
 The engine includes:
@@ -27,8 +27,8 @@ cargo test --workspace --all-targets --all-features --locked
 ```
 
 Run `scripts/check.sh` for the complete local CI suite, including Rust
-documentation, Python typing/tests, and closed-workspace dead-code analysis.
-The additional setup is documented in the
+documentation, Python typing/tests, and closed-workspace dead-code analysis. The
+additional setup is documented in the
 [technical overview](docs/technical-overview.md#development-and-ci).
 
 ## Example usage
@@ -87,10 +87,10 @@ Any player at the table can select or inspect its convention level:
 /msg your-bot-account /level
 ```
 
-Levels `1` through `25` and `max` are accepted. The bot reconnects to an
-ongoing game after a network interruption or launcher restart. `Ctrl+C` and
-`SIGTERM` shut it down cleanly. Player-safe snapshots and decision logs are
-written to `logs/hanabi-live/` by default.
+Levels `1` through `25` and `max` are accepted. The bot reconnects to an ongoing
+game after a network interruption or launcher restart. `Ctrl+C` and `SIGTERM`
+shut it down cleanly. Player-safe snapshots and decision logs are written to
+`logs/hanabi-live/` by default.
 
 ## Documentation
 
@@ -98,9 +98,9 @@ written to `logs/hanabi-live/` by default.
   reports, and baseline updates.
 - [Technical overview](docs/technical-overview.md): architecture, planning,
   conventions, APIs, bridge internals, diagnostics, and CI.
-- [H-Group architecture](docs/architecture.md): reducer boundaries,
-  connection lifecycle, invariants, and extension guidance.
-- [H-Group convention interpreter](docs/h-group.md): level matrix and
-  convention algorithm.
+- [H-Group architecture](docs/architecture.md): reducer boundaries, connection
+  lifecycle, invariants, and extension guidance.
+- [H-Group convention interpreter](docs/h-group.md): level matrix and convention
+  algorithm.
 - [H-Group documentation coverage](docs/h-group-coverage.md): pinned source
   revision, section inventory, and coverage enforcement.
