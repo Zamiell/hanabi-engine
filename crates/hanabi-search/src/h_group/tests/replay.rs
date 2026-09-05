@@ -437,6 +437,78 @@ fn fifth_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine("p4v0s1", &expert_replay_p4v0s1());
 }
 
+/// Reviewed p4v0s1 turn 17: purple to Bob Reverse Finesses Donald's purple 2.
+/// <https://hanabi.github.io/level-2/#the-reverse-finesse>
+#[test]
+fn fifth_replay_move_seventeen_admits_purple_reverse_finesse() {
+    let fixture = expert_replay_p4v0s1();
+    let state = fixture.state_at_turn(16).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let deductions = LogicalDeductions::new(view.clone()).unwrap();
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
+    let target = PlayerId::new(1);
+    let clue = Clue::Suit(Suit::Purple);
+    let focus = CardId::new(5);
+    let touched = vec![focus];
+    let promptable = replay.promptable();
+    let score = crate::h_group::interpretation::delayed_connection_score(
+        &view,
+        HGroupProfile::Max,
+        target,
+        focus,
+        Card::new(Suit::Purple, Rank::Four),
+        false,
+        replay.cards.facts.fixed_cards(),
+        &promptable,
+        &replay.cards.already_playing,
+        &replay.pending_connections,
+        &replay.cards.facts,
+    );
+    let primary =
+        prospective_clue_primary_interpretation(&view, HGroupProfile::Max, target, clue, &touched);
+    let hazard = prospective_clue_hazard(
+        &view,
+        HGroupProfile::Max,
+        target,
+        focus,
+        clue,
+        &touched,
+        false,
+    );
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    assert!(
+        score.is_some(),
+        "the ordered Prompt must not be blocked by the older red 3"
+    );
+    assert_eq!(hazard, None);
+    let interpretation = primary
+        .as_ref()
+        .expect("purple has a recipient interpretation");
+    let line = interpretation
+        .hypotheses
+        .iter()
+        .find(|hypothesis| hypothesis.focus_identity == Card::new(Suit::Purple, Rank::Four))
+        .expect("the Reverse Finesse reaches Bob's purple 4");
+    assert!(line.connection_steps.iter().any(|step| {
+        step.actor == PlayerId::new(3)
+            && step.cards.contains(&CardId::new(24))
+            && step.expected == Card::new(Suit::Purple, Rank::Two)
+            && step.kind == HGroupConnectionKind::Finesse
+    }));
+    assert!(line.connection_steps.iter().any(|step| {
+        step.actor == PlayerId::new(3)
+            && step.cards.contains(&CardId::new(14))
+            && step.expected == Card::new(Suit::Purple, Rank::Three)
+            && step.kind == HGroupConnectionKind::Prompt
+    }));
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate.action == Action::Clue { target, clue }),
+        "score={score:?}; primary={primary:#?}; hazard={hazard:?}; candidates={candidates:#?}"
+    );
+}
+
 #[test]
 fn fifth_replay_move_one_prefers_protecting_bottom_deck_risk() {
     let fixture = expert_replay_p4v0s1();

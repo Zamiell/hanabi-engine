@@ -2466,20 +2466,26 @@ pub(super) fn delayed_connection_score(
             // play before the delayed focus.
             continue;
         }
-        let false_prompt = view.hands.iter().flatten().any(|card| {
-            card.id != focus
-                && explicitly_clued.contains(&card.id)
-                && !already_playing.contains(&card.id)
-                && prompt_allows(card, needed)
-                && card
-                    .identity
-                    .is_some_and(|actual| actual != needed && !is_playable_now(view, actual))
+        let false_prompt = view.hands.iter().any(|hand| {
+            hand.iter()
+                .rev()
+                .filter(|card| {
+                    card.id != focus
+                        && explicitly_clued.contains(&card.id)
+                        && !already_playing.contains(&card.id)
+                        && prompt_allows(card, needed)
+                })
+                .take_while(|card| card.identity != Some(needed))
+                .any(|card| {
+                    card.identity
+                        .is_some_and(|actual| !is_playable_now(view, actual))
+                })
         });
         if false_prompt {
-            // Prompts take precedence over later Prompts and Finesses. A
-            // clued card that can be mistaken for this connector and would
-            // misplay therefore invalidates the whole delayed clue, even if
-            // the correct connector is also visible elsewhere.
+            // Only cards before the correct connector in the hand's Prompt
+            // order can obstruct it. An older matching card is not played
+            // instead of an earlier correct Prompt.
+            // https://hanabi.github.io/level-2/#the-double-prompt--triple-prompt--quadruple-prompt
             return None;
         }
         let explicitly_available = view
