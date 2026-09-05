@@ -64,6 +64,25 @@ is complete.
 Whenever reporting a replay disagreement, convention bug, or position requiring
 human review, use the following instructions.
 
+### Continue After a Fix
+
+When working through replay disagreements, do not stop at reporting that the
+current fix passes. Re-run the active replay comparison from the beginning and
+identify its next disagreement. If the active replay fully agrees, inspect any
+remaining expert-replay failures from validation and report the first mismatch
+in the next failing replay. Do not silently switch replays: name the new seed.
+
+Within the user's authorized bug-fixing scope, investigate and fix obvious bugs
+without waiting for another prompt. Stop for a non-obvious convention or
+strategy question and provide the review context below. Do not change fixtures
+or expected moves merely to obtain agreement.
+
+The final response must state one of: the next unresolved disagreement (with
+link, seed, turn, all candidate clues, and reasoning), all expert replays fully
+agree, or the concrete blocker preventing the next comparison. A passing focused
+test or a count of remaining failures is not a substitute for this handoff.
+Documentation-only requests do not authorize additional engine fixes.
+
 ### Replay Link
 
 Always include a generated clickable Hanab Live replay link, the seed, the
