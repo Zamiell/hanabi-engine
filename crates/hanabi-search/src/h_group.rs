@@ -80,10 +80,7 @@ use constraints::{ConventionConstraints, ConventionRequirementKind};
 pub use coverage::{H_GROUP_DOCUMENTATION_SECTIONS, HGroupDocumentationSection};
 pub(crate) use decision::analyze_h_group_convention;
 pub use decision::infer_h_group;
-use decision::{
-    h_group_predictable_action, infer_h_group_from_replay, positional_discard_candidate,
-    positional_discard_is_valid_snapshot, preferred_due_play_card,
-};
+use decision::{h_group_predictable_action, infer_h_group_from_replay, preferred_due_play_card};
 #[cfg(test)]
 use decision::{ordered_h_group_actions, select_h_group_action};
 use effects::{ConventionJournal, ConventionReducer, EffectBatch, SignalHistory};
@@ -1222,15 +1219,10 @@ fn replay_h_group_inner_uncached(
                 }
                 if let Some(focus) = focus(hand, touched, old_chop, &gotten) {
                     let focus_identity = historical.identity(focus);
-                    let focus_was_chop = old_chop == Some(focus)
-                        || positional_discard_is_valid_snapshot(
-                            view,
-                            &hands,
-                            *target,
-                            focus,
-                            historical_deck_size,
-                            stack_heights,
-                        );
+                    // Save meaning depends on the actual pre-clue chop, not
+                    // another card that could be a Positional Discard.
+                    // https://hanabi.github.io/level-1/#the-5-save
+                    let focus_was_chop = old_chop == Some(focus);
                     for card in touched {
                         facts[card.index()].add_positive_clue(*clue);
                     }
@@ -1508,7 +1500,11 @@ fn replay_h_group_inner_uncached(
                         && clue_tokens_before == MAX_CLUE_TOKENS
                         && *clue == Clue::Rank(Rank::Five)
                         && !focus_was_chop
-                        && !eight_clue_save;
+                        && !eight_clue_save
+                        // Eight tokens allow a last-resort Stall; they do
+                        // not erase a valid Play Clue on an off-chop five.
+                        // https://hanabi.github.io/level-9/#5-stalls-are-a-last-resort
+                        && play_identities.is_empty();
                     let five_chop_move = rule_enabled(profile, HGroupRuleId::ChopMoves)
                         && *clue == Clue::Rank(Rank::Five)
                         && !early_five_stall

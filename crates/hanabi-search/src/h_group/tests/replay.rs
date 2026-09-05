@@ -1,5 +1,58 @@
 use super::*;
 
+/// User-reviewed turn 43 of the generated p4v0s415 continuation: Alice's
+/// chop is #40 (slot 2), not her newly drawn #44 (green 5 in slot 1).
+/// The reviewed 5s Play Clue retouches the old purple-5 promise. This
+/// reproduction certifies that decision and meaning, not its earlier moves.
+#[test]
+fn possible_positional_discard_does_not_make_a_five_save() {
+    let fixture =
+        HanabiLiveReplay::from_json(include_str!("fixtures/p4v0s415-turn43-self-play.json"))
+            .unwrap();
+    let mut state = fixture.replay().unwrap();
+    let view = state.view_for(PlayerId::new(2)).unwrap();
+    let deductions = LogicalDeductions::new(view).unwrap();
+    assert_eq!(
+        infer_h_group(&deductions, HGroupProfile::Max).chops[0],
+        Some(CardId::new(40))
+    );
+    let analysis = crate::analyze_position(
+        deductions.view(),
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig {
+            objective: crate::PlanningObjective::PerfectScore,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        analysis.planner.best_action,
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Five),
+        }
+    );
+    state
+        .apply(Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Five),
+        })
+        .unwrap();
+    for observer in [PlayerId::new(2), PlayerId::new(0)] {
+        let deductions = LogicalDeductions::new(state.view_for(observer).unwrap()).unwrap();
+        let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+        let clue = inferred.clues.last().unwrap();
+        assert_eq!(clue.focus, CardId::new(44));
+        assert!(!clue.focus_was_chop, "observer {observer:?}: {clue:#?}");
+        assert!(!matches!(clue.kind, HGroupClueKind::Save(_)), "{clue:#?}");
+        assert_eq!(clue.kind, HGroupClueKind::Play, "{clue:#?}");
+        assert_eq!(
+            clue.play_identities,
+            IdentitySet::singleton(Card::new(Suit::Green, Rank::Five))
+        );
+    }
+}
+
 /// p4v0s415 move 35: both reviewed purple and rank 4 connect Bob's Elimination p2,
 /// then his p3, to Alice's p4. Donald must retain that same public line.
 #[test]

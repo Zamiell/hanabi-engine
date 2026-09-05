@@ -27,11 +27,10 @@ use super::{
     identity_is_queued_before_target, identity_of, identity_set, infer_h_group_from_replay,
     is_convention_trash, is_critical, is_eventually_useful, is_playable_at, is_playable_now,
     is_unique_visible, next_player, ordered_playable_cards, pending_card_allows_identity,
-    positional_discard_candidate, preferred_due_play_card, projected_h_group_replay,
-    prospective_clue_has_unsafe_connection, prospective_clue_marks_focus_saved,
-    prospective_clue_primary_interpretation, prospective_clue_primary_kind,
-    prospective_clue_signal_kinds, prospective_clue_view, prospective_play_view,
-    prospective_stacked_ejection_card, prospective_team_clue_signal_kinds,
+    preferred_due_play_card, projected_h_group_replay, prospective_clue_has_unsafe_connection,
+    prospective_clue_marks_focus_saved, prospective_clue_primary_interpretation,
+    prospective_clue_primary_kind, prospective_clue_signal_kinds, prospective_clue_view,
+    prospective_play_view, prospective_stacked_ejection_card, prospective_team_clue_signal_kinds,
     replay_identity_is_queued, rule_enabled, subjective_convention_cards,
     subjective_playable_cards, was_clued_before, with_prospective_analysis_cache,
 };
@@ -403,8 +402,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             // Source: https://hanabi.github.io/level-6/#the-tempo-clue
             continue;
         }
-        let endangered_discard = positional_discard_candidate(deductions, target, &gotten);
-        let save_score = if old_chop == Some(focus) || endangered_discard == Some(focus) {
+        let save_score = if old_chop == Some(focus) {
             save_clue_score(
                 view,
                 hand,
@@ -644,7 +642,9 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             });
         let creates_false_non_focus_self_prompt = is_playable_now(view, focus_identity)
             && touched.iter().copied().any(|card| {
-                if card == focus {
+                // Retouching an existing non-focus promise does not introduce
+                // a new Self-Prompt. Only newly clued collateral can do so.
+                if card == focus || promptable.contains(&card) {
                     return false;
                 }
                 identity_of(view, card).is_some_and(|identity| {

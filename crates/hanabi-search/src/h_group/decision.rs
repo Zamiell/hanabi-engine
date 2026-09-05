@@ -12,9 +12,9 @@ use super::{
     TeamConventionSnapshot, TerminalPlanProgress, chop, convention_card_inferences,
     finesse_position, h_group_clue_candidates_from_replay, h_group_phase,
     h_group_rejected_clues_from_replay, identity_of, infer_clue_to_self, is_convention_trash,
-    is_critical, is_eventually_useful, is_playable_at, is_playable_now, next_player,
-    ordered_playable_cards, owner_knowledge_read_model, projected_h_group_replay,
-    prospective_clue_primary_kind, prospective_clue_view, prospective_play_has_unsafe_inference,
+    is_critical, is_eventually_useful, is_playable_now, next_player, ordered_playable_cards,
+    owner_knowledge_read_model, projected_h_group_replay, prospective_clue_primary_kind,
+    prospective_clue_view, prospective_play_has_unsafe_inference,
     prospective_team_clue_signal_kinds, replay_h_group, rule_enabled, was_clued_before,
 };
 
@@ -1298,98 +1298,6 @@ fn positional_discard_is_valid_for(view: &PlayerView, player: PlayerId, discard:
             .get(indicated_slot)
             .and_then(|card| card.identity)
             .is_some_and(|identity| is_playable_now(view, identity))
-    })
-}
-
-pub(super) fn positional_discard_candidate(
-    deductions: &LogicalDeductions,
-    player: PlayerId,
-    gotten: &CardSet,
-) -> Option<CardId> {
-    let view = deductions.view();
-    if view.deck_size > view.hands.len() {
-        return None;
-    }
-    let hand = &view.hands[player.index()];
-    let layout = hand.iter().map(|card| card.id).collect::<Vec<_>>();
-    let candidates = chop(&layout, gotten)
-        .into_iter()
-        .chain(
-            hand.iter()
-                .map(|card| card.id)
-                .filter(|card| !gotten.contains(card)),
-        )
-        .collect::<Vec<_>>();
-    for candidate in candidates {
-        let indicated_slot = hand
-            .iter()
-            .filter(|card| card.id.index() < candidate.index())
-            .count();
-        let mut possibly_valid = false;
-        let mut definitely_valid = false;
-        for distance in 1..view.hands.len() {
-            let target = (player.index() + distance) % view.hands.len();
-            let Some(card) = view.hands[target].get(indicated_slot) else {
-                continue;
-            };
-            if let Some(identity) = card.identity {
-                if is_playable_now(view, identity) {
-                    possibly_valid = true;
-                    definitely_valid = true;
-                }
-                continue;
-            }
-            let Some(possibilities) = deductions.possible_identities(card.id) else {
-                possibly_valid = true;
-                continue;
-            };
-            let playable = possibilities
-                .iter()
-                .filter(|identity| is_playable_now(view, *identity))
-                .count();
-            possibly_valid |= playable > 0;
-            definitely_valid |= playable > 0 && playable == possibilities.len();
-        }
-        if definitely_valid {
-            return Some(candidate);
-        }
-        if possibly_valid {
-            // The target can see the giver's hidden slot and may use this
-            // earlier positional discard. The giver cannot safely infer a
-            // later endangered card from their own information set.
-            return None;
-        }
-    }
-    None
-}
-
-pub(super) fn positional_discard_is_valid_snapshot(
-    view: &PlayerView,
-    hands: &[Vec<CardId>],
-    player: PlayerId,
-    discard: CardId,
-    deck_size: usize,
-    stack_heights: [u8; 5],
-) -> bool {
-    if deck_size > hands.len() {
-        return false;
-    }
-    let indicated_slot = hands[player.index()]
-        .iter()
-        .filter(|candidate| candidate.index() < discard.index())
-        .count();
-    (1..hands.len()).any(|distance| {
-        let target = (player.index() + distance) % hands.len();
-        hands[target].get(indicated_slot).is_some_and(|card| {
-            identity_of(view, *card).map_or_else(
-                // The clue itself establishes that the giver saw a playable
-                // card in this hidden slot. Conditioning on the focused Save
-                // avoids mistaking an earlier unknown slot for the intended
-                // positional discard.
-                || target == view.observer.index(),
-                |identity| is_playable_at(stack_heights, identity),
-            )
-        })
     })
 }
 
