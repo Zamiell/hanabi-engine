@@ -1,0 +1,11 @@
+{
+  "name": "hanabi-engine-dev-tools",
+  "private": true,
+  "scripts": {
+    "format:check": "prettier --check .",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "prettier": "3.9.6"
+  }
+}

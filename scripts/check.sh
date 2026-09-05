@@ -35,6 +35,14 @@ check_file_ownership() {
 echo 'Checking repository file ownership...'
 check_file_ownership
 
+if ! command -v npm >/dev/null 2>&1 || [[ ! -x node_modules/.bin/prettier ]]; then
+  printf >&2 'Prettier development dependencies are missing. Install Node.js/npm, then run npm ci in the repository root.\n'
+  exit 1
+fi
+
+echo 'Checking repository formatting with Prettier...'
+npm run format:check
+
 if [[ -d "$HOME/.cargo/bin" ]]; then
   export PATH="$HOME/.cargo/bin:$PATH"
 fi

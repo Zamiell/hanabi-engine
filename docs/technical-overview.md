@@ -262,6 +262,11 @@ objective, engine path and timeout, server URL, and debug logging. At the table,
 
 ## Development and CI
 
+Install Node.js/npm and run `npm ci` once before running `scripts/check.sh`.
+The script runs `npm run format:check` across all Prettier-supported files in
+the repository, using `prettier.config.mjs` and respecting `.gitignore`.
+Use `npm run format` to apply formatting. Rust remains covered by `cargo fmt`.
+
 The workspace uses Rust 2024 and supports Rust 1.85 or newer. The checks used by
 GitHub Actions are:
 
