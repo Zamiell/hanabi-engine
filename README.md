@@ -1,6 +1,6 @@
 # Hanabi Engine
 
-A Rust engine for standard five-suit Hanabi. It analyzes legal player
+An engine for standard five-suit Hanabi. It analyzes legal player
 observations under a selected convention and can connect a bot to
 [hanab.live](https://hanab.live).
 
