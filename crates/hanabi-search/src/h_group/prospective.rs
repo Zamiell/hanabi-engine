@@ -926,6 +926,20 @@ pub(super) fn prospective_clue_hazard(
     if other_player_projection_is_unsafe(source, after_clue, profile, target, &snapshot.team) {
         return Some(ProspectiveClueHazard::OtherPlayerWrongPromise);
     }
+    // Good Touch includes connectors, not only the focused identity. A
+    // Finesse must not make one player play a card while this same clue
+    // touches a different, useful copy in the recipient's hand.
+    // https://hanabi.github.io/beginner/good-touch-principle/
+    if replay.pending_connections.iter().any(|connection| {
+        connection.focus == focus
+            && is_new_connection(connection, &baseline.replay)
+            && touched.iter().any(|card| {
+                !connection.cards.contains(card)
+                    && identity_of(source, *card) == Some(connection.expected)
+            })
+    }) {
+        return Some(ProspectiveClueHazard::DuplicateGoodTouchPromise);
+    }
     if touched.len() <= 1 {
         return None;
     }

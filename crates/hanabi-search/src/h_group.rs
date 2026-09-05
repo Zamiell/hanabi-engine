@@ -1271,11 +1271,6 @@ fn replay_h_group_inner_uncached(
                                 && pending_connections.is_active(connection)
                         })
                         .map(|connection| connection.expected);
-                    let clue_promptable = previously_promptable
-                        .iter()
-                        .copied()
-                        .chain(touched.iter().copied().filter(|card| *card != focus))
-                        .collect::<CardSet>();
                     let mut play_identities = active_connector_identity.map_or_else(
                         || {
                             snapshot_play_identities(
@@ -1482,7 +1477,7 @@ fn replay_h_group_inner_uncached(
                         hands: &hands,
                         facts: &facts,
                         clues: &clues,
-                        promptable_before: PromptableBeforeClue(&clue_promptable),
+                        promptable_before: PromptableBeforeClue(&previously_promptable),
                         protected_before: &gotten,
                         already_playing: &already_playing,
                         declined_direct_plays: &declined_direct_plays,
@@ -1765,7 +1760,7 @@ fn replay_h_group_inner_uncached(
                             hands: &hands,
                             facts: &facts,
                             clues: &clues,
-                            promptable_before: PromptableBeforeClue(&clue_promptable),
+                            promptable_before: PromptableBeforeClue(&previously_promptable),
                             protected_before: &gotten,
                             already_playing: &already_playing,
                             declined_direct_plays: &declined_direct_plays,

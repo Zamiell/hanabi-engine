@@ -2,6 +2,45 @@ use hanabi_protocol::HanabiLiveReplay;
 use hanabi_search::{HGroupProfile, InformationSet, SupportedConvention, WorldCount};
 
 #[test]
+fn opening_yellow_cannot_prompt_its_newly_touched_collateral() {
+    let replay = HanabiLiveReplay::from_json(r#"{"seed":"p4v0s7","players":["Alice","Bob","Cathy","Donald"],"actions":[{"type":2,"target":3,"value":1}]}"#).unwrap();
+    let state = replay.state_at_turn(0).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let information = InformationSet::new(&view).unwrap();
+    let analysis =
+        SupportedConvention::HGroup(HGroupProfile::Max).analyze(information.deductions());
+    let bad_clue = hanabi_core::Action::Clue {
+        target: hanabi_core::PlayerId::new(3),
+        clue: hanabi_core::Clue::Suit(hanabi_core::Suit::Yellow),
+    };
+    assert!(
+        analysis
+            .actions
+            .iter()
+            .all(|candidate| candidate.action != bad_clue),
+        "{analysis:#?}"
+    );
+    let state = replay.state_at_turn(1).unwrap();
+    for observer in 0..4 {
+        let view = state
+            .view_for(hanabi_core::PlayerId::new(observer))
+            .unwrap();
+        let information = InformationSet::new(&view).unwrap();
+        let analysis =
+            SupportedConvention::HGroup(HGroupProfile::Max).analyze(information.deductions());
+        let hanabi_search::ConventionInferences::HGroup(inferred) = analysis.inferences else {
+            panic!("expected H-Group")
+        };
+        assert!(
+            !inferred.signals.iter().any(|signal| signal.turn == 0
+                && signal.kind == hanabi_search::HGroupMoveKind::Prompt
+                && signal.cards.contains(&hanabi_core::CardId::new(14))),
+            "observer {observer}: {inferred:#?}"
+        );
+    }
+}
+
+#[test]
 fn low_score_five_save_protects_bobs_shifted_chop() {
     let replay =
         HanabiLiveReplay::from_json(include_str!("fixtures/self-play-p4v0s15.json")).unwrap();
