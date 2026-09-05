@@ -496,15 +496,6 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             clue,
             &newly_informed,
             &touched,
-            touched
-                .iter()
-                .filter(|card| {
-                    !replay
-                        .signals
-                        .of_kind(HGroupMoveKind::OrderChopMove)
-                        .any(|signal| signal.cards.contains(card))
-                })
-                .count(),
             &promptable,
             fixed_cards,
             &replay.cards.invalidated_focuses,
@@ -1460,7 +1451,6 @@ pub(super) fn advanced_clue_candidates(
                         previously_fixed.contains(&focus)
                             || replay.cards.invalidated_focuses.contains(&focus),
                         previously_fixed,
-                        touched.len() == 1,
                         &replay.cards.explicitly_clued,
                         &replay.cards.already_playing,
                         &replay.pending_connections,
@@ -2121,7 +2111,6 @@ pub(super) fn play_clue_score(
     clue: Clue,
     newly_touched: &[CardId],
     clue_touched: &[CardId],
-    clue_touch_count: usize,
     explicitly_clued: &CardSet,
     fixed_cards: &CardSet,
     invalidated_focuses: &CardSet,
@@ -2176,7 +2165,6 @@ pub(super) fn play_clue_score(
             focus_identity,
             fixed_cards.contains(&focus) || invalidated_focuses.contains(&focus),
             fixed_cards,
-            clue_touch_count == 1,
             explicitly_clued,
             already_playing,
             pending_connections,
@@ -2291,7 +2279,6 @@ pub(super) fn delayed_connection_score(
     focus_identity: Card,
     focus_was_fixed: bool,
     fixed_cards: &CardSet,
-    allow_queued_prefix: bool,
     explicitly_clued: &CardSet,
     already_playing: &CardSet,
     pending_connections: &ConnectionManager,
@@ -2318,7 +2305,10 @@ pub(super) fn delayed_connection_score(
         }
         return Some(390);
     }
-    let first_unqueued_rank = if allow_queued_prefix {
+    // Existing commitments remain part of the line even when the clue
+    // touches several cards. Focus and collateral-touch validity are checked
+    // separately; neither can erase an already-scheduled predecessor.
+    let first_unqueued_rank =
         ((stack_height + 1)..usize::from(focus_identity.rank.number())).find(|needed_rank| {
             let needed = Card::new(focus_identity.suit, Rank::ALL[*needed_rank - 1]);
             !identity_is_queued_before_target(
@@ -2329,10 +2319,7 @@ pub(super) fn delayed_connection_score(
                 pending_connections,
                 needed,
             )
-        })
-    } else {
-        Some(stack_height + 1)
-    };
+        });
     let Some(first_unqueued_rank) = first_unqueued_rank else {
         if explicitly_clued.contains(&focus) && !focus_was_fixed {
             // `already_playing` can account for every predecessor without a
