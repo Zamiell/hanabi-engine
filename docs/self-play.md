@@ -100,7 +100,10 @@ the absence of a draw after a terminal action.
 
 `crates/hanabi-search/tests/self_play_regressions.rs` checks focused invariants
 from failed self-play seeds. These are not expert optimal-move fixtures: an
-earlier engine move may itself be wrong. The ignored blue-Clarity diagnostic
+earlier engine move may itself be wrong. Unreviewed action assertions check
+admissibility, not strategic superiority. Exact move expectations are reserved
+for specific human-reviewed decisions; a review of one turn does not validate
+the rest of its recording. See [test provenance](testing.md). The ignored blue-Clarity diagnostic
 explicitly records one unresolved giver/recipient disagreement; it is not part
 of the passing correctness gate. The full 200-game benchmark still fails on
 that contradiction and all other engine errors.

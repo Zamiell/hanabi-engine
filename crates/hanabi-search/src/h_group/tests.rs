@@ -1,9 +1,6 @@
 use super::model::FixObligation;
 use super::*;
-use hanabi_core::{
-    Action, FullState, GameEvent, GameStatus, ObservedCard, ObservedHistoryEntry, PlayerView,
-    standard_deck,
-};
+use hanabi_core::{Action, FullState, GameEvent, PlayerView, standard_deck};
 use hanabi_protocol::HanabiLiveReplay;
 
 const MAX_TEST_CONTINUATION_TURNS: usize = 512;
@@ -12,8 +9,9 @@ mod architecture;
 mod replay;
 mod snapshots;
 
-// Keep the large convention corpus physically grouped by responsibility while
-// sharing one set of deterministic scenario builders.
+// Convention expectations come from reviewed replay positions. The support
+// module provides only algorithmic self-play completion checks, not invented
+// convention scenarios. See docs/testing.md for the provenance policy.
 include!("tests/support.rs");
 include!("tests/learning_rules.rs");
 include!("tests/regressions.rs");

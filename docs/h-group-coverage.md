@@ -1,5 +1,10 @@
 # H-Group documentation coverage
 
+This is an implementation inventory, not proof that every convention is
+correct or covered by a validated game. The legacy synthetic convention tests
+have been retired; behavioral coverage comes from reviewed replay positions
+and narrowly scoped bug reproductions. See [testing.md](testing.md).
+
 The engine's convention inventory is pinned to `hanabi.github.io` revision
 `dd55b51aa622f709059a17e0d6afc2adb8402408`. It contains every level-three
 heading in levels 1–25 and the Max extras pages: 357 unique sections in total.

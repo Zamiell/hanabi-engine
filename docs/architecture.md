@@ -272,9 +272,11 @@ rather than manually editing a recipient view. Architecture properties
 additionally verify that the incremental facts equal a complete journal
 reduction, every legal clue is exactly one of admitted or rejected, and a
 resolved-world hypothetical clue produces the same recipient convention state
-as the corresponding real event. The test corpus is physically separated into
-shared fixtures, learning-path rules, historical regressions, strategy
-behavior, architecture properties, and golden replay parity.
+as the corresponding real event. Convention expectations are grounded in
+reviewed replay positions; legacy hand-built convention histories have been
+removed. Self-play reproductions and invariant-only completion checks are
+separate from optimal-move assertions. See [test provenance](testing.md) for
+the retained categories and coverage gaps.
 
 ## Adding a convention rule
 
@@ -291,7 +293,8 @@ behavior, architecture properties, and golden replay parity.
    `ConventionPolicyTier`.
 6. Test giver and recipient interpretations, prospective/retrospective
    equivalence, hidden-truth noninterference when relevant, and at least one
-   replay prefix.
+   human-reviewed replay prefix. Do not manufacture a scenario and treat the
+   engine's current interpretation as its expected answer.
 
 These boundaries are deliberately stricter than a collection of move-specific
 helpers: most past bugs came from one interpretation path updating only part of

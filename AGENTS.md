@@ -17,6 +17,20 @@ scripts/check.sh
 
 If the full suite cannot be run, report which checks were skipped and why.
 
+## Test provenance
+
+Do not add invented game histories as authorities for convention meanings or
+optimal moves. Use a human-reviewed replay position, identify its fixture and
+turn, and explain the reviewed expectation. Hypothetical alternatives may
+branch from that position, but must not silently replace its recorded moves.
+
+Self-play recordings are bug reproductions, not validated strategy. Keep their
+assertions limited to established rules, legality, consistency, or a specific
+human-reviewed interpretation; do not freeze an old engine choice as the best
+move. Artificial inputs remain appropriate for ordinary game-rule, codec,
+algorithm, and data-structure unit tests and invariant-only smoke tests.
+See `docs/testing.md` for the categories and known coverage gaps.
+
 ## Version control
 
 After every user prompt that changes this repository:
