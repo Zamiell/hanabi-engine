@@ -35,9 +35,14 @@ check_file_ownership() {
 echo 'Checking repository file ownership...'
 check_file_ownership
 
-if ! command -v npm >/dev/null 2>&1 || [[ ! -x node_modules/.bin/prettier ]]; then
-  printf >&2 'Prettier development dependencies are missing. Install Node.js/npm, then run npm ci in the repository root.\n'
-  exit 1
+if ! command -v npm &> /dev/null; then
+  printf >&2 'npm is required to run this script.\n'
+  return 1
+fi
+
+if [[ ! -x node_modules/.bin/prettier ]]; then
+  printf >&2 'Prettier was not found. Run "npm ci" in the repository root.\n'
+  return 1
 fi
 
 echo 'Checking repository formatting with Prettier...'
