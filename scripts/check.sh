@@ -2,6 +2,8 @@
 
 set -euo pipefail # Exit on errors and undefined variables.
 
+check_started_seconds=$SECONDS
+
 repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repository_root"
 
@@ -121,4 +123,6 @@ cargo +1.97.1 hawk check \
 echo 'Rechecking repository file ownership...'
 check_file_ownership
 
-echo 'All checks passed.'
+check_elapsed_seconds=$((SECONDS - check_started_seconds))
+printf 'All checks passed in %dm %ds.\n' \
+  "$((check_elapsed_seconds / 60))" "$((check_elapsed_seconds % 60))"
