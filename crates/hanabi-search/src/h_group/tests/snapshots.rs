@@ -543,6 +543,12 @@ fn optimized_expert_replay_owner_superpositions_match_snapshot() {
             path.display()
         )
     });
+    // JSON data is the contract: formatting and object-key order are not.
+    // Arrays retain their ordering, including turns and connection steps.
+    let actual: serde_json::Value =
+        serde_json::from_str(&actual).expect("generated snapshot is valid JSON");
+    let expected: serde_json::Value = serde_json::from_str(&expected)
+        .unwrap_or_else(|error| panic!("invalid snapshot JSON in {}: {error}", path.display()));
     assert_eq!(
         actual, expected,
         "owner-relative convention superpositions or semantic states changed; review the semantic diff, then regenerate with {UPDATE_ENVIRONMENT_VARIABLE}=1 if it is intentional"
