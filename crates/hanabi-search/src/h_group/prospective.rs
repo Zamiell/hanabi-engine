@@ -230,6 +230,72 @@ fn prospective_baseline_projection(
     TeamConventionSnapshot::new(source.clone(), profile).projection(observer)
 }
 
+/// A Fix must repair the recipient's actual dangerous note, not just match
+/// the true identity of a card while focusing a different slot.
+/// <https://hanabi.github.io/level-3/#the-fix-clue>
+pub(super) fn repairs_recipient_connection(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    target: PlayerId,
+    clue: Clue,
+    touched: &[CardId],
+) -> bool {
+    let Some(before) = prospective_baseline_projection(source, profile, target) else {
+        return false;
+    };
+    let Some(connection) = before.inferred.connection else {
+        return false;
+    };
+    // Playing our own pending layer can resolve the recipient's apparent
+    // obligation. Their projection cannot see our hidden connector; do not
+    // turn that uncertainty into a mandatory Fix that interrupts the layer.
+    let Some(giver) = prospective_baseline_projection(source, profile, source.observer) else {
+        return false;
+    };
+    if giver
+        .inferred
+        .connection
+        .is_some_and(|own| own.identity == connection.identity)
+    {
+        return false;
+    }
+    // A projected teammate cannot see an unknown focus in our hand. A
+    // connector inferred only by filling in that missing focus is a possible
+    // branch, not proof that the teammate is about to misplay.
+    if giver
+        .inferred
+        .cards
+        .iter()
+        .any(|card| card.card == connection.focus && card.identities.iter().count() != 1)
+    {
+        return false;
+    }
+    let Some(actual) = identity_of(source, connection.card) else {
+        return false;
+    };
+    if !before.inferred.playable_now.contains(&connection.card)
+        || !is_playable_now(source, connection.identity)
+        || is_playable_now(source, actual)
+        || clue.matches(connection.identity)
+        || !touched.contains(&connection.card)
+    {
+        return false;
+    }
+    let Some(after) = compiled_prospective_clue(source, profile, target, clue, touched) else {
+        return false;
+    };
+    let Some(owner) = after.team.projection(target) else {
+        return false;
+    };
+    owner.inferred.cards.iter().any(|card| {
+        card.card == connection.card
+            && card.focused
+            && card.identities.contains(actual)
+            && card.play_obligation.is_none()
+            && !owner.inferred.playable_now.contains(&card.card)
+    })
+}
+
 /// Reuses the current position's team projection inside one candidate
 /// compilation pass. Strategic comparison and safety validation therefore
 /// share the same observer reductions instead of building parallel baselines.

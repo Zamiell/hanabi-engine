@@ -40,6 +40,11 @@ pub(super) fn candidate_replaces(
     challenger: CompiledClueAction,
     bluff_recognized: bool,
 ) -> bool {
+    // An advanced label cannot erase the mandatory repair of a false note.
+    // https://hanabi.github.io/level-3/#the-fix-clue
+    if existing.purpose() == CluePurpose::Fix {
+        return false;
+    }
     challenger.purpose() == CluePurpose::Fix
         || challenger
             .move_kind()

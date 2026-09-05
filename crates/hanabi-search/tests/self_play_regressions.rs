@@ -2,6 +2,55 @@ use hanabi_protocol::HanabiLiveReplay;
 use hanabi_search::{HGroupProfile, InformationSet, SupportedConvention, WorldCount};
 
 #[test]
+fn cathys_turn_23_repairs_alices_layer_with_purple() {
+    let replay =
+        HanabiLiveReplay::from_json(include_str!("fixtures/self-play-p4v0s10-fix.json")).unwrap();
+    let state = replay.state_at_turn(22).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let information = InformationSet::new(&view).unwrap();
+    let analysis =
+        SupportedConvention::HGroup(HGroupProfile::Max).analyze(information.deductions());
+    assert_eq!(
+        analysis.preferred_action,
+        Some(hanabi_core::Action::Clue {
+            target: hanabi_core::PlayerId::new(0),
+            clue: hanabi_core::Clue::Suit(hanabi_core::Suit::Purple)
+        }),
+        "{analysis:#?}"
+    );
+    // Rank 3 focuses the other slot; it does not repair the blind-play note.
+    assert!(!analysis.actions.iter().any(|candidate| candidate.action
+        == hanabi_core::Action::Clue {
+            target: hanabi_core::PlayerId::new(0),
+            clue: hanabi_core::Clue::Rank(hanabi_core::Rank::Three),
+        }));
+    for (clue, remains_due) in [
+        (hanabi_core::Clue::Suit(hanabi_core::Suit::Purple), false),
+        (hanabi_core::Clue::Rank(hanabi_core::Rank::Three), true),
+    ] {
+        let mut after = state.clone();
+        after
+            .apply(hanabi_core::Action::Clue {
+                target: hanabi_core::PlayerId::new(0),
+                clue,
+            })
+            .unwrap();
+        let owner = after.view_for(hanabi_core::PlayerId::new(0)).unwrap();
+        let information = InformationSet::new(&owner).unwrap();
+        let analysis =
+            SupportedConvention::HGroup(HGroupProfile::Max).analyze(information.deductions());
+        let hanabi_search::ConventionInferences::HGroup(inferred) = analysis.inferences else {
+            panic!("expected H-Group")
+        };
+        assert_eq!(
+            inferred.playable_now.contains(&hanabi_core::CardId::new(2)),
+            remains_due,
+            "{clue:?}: {inferred:#?}"
+        );
+    }
+}
+
+#[test]
 fn recipient_fallback_cannot_reintroduce_a_known_duplicate_red_one() {
     let replay = HanabiLiveReplay::from_json(r#"{"seed":"p4v0s10","players":["Alice","Bob","Cathy","Donald"],"actions":[{"type":2,"target":2,"value":0}]}"#).unwrap();
     let state = replay.state_at_turn(1).unwrap();
