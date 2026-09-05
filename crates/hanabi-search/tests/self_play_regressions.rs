@@ -2,6 +2,34 @@ use hanabi_protocol::HanabiLiveReplay;
 use hanabi_search::{HGroupProfile, InformationSet, SupportedConvention, WorldCount};
 
 #[test]
+fn off_position_visible_one_does_not_delay_cathys_finesse() {
+    let replay =
+        HanabiLiveReplay::from_json(include_str!("fixtures/self-play-p4v0s20.json")).unwrap();
+    let state = replay.state_at_turn(10).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let information = InformationSet::new(&view).unwrap();
+    let analysis =
+        SupportedConvention::HGroup(HGroupProfile::Max).analyze(information.deductions());
+    assert_eq!(
+        analysis.preferred_action,
+        Some(hanabi_core::Action::Play(hanabi_core::CardId::new(11))),
+        "{analysis:#?}"
+    );
+    let hanabi_search::ConventionInferences::HGroup(inferred) = analysis.inferences else {
+        panic!("expected H-Group");
+    };
+    assert_eq!(
+        inferred
+            .connection
+            .map(|connection| (connection.card, connection.identity)),
+        Some((
+            hanabi_core::CardId::new(11),
+            hanabi_core::Card::new(hanabi_core::Suit::Yellow, hanabi_core::Rank::One),
+        ))
+    );
+}
+
+#[test]
 fn independently_known_prompt_connector_does_not_force_an_ambiguous_card_first() {
     for (json, turn) in [
         (include_str!("fixtures/self-play-p4v0s107.json"), 48),

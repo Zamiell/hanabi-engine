@@ -3271,6 +3271,29 @@ fn schedule_connection(
                         unclued
                             .iter()
                             .position(|card| identity_of(view, *card) == Some(expected))
+                            .filter(|position| {
+                                // Visibility alone does not make a connector
+                                // eligible. It must be on Finesse Position, or
+                                // reachable through successful layered plays.
+                                // An unplayable intervening card cannot make
+                                // the observer defer their own blind play.
+                                // A separately planned Fix may remove a lie
+                                // component; mere visibility cannot invent it.
+                                // https://hanabi.github.io/beginner/finesse/#finesse-position
+                                // https://hanabi.github.io/level-5/#the-layered-finesse
+                                let mut heights = stack_heights;
+                                unclued[..*position].iter().all(|card| {
+                                    identity_of(view, *card).is_some_and(|identity| {
+                                        if !is_playable_at(heights, identity) {
+                                            return required_fix.is_some_and(|fix| {
+                                                fix.target == actor && fix.focus == *card
+                                            });
+                                        }
+                                        heights[identity.suit.index()] = identity.rank.number();
+                                        true
+                                    })
+                                })
+                            })
                             .map_or_else(Vec::new, |position| unclued[..=position].to_vec())
                     }
                 } else if actor == view.observer && giver == view.observer {
