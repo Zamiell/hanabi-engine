@@ -1,6 +1,6 @@
 #[test]
 fn a_finessed_player_still_has_an_unclued_chop() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(2)
         .expect("the position after the opening rank-2 clue exists");
     let donald = PlayerId::new(3);

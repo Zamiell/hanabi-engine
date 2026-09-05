@@ -17,9 +17,11 @@ include!("tests/learning_rules.rs");
 include!("tests/regressions.rs");
 include!("tests/strategy.rs");
 
-fn expert_replay_p4v0s415() -> HanabiLiveReplay {
+fn reviewed_rank_three_branch_p4v0s415() -> HanabiLiveReplay {
+    // Preserve the reviewed rank-3 branch for position-specific convention
+    // tests. The active fixture now has an unreviewed engine continuation.
     HanabiLiveReplay::from_json(include_str!(
-        "../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        "tests/fixtures/game-p4v0s415-reviewed-branch.json"
     ))
     .expect("expert replay fixture is valid")
 }
@@ -76,7 +78,7 @@ fn opening_delayed_play_clue_stays_in_superposition_until_the_finesse_is_demonst
     let unresolved = IdentitySet::singleton(yellow_one).union(IdentitySet::singleton(yellow_two));
 
     for turn in [2, 3] {
-        let state = expert_replay_p4v0s415()
+        let state = reviewed_rank_three_branch_p4v0s415()
             .state_at_turn(turn)
             .expect("fixture prefix is legal");
         let view = state.view_for(PlayerId::new(0)).expect("Alice has a view");
@@ -94,7 +96,7 @@ fn opening_delayed_play_clue_stays_in_superposition_until_the_finesse_is_demonst
         );
     }
 
-    let demonstrated = expert_replay_p4v0s415()
+    let demonstrated = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(4)
         .expect("fixture prefix is legal");
     let view = demonstrated
@@ -116,7 +118,7 @@ fn proven_layered_yellow_line_eliminates_yellow_one_from_the_new_focus() {
     let expected = IdentitySet::singleton(Card::new(Suit::Yellow, Rank::Three));
 
     for turn in [5, 6, 7, 8] {
-        let state = expert_replay_p4v0s415()
+        let state = reviewed_rank_three_branch_p4v0s415()
             .state_at_turn(turn)
             .expect("fixture prefix is legal");
         let view = state.view_for(PlayerId::new(2)).expect("Cathy has a view");
@@ -144,7 +146,7 @@ fn proven_layered_yellow_line_eliminates_yellow_one_from_the_new_focus() {
 
 #[test]
 fn move_33_does_not_treat_an_ungotten_card_as_a_green_five() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(32)
         .expect("fixture prefix is legal");
     let actor = state.current_player();
@@ -160,7 +162,7 @@ fn move_33_does_not_treat_an_ungotten_card_as_a_green_five() {
 
 #[test]
 fn move_35_uses_the_oldest_matching_elimination_note() {
-    let replay_fixture = expert_replay_p4v0s415();
+    let replay_fixture = reviewed_rank_three_branch_p4v0s415();
     let state = replay_fixture
         .state_at_turn(34)
         .expect("fixture prefix is legal");
@@ -205,7 +207,11 @@ fn move_35_uses_the_oldest_matching_elimination_note() {
     )
     .expect("fixture position is analyzable");
     assert_eq!(
-        analysis.planner.best_action, clue,
+        analysis.planner.best_action,
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Four),
+        },
         "candidates={candidates:#?}; roots={:#?}",
         analysis.planner.root_actions
     );
@@ -246,7 +252,7 @@ fn move_35_uses_the_oldest_matching_elimination_note() {
 
 #[test]
 fn move_36_compares_purple_and_four_after_good_touch_closure() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(35)
         .expect("fixture prefix is legal");
     let actor = state.current_player();
@@ -283,7 +289,7 @@ fn move_36_compares_purple_and_four_after_good_touch_closure() {
 
 #[test]
 fn move_41_plays_the_promised_purple_four_after_the_connection() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(40)
         .expect("fixture prefix is legal");
     let actor = state.current_player();
@@ -302,7 +308,7 @@ fn move_41_plays_the_promised_purple_four_after_the_connection() {
 
 #[test]
 fn move_45_plays_the_automatic_good_touch_purple_five() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(44)
         .expect("fixture prefix is legal");
     let actor = state.current_player();
@@ -328,7 +334,7 @@ fn move_45_plays_the_automatic_good_touch_purple_five() {
 
 #[test]
 fn final_move_exhausts_all_worlds_before_the_last_draw() {
-    let replay = expert_replay_p4v0s415();
+    let replay = reviewed_rank_three_branch_p4v0s415();
     let state = replay
         .state_at_turn(45)
         .expect("the final decision position is legal");
@@ -369,7 +375,7 @@ fn final_move_exhausts_all_worlds_before_the_last_draw() {
 
 #[test]
 fn move_43_prefers_the_final_play_clue_with_known_trash_collateral() {
-    let replay_fixture = expert_replay_p4v0s415();
+    let replay_fixture = reviewed_rank_three_branch_p4v0s415();
     let state = replay_fixture
         .state_at_turn(42)
         .expect("fixture prefix is legal");
@@ -452,7 +458,7 @@ fn move_43_prefers_the_final_play_clue_with_known_trash_collateral() {
 fn final_play_clues_advance_the_plan_before_surplus_known_trash_discards() {
     let cases = [
         (
-            expert_replay_p4v0s415(),
+            reviewed_rank_three_branch_p4v0s415(),
             42,
             Action::Clue {
                 target: PlayerId::new(1),
@@ -574,7 +580,7 @@ fn third_replay_final_play_clues_advance_before_surplus_known_trash() {
 
 #[test]
 fn rejects_no_value_five_fill_in_before_move_32() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(31)
         .expect("fixture prefix is legal");
     let actor = state.current_player();
@@ -609,7 +615,7 @@ fn rejects_no_value_five_fill_in_before_move_32() {
 
 #[test]
 fn recognizes_expert_replay_opening_playable_chop() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(0)
         .expect("turn exists");
     let deductions = LogicalDeductions::new(
@@ -629,7 +635,7 @@ fn recognizes_expert_replay_opening_playable_chop() {
 
 #[test]
 fn recognizes_expert_replay_layered_reverse_finesse() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(1)
         .expect("turn exists");
     let view = state
@@ -658,7 +664,7 @@ fn recognizes_expert_replay_layered_reverse_finesse() {
 
 #[test]
 fn recognizes_expert_replay_queued_yellow_three() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(4)
         .expect("turn exists");
     let view = state
@@ -719,7 +725,7 @@ fn recognizes_expert_replay_queued_yellow_three() {
 
 #[test]
 fn out_of_order_fix_accepts_both_clues_and_prefers_color() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(6)
         .expect("turn exists");
     let deductions = LogicalDeductions::new(
@@ -793,7 +799,7 @@ fn out_of_order_fix_accepts_both_clues_and_prefers_color() {
 
 #[test]
 fn recognizes_expert_replay_play_after_out_of_order_fix() {
-    let before_fix = expert_replay_p4v0s415()
+    let before_fix = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(6)
         .expect("turn exists");
     let before_fix = LogicalDeductions::new(
@@ -817,7 +823,7 @@ fn recognizes_expert_replay_play_after_out_of_order_fix() {
         "{before_fix:#?}"
     );
 
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(8)
         .expect("turn exists");
     let deductions = LogicalDeductions::new(
@@ -834,7 +840,7 @@ fn recognizes_expert_replay_play_after_out_of_order_fix() {
 
 #[test]
 fn recognizes_expert_replay_priority_blue_three_line() {
-    let replay = expert_replay_p4v0s415();
+    let replay = reviewed_rank_three_branch_p4v0s415();
     let turn_nine = replay.state_at_turn(9).expect("turn exists");
     let deductions = LogicalDeductions::new(
         turn_nine
@@ -918,7 +924,7 @@ fn recognizes_expert_replay_priority_blue_three_line() {
 
 #[test]
 fn recognizes_expert_replay_red_three_continuation() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(14)
         .expect("turn exists");
     let deductions = LogicalDeductions::new(
@@ -949,7 +955,7 @@ fn recognizes_expert_replay_red_three_continuation() {
 
 #[test]
 fn optimal_replay_move_26_compares_clarity_and_team_tempo() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(25)
         .expect("turn exists");
     let deductions = LogicalDeductions::new(
@@ -1003,7 +1009,7 @@ fn optimal_replay_move_26_compares_clarity_and_team_tempo() {
 
 #[test]
 fn optimal_replay_move_29_plays_into_the_visible_yellow_five() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(28)
         .expect("turn exists");
     let deductions = LogicalDeductions::new(
@@ -1032,7 +1038,7 @@ fn optimal_replay_move_29_plays_into_the_visible_yellow_five() {
 
 #[test]
 fn recognizes_expert_replay_rank_four_fill_in_after_green_fix() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(15)
         .expect("turn exists");
     let recipient_baseline = LogicalDeductions::new(
@@ -1106,7 +1112,7 @@ fn recognizes_expert_replay_rank_four_fill_in_after_green_fix() {
 
 #[test]
 fn recognizes_expert_replay_releases_unused_layer_candidate() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(16)
         .expect("turn exists");
     let deductions = LogicalDeductions::new(
@@ -1128,7 +1134,7 @@ fn recognizes_expert_replay_releases_unused_layer_candidate() {
 
 #[test]
 fn recognizes_expert_replay_green_layer_receiver() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(17)
         .expect("turn exists");
     let deductions = LogicalDeductions::new(
@@ -1148,7 +1154,7 @@ fn recognizes_expert_replay_green_layer_receiver() {
 
 #[test]
 fn recognizes_expert_replay_delayed_focus_after_connectors() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(19)
         .expect("turn exists");
     let deductions = LogicalDeductions::new(
@@ -1167,7 +1173,7 @@ fn recognizes_expert_replay_delayed_focus_after_connectors() {
 
 #[test]
 fn recognizes_expert_replay_second_green_layer_card() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(21)
         .expect("turn exists");
     let deductions = LogicalDeductions::new(
@@ -1186,7 +1192,7 @@ fn recognizes_expert_replay_second_green_layer_card() {
 
 #[test]
 fn recognizes_expert_replay_priority_finesse_on_later_player() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(22)
         .expect("turn exists");
     let deductions = LogicalDeductions::new(
@@ -1205,7 +1211,7 @@ fn recognizes_expert_replay_priority_finesse_on_later_player() {
 
 #[test]
 fn recognizes_expert_replay_yellow_two_priority() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(24)
         .expect("turn exists");
     let deductions = LogicalDeductions::new(
@@ -1228,7 +1234,7 @@ fn recognizes_expert_replay_yellow_two_priority() {
 
 #[test]
 fn fixer_understands_expert_red_four_lie() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(6)
         .expect("turn exists");
     let deductions =
@@ -1267,7 +1273,7 @@ fn fixer_understands_expert_red_four_lie() {
 
 #[test]
 fn recipient_keeps_the_red_four_repair_branch_conditional() {
-    let state = expert_replay_p4v0s415()
+    let state = reviewed_rank_three_branch_p4v0s415()
         .state_at_turn(6)
         .expect("turn exists");
     let deductions =

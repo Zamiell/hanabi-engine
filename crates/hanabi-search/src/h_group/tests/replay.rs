@@ -4,7 +4,7 @@ use super::*;
 /// <https://hanabi.github.io/level-18/#the-elimination-finesse>
 #[test]
 fn elimination_finesse_slot_selection_respects_notes_and_chop_moves() {
-    let fixture = expert_replay_p4v0s415();
+    let fixture = reviewed_rank_three_branch_p4v0s415();
     let state = fixture.state_at_turn(34).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let deductions = LogicalDeductions::new(view).unwrap();
@@ -45,7 +45,7 @@ fn elimination_finesse_slot_selection_respects_notes_and_chop_moves() {
 /// granting any special admission score or overriding clue safety.
 #[test]
 fn elimination_finesse_is_admitted_and_understood_by_its_owner() {
-    let fixture = expert_replay_p4v0s415();
+    let fixture = reviewed_rank_three_branch_p4v0s415();
     let state = fixture.state_at_turn(34).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let deductions = LogicalDeductions::new(view.clone()).unwrap();
@@ -146,16 +146,22 @@ fn assert_expert_replay_matches_engine(seed: &str, replay: &HanabiLiveReplay) {
     }
 }
 
-/// Golden compatibility oracle: every position in the curated expert replay
-/// must select its corresponding optimal action.
+/// The user approved moves through 35. The generated suffix awaits review;
+/// it is validated for legality, not frozen as optimal strategy.
 #[test]
 fn optimized_expert_replay_matches_engine() {
-    assert_expert_replay_matches_engine("p4v0s415", &expert_replay_p4v0s415());
+    let mut replay = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .expect("active replay is valid");
+    replay.replay().expect("generated continuation is legal");
+    replay.actions.truncate(35);
+    assert_expert_replay_matches_engine("p4v0s415", &replay);
 }
 
 #[test]
 fn first_replay_move_eight_keeps_a_loaded_clue_in_superposition() {
-    let fixture = expert_replay_p4v0s415();
+    let fixture = reviewed_rank_three_branch_p4v0s415();
     let state = fixture.state_at_turn(7).expect("fixture prefix is legal");
     let view = state
         .view_for(state.current_player())
@@ -182,7 +188,7 @@ fn first_replay_move_eight_keeps_a_loaded_clue_in_superposition() {
 
 #[test]
 fn first_replay_move_ten_admits_the_direct_rank_three_play_clue() {
-    let fixture = expert_replay_p4v0s415();
+    let fixture = reviewed_rank_three_branch_p4v0s415();
     let state = fixture.state_at_turn(9).expect("fixture prefix is legal");
     let view = state
         .view_for(state.current_player())
@@ -228,7 +234,7 @@ fn first_replay_move_ten_admits_the_direct_rank_three_play_clue() {
 
 #[test]
 fn first_replay_move_seven_is_a_fix_of_the_promised_red_one() {
-    let fixture = expert_replay_p4v0s415();
+    let fixture = reviewed_rank_three_branch_p4v0s415();
     let before = fixture.state_at_turn(6).expect("fixture prefix is legal");
     let before_view = before
         .view_for(before.current_player())

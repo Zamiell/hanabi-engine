@@ -1,52 +1,251 @@
 {
-  "players": ["Alice", "Bob", "Cathy", "Donald"],
   "actions": [
-    { "type": 2, "target": 2, "value": 2 },
-    { "type": 2, "target": 0, "value": 1 },
-    { "type": 0, "target": 8, "value": 0 },
-    { "type": 0, "target": 15, "value": 0 },
-    { "type": 2, "target": 2, "value": 1 },
-    { "type": 2, "target": 3, "value": 0 },
-    { "type": 2, "target": 0, "value": 2 },
-    { "type": 0, "target": 14, "value": 0 },
-    { "type": 0, "target": 1, "value": 0 },
-    { "type": 3, "target": 3, "value": 3 },
-    { "type": 0, "target": 11, "value": 0 },
-    { "type": 0, "target": 18, "value": 0 },
-    { "type": 2, "target": 1, "value": 3 },
-    { "type": 0, "target": 4, "value": 0 },
-    { "type": 0, "target": 9, "value": 0 },
-    { "type": 3, "target": 0, "value": 4 },
-    { "type": 1, "target": 0, "value": 0 },
-    { "type": 0, "target": 22, "value": 0 },
-    { "type": 2, "target": 0, "value": 4 },
-    { "type": 0, "target": 17, "value": 0 },
-    { "type": 0, "target": 19, "value": 0 },
-    { "type": 0, "target": 7, "value": 0 },
-    { "type": 0, "target": 23, "value": 0 },
-    { "type": 0, "target": 13, "value": 0 },
-    { "type": 0, "target": 2, "value": 0 },
-    { "type": 2, "target": 0, "value": 1 },
-    { "type": 0, "target": 16, "value": 0 },
-    { "type": 1, "target": 12, "value": 0 },
-    { "type": 0, "target": 31, "value": 0 },
-    { "type": 2, "target": 0, "value": 3 },
-    { "type": 0, "target": 10, "value": 0 },
-    { "type": 1, "target": 21, "value": 0 },
-    { "type": 0, "target": 27, "value": 0 },
-    { "type": 1, "target": 5, "value": 0 },
-    { "type": 3, "target": 3, "value": 3 },
-    { "type": 2, "target": 0, "value": 4 },
-    { "type": 0, "target": 3, "value": 0 },
-    { "type": 0, "target": 6, "value": 0 },
-    { "type": 1, "target": 20, "value": 0 },
-    { "type": 0, "target": 33, "value": 0 },
-    { "type": 0, "target": 34, "value": 0 },
-    { "type": 1, "target": 25, "value": 0 },
-    { "type": 2, "target": 1, "value": 2 },
-    { "type": 1, "target": 26, "value": 0 },
-    { "type": 0, "target": 24, "value": 0 },
-    { "type": 0, "target": 44, "value": 0 }
+    {
+      "target": 2,
+      "type": 2,
+      "value": 2
+    },
+    {
+      "target": 0,
+      "type": 2,
+      "value": 1
+    },
+    {
+      "target": 8,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 15,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 2,
+      "type": 2,
+      "value": 1
+    },
+    {
+      "target": 3,
+      "type": 2,
+      "value": 0
+    },
+    {
+      "target": 0,
+      "type": 2,
+      "value": 2
+    },
+    {
+      "target": 14,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 1,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 3,
+      "type": 3,
+      "value": 3
+    },
+    {
+      "target": 11,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 18,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 1,
+      "type": 2,
+      "value": 3
+    },
+    {
+      "target": 4,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 9,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 0,
+      "type": 3,
+      "value": 4
+    },
+    {
+      "target": 0,
+      "type": 1,
+      "value": 0
+    },
+    {
+      "target": 22,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 0,
+      "type": 2,
+      "value": 4
+    },
+    {
+      "target": 17,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 19,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 7,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 23,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 13,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 2,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 0,
+      "type": 2,
+      "value": 1
+    },
+    {
+      "target": 16,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 12,
+      "type": 1,
+      "value": 0
+    },
+    {
+      "target": 31,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 0,
+      "type": 2,
+      "value": 3
+    },
+    {
+      "target": 10,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 21,
+      "type": 1,
+      "value": 0
+    },
+    {
+      "target": 27,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 5,
+      "type": 1,
+      "value": 0
+    },
+    {
+      "target": 0,
+      "type": 3,
+      "value": 4
+    },
+    {
+      "target": 1,
+      "type": 2,
+      "value": 4
+    },
+    {
+      "target": 3,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 6,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 20,
+      "type": 1,
+      "value": 0
+    },
+    {
+      "target": 26,
+      "type": 1,
+      "value": 0
+    },
+    {
+      "target": 37,
+      "type": 1,
+      "value": 0
+    },
+    {
+      "target": 38,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 1,
+      "type": 2,
+      "value": 2
+    },
+    {
+      "target": 30,
+      "type": 1,
+      "value": 0
+    },
+    {
+      "target": 34,
+      "type": 1,
+      "value": 0
+    },
+    {
+      "target": 44,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 29,
+      "type": 1,
+      "value": 0
+    },
+    {
+      "target": 45,
+      "type": 0,
+      "value": 0
+    },
+    {
+      "target": 24,
+      "type": 0,
+      "value": 0
+    }
   ],
+  "players": ["Alice", "Bob", "Cathy", "Donald"],
   "seed": "p4v0s415"
 }
