@@ -236,6 +236,7 @@ fn prospective_baseline_projection(
 pub(super) fn repairs_recipient_connection(
     source: &PlayerView,
     profile: HGroupProfile,
+    giver: &HGroupInferences,
     target: PlayerId,
     clue: Clue,
     touched: &[CardId],
@@ -249,21 +250,19 @@ pub(super) fn repairs_recipient_connection(
     // Playing our own pending layer can resolve the recipient's apparent
     // obligation. Their projection cannot see our hidden connector; do not
     // turn that uncertainty into a mandatory Fix that interrupts the layer.
-    let Some(giver) = prospective_baseline_projection(source, profile, source.observer) else {
-        return false;
-    };
-    if giver
-        .inferred
-        .connection
-        .is_some_and(|own| own.identity == connection.identity)
-    {
+    if giver.connection.is_some_and(|own| {
+        own.identity == connection.identity
+            || giver
+                .cards
+                .iter()
+                .any(|card| card.card == own.card && card.identities.contains(connection.identity))
+    }) {
         return false;
     }
     // A projected teammate cannot see an unknown focus in our hand. A
     // connector inferred only by filling in that missing focus is a possible
     // branch, not proof that the teammate is about to misplay.
     if giver
-        .inferred
         .cards
         .iter()
         .any(|card| card.card == connection.focus && card.identities.iter().count() != 1)

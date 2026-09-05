@@ -2,6 +2,22 @@ use hanabi_protocol::HanabiLiveReplay;
 use hanabi_search::{HGroupProfile, InformationSet, SupportedConvention, WorldCount};
 
 #[test]
+fn donald_completes_the_opening_layer_instead_of_fixing_a_projected_branch() {
+    let replay =
+        HanabiLiveReplay::from_json(include_str!("fixtures/self-play-p4v0s10-fix.json")).unwrap();
+    let state = replay.state_at_turn(3).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let information = InformationSet::new(&view).unwrap();
+    let analysis =
+        SupportedConvention::HGroup(HGroupProfile::Max).analyze(information.deductions());
+    assert_eq!(
+        analysis.preferred_action,
+        Some(hanabi_core::Action::Play(hanabi_core::CardId::new(15))),
+        "{analysis:#?}"
+    );
+}
+
+#[test]
 fn cathys_turn_23_repairs_alices_layer_with_purple() {
     let replay =
         HanabiLiveReplay::from_json(include_str!("fixtures/self-play-p4v0s10-fix.json")).unwrap();

@@ -212,6 +212,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             .expect("standard Hanabi has at most five players"),
     );
     let convention_cards = convention_card_inferences(deductions, replay);
+    let giver_inferred = infer_h_group_from_replay(deductions, replay.clone(), profile);
     let mut baseline_playing = replay.cards.already_playing.clone();
     let promised_connection_cards = replay
         .pending_connections
@@ -291,16 +292,21 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
         let five_chop_move = rule_enabled(profile, HGroupRuleId::ChopMoves)
             && clue == Clue::Rank(Rank::Five)
             && five_chop_moved_card(layout, &touched, &gotten).is_some();
-        let repairs_required_fix =
-            super::prospective::repairs_recipient_connection(view, profile, target, clue, &touched)
-                || replay.required_fixes.iter().any(|obligation| {
-                    let required = obligation.required;
-                    required.actor == view.current_player
-                        && fix_condition_is_live(view, obligation.condition)
-                        && required.target == target
-                        && touched.contains(&required.focus)
-                        && clue.matches(required.identity)
-                });
+        let repairs_required_fix = super::prospective::repairs_recipient_connection(
+            view,
+            profile,
+            &giver_inferred,
+            target,
+            clue,
+            &touched,
+        ) || replay.required_fixes.iter().any(|obligation| {
+            let required = obligation.required;
+            required.actor == view.current_player
+                && fix_condition_is_live(view, obligation.condition)
+                && required.target == target
+                && touched.contains(&required.focus)
+                && clue.matches(required.identity)
+        });
         let repairs_focus_inversion =
             replay
                 .signals
