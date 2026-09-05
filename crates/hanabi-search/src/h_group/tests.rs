@@ -210,7 +210,7 @@ fn move_35_uses_the_oldest_matching_elimination_note() {
         analysis.planner.best_action,
         Action::Clue {
             target: PlayerId::new(0),
-            clue: Clue::Rank(Rank::Four),
+            clue: Clue::Suit(Suit::Purple),
         },
         "candidates={candidates:#?}; roots={:#?}",
         analysis.planner.root_actions
