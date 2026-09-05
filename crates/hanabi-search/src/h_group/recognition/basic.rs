@@ -37,6 +37,9 @@ pub(in crate::h_group) fn apply_level_two_effects(
     if *clue == Clue::Rank(Rank::Five)
         && !touched.is_empty()
         && !five_chop_move
+        // A Save on a shifted chop is still a Save even when the oldest
+        // card has already been protected. Honor the canonical meaning.
+        && !same_turn_signal(effects.signals, entry.turn, HGroupMoveKind::SaveClue)
         && hands[target.index()]
             .first()
             .is_none_or(|chop| !touched.contains(chop))

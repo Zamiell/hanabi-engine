@@ -2,6 +2,90 @@ use hanabi_protocol::HanabiLiveReplay;
 use hanabi_search::{HGroupProfile, InformationSet, SupportedConvention, WorldCount};
 
 #[test]
+fn low_score_five_save_protects_bobs_shifted_chop() {
+    let replay =
+        HanabiLiveReplay::from_json(include_str!("fixtures/self-play-p4v0s15.json")).unwrap();
+    let mut state = replay.state_at_turn(8).unwrap();
+    let save = hanabi_core::Action::Clue {
+        target: hanabi_core::PlayerId::new(1),
+        clue: hanabi_core::Clue::Rank(hanabi_core::Rank::Five),
+    };
+    let view = state.view_for(state.current_player()).unwrap();
+    let information = InformationSet::new(&view).unwrap();
+    let analysis =
+        SupportedConvention::HGroup(HGroupProfile::Max).analyze(information.deductions());
+    assert_eq!(analysis.preferred_action, Some(save), "{analysis:#?}");
+    state.apply(save).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let information = InformationSet::new(&view).unwrap();
+    let analysis =
+        SupportedConvention::HGroup(HGroupProfile::Max).analyze(information.deductions());
+    let hanabi_search::ConventionInferences::HGroup(inferred) = analysis.inferences else {
+        panic!("expected H-Group")
+    };
+    assert!(
+        inferred
+            .cards
+            .iter()
+            .find(|card| card.card == hanabi_core::CardId::new(5))
+            .unwrap()
+            .saved
+    );
+    assert!(
+        !inferred
+            .signals
+            .iter()
+            .any(|signal| signal.turn == 8
+                && signal.kind == hanabi_search::HGroupMoveKind::FiveStall)
+    );
+}
+
+#[test]
+fn good_touch_exclusion_survives_a_gentlemans_discard() {
+    let replay =
+        HanabiLiveReplay::from_json(include_str!("fixtures/self-play-p4v0s15.json")).unwrap();
+    let state = replay.state_at_turn(48).unwrap();
+    let view = state.view_for(hanabi_core::PlayerId::new(0)).unwrap();
+    let information = InformationSet::new(&view).unwrap();
+    let analysis =
+        SupportedConvention::HGroup(HGroupProfile::Max).analyze(information.deductions());
+    let hanabi_search::ConventionInferences::HGroup(inferred) = analysis.inferences else {
+        panic!("expected H-Group");
+    };
+    let blue_four = hanabi_core::Card::new(hanabi_core::Suit::Blue, hanabi_core::Rank::Four);
+    assert!(inferred.signals.iter().any(|signal| signal.turn == 47
+        && signal.kind == hanabi_search::HGroupMoveKind::GentlemansDiscard
+        && signal.cards == [hanabi_core::CardId::new(41)]
+        && signal.identity == Some(blue_four)));
+    assert_eq!(
+        inferred
+            .cards
+            .iter()
+            .find(|card| card.card == hanabi_core::CardId::new(41))
+            .unwrap()
+            .identities
+            .iter()
+            .collect::<Vec<_>>(),
+        vec![blue_four]
+    );
+    for id in [19, 21] {
+        assert!(
+            !inferred
+                .cards
+                .iter()
+                .find(|card| card.card == hanabi_core::CardId::new(id))
+                .unwrap()
+                .identities
+                .contains(blue_four)
+        );
+    }
+    assert_ne!(
+        information.world_count_up_to(&analysis.belief_constraints, 1),
+        WorldCount::Exact(0)
+    );
+}
+
+#[test]
 fn off_position_visible_one_does_not_delay_cathys_finesse() {
     let replay =
         HanabiLiveReplay::from_json(include_str!("fixtures/self-play-p4v0s20.json")).unwrap();

@@ -1399,6 +1399,9 @@ fn replay_h_group_inner_uncached(
                         .sum::<usize>();
                     let low_score_number_five = rule_enabled(profile, HGroupRuleId::FiveTech)
                         && *clue == Clue::Rank(Rank::Five)
+                        // Level 19 turns off Play Clues, not ordinary 5 Saves.
+                        // https://hanabi.github.io/level-19/#no-play-clues-with-a-number-5-clue-in-the-low-score-phase
+                        && save_identities.is_empty()
                         && score < 2 * Suit::ALL.len();
                     let early_five_stall = rule_enabled(profile, HGroupRuleId::BasicMoves)
                         && early_game

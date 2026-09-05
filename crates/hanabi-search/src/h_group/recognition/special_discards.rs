@@ -91,6 +91,7 @@ pub(in crate::h_group) fn apply_transfer_effects(
             .filter(|candidate| {
                 explicitly_clued.contains(candidate)
                     && context.before.facts[candidate.index()].allows(*identity)
+                    && !transfer_was_clued_after_visible_touch(view, entry.turn, *card, *candidate)
                     && signals
                         .facts()
                         .known_identity(*candidate)
@@ -223,6 +224,29 @@ pub(in crate::h_group) fn apply_transfer_effects(
         vec![target_card],
         Some(*identity),
     );
+}
+
+/// A giver who can see an already-touched recipient card cannot knowingly
+/// touch its useful duplicate. Discarding the later-touched card does not
+/// revoke that evidence and manufacture a Sarcastic target.
+/// <https://hanabi.github.io/level-1/#good-touch-principle>
+/// <https://hanabi.github.io/level-10/#the-gentlemans-discard-gd>
+fn transfer_was_clued_after_visible_touch(
+    view: &PlayerView,
+    turn: u32,
+    transferred: hanabi_core::CardId,
+    candidate: hanabi_core::CardId,
+) -> bool {
+    view.history.iter().any(|entry| {
+        let ObservedEvent::Clued { giver, touched, .. } = &entry.event else {
+            return false;
+        };
+        entry.turn < turn
+            && *giver != view.observer
+            && touched.contains(&transferred)
+            && !was_clued_before(view, entry.turn, transferred)
+            && was_clued_before(view, entry.turn, candidate)
+    })
 }
 
 pub(in crate::h_group) fn apply_special_finesse_discard_effects(
