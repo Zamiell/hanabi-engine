@@ -50,10 +50,17 @@ is complete.
 - The "[hanabi-live](https://github.com/Hanabi-Live/hanabi-live)" repository contains the source code for the website where everybody plays the game. This engine has to integrate with it in various ways. The repository should be checked-out next to this one. You can reference the source code when you need to confirm a specific game mechanic or server data structure.
 - The ["hanabi.github.io"](https://github.com/hanabi/hanabi.github.io/) repository contains the source code for the website that documents every H-Group convention. The engine uses these conventions when playing in H-Group mode. The repository should be checked-out next to this one. You can reference the source code when you need to confirm how a specific convention should work.
 
-## Strategy or Convention Questions
+## Replay Positions and Human Review
 
-When asking the human a strategy or convention question, include a clickable
-Hanab Live replay link generated with:
+Whenever reporting a replay disagreement, convention bug, or position requiring
+human review, always include a generated clickable Hanab Live replay link, the
+seed, the one-based turn, and the competing actions or concrete issue. This
+applies even when reporting status rather than explicitly asking a question.
+Do not wait for the user to request the link in a follow-up.
+
+The expert replay comparison prints a link on disagreement. Include that link
+in the user-facing response; a link buried in test output is not sufficient.
+Otherwise generate it with:
 
 ```bash
 scripts/generate-hanab-live-link.sh path/to/game.json --turn 23
@@ -66,10 +73,6 @@ Pass a standard-game fixture or a self-play `.active/<seed>.json` replay;
 seed-only decks are expanded automatically. The entire supplied replay is
 validated, so use a legal prefix if later actions are malformed.
 
-The link embeds the deck and actions; no upload, clipboard access, or running
-local server is needed to generate it. Opening it imports the replay on Hanab
-Live. The upstream format replaces player names with Alice/Bob/etc. and omits
-notes, seed metadata, and custom options. Do not use it for nonstandard games.
-The codec mirrors `hanabi-live/packages/client/src/lobby/hypoCompress.ts`.
-Include the seed, turn, and concrete question alongside the link, rather than
-requiring the human to infer the issue from the replay alone.
+Before sending a response about a specific disagreement, check that it includes
+the replay link, seed, Hanab Live turn, and both actions. If link generation
+fails, report the failure explicitly rather than silently omitting the link.

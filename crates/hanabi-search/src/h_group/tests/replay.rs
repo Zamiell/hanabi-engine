@@ -1,6 +1,6 @@
 use super::*;
 
-fn assert_expert_replay_matches_engine(replay: &HanabiLiveReplay) {
+fn assert_expert_replay_matches_engine(seed: &str, replay: &HanabiLiveReplay) {
     for turn in 0..u32::try_from(replay.actions.len()).expect("replay fits in u32") {
         let state = replay.state_at_turn(turn).expect("fixture prefix is legal");
         let actor = state.current_player();
@@ -23,6 +23,16 @@ fn assert_expert_replay_matches_engine(replay: &HanabiLiveReplay) {
         if analysis.planner.best_action == expected {
             continue;
         }
+        let link = hanabi_protocol::replay_link(replay, usize::try_from(turn).unwrap() + 1)
+            .unwrap_or_else(|error| format!("Replay link generation failed: {error}"));
+        let review = format!(
+            "{seed}, Hanab Live turn {} ({}):\nFixture: {expected:?}\nEngine: {:?}\nReplay: {link}",
+            turn + 1,
+            replay.players[actor.index()],
+            analysis.planner.best_action,
+        );
+        // Print before the large diagnostics so the review link is easy to find.
+        eprintln!("{review}");
         let deductions = LogicalDeductions::new(view).expect("fixture position is logical");
         let clue_candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
         let replay = replay_h_group(&deductions, HGroupProfile::Max);
@@ -36,7 +46,7 @@ fn assert_expert_replay_matches_engine(replay: &HanabiLiveReplay) {
         assert_eq!(
             analysis.planner.best_action,
             expected,
-            "engine disagrees at move {}; planner candidates: {:#?}; convention candidates: {clue_candidates:#?}; rejected clues: {rejected:#?}; inferences: {inferences:#?}",
+            "{review}\nengine disagrees at move {}; planner candidates: {:#?}; convention candidates: {clue_candidates:#?}; rejected clues: {rejected:#?}; inferences: {inferences:#?}",
             turn + 1,
             analysis.planner.root_actions,
         );
@@ -47,7 +57,7 @@ fn assert_expert_replay_matches_engine(replay: &HanabiLiveReplay) {
 /// must select its corresponding optimal action.
 #[test]
 fn optimized_expert_replay_matches_engine() {
-    assert_expert_replay_matches_engine(&expert_replay_p4v0s415());
+    assert_expert_replay_matches_engine("p4v0s415", &expert_replay_p4v0s415());
 }
 
 #[test]
@@ -153,7 +163,7 @@ fn first_replay_move_seven_is_a_fix_of_the_promised_red_one() {
 
 #[test]
 fn second_expert_replay_matches_engine() {
-    assert_expert_replay_matches_engine(&expert_replay_p4v0s9());
+    assert_expert_replay_matches_engine("p4v0s9", &expert_replay_p4v0s9());
 }
 
 #[test]
@@ -237,7 +247,7 @@ fn second_replay_move_seventeen_excludes_the_promised_purple_two() {
 
 #[test]
 fn third_expert_replay_matches_engine() {
-    assert_expert_replay_matches_engine(&expert_replay_p4v0s2());
+    assert_expert_replay_matches_engine("p4v0s2", &expert_replay_p4v0s2());
 }
 
 #[test]
@@ -265,7 +275,7 @@ fn third_replay_two_new_duplicate_fours_still_violate_good_touch() {
 
 #[test]
 fn fourth_expert_replay_matches_engine() {
-    assert_expert_replay_matches_engine(&expert_replay_p4v0s3());
+    assert_expert_replay_matches_engine("p4v0s3", &expert_replay_p4v0s3());
 }
 
 #[test]
@@ -424,7 +434,7 @@ fn fifth_replay_cathy_draws_for_faster_green_completion() {
 
 #[test]
 fn fifth_expert_replay_matches_engine() {
-    assert_expert_replay_matches_engine(&expert_replay_p4v0s1());
+    assert_expert_replay_matches_engine("p4v0s1", &expert_replay_p4v0s1());
 }
 
 #[test]
