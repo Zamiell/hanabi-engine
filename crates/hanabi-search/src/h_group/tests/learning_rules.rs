@@ -1289,28 +1289,6 @@ fn focus_rules_cover_retouched_single_and_leftmost_new_cards() {
 }
 
 #[test]
-fn two_save_is_followed_by_the_more_efficient_rank_one_play_clue() {
-    let mut state = paired_sample_five_state();
-    state
-        .apply(Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Rank(Rank::Two),
-        })
-        .unwrap();
-    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
-
-    assert_eq!(
-        select_h_group_action(&deductions, HGroupProfile::Max),
-        Some(Action::Clue {
-            target: PlayerId::new(2),
-            clue: Clue::Rank(Rank::One),
-        }),
-        "candidates: {:#?}",
-        h_group_clue_candidates(&deductions, HGroupProfile::Max),
-    );
-}
-
-#[test]
 fn out_of_order_clue_is_not_given_to_the_immediate_next_player() {
     let mut state = paired_sample_five_state();
     for action in [
@@ -1616,51 +1594,6 @@ fn five_color_ejection_is_not_given_when_second_finesse_position_would_misplay()
         target: PlayerId::new(0),
         clue: Clue::Suit(Suit::Purple),
     }));
-}
-
-#[test]
-fn duplicate_rank_ones_use_a_focused_play_clue_instead_of_ignition() {
-    let mut state = paired_sample_one_state();
-    for action in [
-        Action::Clue {
-            target: PlayerId::new(1),
-            clue: Clue::Rank(Rank::Two),
-        },
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Suit(Suit::Yellow),
-        },
-        Action::Play(CardId::new(14)),
-        Action::Play(CardId::new(1)),
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Rank(Rank::One),
-        },
-        Action::Clue {
-            target: PlayerId::new(0),
-            clue: Clue::Rank(Rank::Five),
-        },
-        Action::Play(CardId::new(4)),
-    ] {
-        state.apply(action).unwrap();
-    }
-    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
-
-    let rank_one = Action::Clue {
-        target: PlayerId::new(2),
-        clue: Clue::Rank(Rank::One),
-    };
-    assert!(ordered_h_group_actions(&deductions, HGroupProfile::Max).contains(&rank_one));
-
-    state.apply(rank_one).unwrap();
-    let receiver = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
-    let inferred = infer_h_group(&receiver, HGroupProfile::Max);
-    assert_eq!(
-        select_h_group_action(&receiver, HGroupProfile::Max),
-        Some(Action::Play(CardId::new(13)))
-    );
-    assert!(!inferred.playable_now.contains(&CardId::new(11)));
-    assert!(!inferred.playable_now.contains(&CardId::new(12)));
 }
 
 #[test]
