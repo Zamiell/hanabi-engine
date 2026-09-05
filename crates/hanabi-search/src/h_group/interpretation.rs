@@ -514,21 +514,6 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             &replay.cards.facts,
         )
         .or_else(|| {
-            let identities = newly_informed
-                .iter()
-                .filter_map(|card| identity_of(view, *card))
-                .collect::<Vec<_>>();
-            let distinct = identity_set(identities.iter().copied());
-            (clue == Clue::Rank(Rank::One)
-                && target == next_player
-                && is_playable_now(view, focus_identity)
-                && identities.len() == newly_informed.len()
-                && identities.iter().all(|identity| identity.rank == Rank::One)
-                && distinct.len() >= 2
-                && distinct.len() < identities.len())
-            .then(|| 410 + u16::try_from(distinct.len()).unwrap_or(0))
-        })
-        .or_else(|| {
             rule_enabled(profile, HGroupRuleId::Elimination)
                 .then(|| {
                     elimination_finesse_connection(
