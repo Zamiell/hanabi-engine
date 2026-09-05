@@ -62,26 +62,28 @@ is complete.
 ## Replay Positions and Human Review
 
 Whenever reporting a replay disagreement, convention bug, or position requiring
-human review, always include a generated clickable Hanab Live replay link, the
-seed, the one-based turn, and the competing actions or concrete issue. This
-applies even when reporting status rather than explicitly asking a question. Do
-not wait for the user to request the link in a follow-up.
+human review, use the following instructions.
+
+### Replay Link
+
+Always include a generated clickable Hanab Live replay link, the seed, the
+one-based turn, and the competing actions or concrete issue. This applies even
+when reporting status rather than explicitly asking a question.
 
 The expert replay comparison prints a link on disagreement. Include that link in
-the user-facing response; a link buried in test output is not sufficient.
-Otherwise generate it with:
+the user-facing response. Otherwise, generate it with:
 
 ```bash
-scripts/generate-hanab-live-link.sh path/to/game.json --turn 23
+scripts/generate-hanab-live-link.sh path/to/game.json --turn 1
 ```
 
-The script prints `https://hanab.live/shared-replay-json/<compressed-data>#23`.
-Use Hanab Live's **one-based** turn number: turn 1 is the initial deal, and turn
-23 is the position after 22 actions. This differs from `analyze --turn`. Pass a
-standard-game fixture or a self-play `.active/<seed>.json` replay; seed-only
-decks are expanded automatically. The entire supplied replay is validated, so
-use a legal prefix if later actions are malformed.
+Use Hanab Live's **one-based** turn number.
 
-Before sending a response about a specific disagreement, check that it includes
-the replay link, seed, Hanab Live turn, and both actions. If link generation
-fails, report the failure explicitly rather than silently omitting the link.
+### Canditate Clues
+
+Always enumerate all canditate clues that the engine considered.
+
+### Move Reasoning
+
+Explain the full reasoning of why the engine chose one canditate clue over the
+others.
