@@ -1339,6 +1339,107 @@ fn replay_h_group_inner_uncached(
                         focus_identities = focus_identities.union(delayed_claimed_plays);
                         play_identities = play_identities.union(delayed_claimed_plays);
                     }
+                    // Speculation and commit must both read the same pre-clue
+                    // convention snapshot. Pushing the new Play signal may
+                    // reactivate a previously fixed card; allowing commit to
+                    // observe that mutation made it manufacture a loaded
+                    // connection and Fix that simulation never proposed.
+                    let convention_facts_before_clue = signals.facts().clone();
+                    let connection_context = ConnectionPlanningContext {
+                        profile,
+                        view,
+                        turn: entry.turn,
+                        giver: *giver,
+                        target: *target,
+                        focus,
+                        clue: *clue,
+                        touches: CurrentClueTouches(touched),
+                        hands: &hands,
+                        facts: &facts,
+                        clues: &clues,
+                        promptable_before: PromptableBeforeClue(&previously_promptable),
+                        protected_before: &gotten,
+                        already_playing: &already_playing,
+                        declined_direct_plays: &declined_direct_plays,
+                        convention_facts: &convention_facts_before_clue,
+                        chop_moved: &chop_moved,
+                        stack_heights,
+                        allow_blind_reverse_empathy,
+                    };
+                    // The snapshot shortcut handles one missing connector.
+                    // An Elimination Finesse can also start a longer sequence:
+                    // prove that sequence with the same planner that will
+                    // materialize its obligations, not a special clue score.
+                    // https://hanabi.github.io/level-18/#the-elimination-finesse
+                    for identity in focus_identities.without(play_identities).iter() {
+                        let height = stack_heights[identity.suit.index()];
+                        if identity.rank.number() <= height + 2
+                            || !rule_enabled(profile, HGroupRuleId::Elimination)
+                            || !convention_facts_before_clue
+                                .identity_claims()
+                                .iter()
+                                .any(|claim| {
+                                    claim.source == HGroupMoveKind::Elimination
+                                        && claim.identity.suit == identity.suit
+                                        && claim.identity.rank.number() > height
+                                        && claim.identity.rank.number() < identity.rank.number()
+                                })
+                        {
+                            continue;
+                        }
+                        let hypothesis = connection_context.simulate(
+                            identity,
+                            &pending_connections,
+                            &invisibly_clued,
+                        );
+                        let complete = ((height + 1)..identity.rank.number()).all(|rank| {
+                            let expected =
+                                Card::new(identity.suit, Rank::ALL[usize::from(rank - 1)]);
+                            pending_connections.identity_is_queued(expected)
+                                || interpretation::snapshot_accounted(
+                                    expected,
+                                    focus,
+                                    view,
+                                    &hands,
+                                    &facts,
+                                    &previously_promptable,
+                                )
+                                || hypothesis
+                                    .connection_steps
+                                    .iter()
+                                    .any(|step| step.expected == expected)
+                        });
+                        // This supplements a rejected snapshot, so a merely
+                        // compatible hidden Finesse position is not evidence
+                        // for inventing several extra ranks. Require each new
+                        // connector to be independently visible or known.
+                        let evidenced = hypothesis.connection_steps.iter().all(|step| {
+                            step.cards.last().is_some_and(|card| {
+                                historical.identity(*card) == Some(step.expected)
+                                    || facts[card.index()].identity_mask()
+                                        == 1 << step.expected.index()
+                                    || convention_facts_before_clue.known_identity(*card)
+                                        == Some(step.expected)
+                            })
+                        });
+                        let uses_elimination = hypothesis.connection_steps.iter().any(|step| {
+                            rule_enabled(profile, HGroupRuleId::Elimination)
+                                && elimination_finesse_card(
+                                    step.actor,
+                                    &hands[step.actor.index()],
+                                    focus,
+                                    step.expected,
+                                    &convention_facts_before_clue,
+                                    &chop_moved,
+                                    |card| facts[card.index()].allows(step.expected),
+                                )
+                                .is_some_and(|card| step.cards == [card])
+                        });
+                        if complete && evidenced && uses_elimination {
+                            play_identities =
+                                play_identities.union(IdentitySet::singleton(identity));
+                        }
+                    }
                     let mut intermediate_bluff = false;
                     if rule_enabled(profile, HGroupRuleId::IntermediateBluffs)
                         && *clue == Clue::Rank(Rank::Three)
@@ -1459,33 +1560,6 @@ fn replay_h_group_inner_uncached(
                             })
                             .fold(0, |mask, identity| mask | (1 << identity.index())),
                     );
-                    // Speculation and commit must both read the same pre-clue
-                    // convention snapshot. Pushing the new Play signal may
-                    // reactivate a previously fixed card; allowing commit to
-                    // observe that mutation made it manufacture a loaded
-                    // connection and Fix that simulation never proposed.
-                    let convention_facts_before_clue = signals.facts().clone();
-                    let connection_context = ConnectionPlanningContext {
-                        profile,
-                        view,
-                        turn: entry.turn,
-                        giver: *giver,
-                        target: *target,
-                        focus,
-                        clue: *clue,
-                        touches: CurrentClueTouches(touched),
-                        hands: &hands,
-                        facts: &facts,
-                        clues: &clues,
-                        promptable_before: PromptableBeforeClue(&previously_promptable),
-                        protected_before: &gotten,
-                        already_playing: &already_playing,
-                        declined_direct_plays: &declined_direct_plays,
-                        convention_facts: &convention_facts_before_clue,
-                        chop_moved: &chop_moved,
-                        stack_heights,
-                        allow_blind_reverse_empathy,
-                    };
                     let connection_hypotheses = play_identities
                         .iter()
                         .map(|identity| {

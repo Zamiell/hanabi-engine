@@ -1,5 +1,46 @@
 use super::*;
 
+/// p4v0s415 move 35: reviewed rank 4 connects Bob's Elimination p2,
+/// then his p3, to Alice's p4. Donald must retain that same public line.
+#[test]
+fn elimination_sequence_is_recognized_by_the_next_observer() {
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    let state = fixture.state_at_turn(35).unwrap();
+    let view = state.view_for(PlayerId::new(3)).unwrap();
+    let deductions = LogicalDeductions::new(view).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    let clue = inferred.clues.iter().find(|clue| clue.turn == 34).unwrap();
+    assert_eq!(clue.kind, HGroupClueKind::Play);
+    let line = clue
+        .hypotheses
+        .iter()
+        .find(|hypothesis| hypothesis.focus_identity == Card::new(Suit::Purple, Rank::Four))
+        .expect("rank 4 retains the complete purple connection");
+    for (card, rank) in [(6, Rank::Two), (38, Rank::Three)] {
+        assert!(
+            line.connection_steps.iter().any(|step| {
+                step.actor == PlayerId::new(1)
+                    && step.cards == [CardId::new(card)]
+                    && step.expected == Card::new(Suit::Purple, rank)
+            }),
+            "{line:#?}"
+        );
+    }
+    assert!(
+        !h_group_clue_candidates(&deductions, HGroupProfile::Max)
+            .iter()
+            .any(|candidate| candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(1),
+                    clue: Clue::Suit(Suit::Purple),
+                }),
+        "repeating both promised purple cards creates no new play"
+    );
+}
+
 /// Slot-selection invariants using the reviewed p4v0s415 turn-35 notes.
 /// <https://hanabi.github.io/level-18/#the-elimination-finesse>
 #[test]
