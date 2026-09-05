@@ -99,9 +99,7 @@ pub(in crate::h_group) fn recipient_replay_assessment(
                 HGroupMoveKind::TempoClue | HGroupMoveKind::TempoClueChopMove
             )
         }),
-        CluePurpose::Advanced | CluePurpose::FallbackPlay | CluePurpose::FallbackSave => {
-            !signals.is_empty()
-        }
+        CluePurpose::Advanced => !signals.is_empty(),
     };
     if recognized {
         ClueRecognition::RecipientReplay

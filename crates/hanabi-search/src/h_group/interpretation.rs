@@ -512,65 +512,13 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             &replay.pending_connections,
             &convention_cards,
             &replay.cards.facts,
-        )
-        .or_else(|| {
-            rule_enabled(profile, HGroupRuleId::Elimination)
-                .then(|| {
-                    elimination_finesse_connection(
-                        view,
-                        &replay.hands,
-                        None,
-                        None,
-                        &replay.cards.facts,
-                        &replay.cards.chop_moved,
-                        std::array::from_fn(|suit| {
-                            u8::try_from(view.play_stacks[suit].len())
-                                .expect("a standard stack has at most five cards")
-                        }),
-                        focus,
-                        focus_identity,
-                    )
-                })
-                .flatten()
-                // The clue both secures the immediately playable elimination
-                // card and promises its delayed focus. Treat it as an urgent
-                // play line; strategic coverage can then distinguish it from
-                // a direct clue that concentrates both plays in one hand.
-                .map(|_| 500)
-        });
+        );
         let fallback_signals =
             prospective_team_clue_signal_kinds(view, profile, target, clue, &touched);
         let recipient_focus_inversion = fallback_signals.contains(&HGroupMoveKind::FocusInversion);
-        let recipient_out_of_order = fallback_signals.iter().any(|kind| {
-            matches!(
-                kind,
-                HGroupMoveKind::OutOfOrderPlay | HGroupMoveKind::OutOfOrderFinesse
-            )
-        });
-        let recipient_visible_connection = fallback_signals.contains(&HGroupMoveKind::Prompt)
-            && fallback_signals.iter().any(|kind| {
-                matches!(
-                    kind,
-                    HGroupMoveKind::Finesse
-                        | HGroupMoveKind::ReverseFinesse
-                        | HGroupMoveKind::SelfFinesse
-                        | HGroupMoveKind::LayeredFinesse
-                        | HGroupMoveKind::HiddenFinesse
-                        | HGroupMoveKind::QueuedFinesse
-                        | HGroupMoveKind::AmbiguousFinesse
-                )
-            });
         let mixed_touch_continuation = matches!(clue, Clue::Suit(_))
             && touched.len() > newly_informed.len()
             && !gotten.contains(&focus);
-        let giver_has_scheduled_play = view.hands[view.observer.index()]
-            .iter()
-            .any(|card| baseline_playing.contains(&card.id));
-        let novel_recipient_visible_connection = recipient_visible_connection
-            && focus_identity.rank == Rank::Four
-            && !gotten.contains(&focus)
-            && !giver_has_scheduled_play
-            && !recipient_out_of_order;
         if play_score.is_none()
             && save_score.is_none()
             // Recipient recognition can recover a connection, but cannot
@@ -583,9 +531,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 fixed_cards,
                 convention_cards: &convention_cards,
             })
-            && (recipient_focus_inversion
-                || novel_recipient_visible_connection
-                || mixed_touch_continuation)
+            && (recipient_focus_inversion || mixed_touch_continuation)
             && prospective_clue_primary_interpretation(view, profile, target, clue, &touched)
                 .is_some_and(|interpretation| {
                     let height = view.play_stacks[focus_identity.suit.index()].len();
@@ -613,19 +559,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                                     .hypotheses
                                     .iter()
                                     .any(|hypothesis| !hypothesis.connection_steps.is_empty()))
-                            || (novel_recipient_visible_connection
-                                && interpretation.hypotheses.iter().any(|hypothesis| {
-                                    hypothesis.focus_identity == focus_identity
-                                        && hypothesis.required_fix.is_none()
-                                        && hypothesis
-                                            .connection_steps
-                                            .iter()
-                                            .any(|step| step.kind == HGroupConnectionKind::Prompt)
-                                        && hypothesis
-                                            .connection_steps
-                                            .iter()
-                                            .any(|step| step.kind != HGroupConnectionKind::Prompt)
-                                })))
+                            )
                 })
         {
             // Recipient replay is the canonical semantic compiler. It can

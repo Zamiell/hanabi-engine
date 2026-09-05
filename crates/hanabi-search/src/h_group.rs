@@ -103,11 +103,10 @@ use information_value::convention_information_value;
 #[cfg(test)]
 use interpretation::h_group_clue_candidates;
 use interpretation::{
-    build_convention_knowledge, convention_card_inferences, creates_false_anxiety,
-    elimination_finesse_connection, h_group_clue_candidates_from_replay,
-    h_group_rejected_clues_from_replay, infer_clue_to_self, loaded_connection_plan,
-    recipient_replay_assessment, snapshot_good_touch_identities, snapshot_play_identities,
-    snapshot_save_identities,
+    build_convention_knowledge, convention_card_inferences, elimination_finesse_connection,
+    h_group_clue_candidates_from_replay, h_group_rejected_clues_from_replay, infer_clue_to_self,
+    loaded_connection_plan, recipient_replay_assessment, snapshot_good_touch_identities,
+    snapshot_play_identities, snapshot_save_identities,
 };
 use knowledge_effects::{CardKnowledgeEffect, ConventionKnowledge, KnowledgeSource};
 use ledger::{

@@ -2,22 +2,20 @@ use crate::ConventionPolicyTier;
 
 use super::{
     Action, ActionPreference, ActionSchedule, BeliefConstraints, Card, CardId, CardSet, Clue,
-    CluePurpose, ClueSchedule, ClueValue, CompiledClueAction, CompiledHGroupAction,
-    ConventionActionReason, ConventionConstraintGraph, ConventionConstraints,
-    ConventionRequirementKind, HGroupActionKind, HGroupActionSet, HGroupClueKind, HGroupConnection,
-    HGroupConnectionKind, HGroupConnectionPromise, HGroupIdentityStatus, HGroupInferences,
-    HGroupMoveKind, HGroupPhase, HGroupPlayObligation, HGroupProfile, HGroupRuleId, HGroupState,
-    IdentitySet, LogicalDeductions, MAX_CLUE_TOKENS, ObservedEvent, OnceLock, PerspectiveDepth,
-    PerspectiveProjector, PlayerId, PlayerView, ProspectiveTransition, Rank,
-    RejectedConventionAction, Suit, TeamConventionSnapshot, TerminalPlanProgress, chop,
-    convention_card_inferences, creates_false_anxiety, finesse_position, focus,
-    h_group_clue_candidates_from_replay, h_group_phase, h_group_rejected_clues_from_replay,
-    identity_of, infer_clue_to_self, is_convention_trash, is_critical, is_eventually_useful,
-    is_playable_at, is_playable_now, next_player, ordered_playable_cards,
-    owner_knowledge_read_model, projected_h_group_replay, prospective_clue_has_unsafe_connection,
-    prospective_clue_marks_focus_saved, prospective_clue_primary_kind, prospective_clue_view,
-    prospective_play_has_unsafe_inference, prospective_team_clue_signal_kinds, replay_h_group,
-    rule_enabled, was_clued_before,
+    CluePurpose, CompiledClueAction, CompiledHGroupAction, ConventionActionReason,
+    ConventionConstraintGraph, ConventionConstraints, ConventionRequirementKind, HGroupActionKind,
+    HGroupActionSet, HGroupClueKind, HGroupConnection, HGroupConnectionKind,
+    HGroupConnectionPromise, HGroupIdentityStatus, HGroupInferences, HGroupMoveKind, HGroupPhase,
+    HGroupPlayObligation, HGroupProfile, HGroupRuleId, HGroupState, IdentitySet, LogicalDeductions,
+    MAX_CLUE_TOKENS, ObservedEvent, OnceLock, PerspectiveDepth, PerspectiveProjector, PlayerId,
+    PlayerView, ProspectiveTransition, Rank, RejectedConventionAction, Suit,
+    TeamConventionSnapshot, TerminalPlanProgress, chop, convention_card_inferences,
+    finesse_position, h_group_clue_candidates_from_replay, h_group_phase,
+    h_group_rejected_clues_from_replay, identity_of, infer_clue_to_self, is_convention_trash,
+    is_critical, is_eventually_useful, is_playable_at, is_playable_now, next_player,
+    ordered_playable_cards, owner_knowledge_read_model, projected_h_group_replay,
+    prospective_clue_primary_kind, prospective_clue_view, prospective_play_has_unsafe_inference,
+    prospective_team_clue_signal_kinds, replay_h_group, rule_enabled, was_clued_before,
 };
 
 #[derive(Clone, Debug)]
@@ -629,32 +627,6 @@ fn ordered_h_group_actions_from_analysis(
                 && positional_discard_is_valid(view, card.id)
         }) {
             return vec![Action::Discard(forced.id)];
-        }
-    }
-    if own_hand.iter().all(|card| gotten.contains(&card.id)) {
-        if let Some(clue) = legal_actions
-            .iter()
-            .copied()
-            .filter_map(|action| {
-                fallback_clue_score(view, profile, action, &gotten).map(|score| (score, action))
-            })
-            .max_by_key(|(score, _)| *score)
-            .map(|(_, action)| action)
-        {
-            return vec![clue];
-        }
-    }
-    if view.deck_size <= view.hands.len() {
-        if let Some(clue) = legal_actions
-            .iter()
-            .copied()
-            .filter_map(|action| {
-                fallback_clue_score(view, profile, action, &gotten).map(|score| (score, action))
-            })
-            .max_by_key(|(score, _)| *score)
-            .map(|(_, action)| action)
-        {
-            return vec![clue];
         }
     }
     if view.clue_tokens < MAX_CLUE_TOKENS {
@@ -1305,74 +1277,6 @@ fn derive_predictable_action(
     } else {
         None
     }
-}
-
-fn fallback_clue_score(
-    view: &PlayerView,
-    profile: HGroupProfile,
-    action: Action,
-    gotten: &CardSet,
-) -> Option<u8> {
-    let Action::Clue { target, clue } = action else {
-        return None;
-    };
-    let hand = &view.hands[target.index()];
-    let layout = hand.iter().map(|card| card.id).collect::<Vec<_>>();
-    let touched = hand
-        .iter()
-        .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
-        .map(|card| card.id)
-        .collect::<Vec<_>>();
-    if touched.iter().all(|card| {
-        hand.iter()
-            .find(|candidate| candidate.id == *card)
-            .is_some_and(|card| card.clues.has_positive_clue(clue))
-    }) {
-        return None;
-    }
-    let old_chop = chop(&layout, gotten);
-    let focus = focus(&layout, &touched, old_chop, gotten)?;
-    let identity = hand
-        .iter()
-        .find(|card| card.id == focus)
-        .and_then(|card| card.identity)?;
-    let (score, save) = if is_playable_now(view, identity) {
-        (3, false)
-    } else if old_chop == Some(focus)
-        && (matches!(
-            (clue, identity.rank),
-            (Clue::Rank(Rank::Five), Rank::Five) | (Clue::Rank(Rank::Two), Rank::Two)
-        ) || is_critical(view, identity))
-    {
-        (2, true)
-    } else {
-        return None;
-    };
-    let candidate = CompiledClueAction::new(
-        action,
-        None,
-        ClueValue::new(u16::from(score)),
-        if save {
-            CluePurpose::FallbackSave
-        } else {
-            CluePurpose::FallbackPlay
-        },
-        ClueSchedule::new(
-            save && (identity.rank == Rank::Five || is_critical(view, identity)),
-            !save,
-        ),
-        0,
-    );
-    if prospective_clue_has_unsafe_connection(view, profile, target, focus, clue, &touched, !save) {
-        return None;
-    }
-    if save && !prospective_clue_marks_focus_saved(view, profile, target, focus, clue, &touched) {
-        return None;
-    }
-    if view.clue_tokens == 1 && creates_false_anxiety(view, profile, gotten, &candidate) {
-        return None;
-    }
-    Some(score)
 }
 
 fn positional_discard_is_valid(view: &PlayerView, discard: CardId) -> bool {

@@ -10,8 +10,6 @@ pub(super) enum CluePurpose {
     Save,
     Advanced,
     Tempo,
-    FallbackPlay,
-    FallbackSave,
 }
 
 /// Evidence supporting prospective admission. Some clues have meaning that
@@ -191,11 +189,6 @@ impl CompiledClueAction {
             CluePurpose::Tempo if self.semantics.move_kind != Some(HGroupMoveKind::TempoClue) => {
                 Err("Tempo purpose lacks TempoClue semantics")
             }
-            CluePurpose::FallbackPlay | CluePurpose::FallbackSave
-                if self.semantics.move_kind.is_some() =>
-            {
-                Err("fallback clue unexpectedly has named convention semantics")
-            }
             _ => Ok(()),
         }
     }
@@ -218,10 +211,7 @@ impl CompiledClueAction {
     }
 
     pub(super) const fn is_save(self) -> bool {
-        matches!(
-            self.semantics.purpose,
-            CluePurpose::Save | CluePurpose::FallbackSave
-        )
+        matches!(self.semantics.purpose, CluePurpose::Save)
     }
 
     pub(super) const fn connection_steps(self) -> u8 {
