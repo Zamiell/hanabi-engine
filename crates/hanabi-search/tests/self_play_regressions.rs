@@ -2,6 +2,27 @@ use hanabi_protocol::HanabiLiveReplay;
 use hanabi_search::{HGroupProfile, InformationSet, SupportedConvention, WorldCount};
 
 #[test]
+fn recipient_fallback_cannot_reintroduce_a_known_duplicate_red_one() {
+    let replay = HanabiLiveReplay::from_json(r#"{"seed":"p4v0s10","players":["Alice","Bob","Cathy","Donald"],"actions":[{"type":2,"target":2,"value":0}]}"#).unwrap();
+    let state = replay.state_at_turn(1).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let information = InformationSet::new(&view).unwrap();
+    let analysis =
+        SupportedConvention::HGroup(HGroupProfile::Max).analyze(information.deductions());
+    let bad_clue = hanabi_core::Action::Clue {
+        target: hanabi_core::PlayerId::new(3),
+        clue: hanabi_core::Clue::Suit(hanabi_core::Suit::Red),
+    };
+    assert!(
+        analysis
+            .actions
+            .iter()
+            .all(|candidate| candidate.action != bad_clue),
+        "{analysis:#?}"
+    );
+}
+
+#[test]
 fn opening_yellow_cannot_prompt_its_newly_touched_collateral() {
     let replay = HanabiLiveReplay::from_json(r#"{"seed":"p4v0s7","players":["Alice","Bob","Cathy","Donald"],"actions":[{"type":2,"target":3,"value":1}]}"#).unwrap();
     let state = replay.state_at_turn(0).unwrap();

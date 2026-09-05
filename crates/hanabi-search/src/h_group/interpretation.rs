@@ -580,6 +580,16 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             && !recipient_out_of_order;
         if play_score.is_none()
             && save_score.is_none()
+            // Recipient recognition can recover a connection, but cannot
+            // waive Good Touch for known useful duplicates.
+            && !duplicates_known_good_touch(GoodTouchContext {
+                view,
+                newly_touched: &newly_informed,
+                clue: Some((clue, &touched)),
+                explicitly_clued: &promptable,
+                fixed_cards,
+                convention_cards: &convention_cards,
+            })
             && (recipient_focus_inversion
                 || novel_recipient_visible_connection
                 || mixed_touch_continuation)
