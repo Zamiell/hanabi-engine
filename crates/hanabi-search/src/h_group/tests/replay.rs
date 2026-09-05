@@ -1,5 +1,98 @@
 use super::*;
 
+/// Slot-selection invariants using the reviewed p4v0s415 turn-35 notes.
+/// <https://hanabi.github.io/level-18/#the-elimination-finesse>
+#[test]
+fn elimination_finesse_slot_selection_respects_notes_and_chop_moves() {
+    let fixture = expert_replay_p4v0s415();
+    let state = fixture.state_at_turn(34).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let deductions = LogicalDeductions::new(view).unwrap();
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
+    let actor = PlayerId::new(1);
+    let select = |moved: &CardSet, excluded: Option<CardId>| {
+        elimination_finesse_card(
+            actor,
+            &replay.hands[1],
+            CardId::new(33),
+            Card::new(Suit::Purple, Rank::Two),
+            &replay.cards.facts,
+            moved,
+            |card| Some(card) != excluded,
+        )
+    };
+    assert_eq!(select(&CardSet::default(), None), Some(CardId::new(6)));
+    assert_eq!(
+        select(&[CardId::new(6)].into_iter().collect(), None),
+        Some(CardId::new(25))
+    );
+    assert_eq!(
+        select(
+            &[CardId::new(6), CardId::new(25), CardId::new(28)]
+                .into_iter()
+                .collect(),
+            None
+        ),
+        Some(CardId::new(6))
+    );
+    assert_eq!(
+        select(&CardSet::default(), Some(CardId::new(6))),
+        Some(CardId::new(25))
+    );
+}
+
+/// Same reviewed clue: admission, connection proof, and owner agree without
+/// granting any special admission score or overriding clue safety.
+#[test]
+fn elimination_finesse_is_admitted_and_understood_by_its_owner() {
+    let fixture = expert_replay_p4v0s415();
+    let state = fixture.state_at_turn(34).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let deductions = LogicalDeductions::new(view.clone()).unwrap();
+    let target = PlayerId::new(3);
+    let clue = Clue::Rank(Rank::Three);
+    assert!(
+        h_group_clue_candidates(&deductions, HGroupProfile::Max)
+            .iter()
+            .any(|candidate| candidate.action == Action::Clue { target, clue })
+    );
+    assert_eq!(
+        prospective_clue_hazard(
+            &view,
+            HGroupProfile::Max,
+            target,
+            CardId::new(33),
+            clue,
+            &[CardId::new(33)],
+            false
+        ),
+        None
+    );
+    let interpretation = prospective_clue_primary_interpretation(
+        &view,
+        HGroupProfile::Max,
+        target,
+        clue,
+        &[CardId::new(33)],
+    )
+    .unwrap();
+    assert!(interpretation.hypotheses.iter().any(|hypothesis| {
+        hypothesis.connection_steps.iter().any(|step| {
+            step.actor == PlayerId::new(1)
+                && step.cards == [CardId::new(6)]
+                && step.expected == Card::new(Suit::Purple, Rank::Two)
+        })
+    }));
+    let after = fixture.state_at_turn(35).unwrap();
+    let owner = LogicalDeductions::new(after.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    assert_eq!(
+        infer_h_group(&owner, HGroupProfile::Max)
+            .connection
+            .map(|connection| connection.card),
+        Some(CardId::new(6))
+    );
+}
+
 fn assert_expert_replay_matches_engine(seed: &str, replay: &HanabiLiveReplay) {
     for turn in 0..u32::try_from(replay.actions.len()).expect("replay fits in u32") {
         let state = replay.state_at_turn(turn).expect("fixture prefix is legal");
@@ -463,6 +556,7 @@ fn fifth_replay_move_seventeen_admits_purple_reverse_finesse() {
         &replay.cards.already_playing,
         &replay.pending_connections,
         &replay.cards.facts,
+        &replay.cards.chop_moved,
     );
     let primary =
         prospective_clue_primary_interpretation(&view, HGroupProfile::Max, target, clue, &touched);

@@ -103,10 +103,11 @@ use information_value::convention_information_value;
 #[cfg(test)]
 use interpretation::h_group_clue_candidates;
 use interpretation::{
-    build_convention_knowledge, convention_card_inferences, elimination_finesse_connection,
-    h_group_clue_candidates_from_replay, h_group_rejected_clues_from_replay, infer_clue_to_self,
-    loaded_connection_plan, recipient_replay_assessment, snapshot_good_touch_identities,
-    snapshot_play_identities, snapshot_save_identities,
+    build_convention_knowledge, convention_card_inferences, elimination_finesse_card,
+    elimination_finesse_connection, h_group_clue_candidates_from_replay,
+    h_group_rejected_clues_from_replay, infer_clue_to_self, loaded_connection_plan,
+    recipient_replay_assessment, snapshot_good_touch_identities, snapshot_play_identities,
+    snapshot_save_identities,
 };
 use knowledge_effects::{CardKnowledgeEffect, ConventionKnowledge, KnowledgeSource};
 use ledger::{
@@ -2896,6 +2897,21 @@ fn schedule_connection(
         if expected_is_already_playing {
             continue;
         }
+        let elimination_card_for = |actor: PlayerId| {
+            rule_enabled(profile, HGroupRuleId::Elimination)
+                .then(|| {
+                    elimination_finesse_card(
+                        actor,
+                        &hands[actor.index()],
+                        focus,
+                        expected,
+                        convention_facts,
+                        chop_moved,
+                        |card| facts[card.index()].allows(expected),
+                    )
+                })
+                .flatten()
+        };
         let mut found = None;
         let ordinary_search_len = if rule_enabled(profile, HGroupRuleId::BasicMoves) {
             (target.index() + hands.len() - actor_index) % hands.len() + 1
@@ -2907,17 +2923,18 @@ fn schedule_connection(
                 let candidate_index = (actor_index + distance) % hands.len();
                 (candidate_index != target.index() && candidate_index != giver.index())
                     .then(|| {
-                        hands[candidate_index]
-                            .iter()
-                            .rev()
-                            .copied()
-                            .find(|card| {
+                        elimination_card_for(PlayerId::new(
+                            u8::try_from(candidate_index).expect("player index"),
+                        ))
+                        .or_else(|| {
+                            hands[candidate_index].iter().rev().copied().find(|card| {
                                 *card != focus
                                     && !promptable_before_clue.contains(card)
                                     && !invisibly_clued.contains(card)
                                     && !scheduled_cards.contains(card)
                             })
-                            .map(|card| (candidate_index, card))
+                        })
+                        .map(|card| (candidate_index, card))
                     })
                     .flatten()
             })
@@ -2938,7 +2955,8 @@ fn schedule_connection(
                         allow_blind_reverse_empathy,
                     ) && (identity_of(view, *card) == Some(expected)
                         || (*candidate_index == view.observer.index()
-                            && facts[card.index()].identity_mask() == 1 << expected.index()))
+                            && (facts[card.index()].identity_mask() == 1 << expected.index()
+                                || elimination_card_for(view.observer) == Some(*card))))
                 })
                 || rule_enabled(profile, HGroupRuleId::SpecialFinesses)
                     && (ordinary_search_len..hands.len()).any(|distance| {
@@ -3104,6 +3122,8 @@ fn schedule_connection(
                                         )
                                 } else {
                                     facts[card.index()].allows(expected)
+                                        && HistoricalView::new(view, turn)
+                                            .has_unseen_copy(expected, hands)
                                 }
                             },
                             |actual| actual == expected,
@@ -3241,7 +3261,16 @@ fn schedule_connection(
                 }) {
                     continue;
                 }
-                let cards = if rule_enabled(profile, HGroupRuleId::SpecialFinesses) {
+                let cards = if let Some(card) = elimination_card_for(actor) {
+                    // Elimination changes this actor's Finesse position, not
+                    // the validity of the whole clue. Select before checking
+                    // visibility so a wrong selected card cannot be skipped.
+                    (!scheduled_cards.contains(&card)
+                        && (actor == view.observer || identity_of(view, card) == Some(expected)))
+                    .then_some(card)
+                    .into_iter()
+                    .collect()
+                } else if rule_enabled(profile, HGroupRuleId::SpecialFinesses) {
                     if actor == view.observer {
                         if giver == view.observer {
                             unclued
@@ -3348,11 +3377,13 @@ fn schedule_connection(
                 Some(HistoricalView::new(view, turn)),
                 convention_facts,
                 chop_moved,
-                stack_heights,
                 focus,
-                focus_identity,
+                expected,
             ) {
-                if elimination_identity == expected && !scheduled_cards.contains(&card) {
+                if actor == target
+                    && elimination_identity == expected
+                    && !scheduled_cards.contains(&card)
+                {
                     actor_index = actor.index();
                     found = Some((actor, vec![card], HGroupConnectionKind::Finesse));
                 }

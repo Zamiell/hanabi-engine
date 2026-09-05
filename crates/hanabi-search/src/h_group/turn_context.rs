@@ -63,6 +63,28 @@ impl<'a> HistoricalView<'a> {
 
         identity_of(self.source, card)
     }
+
+    /// Whether an unknown card can still be this identity at this history turn.
+    /// Count only then-visible cards and already revealed plays/discards.
+    pub(super) fn has_unseen_copy(self, identity: Card, hands: &[Vec<CardId>]) -> bool {
+        let visible = hands
+            .iter()
+            .flatten()
+            .filter(|card| self.identity(**card) == Some(identity))
+            .count();
+        let revealed = self
+            .source
+            .history
+            .iter()
+            .filter(|entry| {
+                entry.turn < self.turn
+                    && matches!(entry.event,
+                ObservedEvent::Played { identity: card, .. }
+                    | ObservedEvent::Discarded { identity: card, .. } if card == identity)
+            })
+            .count();
+        visible + revealed < usize::from(identity.rank.copies())
+    }
 }
 
 /// Public convention-relevant state at one side of an observed event.

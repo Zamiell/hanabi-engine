@@ -503,6 +503,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             &replay.pending_connections,
             &convention_cards,
             &replay.cards.facts,
+            &replay.cards.chop_moved,
         );
         let fallback_signals =
             prospective_team_clue_signal_kinds(view, profile, target, clue, &touched);
@@ -1455,6 +1456,7 @@ pub(super) fn advanced_clue_candidates(
                         &replay.cards.already_playing,
                         &replay.pending_connections,
                         &replay.cards.facts,
+                        &replay.cards.chop_moved,
                     )
                     .is_some()
                         && !prospective_clue_has_unsafe_connection(
@@ -2118,6 +2120,7 @@ pub(super) fn play_clue_score(
     pending_connections: &ConnectionManager,
     convention_cards: &[HGroupCardInference],
     convention_facts: &ConventionFacts,
+    chop_moved: &CardSet,
 ) -> Option<u16> {
     let trash_collateral = known_trash_collateral(view, focus, focus_identity, clue, newly_touched);
     let ordinary_touches = newly_touched
@@ -2169,6 +2172,7 @@ pub(super) fn play_clue_score(
             already_playing,
             pending_connections,
             convention_facts,
+            chop_moved,
         )?
     };
     Some(
@@ -2202,7 +2206,36 @@ pub(super) fn known_trash_collateral(
         .collect()
 }
 
-/// Finds the card promised by an Elimination Finesse for `focus_identity`.
+/// Selects the oldest eligible Elimination-noted card before considering its face.
+/// All note sources materialize as Elimination claims; later draws are absent
+/// from those claims. Skip Chop-Moved cards unless every candidate is moved.
+/// Source: <https://hanabi.github.io/level-18/#the-elimination-finesse>
+pub(super) fn elimination_finesse_card(
+    actor: PlayerId,
+    hand: &[CardId],
+    focus: CardId,
+    expected: Card,
+    convention_facts: &ConventionFacts,
+    chop_moved: &CardSet,
+    allows: impl Fn(CardId) -> bool,
+) -> Option<CardId> {
+    let eligible = |card: CardId| {
+        card != focus
+            && allows(card)
+            && convention_facts.identity_claims().iter().any(|claim| {
+                claim.source == HGroupMoveKind::Elimination
+                    && claim.target == Some(actor)
+                    && claim.identity == expected
+                    && claim.cards.contains(&card)
+            })
+    };
+    hand.iter()
+        .copied()
+        .find(|card| eligible(*card) && !chop_moved.contains(card))
+        .or_else(|| hand.iter().copied().find(|card| eligible(*card)))
+}
+
+/// Finds a visible or owner-relative Elimination connector for `expected`.
 ///
 /// Elimination notes are disjunctive: the noted identity is somewhere among
 /// the cards recorded by the original signal. A Finesse on the next card in
@@ -2216,15 +2249,9 @@ pub(super) fn elimination_finesse_connection(
     historical: Option<HistoricalView<'_>>,
     convention_facts: &ConventionFacts,
     chop_moved: &CardSet,
-    stack_heights: [u8; 5],
     focus: CardId,
-    focus_identity: Card,
+    expected: Card,
 ) -> Option<(PlayerId, CardId, Card)> {
-    let stack_height = stack_heights[focus_identity.suit.index()];
-    if focus_identity.rank.number() != stack_height + 2 {
-        return None;
-    }
-    let expected = Card::new(focus_identity.suit, Rank::ALL[usize::from(stack_height)]);
     let direct_facts = |card: CardId| {
         clue_facts.map_or_else(
             || {
@@ -2251,20 +2278,15 @@ pub(super) fn elimination_finesse_connection(
             }
             let player = claim.target?;
             let hand = hands.get(player.index())?;
-            let candidates = hand
-                .iter()
-                .copied()
-                .filter(|card| {
-                    *card != focus
-                        && claim.cards.contains(card)
-                        && direct_facts(*card).allows(expected)
-                })
-                .collect::<Vec<_>>();
-            let promised = candidates
-                .iter()
-                .copied()
-                .find(|card| !chop_moved.contains(card))
-                .or_else(|| candidates.first().copied())?;
+            let promised = elimination_finesse_card(
+                player,
+                hand,
+                focus,
+                expected,
+                convention_facts,
+                chop_moved,
+                |card| direct_facts(card).allows(expected),
+            )?;
             (player == view.observer || visible_identity(promised) == Some(expected))
                 .then_some((player, promised, expected))
         })
@@ -2283,6 +2305,7 @@ pub(super) fn delayed_connection_score(
     already_playing: &CardSet,
     pending_connections: &ConnectionManager,
     convention_facts: &ConventionFacts,
+    chop_moved: &CardSet,
 ) -> Option<u16> {
     let stack_height = view.play_stacks[focus_identity.suit.index()].len();
     if usize::from(focus_identity.rank.number()) <= stack_height + 1
@@ -2373,6 +2396,36 @@ pub(super) fn delayed_connection_score(
                 .known_identity(card.id)
                 .map_or_else(|| card.clues.allows(identity), |known| known == identity)
     };
+    let finesse_connects = |player: usize, needed: Card| {
+        let actor = PlayerId::new(u8::try_from(player).expect("standard player index"));
+        let hand = &view.hands[player];
+        let layout = hand.iter().map(|card| card.id).collect::<Vec<_>>();
+        if rule_enabled(profile, HGroupRuleId::Elimination) {
+            if let Some(card) = elimination_finesse_card(
+                actor,
+                &layout,
+                focus,
+                needed,
+                convention_facts,
+                chop_moved,
+                |id| {
+                    hand.iter()
+                        .any(|card| card.id == id && card.clues.allows(needed))
+                },
+            ) {
+                return !already_playing.contains(&card) && identity_of(view, card) == Some(needed);
+            }
+        }
+        visible_finesse_connects(
+            view,
+            hand,
+            needed,
+            focus,
+            explicitly_clued,
+            already_playing,
+            rule_enabled(profile, HGroupRuleId::SpecialFinesses),
+        )
+    };
     let direct_reverse_connection = rule_enabled(profile, HGroupRuleId::BasicMoves)
         && (ordinary_search_len..view.hands.len()).any(|distance| {
             let player = (first + distance) % view.hands.len();
@@ -2386,15 +2439,7 @@ pub(super) fn delayed_connection_score(
                     && prompt_allows(card, connector)
                     && card.identity == Some(connector)
             });
-            let finesse = visible_finesse_connects(
-                view,
-                &view.hands[player],
-                connector,
-                focus,
-                explicitly_clued,
-                already_playing,
-                rule_enabled(profile, HGroupRuleId::SpecialFinesses),
-            );
+            let finesse = finesse_connects(player, connector);
             prompt || finesse
         });
     let search_len = if explicitly_clued.contains(&focus) || direct_reverse_connection {
@@ -2436,18 +2481,10 @@ pub(super) fn delayed_connection_score(
             })
     });
     let has_finesse = !has_prompt
-        && player_order.iter().copied().any(|player| {
-            player != target.index()
-                && visible_finesse_connects(
-                    view,
-                    &view.hands[player],
-                    connector,
-                    focus,
-                    explicitly_clued,
-                    already_playing,
-                    rule_enabled(profile, HGroupRuleId::SpecialFinesses),
-                )
-        });
+        && player_order
+            .iter()
+            .copied()
+            .any(|player| player != target.index() && finesse_connects(player, connector));
     if !has_prompt && !has_finesse {
         return None;
     }
@@ -2493,18 +2530,10 @@ pub(super) fn delayed_connection_score(
             .iter()
             .flatten()
             .any(|card| explicitly_clued.contains(&card.id) && card.identity == Some(needed));
-        let layered_finesse_available = player_order.iter().copied().any(|player| {
-            player != target.index()
-                && visible_finesse_connects(
-                    view,
-                    &view.hands[player],
-                    needed,
-                    focus,
-                    explicitly_clued,
-                    already_playing,
-                    rule_enabled(profile, HGroupRuleId::SpecialFinesses),
-                )
-        });
+        let layered_finesse_available = player_order
+            .iter()
+            .copied()
+            .any(|player| player != target.index() && finesse_connects(player, needed));
         if !explicitly_available && !layered_finesse_available {
             return None;
         }

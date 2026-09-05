@@ -1323,9 +1323,8 @@ pub(in crate::h_group) fn snapshot_playable(
             historical_view,
             convention_facts,
             chop_moved,
-            stack_heights,
             focus,
-            identity,
+            *connector,
         )
         .is_some())
 }
