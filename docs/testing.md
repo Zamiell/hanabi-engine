@@ -7,28 +7,27 @@ convention interpretation was correct.
 
 ## Retained coverage
 
-| Category                        | Evidence and permitted assertions                                                                                                                                                      |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Reviewed expert replays         | `game-p4v0s415`: action parity through move 35; `game-p4v0s9`, `game-p4v0s2`, `game-p4v0s3`, and `game-p4v0s1`: full action parity. All retain focused, reviewed interpretation tests. |
-| Replay-based hypotheses         | Alternative clues and hidden-world branches from identified reviewed positions; these are comparisons, not permission to rewrite the fixture.                                          |
-| Superpositions and architecture | Reviewed snapshot expectations; incremental/replayed equivalence, perspective isolation, causal bookkeeping, and consistency invariants.                                               |
-| Recorded self-play failures     | Specific established-rule failures and legality/consistency checks. Earlier moves and whole-game strategy are not certified.                                                           |
-| Ordinary unit tests             | Game rules, seed generation, codecs, exact-search algorithms, identity sets, focus ordering, and data structures may use artificial inputs with independently defined expectations.    |
-| Completion smoke tests          | Generated games check legal actions and bounded completion across profiles; they do not prescribe moves, identities, or a target score.                                                |
+| Category                        | Evidence and permitted assertions                                                                                                                                                                                                             |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reviewed expert replays         | `game-p4v0s415`: approved actions through move 36 (full replay legality currently blocked at move 40); `game-p4v0s9`, `game-p4v0s2`, `game-p4v0s3`, and `game-p4v0s1`: full action parity. All retain focused, reviewed interpretation tests. |
+| Replay-based hypotheses         | Alternative clues and hidden-world branches from identified reviewed positions; these are comparisons, not permission to rewrite the fixture.                                                                                                 |
+| Superpositions and architecture | Reviewed snapshot expectations; incremental/replayed equivalence, perspective isolation, causal bookkeeping, and consistency invariants.                                                                                                      |
+| Recorded self-play failures     | Specific established-rule failures and legality/consistency checks. Earlier moves and whole-game strategy are not certified.                                                                                                                  |
+| Ordinary unit tests             | Game rules, seed generation, codecs, exact-search algorithms, identity sets, focus ordering, and data structures may use artificial inputs with independently defined expectations.                                                           |
+| Completion smoke tests          | Generated games check legal actions and bounded completion across profiles; they do not prescribe moves, identities, or a target score.                                                                                                       |
 
 The expensive `h_group_max_self_play_200` benchmark remains separate from
 `check.sh`. Its scores measure performance, not convention correctness.
 
 ## Pending continuation review: p4v0s415
 
-Move 35 is the user-approved purple clue to Alice (replacing rank 4 after the
-Elimination sequence recognition fix). Moves 36–49 were generated using H-Group
-Max, the perfect-score objective, and default planner limits; each decision
-received only the acting player's view. This continuation finishes at 25 with no
-strikes, but is **not yet reviewed**. The active fixture's suffix is checked for
-legality, not optimal-action parity. It has not been regenerated after this
-change; move 36's purple clue to Bob is now redundant and awaits a separately
-approved fixture update.
+Move 35 is the user-approved purple clue to Alice; move 36 is the approved
+discard of Donald's purple 1 (#26). Moves 37–49 retain the older
+engine-generated continuation and are **not yet reviewed or regenerated**. It is
+now illegal at move 40, which attempts to discard #26 again. The full replay
+legality assertion intentionally remains failing until that continuation is
+corrected. Do not silently change subsequent actions or treat the older 25-point
+result as a result for the revised fixture.
 
 `crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s415-reviewed-branch.json`
 preserves the previous rank-3 branch for existing position-specific convention

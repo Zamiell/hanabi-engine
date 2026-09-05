@@ -195,7 +195,7 @@ fn assert_expert_replay_matches_engine(seed: &str, replay: &HanabiLiveReplay) {
     }
 }
 
-/// The user approved moves through 35. The generated suffix awaits review;
+/// The user approved moves through 36. The generated suffix awaits review;
 /// it is validated for legality, not frozen as optimal strategy.
 #[test]
 fn optimized_expert_replay_matches_engine() {
@@ -204,7 +204,7 @@ fn optimized_expert_replay_matches_engine() {
     ))
     .expect("active replay is valid");
     replay.replay().expect("generated continuation is legal");
-    replay.actions.truncate(35);
+    replay.actions.truncate(36);
     assert_expert_replay_matches_engine("p4v0s415", &replay);
 }
 
