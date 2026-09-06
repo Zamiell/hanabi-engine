@@ -1,5 +1,45 @@
 use super::*;
 
+/// Reviewed p4v0s415 move 42: after Bob plays the Elimination p2 at 38,
+/// the next connection is his p3 (#38), not a discretionary trash discard.
+#[test]
+fn elimination_finesse_owner_continues_with_purple_three() {
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    for turn in [35, 38, 41] {
+        let state = fixture.state_at_turn(turn).unwrap();
+        let view = state.view_for(PlayerId::new(1)).unwrap();
+        let deductions = LogicalDeductions::new(view.clone()).unwrap();
+        let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+        let clue = inferred.clues.iter().find(|clue| clue.turn == 34).unwrap();
+        assert_eq!(clue.kind, HGroupClueKind::Play, "after {turn}: {clue:#?}");
+        let expected = if turn == 35 {
+            CardId::new(6)
+        } else {
+            CardId::new(38)
+        };
+        assert_eq!(
+            inferred.connection.map(|c| c.card),
+            Some(expected),
+            "after {turn}: {inferred:#?}"
+        );
+        if turn == 41 {
+            let analysis = crate::analyze_position(
+                &view,
+                crate::SupportedConvention::HGroup(HGroupProfile::Max),
+                crate::PlannerConfig {
+                    objective: crate::PlanningObjective::PerfectScore,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            assert_eq!(analysis.planner.best_action, Action::Play(CardId::new(38)));
+        }
+    }
+}
+
 /// User-reviewed turn 43 of the generated p4v0s415 continuation: Alice's
 /// chop is #40 (slot 2), not her newly drawn #44 (green 5 in slot 1).
 /// The reviewed 5s Play Clue retouches the old purple-5 promise. This

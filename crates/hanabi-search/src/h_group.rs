@@ -1401,10 +1401,12 @@ fn replay_h_group_inner_uncached(
                                     .iter()
                                     .any(|step| step.expected == expected)
                         });
-                        // This supplements a rejected snapshot, so a merely
-                        // compatible hidden Finesse position is not evidence
-                        // for inventing several extra ranks. Require each new
-                        // connector to be independently visible or known.
+                        // Visible connectors must match. The blind reactor,
+                        // however, learns their own connection from the clue:
+                        // requiring prior identity knowledge would prevent an
+                        // Elimination Finesse from ever reaching its owner.
+                        // Only accept the ordered Finesse slots selected by
+                        // the shared planner, with literal/count feasibility.
                         let evidenced = hypothesis.connection_steps.iter().all(|step| {
                             step.cards.last().is_some_and(|card| {
                                 historical.identity(*card) == Some(step.expected)
@@ -1412,6 +1414,13 @@ fn replay_h_group_inner_uncached(
                                         == 1 << step.expected.index()
                                     || convention_facts_before_clue.known_identity(*card)
                                         == Some(step.expected)
+                                    || (step.actor == view.observer
+                                        && *giver != view.observer
+                                        && step.kind == HGroupConnectionKind::Finesse
+                                        && step.cards.iter().all(|candidate| {
+                                            facts[candidate.index()].allows(step.expected)
+                                        })
+                                        && historical.has_unseen_copy(step.expected, &hands))
                             })
                         });
                         let uses_elimination = hypothesis.connection_steps.iter().any(|step| {
