@@ -1628,7 +1628,14 @@ pub(in crate::h_group) fn snapshot_save_identities(
     let mask = identities
         .iter()
         .filter(|identity| {
+            // No Save interpretation can protect a rank already on its stack.
+            if identity.rank.number() <= stack_heights[identity.suit.index()] {
+                return false;
+            }
             if eight_clue_save {
+                // The event compiler has already removed secured identities
+                // using its historical perspective. Do not consult later
+                // revealed faces here to repeat that accounting.
                 return true;
             }
             match clue {

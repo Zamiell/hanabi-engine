@@ -1586,7 +1586,21 @@ pub(super) fn advanced_clue_candidates(
             && !replay.early_game
             && view.clue_tokens == MAX_CLUE_TOKENS
             && clue_focus.is_some_and(|focus| !gotten.contains(&focus))
-            && clue_focus.is_some_and(|focus| layout.last() != Some(&focus));
+            && clue_focus.is_some_and(|focus| layout.last() != Some(&focus))
+            && clue_focus
+                .and_then(|focus| identity_of(view, focus))
+                .is_some_and(|identity| {
+                    is_eventually_useful(view, identity)
+                        && !view.hands.iter().flatten().any(|other| {
+                            gotten.contains(&other.id)
+                                && Some(other.id) != clue_focus
+                                && (other.identity == Some(identity)
+                                    || convention_cards.iter().any(|note| {
+                                        note.card == other.id
+                                            && note.identities == IdentitySet::singleton(identity)
+                                    }))
+                        })
+                });
         let trash_chop_move = rule_enabled(profile, HGroupRuleId::ChopMoves)
             && prospective_clue_signal_kinds(view, profile, target, clue, &touched)
                 .contains(&HGroupMoveKind::TrashChopMove);

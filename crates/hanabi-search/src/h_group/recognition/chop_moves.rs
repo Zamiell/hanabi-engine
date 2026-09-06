@@ -70,8 +70,7 @@ fn card_is_accounted_trash(
                     return false;
                 }
                 let facts = context.before.facts[other.index()];
-                let literal = IdentitySet::from_mask(facts.identity_mask());
-                let promised = super::super::primary::remaining_prior_play_identities(
+                super::super::primary::protected_identity_from_clues(
                     other,
                     facts,
                     context.before.stack_heights,
@@ -79,9 +78,7 @@ fn card_is_accounted_trash(
                         .clues
                         .iter()
                         .filter(|clue| clue.turn < context.entry.turn),
-                );
-                literal == IdentitySet::singleton(identity)
-                    || promised == IdentitySet::singleton(identity)
+                ) == Some(identity)
             })
         })
 }

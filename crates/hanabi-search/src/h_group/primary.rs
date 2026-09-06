@@ -1,6 +1,24 @@
-use hanabi_core::{CardId, Clue, ClueFacts, Rank};
+use hanabi_core::{Card, CardId, Clue, ClueFacts, Rank};
 
 use super::{HGroupClueInterpretation, HGroupClueKind, HGroupSaveKind, IdentitySet};
+
+/// Exact identity established for a protected card without looking at its
+/// hidden face. Shared by Save and Chop Move value checks.
+pub(super) fn protected_identity_from_clues<'a>(
+    card: CardId,
+    facts: ClueFacts,
+    stacks: [u8; 5],
+    clues: impl DoubleEndedIterator<Item = &'a HGroupClueInterpretation>,
+) -> Option<Card> {
+    let literal = IdentitySet::from_mask(facts.identity_mask());
+    if literal.len() == 1 {
+        return literal.iter().next();
+    }
+    let remaining = remaining_prior_play_identities(card, facts, stacks, clues);
+    (remaining.len() == 1)
+        .then(|| remaining.iter().next())
+        .flatten()
+}
 
 /// Evaluate an existing useful-card promise against the literal information
 /// and stacks *before* a reclue. Later fill-ins and completed predecessors can

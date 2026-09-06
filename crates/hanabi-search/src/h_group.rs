@@ -1472,13 +1472,46 @@ fn replay_h_group_inner_uncached(
                             play_identities = play_identities.union(three_bluff_targets);
                         }
                     }
-                    let eight_clue_save = rule_enabled(profile, HGroupRuleId::Stalling)
+                    let eight_clue_save_position = rule_enabled(profile, HGroupRuleId::Stalling)
                         && !early_game
                         && clue_tokens_before == MAX_CLUE_TOKENS
                         && !gotten.contains(&focus)
                         && hands[target.index()].last() != Some(&focus);
+                    // Level 9 changes where a Save may be given, not what
+                    // needs saving. Resolve secured identities from this
+                    // event's information, never from later draws/reveals.
+                    // https://hanabi.github.io/level-9/#the-8-clue-save-8cs
+                    let eight_save_identities = if eight_clue_save_position {
+                        IdentitySet::from_mask(
+                            focus_identities
+                                .iter()
+                                .filter(|identity| {
+                                    identity.rank.number() > stack_heights[identity.suit.index()]
+                                        && !gotten.iter().copied().any(|other| {
+                                            if other == focus {
+                                                return false;
+                                            }
+                                            historical.identity(other) == Some(*identity)
+                                                || primary::protected_identity_from_clues(
+                                                    other,
+                                                    before.facts[other.index()],
+                                                    stack_heights,
+                                                    clues.iter(),
+                                                ) == Some(*identity)
+                                        })
+                                })
+                                .fold(0, |mask, identity| mask | (1 << identity.index())),
+                        )
+                    } else {
+                        IdentitySet::default()
+                    };
+                    let eight_clue_save = !eight_save_identities.is_empty();
                     let save_identities = snapshot_save_identities(
-                        focus_identities,
+                        if eight_clue_save_position {
+                            eight_save_identities
+                        } else {
+                            focus_identities
+                        },
                         *clue,
                         *giver,
                         focus,

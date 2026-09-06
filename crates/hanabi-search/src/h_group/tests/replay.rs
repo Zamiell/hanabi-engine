@@ -1,5 +1,56 @@
 use super::*;
 
+/// User-reviewed p4v0s415 turn 46: every needed identity is already secured.
+/// Eight tokens cannot turn Cathy's y1 or g4 into a useful Save.
+#[test]
+fn eight_clue_saves_do_not_protect_completed_suits() {
+    let mut json: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    json["actions"][41] = serde_json::json!({"type": 0, "target": 38, "value": 0});
+    let fixture = HanabiLiveReplay::from_json(&json.to_string()).unwrap();
+    let state = fixture.state_at_turn(45).unwrap();
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    for clue in [
+        Clue::Suit(Suit::Yellow),
+        Clue::Suit(Suit::Green),
+        Clue::Rank(Rank::One),
+    ] {
+        let action = Action::Clue {
+            target: PlayerId::new(2),
+            clue,
+        };
+        assert!(
+            candidates
+                .iter()
+                .all(|candidate| candidate.action != action || !candidate.is_save()),
+            "{candidates:#?}"
+        );
+        let mut after = state.clone();
+        after.apply(action).unwrap();
+        for observer in [PlayerId::new(1), PlayerId::new(2)] {
+            let deductions = LogicalDeductions::new(after.view_for(observer).unwrap()).unwrap();
+            let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+            let meaning = inferred
+                .clues
+                .iter()
+                .find(|meaning| meaning.turn == 45)
+                .unwrap();
+            assert!(meaning.save_identities.is_empty(), "{meaning:#?}");
+            assert!(
+                !matches!(
+                    meaning.kind,
+                    HGroupClueKind::Save(_) | HGroupClueKind::PlayOrSave
+                ),
+                "{meaning:#?}"
+            );
+            assert!(!inferred.signals.iter().any(|signal| signal.turn == 45 && signal.kind == HGroupMoveKind::EightClueSave));
+        }
+    }
+}
+
 /// User-reviewed p4v0s415 turn 46: red touches Alice's trash r2. Her
 /// remaining p4/p5 are already gotten, so no useful identity remains for
 /// the unclued g1 to protect. Neither observer may infer a Trash Chop Move.
