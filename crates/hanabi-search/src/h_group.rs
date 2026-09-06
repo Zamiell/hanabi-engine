@@ -1475,6 +1475,7 @@ fn replay_h_group_inner_uncached(
                     let eight_clue_save = rule_enabled(profile, HGroupRuleId::Stalling)
                         && !early_game
                         && clue_tokens_before == MAX_CLUE_TOKENS
+                        && !gotten.contains(&focus)
                         && hands[target.index()].last() != Some(&focus);
                     let save_identities = snapshot_save_identities(
                         focus_identities,
@@ -1522,6 +1523,24 @@ fn replay_h_group_inner_uncached(
                     let no_information_reclue = touched
                         .iter()
                         .all(|card| was_clued_before_with(view, entry.turn, *card, *clue));
+                    // Reconfirming an existing play is a Burn/Fill-In, not a
+                    // fresh Play or Tempo promise. Preserve the older promise.
+                    // https://hanabi.github.io/level-6/#the-tempo-clue
+                    let already_playing_reclue = touched.iter().all(|card| {
+                        previously_promptable.contains(card)
+                            && (already_playing.contains(card)
+                                || primary::prior_play_is_ready(
+                                    *card,
+                                    before.facts[card.index()],
+                                    stack_heights,
+                                    clues.iter(),
+                                )
+                                || convention_facts_before_clue
+                                    .known_identity(*card)
+                                    .is_some_and(|identity| {
+                                        is_playable_at(stack_heights, identity)
+                                    }))
+                    });
                     let interpretation_plan = ClueInterpretationPlan::resolve(PrimaryClueInputs {
                         clue: *clue,
                         play_identities,
@@ -1538,6 +1557,8 @@ fn replay_h_group_inner_uncached(
                                 .then_some(primary::PrimarySuppression::EightClueFiveStall),
                             no_information_reclue
                                 .then_some(primary::PrimarySuppression::NoInformationReclue),
+                            already_playing_reclue
+                                .then_some(primary::PrimarySuppression::AlreadyPlayingReclue),
                         ],
                     });
                     let kind = interpretation_plan.kind;
@@ -1551,7 +1572,8 @@ fn replay_h_group_inner_uncached(
                                 || low_score_number_five
                                 || early_five_stall
                                 || eight_clue_five_stall
-                                || no_information_reclue)
+                                || no_information_reclue
+                                || already_playing_reclue)
                     );
                     let target_already_loaded = pending_connections.iter().any(|connection| {
                         connection.actor == *target && pending_connections.is_active(connection)

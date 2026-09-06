@@ -1,6 +1,33 @@
-use hanabi_core::{Clue, Rank};
+use hanabi_core::{CardId, Clue, ClueFacts, Rank};
 
-use super::{HGroupClueKind, HGroupSaveKind, IdentitySet};
+use super::{HGroupClueInterpretation, HGroupClueKind, HGroupSaveKind, IdentitySet};
+
+/// Evaluate an existing useful-card promise against the literal information
+/// and stacks *before* a reclue. Later fill-ins and completed predecessors can
+/// resolve an originally ambiguous Play promise without another Play Clue.
+pub(super) fn prior_play_is_ready<'a>(
+    card: CardId,
+    facts: ClueFacts,
+    stacks: [u8; 5],
+    clues: impl DoubleEndedIterator<Item = &'a HGroupClueInterpretation>,
+) -> bool {
+    clues
+        .rev()
+        .find(|clue| clue.focus == card)
+        .is_some_and(|clue| {
+            let mut remaining = clue
+                .play_identities
+                .iter()
+                .filter(|identity| {
+                    facts.allows(*identity)
+                        && identity.rank.number() > stacks[identity.suit.index()]
+                })
+                .peekable();
+            remaining.peek().is_some()
+                && remaining
+                    .all(|identity| identity.rank.number() == stacks[identity.suit.index()] + 1)
+        })
+}
 
 /// A higher-precedence meaning that suppresses an ordinary Play/Save reading.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -11,6 +38,7 @@ pub(super) enum PrimarySuppression {
     EarlyFiveStall,
     EightClueFiveStall,
     NoInformationReclue,
+    AlreadyPlayingReclue,
 }
 
 /// Inputs to the one primary clue-precedence resolver.
@@ -24,7 +52,7 @@ pub(super) struct PrimaryClueInputs {
     /// Ordered highest-to-lowest precedence overrides that apply to this
     /// clue. An array keeps the hot path allocation-free while avoiding an
     /// error-prone bag of unrelated boolean parameters.
-    pub(super) suppressions: [Option<PrimarySuppression>; 6],
+    pub(super) suppressions: [Option<PrimarySuppression>; 7],
 }
 
 /// Canonical primary meaning shared by replay and prospective interpretation.
@@ -115,6 +143,7 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
             ],
         });
         assert_eq!(plan.kind, HGroupClueKind::Unrecognized);
@@ -131,7 +160,7 @@ mod tests {
             save_identities: red_two,
             stack_heights: [1, 0, 0, 0, 0],
             eight_clue_save: false,
-            suppressions: [None; 6],
+            suppressions: [None; 7],
         });
         assert_eq!(plan.kind, HGroupClueKind::Save(HGroupSaveKind::Two));
         assert!(plan.play_identities.is_empty());

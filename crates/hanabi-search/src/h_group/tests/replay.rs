@@ -1,5 +1,59 @@
 use super::*;
 
+/// User-reviewed p4v0s415 turn 46 on the corrected move-42 branch: #34
+/// already has a purple clue and is promised playable. Filling in its rank
+/// neither saves a new card at eight tokens nor creates a new play.
+#[test]
+fn eight_token_fill_in_preserves_existing_purple_four_play() {
+    let mut json: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    json["actions"][41] = serde_json::json!({"type": 0, "target": 38, "value": 0});
+    let fixture = HanabiLiveReplay::from_json(&json.to_string()).unwrap();
+    let mut state = fixture.state_at_turn(45).unwrap();
+    let action = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Rank(Rank::Four),
+    };
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let candidate = candidates
+        .iter()
+        .find(|candidate| candidate.action == action)
+        .expect("eight tokens permit this literal rank fill-in");
+    assert!(!candidate.is_save());
+    assert!(!candidate.immediate_play(), "{candidate:#?}");
+    let before = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    assert!(
+        infer_h_group(&before, HGroupProfile::Max)
+            .playable_now
+            .contains(&CardId::new(34))
+    );
+    state.apply(action).unwrap();
+    for player in [PlayerId::new(0), PlayerId::new(1)] {
+        let deductions = LogicalDeductions::new(state.view_for(player).unwrap()).unwrap();
+        let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+        let clue = inferred.clues.iter().find(|clue| clue.turn == 45).unwrap();
+        assert_eq!(clue.kind, HGroupClueKind::Unrecognized, "{clue:#?}");
+        assert!(clue.play_identities.is_empty());
+        assert!(clue.save_identities.is_empty());
+        assert!(!inferred.signals.iter().any(|signal| signal.turn == 45
+            && matches!(
+                signal.kind,
+                HGroupMoveKind::EightClueSave
+                    | HGroupMoveKind::PlayClue
+                    | HGroupMoveKind::TempoClue
+            )));
+        if player == PlayerId::new(0) {
+            assert!(
+                inferred.playable_now.contains(&CardId::new(34)),
+                "the original play survives the fill-in"
+            );
+        }
+    }
+}
+
 /// User-reviewed p4v0s415 move 45, branching at 42 to play Bob's promised p3.
 /// Alice must play g5, p4, p5 herself: g5 returns a clue without delaying the
 /// completion of her three plays. This is Level 25's 4's Priority Exception.

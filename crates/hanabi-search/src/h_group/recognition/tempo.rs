@@ -97,7 +97,14 @@ pub(in crate::h_group) fn apply_tempo_effects(
                 .iter()
                 .all(|identity| is_playable_at(context.before.stack_heights, identity))
     });
-    if recipient_already_knew_playable {
+    if recipient_already_knew_playable
+        || super::super::primary::prior_play_is_ready(
+            tempo_focus,
+            context.before.facts[tempo_focus.index()],
+            context.before.stack_heights,
+            effects.clues.iter().filter(|clue| clue.turn < entry.turn),
+        )
+    {
         // Level 6 names this a Burn, not a Tempo Clue. The Level 9 stall
         // recognizer decides whether the Burn was legal in this context.
         return;

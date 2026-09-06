@@ -1585,6 +1585,7 @@ pub(super) fn advanced_clue_candidates(
         let eight_clue_save = rule_enabled(profile, HGroupRuleId::Stalling)
             && !replay.early_game
             && view.clue_tokens == MAX_CLUE_TOKENS
+            && clue_focus.is_some_and(|focus| !gotten.contains(&focus))
             && clue_focus.is_some_and(|focus| layout.last() != Some(&focus));
         let trash_chop_move = rule_enabled(profile, HGroupRuleId::ChopMoves)
             && prospective_clue_signal_kinds(view, profile, target, clue, &touched)
@@ -1973,7 +1974,9 @@ pub(super) fn advanced_clue_candidates(
             },
             ClueSchedule::new(
                 kind == HGroupMoveKind::FakeSave || urgently_protects_critical_chop,
-                playable > 0,
+                // A Fill-In Stall may touch a playable card, but it does not
+                // acquire that play. Do not grant it scheduling credit.
+                playable > 0 && kind != HGroupMoveKind::Stall,
             ),
             if kind == HGroupMoveKind::LieComponentFinesse {
                 clue_focus
@@ -2123,6 +2126,16 @@ pub(super) fn play_clue_score(
     chop_moved: &CardSet,
 ) -> Option<u16> {
     let trash_collateral = known_trash_collateral(view, focus, focus_identity, clue, newly_touched);
+    // A fill-in on an existing play creates no new Play Clue. Let the
+    // advanced classifier handle lawful Stall/Fill-In meanings instead.
+    // https://hanabi.github.io/level-6/#the-tempo-clue
+    if newly_touched.is_empty()
+        && clue_touched
+            .iter()
+            .all(|card| already_playing.contains(card))
+    {
+        return None;
+    }
     let ordinary_touches = newly_touched
         .iter()
         .copied()
