@@ -15,6 +15,19 @@ fn learning_path_metadata_covers_every_cumulative_level() {
 }
 
 #[test]
+fn opening_ejection_does_not_count_unconnected_blue_five_as_a_play() {
+    // User-reviewed p4v0s9 turn 1: blue to Cathy ejects Bob's g1 (#6)
+    // and protects b5 (#11). It does not establish the missing b1-b4.
+    let fixture = expert_replay_p4v0s9();
+    let state = fixture.state_at_turn(0).unwrap();
+    let deductions = LogicalDeductions::new(state.view_for(state.current_player()).unwrap()).unwrap();
+    let action = Action::Clue { target: PlayerId::new(2), clue: Clue::Suit(Suit::Blue) };
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let candidate = candidates.iter().find(|candidate| candidate.action == action).unwrap();
+    assert_eq!(candidate.convention_action_count(), Some(1), "{candidate:#?}");
+}
+
+#[test]
 fn level_thirteen_admits_the_opening_hard_three_self_bluff() {
     let fixture = expert_replay_p4v0s9();
     let state = fixture.state_at_turn(0).expect("opening position exists");

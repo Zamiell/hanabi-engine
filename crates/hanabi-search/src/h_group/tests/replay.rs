@@ -2625,8 +2625,8 @@ fn third_replay_move_two_distinguishes_bluff_from_clandestine_finesse() {
             candidate(blue).convention_action_count(),
             candidate(blue).convention_connection_steps(),
         ),
-        (Some(2), Some(1)),
-        "the Stacked Ejection promises its blind play and the blue 5, not the apparent Finesse chain",
+        (Some(1), Some(1)),
+        "the Stacked Ejection secures one blind play; protecting blue 5 does not establish blue 1-4",
     );
     assert!(
         !candidate(blue).is_urgent_save(),
@@ -2634,7 +2634,7 @@ fn third_replay_move_two_distinguishes_bluff_from_clandestine_finesse() {
     );
     assert!(
         candidate(two).score() > candidate(blue).score(),
-        "the 3-for-1 Clandestine Finesse must beat the premature 2-for-1 Stacked Ejection: blue={:#?}; two={:#?}",
+        "the 3-for-1 Clandestine Finesse must beat the one-play Stacked Ejection: blue={:#?}; two={:#?}",
         candidate(blue),
         candidate(two),
     );

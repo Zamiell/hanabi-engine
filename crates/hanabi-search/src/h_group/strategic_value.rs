@@ -1210,11 +1210,34 @@ fn canonical_named_line_metrics(
                 | HGroupMoveKind::Ejection
                 | HGroupMoveKind::OutOfPositionEjection
                 | HGroupMoveKind::StackedEjection => {
-                    // The signal contains the ejected blind-play followed by
-                    // the clued focus. An Ejection takes precedence over the
-                    // apparent multi-step Finesse on the 5, so those are the
-                    // only two actions this clue actually promises.
-                    ejection = Some((signal.cards.len(), 1));
+                    // Focus-only identity annotations are not action signals.
+                    // The full signal contains one ejected card followed by
+                    // touched cards; those touches are not additional plays.
+                    // https://hanabi.github.io/level-16/#ejections
+                    if signal.cards.len() < 2 {
+                        continue;
+                    }
+                    let commitments =
+                        projected_line_state(source, team.projection(source.observer)?)
+                            .closed_public_commitments(source);
+                    let focus_is_secured = projection
+                        .replay
+                        .clues
+                        .iter()
+                        .find(|clue| clue.turn == source.turn)
+                        .and_then(|clue| identity_of(source, clue.focus))
+                        .is_some_and(|focus| {
+                            is_eventually_useful(source, focus)
+                                && (1..focus.rank.number()).all(|rank| {
+                                    usize::from(rank)
+                                        <= source.play_stacks[focus.suit.index()].len()
+                                        || commitments.iter().any(|(_, promised)| {
+                                            promised.suit == focus.suit
+                                                && promised.rank.number() == rank
+                                        })
+                                })
+                        });
+                    ejection = Some((1 + usize::from(focus_is_secured), 1));
                 }
                 HGroupMoveKind::Charm => {
                     if observer != source.observer {
