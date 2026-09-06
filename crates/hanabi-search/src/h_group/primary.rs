@@ -11,21 +11,34 @@ pub(super) fn prior_play_is_ready<'a>(
     stacks: [u8; 5],
     clues: impl DoubleEndedIterator<Item = &'a HGroupClueInterpretation>,
 ) -> bool {
+    let remaining = remaining_prior_play_identities(card, facts, stacks, clues);
+    !remaining.is_empty()
+        && remaining
+            .iter()
+            .all(|identity| identity.rank.number() == stacks[identity.suit.index()] + 1)
+}
+
+/// Remaining identities of an existing useful Play promise, using only the
+/// literal facts and stack heights available at the event being interpreted.
+pub(super) fn remaining_prior_play_identities<'a>(
+    card: CardId,
+    facts: ClueFacts,
+    stacks: [u8; 5],
+    clues: impl DoubleEndedIterator<Item = &'a HGroupClueInterpretation>,
+) -> IdentitySet {
     clues
         .rev()
         .find(|clue| clue.focus == card)
-        .is_some_and(|clue| {
-            let mut remaining = clue
-                .play_identities
-                .iter()
-                .filter(|identity| {
-                    facts.allows(*identity)
-                        && identity.rank.number() > stacks[identity.suit.index()]
-                })
-                .peekable();
-            remaining.peek().is_some()
-                && remaining
-                    .all(|identity| identity.rank.number() == stacks[identity.suit.index()] + 1)
+        .map_or_else(IdentitySet::default, |clue| {
+            IdentitySet::from_mask(
+                clue.play_identities
+                    .iter()
+                    .filter(|identity| {
+                        facts.allows(*identity)
+                            && identity.rank.number() > stacks[identity.suit.index()]
+                    })
+                    .fold(0, |mask, identity| mask | (1 << identity.index())),
+            )
         })
 }
 

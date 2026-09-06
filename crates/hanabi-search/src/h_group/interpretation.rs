@@ -1794,8 +1794,6 @@ pub(super) fn advanced_clue_candidates(
             // only convention trash and has no Minimum Clue Value. Do not let
             // the same physical clue fall through to 5 Pull or Play meaning.
             five_chop_move_has_value.then_some((HGroupMoveKind::FiveChopMove, 210))
-        } else if rule_enabled(profile, HGroupRuleId::ChopMoves) && all_trash {
-            Some((HGroupMoveKind::ChopMove, 210))
         } else if let Some(kind) =
             five_tech_kind.filter(|_| rule_enabled(profile, HGroupRuleId::FiveTech))
         {
@@ -1831,6 +1829,16 @@ pub(super) fn advanced_clue_candidates(
             continue;
         };
         let replaces_ordinary_play = named_interpretation_replaces_ordinary(kind);
+        // A reactor may infer a blind play because they cannot see its face.
+        // That is not evidence the giver can safely initiate the move. Named
+        // replacement meanings must still respect visible, completed stacks.
+        if replaces_ordinary_play
+            && super::prospective::prospective_clue_forces_visible_trash(
+                view, profile, target, clue, &touched,
+            )
+        {
+            continue;
+        }
         let recognized_stacked_ejection = matches!(
             max_signal,
             Some(HGroupMoveKind::StackedEjection | HGroupMoveKind::StackedDischarge)

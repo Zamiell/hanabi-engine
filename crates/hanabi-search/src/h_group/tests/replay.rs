@@ -1,5 +1,54 @@
 use super::*;
 
+/// User-reviewed p4v0s415 turn 46: red touches Alice's trash r2. Her
+/// remaining p4/p5 are already gotten, so no useful identity remains for
+/// the unclued g1 to protect. Neither observer may infer a Trash Chop Move.
+#[test]
+fn fully_accounted_endgame_does_not_chop_move_alices_trash() {
+    let mut json: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    json["actions"][41] = serde_json::json!({"type": 0, "target": 38, "value": 0});
+    let fixture = HanabiLiveReplay::from_json(&json.to_string()).unwrap();
+    let mut state = fixture.state_at_turn(45).unwrap();
+    let action = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Suit(Suit::Red),
+    };
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    for candidate in h_group_clue_candidates(&deductions, HGroupProfile::Max) {
+        if candidate.action == action {
+            assert_eq!(
+                candidate.move_kind(),
+                Some(HGroupMoveKind::Stall),
+                "{candidate:#?}"
+            );
+            assert!(
+                !matches!(
+                    candidate.move_kind(),
+                    Some(HGroupMoveKind::ChopMove | HGroupMoveKind::TrashChopMove)
+                ),
+                "{candidate:#?}"
+            );
+        }
+    }
+    state.apply(action).unwrap();
+    for player in [PlayerId::new(0), PlayerId::new(1)] {
+        let deductions = LogicalDeductions::new(state.view_for(player).unwrap()).unwrap();
+        let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+        assert!(
+            !inferred.signals.iter().any(|signal| signal.turn == 45
+                && matches!(
+                    signal.kind,
+                    HGroupMoveKind::ChopMove | HGroupMoveKind::TrashChopMove
+                )),
+            "{inferred:#?}"
+        );
+        assert!(!inferred.chop_moved.contains(&CardId::new(40)));
+    }
+}
+
 /// User-reviewed p4v0s415 turn 46 on the corrected move-42 branch: #34
 /// already has a purple clue and is promised playable. Filling in its rank
 /// neither saves a new card at eight tokens nor creates a new play.

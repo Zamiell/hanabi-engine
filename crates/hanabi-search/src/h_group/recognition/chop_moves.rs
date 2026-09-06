@@ -65,7 +65,24 @@ fn card_is_accounted_trash(
                 context.after.stack_heights,
                 gotten,
                 effects.signals.facts(),
-            )
+            ) || gotten.iter().copied().any(|other| {
+                if other == card {
+                    return false;
+                }
+                let facts = context.before.facts[other.index()];
+                let literal = IdentitySet::from_mask(facts.identity_mask());
+                let promised = super::super::primary::remaining_prior_play_identities(
+                    other,
+                    facts,
+                    context.before.stack_heights,
+                    effects
+                        .clues
+                        .iter()
+                        .filter(|clue| clue.turn < context.entry.turn),
+                );
+                literal == IdentitySet::singleton(identity)
+                    || promised == IdentitySet::singleton(identity)
+            })
         })
 }
 
@@ -167,15 +184,6 @@ pub(crate) fn apply_chop_move_effects(
     if !all_trash && !five_chop_move {
         return;
     }
-    if all_trash {
-        // A Bluff is only provisional until the clue's ordinary trash
-        // interpretation has been checked. If every touched identity is
-        // already accounted for, Minimum Clue Value makes this a Trash Chop
-        // Move instead; retract any same-focus connection synthesized by the
-        // earlier Bluff pass.
-        // Source: https://hanabi.github.io/level-4/#the-trash-chop-move-tcm
-        supersede_current_connections(context, effects, touched);
-    }
     let boundary = touched
         .iter()
         .filter_map(|card| hand.iter().position(|candidate| candidate == card))
@@ -212,6 +220,11 @@ pub(crate) fn apply_chop_move_effects(
         // - https://hanabi.github.io/level-4/#the-trash-chop-move-tcm
         // - https://hanabi.github.io/level-21/#the-trash-double-ignition-tdi
         return;
+    }
+    // Only a demonstrated Chop Move may supersede another interpretation;
+    // a trash-shaped clue with nothing to protect must leave it untouched.
+    if all_trash {
+        supersede_current_connections(context, effects, touched);
     }
     effects.chop_moved.extend(moved.iter().copied());
     push_signal(

@@ -683,6 +683,38 @@ pub(super) fn prospective_team_clue_signal_kinds(
     kinds
 }
 
+/// A blind reactor's inferred obligation cannot license the giver to play
+/// visible trash. Check the reactor's own interpretation against only faces
+/// visible to the giver, including named meanings replacing the ordinary clue.
+/// <https://hanabi.github.io/extras/ejections/#the-trash-ejection>
+pub(super) fn prospective_clue_forces_visible_trash(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    target: PlayerId,
+    clue: Clue,
+    touched: &[CardId],
+) -> bool {
+    let Some(snapshot) = compiled_prospective_clue(source, profile, target, clue, touched) else {
+        return false;
+    };
+    source.hands.iter().enumerate().any(|(index, hand)| {
+        let observer = PlayerId::new(u8::try_from(index).expect("at most five players"));
+        let Some(projection) = snapshot.projection(observer) else {
+            return false;
+        };
+        hand.iter().any(|card| {
+            card.identity
+                .is_some_and(|identity| super::card_is_trash(source, identity))
+                && projection.replay.cards.forced_playable.contains(&card.id)
+                && projection.replay.signals.iter().any(|signal| {
+                    signal.turn == source.turn
+                        && signal.target == Some(observer)
+                        && signal.cards.first() == Some(&card.id)
+                })
+        })
+    })
+}
+
 /// Card ordered to blind-play by a team-recognized Stacked Ejection or
 /// Stacked Discharge in a hypothetical clue.
 pub(super) fn prospective_stacked_ejection_card(
