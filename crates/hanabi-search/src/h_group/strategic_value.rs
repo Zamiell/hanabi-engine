@@ -4,8 +4,7 @@ use super::{
     HGroupConnection, HGroupMoveKind, HGroupProfile, HGroupRuleId, IdentitySet, LineOutcome,
     LogicalDeductions, PlayerId, PlayerView, Rank, RecipientCardConsequence,
     RecipientCardDisposition, card_is_trash, compiled_baseline_team, compiled_prospective_clue,
-    identity_of, is_eventually_useful, is_playable_at, is_playable_now,
-    prospective_team_clue_signal_kinds, rule_enabled,
+    identity_of, is_eventually_useful, is_playable_at, is_playable_now, rule_enabled,
 };
 
 const TEAM_ACTION_COVERAGE_PENALTY: u16 = 80;
@@ -168,8 +167,7 @@ pub(super) fn apply_strategic_clue_values(
         // Save and Fix semantics are protection obligations, not optional
         // strategic protection choices. Risk valuation must not let an
         // unrelated clue outrank the clue that satisfies such an obligation.
-        if source.turn == 0
-            && !matches!(candidate.purpose(), CluePurpose::Fix | CluePurpose::Save)
+        if !matches!(candidate.purpose(), CluePurpose::Fix | CluePurpose::Save)
             && candidate.move_kind() != Some(HGroupMoveKind::FixClue)
         {
             candidate.value.penalize_teamwork(
@@ -185,20 +183,12 @@ pub(super) fn apply_strategic_clue_values(
             .convention_action_count
             .unwrap_or(value.action_coverage)
             .max(value.action_coverage);
-        if candidate_action_count <= 1 {
-            // A demonstrated multi-action convention line already advances
-            // the team's schedule past this local one-card comparison. Apply
-            // chop-deadline ordering only to ordinary one-action alternatives;
-            // otherwise an opening Clandestine Finesse can lose merely because
-            // its first projected action belongs to another player.
-            let missed_critical_chop_deadline = best_critical_chop_deadline_value
-                .saturating_sub(critical_chop_deadline_values[index]);
-            candidate.value.penalize_teamwork(
-                CRITICAL_CHOP_DEADLINE_PENALTY.saturating_mul(
-                    u16::try_from(missed_critical_chop_deadline).unwrap_or(u16::MAX),
-                ),
-            );
-        }
+        let missed_critical_chop_deadline =
+            best_critical_chop_deadline_value.saturating_sub(critical_chop_deadline_values[index]);
+        candidate.value.penalize_teamwork(
+            CRITICAL_CHOP_DEADLINE_PENALTY
+                .saturating_mul(u16::try_from(missed_critical_chop_deadline).unwrap_or(u16::MAX)),
+        );
         let same_target_immediate_play_is_at_least_as_productive =
             best_immediate_action_count_by_target[candidate.target().index()]
                 .is_some_and(|best| best >= candidate_action_count);
@@ -210,23 +200,17 @@ pub(super) fn apply_strategic_clue_values(
             // Source: https://hanabi.github.io/beginner/other-general-strategy/#give-play-clues-over-save-clues
             candidate.value.penalize_teamwork(PLAY_OVER_SAVE_PENALTY);
         }
-        if source.turn > 0 {
-            if let (Some(best), Some(actual)) =
-                (best_named_line_action_count, value.convention_action_count)
-            {
-                // Compare named convention lines by the actions they actually
-                // secure, not by an apparent connection's raw depth. A stalled
-                // Layered Finesse may be legal while accomplishing less than a
-                // Clandestine Finesse that gives the team several forced actions.
-                // This remains observer-relative: the metric is compiled from
-                // each player's projected interpretation, never from the hidden
-                // authoritative deck.
-                candidate.value.penalize_teamwork(
-                    NAMED_LINE_ACTION_DEFICIT_PENALTY.saturating_mul(
-                        u16::try_from(best.saturating_sub(actual)).unwrap_or(u16::MAX),
-                    ),
-                );
-            }
+        if let (Some(best), Some(actual)) =
+            (best_named_line_action_count, value.convention_action_count)
+        {
+            // Compare named convention lines by the actions they actually
+            // secure, not by an apparent connection's raw depth. This remains
+            // observer-relative and applies to opening clues as well.
+            candidate
+                .value
+                .penalize_teamwork(NAMED_LINE_ACTION_DEFICIT_PENALTY.saturating_mul(
+                    u16::try_from(best.saturating_sub(actual)).unwrap_or(u16::MAX),
+                ));
         }
         let extends_existing_owner_promise = match candidate.action {
             Action::Clue { target, clue } => source.hands[target.index()].iter().any(|card| {
@@ -270,16 +254,7 @@ pub(super) fn apply_strategic_clue_values(
                 .value
                 .penalize_teamwork(STALLED_MULTI_STEP_CONNECTION_PENALTY);
         }
-        let candidate_is_opening_bluff =
-            source.turn == 0 && clue_is_bluff(source, profile, candidate.action);
-        // An opening Bluff has no established team action to displace, so do
-        // not penalize the concentration that makes the Bluff work. Once the
-        // game has started, ordinary Teamwork comparisons still apply.
-        let uncovered_players = if candidate_is_opening_bluff {
-            0
-        } else {
-            best_coverage.saturating_sub(value.covered_players())
-        };
+        let uncovered_players = best_coverage.saturating_sub(value.covered_players());
         candidate.value.penalize_teamwork(
             TEAM_ACTION_COVERAGE_PENALTY
                 .saturating_mul(u16::try_from(uncovered_players).unwrap_or(u16::MAX)),
@@ -594,25 +569,6 @@ fn visible_successor_depth(source: &PlayerView, identity: Card) -> usize {
         depth += 1;
     }
     depth
-}
-
-fn clue_is_bluff(source: &PlayerView, profile: HGroupProfile, action: Action) -> bool {
-    let Action::Clue { target, clue } = action else {
-        return false;
-    };
-    let touched = source.hands[target.index()]
-        .iter()
-        .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
-        .map(|card| card.id)
-        .collect::<Vec<_>>();
-    prospective_team_clue_signal_kinds(source, profile, target, clue, &touched)
-        .into_iter()
-        .any(|kind| {
-            matches!(
-                kind,
-                HGroupMoveKind::Bluff | HGroupMoveKind::SelfBluff | HGroupMoveKind::DoubleBluff
-            )
-        })
 }
 
 fn clue_establishes_actor_recognized_action(
