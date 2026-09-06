@@ -128,11 +128,10 @@ pub(super) fn apply_strategic_clue_values(
         .unwrap_or(0);
     let bottom_deck_risk_values = values
         .iter()
-        .zip(candidates.iter())
-        .map(|(value, candidate)| {
-            value.as_ref().map_or(0, |value| {
-                bottom_deck_risk_protection(source, *candidate, value)
-            })
+        .map(|value| {
+            value
+                .as_ref()
+                .map_or(0, |value| bottom_deck_risk_protection(source, value))
         })
         .collect::<Vec<_>>();
     let best_bottom_deck_risk_value = bottom_deck_risk_values.iter().copied().max().unwrap_or(0);
@@ -351,23 +350,12 @@ pub(super) fn apply_strategic_clue_values(
 /// bottom-deck risk. If every physical copy is already visible, the team can
 /// trivially give a normal Save Clue later; protecting that identity now does
 /// not mitigate a hidden-copy ordering risk.
-fn bottom_deck_risk_protection(
-    source: &PlayerView,
-    candidate: CompiledClueAction,
-    value: &LineOutcome,
-) -> usize {
-    let Action::Clue { target, clue } = candidate.action else {
-        return 0;
-    };
+/// Protection comes from the compiled causal outcome, including indirect
+/// connections, not just physical touches in the clue recipient's hand.
+fn bottom_deck_risk_protection(source: &PlayerView, value: &LineOutcome) -> usize {
     value
         .protected_cards
         .iter()
-        .filter(|protected| {
-            source.hands[target.index()].iter().any(|card| {
-                card.id == **protected
-                    && card.identity.is_some_and(|identity| clue.matches(identity))
-            })
-        })
         .filter_map(|card| identity_of(source, *card))
         .filter(|identity| {
             is_eventually_useful(source, *identity)
@@ -1056,6 +1044,17 @@ fn clue_line_value(
                     .iter()
                     .filter_map(|(card, identities)| {
                         (!baseline.owner_promises.iter().any(|(old, _)| old == card)
+                            // A connection can list alternative hidden slots.
+                            // The giver must not count every visible face in
+                            // that list as secured by the expected identity.
+                            && (touched.contains(card)
+                                || after.chop_moved.contains(card)
+                                || !changed_connection_cards.contains(card)
+                                || identity_of(source, *card).is_none_or(|actual| {
+                                    after.connection_lines.iter().any(|(_, _, expected, cards)| {
+                                        *expected == actual && cards.contains(card)
+                                    })
+                                }))
                             && identities
                                 .iter()
                                 .any(|identity| commitment_caused(*card, identity)))
@@ -1330,4 +1329,57 @@ fn card_owner(source: &PlayerView, card: CardId) -> Option<PlayerId> {
         .position(|hand| hand.iter().any(|candidate| candidate.id == card))
         .and_then(|index| u8::try_from(index).ok())
         .map(PlayerId::new)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hanabi_core::{Clue, Suit};
+    use hanabi_protocol::HanabiLiveReplay;
+
+    #[test]
+    fn reviewed_turn_ten_credits_direct_and_indirect_purple_three_protection() {
+        // User-reviewed p4v0s9 turn 10: both alternatives protect Donald's
+        // p3 (#17), although the rank-4 clue only physically touches Cathy.
+        let replay = HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s9.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(9).unwrap();
+        let source = state.view_for(state.current_player()).unwrap();
+        let team = compiled_baseline_team(&source, HGroupProfile::Max);
+        let baselines = (0..4)
+            .map(|player| {
+                projected_line_state(&source, team.projection(PlayerId::new(player)).unwrap())
+            })
+            .collect::<Vec<_>>();
+        for action in [
+            Action::Clue {
+                target: PlayerId::new(2),
+                clue: Clue::Rank(Rank::Four),
+            },
+            Action::Clue {
+                target: PlayerId::new(3),
+                clue: Clue::Suit(Suit::Purple),
+            },
+        ] {
+            let outcome = clue_line_value(&source, HGroupProfile::Max, action, &baselines).unwrap();
+            assert!(
+                outcome.protected_cards.contains(&CardId::new(17)),
+                "{action:?}: {outcome:#?}"
+            );
+            assert!(!outcome.protected_cards.contains(&CardId::new(14)));
+            assert!(!outcome.protected_cards.contains(&CardId::new(15)));
+            assert_eq!(
+                bottom_deck_risk_protection(&source, &outcome),
+                1,
+                "{action:?}: {:?}",
+                outcome
+                    .protected_cards
+                    .iter()
+                    .map(|card| (*card, identity_of(&source, *card)))
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
 }
