@@ -2647,11 +2647,18 @@ fn has_higher_basic_priority(
                 .flat_map(|(_, other_hand)| other_hand)
                 .any(|other| identity_of(view, *other) == Some(next))
         });
-        let leads_self = next.is_some_and(|next| {
-            hand.iter().copied().any(|other| {
-                other != card && facts[other.index()].identity_mask() == 1 << next.index()
-            })
-        });
+        let terminal_chain = (candidate_identity.rank == Rank::Five
+            || played_identity.rank == Rank::Five)
+            && play_order::completes_own_terminal_chain(identity, |successor| {
+                hand.iter()
+                    .any(|other| facts[other.index()].identity_mask() == 1 << successor.index())
+            });
+        let leads_self = !terminal_chain
+            && next.is_some_and(|next| {
+                hand.iter().copied().any(|other| {
+                    other != card && facts[other.index()].identity_mask() == 1 << next.index()
+                })
+            });
         let position = hand
             .iter()
             .position(|in_hand| *in_hand == card)

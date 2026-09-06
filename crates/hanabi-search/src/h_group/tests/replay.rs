@@ -1,5 +1,38 @@
 use super::*;
 
+/// User-reviewed p4v0s415 move 45, branching at 42 to play Bob's promised p3.
+/// Alice must play g5, p4, p5 herself: g5 returns a clue without delaying the
+/// completion of her three plays. This is Level 25's 4's Priority Exception.
+#[test]
+fn own_terminal_chain_does_not_take_priority_over_green_five() {
+    let mut json: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    json["actions"][41] = serde_json::json!({"type": 0, "target": 38, "value": 0});
+    let fixture = HanabiLiveReplay::from_json(&json.to_string()).unwrap();
+    let state = fixture.state_at_turn(44).unwrap();
+    let view = state.view_for(PlayerId::new(0)).unwrap();
+    let deductions = LogicalDeductions::new(view.clone()).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    assert!(inferred.playable_now.contains(&CardId::new(34)));
+    assert!(inferred.playable_now.contains(&CardId::new(44)));
+    assert_eq!(
+        play_order::ordered_playable_cards(&view, &inferred, HGroupProfile::Max)[0],
+        CardId::new(44),
+    );
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig {
+            objective: crate::PlanningObjective::PerfectScore,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(analysis.planner.best_action, Action::Play(CardId::new(44)));
+}
+
 /// Reviewed p4v0s415 move 42: after Bob plays the Elimination p2 at 38,
 /// the next connection is his p3 (#38), not a discretionary trash discard.
 #[test]

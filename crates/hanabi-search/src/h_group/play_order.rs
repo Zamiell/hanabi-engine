@@ -156,6 +156,24 @@ fn priority_playable_order_key(
         if identity.rank == Rank::Five {
             return false;
         }
+        let known_playable_five = context.inferred.cards.iter().any(|candidate| {
+            context.inferred.playable_now.contains(&candidate.card)
+                && candidate.identities.len() == 1
+                && candidate
+                    .identities
+                    .iter()
+                    .any(|identity| identity.rank == Rank::Five)
+        });
+        if known_playable_five
+            && completes_own_terminal_chain(identity, |successor| {
+                context.inferred.cards.iter().any(|candidate| {
+                    context.gotten.contains(&candidate.card)
+                        && candidate.identities == IdentitySet::singleton(successor)
+                })
+            })
+        {
+            return false;
+        }
         let next = Card::new(identity.suit, Rank::ALL[identity.rank.index() + 1]);
         context.inferred.cards.iter().any(|candidate| {
             candidate.card != card
@@ -173,4 +191,19 @@ fn priority_playable_order_key(
         rank,
         u8::try_from(context.own_hand.len().saturating_sub(position)).unwrap_or(u8::MAX),
     )
+}
+
+/// The 4's Priority Exception also covers a known 3 followed by one's own
+/// known 4 and 5. Finishing this chain cannot hand the suit to a teammate;
+/// another playable 5 should return its clue first. Share this predicate with
+/// history recognition so the ordinary play does not signal a Priority move.
+/// <https://hanabi.github.io/level-25/#2-the-4s-priority-exception>
+pub(super) fn completes_own_terminal_chain(
+    identity: Card,
+    mut owns_known: impl FnMut(Card) -> bool,
+) -> bool {
+    matches!(identity.rank, Rank::Three | Rank::Four)
+        && Rank::ALL[identity.rank.index() + 1..]
+            .iter()
+            .all(|rank| owns_known(Card::new(identity.suit, *rank)))
 }
