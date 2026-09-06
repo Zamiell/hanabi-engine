@@ -136,6 +136,10 @@ pub struct HGroupClueInterpretation {
     /// connection steps and conditional repair instead of flattening those
     /// consequences into the focus card's identity union.
     pub(super) hypotheses: Vec<ClueInterpretationHypothesis>,
+    /// Visible prefix of a feasible but unresolved multi-rank Finesse.
+    /// This prevents stomping the intended connector without asserting that
+    /// the observer's hidden cards satisfy the rest of the hypothetical line.
+    pub(super) unresolved_visible_prefix: Vec<ClueConnectionStep>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

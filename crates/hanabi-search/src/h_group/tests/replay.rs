@@ -2668,6 +2668,70 @@ fn third_replay_move_two_scores_rank_three_as_a_bluff_not_a_delayed_play() {
 }
 
 #[test]
+fn cathy_does_not_stomp_donalds_pending_purple_finesse() {
+    // User-reviewed p4v0s2 turn 3 after Bob's hypothetical purple to Alice.
+    // Project Cathy from Bob's view, without revealing Bob's own cards.
+    let state = expert_replay_p4v0s2().state_at_turn(1).unwrap();
+    let source = state.view_for(PlayerId::new(1)).unwrap();
+    let after = ProspectiveTransition::clue_by(
+        &source,
+        PlayerId::new(1),
+        PlayerId::new(0),
+        Clue::Suit(Suit::Purple),
+        &[CardId::new(0)],
+    );
+    let (deductions, replay) = PerspectiveProjector::new(&after, HGroupProfile::Max)
+        .project(PlayerId::new(2), PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let analysis = analyze_h_group_convention(&deductions, HGroupProfile::Max);
+    assert!(replay.clues.iter().any(|prior| {
+        prior.focus == CardId::new(0)
+            && prior.unresolved_visible_prefix.iter().any(|step| {
+                step.actor == PlayerId::new(3)
+                    && step.cards == [CardId::new(14)]
+                    && step.expected == Card::new(Suit::Purple, Rank::One)
+            })
+    }));
+    let stomp = Action::Clue {
+        target: PlayerId::new(3),
+        clue: Clue::Suit(Suit::Purple),
+    };
+    assert!(
+        !candidates.iter().any(|candidate| candidate.action == stomp),
+        "{candidates:#?}"
+    );
+    assert!(
+        analysis
+            .rejected_actions
+            .iter()
+            .any(|rejected| rejected.action == stomp
+                && rejected.reason == ConventionRejectionReason::RedundantOutcome)
+    );
+    assert!(
+        !candidates.iter().any(|candidate| candidate.action
+            == Action::Clue {
+                target: PlayerId::new(3),
+                clue: Clue::Rank(Rank::One)
+            }),
+        "the rank-1 clue only names the same pending g1 and p1"
+    );
+    assert!(
+        !replay
+            .pending_connections
+            .iter()
+            .any(|step| step.actor == PlayerId::new(2)
+                && step.expected == Card::new(Suit::Purple, Rank::Two)),
+        "the visible prefix must not commit Cathy's unknown follow-up as purple 2"
+    );
+    assert!(candidates.iter().any(|candidate| candidate.action
+        == Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue)
+        }));
+}
+
+#[test]
 fn third_replay_move_sixteen_does_not_reinterpret_an_already_promised_play_as_a_bluff() {
     let fixture = expert_replay_p4v0s2();
     let state = fixture.state_at_turn(16).expect("fixture prefix is legal");

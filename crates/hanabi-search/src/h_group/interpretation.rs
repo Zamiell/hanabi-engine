@@ -869,6 +869,10 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
         });
     }
 
+    candidates.retain(|candidate| {
+        candidate.purpose() == CluePurpose::Fix
+            || !stomps_unresolved_visible_prefix(view, replay, candidate.action)
+    });
     let observer_chop = chop(&replay.hands[view.observer.index()], &gotten);
     if candidates.is_empty()
         && (observer_chop.is_none()
@@ -897,6 +901,53 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
         candidates.retain(|candidate| candidate.move_kind() != Some(HGroupMoveKind::Burn));
     }
     SemanticallyAdmittedCandidates::new(candidates).finalize(deductions, profile)
+}
+
+/// A later clue cannot take credit for naming an existing visible Finesse
+/// connector merely because its original hidden continuation is unresolved.
+/// <https://hanabi.github.io/level-2/#stomping-on-a-finesse>
+fn stomps_unresolved_visible_prefix(
+    view: &PlayerView,
+    replay: &HGroupState,
+    action: Action,
+) -> bool {
+    let Action::Clue { target, clue } = action else {
+        return false;
+    };
+    let touched = view.hands[target.index()]
+        .iter()
+        .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
+        .collect::<Vec<_>>();
+    let unresolved = |card: &&ObservedCard| {
+        replay.clues.iter().any(|prior| {
+            !replay.cards.facts.fixed_cards().contains(&prior.focus)
+                && view.hands[prior.target.index()]
+                    .iter()
+                    .any(|focus| focus.id == prior.focus)
+                && !replay
+                    .clues
+                    .iter()
+                    .any(|later| later.turn > prior.turn && later.touched.contains(&prior.focus))
+                && !replay.signals.iter().any(|signal| {
+                    signal.turn == prior.turn
+                        && !matches!(signal.kind, HGroupMoveKind::Context | HGroupMoveKind::Extra)
+                })
+                && prior.unresolved_visible_prefix.iter().any(|step| {
+                    step.actor == target
+                        && step.cards.contains(&card.id)
+                        && card.identity == Some(step.expected)
+                })
+        })
+    };
+    touched.iter().any(unresolved)
+        && touched.iter().all(|card| {
+            unresolved(card)
+                || replay.pending_connections.iter().any(|step| {
+                    step.actor == target
+                        && step.cards.contains(&card.id)
+                        && card.identity == Some(step.expected)
+                })
+        })
 }
 
 fn fix_condition_is_live(view: &PlayerView, condition: FixCondition) -> bool {

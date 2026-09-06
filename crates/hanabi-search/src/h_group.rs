@@ -1595,6 +1595,76 @@ fn replay_h_group_inner_uncached(
                         ],
                     });
                     let kind = interpretation_plan.kind;
+                    // An observer can recognize a visible Finesse prefix
+                    // without knowing the hidden continuation. Keep that
+                    // evidence separate from committed card identities.
+                    // https://hanabi.github.io/level-5/#the-ambiguous-finesse
+                    let unresolved_visible_prefix = if kind == HGroupClueKind::Unrecognized
+                        && interpretation_plan.suppression.is_none()
+                        && matches!(clue, Clue::Suit(_))
+                        && rule_enabled(profile, HGroupRuleId::BasicMoves)
+                    {
+                        historical
+                            .identity(focus)
+                            .and_then(|identity| {
+                                let height = stack_heights[identity.suit.index()];
+                                if identity.rank.number() <= height + 2 {
+                                    return None;
+                                }
+                                let context = ConnectionPlanningContext {
+                                    allow_blind_reverse_empathy: true,
+                                    ..connection_context
+                                };
+                                let plan = context.simulate(
+                                    identity,
+                                    &pending_connections,
+                                    &invisibly_clued,
+                                );
+                                let complete = ((height + 1)..identity.rank.number()).all(|rank| {
+                                    let expected =
+                                        Card::new(identity.suit, Rank::ALL[usize::from(rank - 1)]);
+                                    pending_connections.identity_is_queued(expected)
+                                        || interpretation::snapshot_accounted(
+                                            expected,
+                                            focus,
+                                            view,
+                                            &hands,
+                                            &facts,
+                                            &previously_promptable,
+                                        )
+                                        || plan
+                                            .connection_steps
+                                            .iter()
+                                            .any(|step| step.expected == expected)
+                                });
+                                let feasible = plan.connection_steps.iter().all(|step| {
+                                    step.cards.last().is_some_and(|card| {
+                                        historical.identity(*card) == Some(step.expected)
+                                            || (step.actor == view.observer
+                                                && step.cards.iter().all(|candidate| {
+                                                    facts[candidate.index()].allows(step.expected)
+                                                })
+                                                && historical
+                                                    .has_unseen_copy(step.expected, &hands))
+                                    })
+                                });
+                                (complete && feasible && plan.required_fix.is_none()).then(|| {
+                                    plan.connection_steps
+                                        .into_iter()
+                                        .take_while(|step| {
+                                            step.kind == HGroupConnectionKind::Finesse
+                                                && step.cards.last().is_some_and(|card| {
+                                                    historical.identity(*card)
+                                                        == Some(step.expected)
+                                                })
+                                        })
+                                        .collect::<Vec<_>>()
+                                })
+                            })
+                            .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
                     play_identities = interpretation_plan.play_identities;
                     let save_identities = interpretation_plan.save_identities;
                     debug_assert_eq!(
@@ -1827,6 +1897,7 @@ fn replay_h_group_inner_uncached(
                         // Prompted merely because it was moved.
                         previously_gotten: previously_promptable.iter().copied().collect(),
                         hypotheses: connection_hypotheses,
+                        unresolved_visible_prefix,
                     });
                     let current_clue = clues
                         .last()

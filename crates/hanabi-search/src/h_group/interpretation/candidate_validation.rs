@@ -36,7 +36,9 @@ pub(crate) fn h_group_rejected_clues_from_replay(
             let adds_information = hand
                 .iter()
                 .any(|card| touched.contains(&card.id) && !card.clues.has_positive_clue(clue));
-            let reason = if adds_information {
+            let reason = if super::stomps_unresolved_visible_prefix(view, replay, action) {
+                ConventionRejectionReason::RedundantOutcome
+            } else if adds_information {
                 let old_chop = chop(&replay.hands[target.index()], &gotten);
                 let Some(focus) = focus(&replay.hands[target.index()], &touched, old_chop, &gotten)
                 else {
