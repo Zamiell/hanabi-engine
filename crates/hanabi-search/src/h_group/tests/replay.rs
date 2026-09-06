@@ -2660,7 +2660,23 @@ fn third_replay_move_two_scores_rank_three_as_a_bluff_not_a_delayed_play() {
     assert_eq!(candidate.purpose(), CluePurpose::Advanced);
     assert_eq!(candidate.connection_steps(), 0);
     assert_eq!(candidate.convention_connection_steps(), Some(1));
-    assert_eq!(candidate.convention_action_count(), Some(1));
+    // User-reviewed: one blind play plus protection of the focused 3 is
+    // 2-for-1 efficiency, not two immediately executable plays.
+    assert_eq!(candidate.convention_action_count(), Some(2));
+    let clandestine = h_group_clue_candidates(&deductions, HGroupProfile::Max)
+        .into_iter()
+        .find(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(3),
+                    clue: Clue::Rank(Rank::Two),
+                }
+        })
+        .expect("the reviewed Reverse Clandestine Finesse remains valid");
+    assert!(
+        clandestine.score() > candidate.score(),
+        "the 3-for-1 must beat the 2-for-1 without invented coverage or a false blue-5 deadline"
+    );
     assert!(
         candidate.score() < 400,
         "a 3 Bluff gets Cathy's immediate blind play but does not promise purple 2 or make Alice's purple 3 playable: {candidate:#?}",

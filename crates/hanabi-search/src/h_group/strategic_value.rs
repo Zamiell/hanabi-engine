@@ -55,7 +55,15 @@ pub(super) fn apply_strategic_clue_values(
     };
     let values = candidates
         .iter()
-        .map(|candidate| clue_line_value(source, profile, candidate.action, &baselines))
+        .map(|candidate| {
+            clue_line_value(
+                source,
+                profile,
+                candidate.action,
+                &baselines,
+                candidate.move_kind(),
+            )
+        })
         .collect::<Vec<_>>();
     let best_coverage = values
         .iter()
@@ -108,6 +116,10 @@ pub(super) fn apply_strategic_clue_values(
         )
         .is_some()
     };
+    let occupied_by_connection = baseline_team
+        .projection(source.observer)
+        .map(|projection| occupied_by_visible_connection(source, &projection.replay))
+        .unwrap_or_default();
     let critical_chop_deadline_values = values
         .iter()
         .map(|value| {
@@ -117,6 +129,7 @@ pub(super) fn apply_strategic_clue_values(
                     &baselines,
                     value,
                     current_stack_heights,
+                    &occupied_by_connection,
                 )
             })
         })
@@ -374,15 +387,35 @@ fn bottom_deck_risk_protection(source: &PlayerView, value: &LineOutcome) -> usiz
         .len()
 }
 
+/// Finds players occupied by a visible, successful pending blind play.
+fn occupied_by_visible_connection(
+    source: &PlayerView,
+    replay: &super::HGroupState,
+) -> Vec<PlayerId> {
+    // A pending blind play occupies its owner even when the owner-relative
+    // identity closure does not resolve the card. The giver may verify that
+    // the visible first layer succeeds without exposing it to its owner.
+    replay
+        .pending_connections
+        .iter()
+        .filter(|connection| {
+            replay.pending_connections.is_active(connection)
+                && connection.cards.first().is_some_and(|card| {
+                    identity_of(source, *card).is_some_and(|actual| is_playable_now(source, actual))
+                })
+        })
+        .map(|connection| connection.actor)
+        .collect()
+}
+
 /// Values protection by the turn on which an otherwise-unoccupied player
-/// would reach a critical chop. Earlier deadlines dominate later ones: a clue
-/// that occupies Bob before his discard can be strictly more urgent than one
-/// that protects Cathy's later chop, even when both secure one card.
+/// would reach a critical chop. Earlier deadlines dominate later ones.
 fn secured_critical_chop_deadline_value(
     source: &PlayerView,
     baselines: &[ProjectedLineState],
     value: &LineOutcome,
     stack_heights: [u8; 5],
+    occupied_by_connection: &[PlayerId],
 ) -> usize {
     let player_count = source.hands.len();
     baselines
@@ -394,6 +427,7 @@ fn secured_critical_chop_deadline_value(
             );
             let distance = (player + player_count - source.current_player.index()) % player_count;
             if distance == 0
+                || occupied_by_connection.contains(&actor)
                 || scheduled_play_continuation_value(source, baseline, actor, stack_heights)
                     .is_some()
             {
@@ -862,6 +896,7 @@ fn clue_line_value(
     profile: HGroupProfile,
     action: Action,
     baselines: &[ProjectedLineState],
+    canonical_kind: Option<HGroupMoveKind>,
 ) -> Option<LineOutcome> {
     let Action::Clue { target, clue } = action else {
         return None;
@@ -874,7 +909,7 @@ fn clue_line_value(
     let compiled = compiled_prospective_clue(source, profile, target, clue, &touched)?;
     let after_clue = compiled.after();
     let mut value = LineOutcome::default();
-    let named_line = canonical_named_line_metrics(source, &compiled);
+    let named_line = canonical_named_line_metrics(source, &compiled, canonical_kind);
     let giver_projection = compiled.projection(source.observer)?;
     let ignition_cards = giver_projection
         .replay
@@ -1109,6 +1144,21 @@ fn clue_line_value(
             .public_actions
             .retain(|commitment| commitment.card != focus);
     }
+    // An observer's alternative Finesse reading is not an additional action
+    // in the canonical Bluff/Clandestine line. Keep only that line's cards,
+    // and never count two different identities on the same visible card.
+    // https://hanabi.github.io/level-11/#mistaking-a-layered-finesse-for-a-bluff
+    let canonical_cards = named_line.as_ref().and_then(|(_, _, cards)| cards.as_ref());
+    let consistent = |commitment: &ActionCommitment| {
+        canonical_cards.is_none_or(|cards| {
+            cards.contains(&commitment.card)
+                && identity_of(source, commitment.card)
+                    .is_none_or(|actual| commitment.identities.contains(actual))
+        })
+    };
+    giver_public_actions.retain(consistent);
+    value.public_actions.retain(consistent);
+    value.owner_actions.retain(consistent);
     giver_public_actions
         .sort_unstable_by_key(|commitment| (commitment.card.index(), commitment.owner.index()));
     giver_public_actions.dedup();
@@ -1152,7 +1202,7 @@ fn clue_line_value(
             })
         }));
     value.action_coverage = giver_public_actions.len();
-    if let Some((action_count, connection_steps)) = named_line {
+    if let Some((action_count, connection_steps, _)) = named_line {
         value.convention_action_count = Some(action_count);
         value.convention_connection_steps = Some(connection_steps);
     }
@@ -1167,12 +1217,16 @@ fn clue_line_value(
 /// Layered Finesse. A Clandestine Finesse, meanwhile, includes every layered
 /// blind play plus the clued focus. Keeping this precedence here prevents the
 /// outcome comparison from adding mutually exclusive observer projections.
+#[allow(clippy::too_many_lines)]
 fn canonical_named_line_metrics(
     source: &PlayerView,
     team: &CompiledProspectiveClue,
-) -> Option<(usize, usize)> {
+    canonical_kind: Option<HGroupMoveKind>,
+) -> Option<(usize, usize, Option<Vec<CardId>>)> {
     let mut bluff = None;
     let mut clandestine = None;
+    let mut bluff_cards = Vec::new();
+    let mut clandestine_cards = Vec::new();
     let mut layered = None;
     let mut ejection = None;
     let mut ignition = None;
@@ -1188,16 +1242,47 @@ fn canonical_named_line_metrics(
         {
             match signal.kind {
                 HGroupMoveKind::Bluff => {
+                    if canonical_kind != Some(HGroupMoveKind::Bluff) {
+                        continue;
+                    }
                     let blind_plays = signal.cards.len().saturating_sub(1);
-                    let focus_is_secured = signal.cards.last().is_some_and(|focus| {
-                        identity_of(source, *focus).is_some_and(|identity| {
-                            view_distance_from_playable(source, identity) == 1
+                    // Efficiency includes the protected focus even for a 3
+                    // Bluff. It is not a claim that the 3 can play yet.
+                    let mut secured_cards = signal.cards.clone();
+                    if let Some(clue) = projection
+                        .replay
+                        .clues
+                        .iter()
+                        .find(|clue| clue.turn == source.turn)
+                    {
+                        secured_cards.extend(clue.new_non_focus.iter().copied().filter(|card| {
+                            identity_of(source, *card)
+                                .is_some_and(|identity| is_eventually_useful(source, identity))
+                        }));
+                    }
+                    secured_cards.sort_unstable();
+                    secured_cards.dedup();
+                    bluff = Some((secured_cards.len(), blind_plays));
+                    bluff_cards.clone_from(&signal.cards);
+                    if bluff_cards.last().is_some_and(|card| {
+                        identity_of(source, *card).is_none_or(|identity| {
+                            view_distance_from_playable(source, identity) > 1
                         })
-                    });
-                    bluff = Some((blind_plays + usize::from(focus_is_secured), blind_plays));
+                    }) {
+                        bluff_cards.pop();
+                    }
                 }
                 HGroupMoveKind::ClandestineFinesse => {
                     clandestine = Some((signal.cards.len() + 1, signal.cards.len()));
+                    clandestine_cards.clone_from(&signal.cards);
+                    if let Some(clue) = projection
+                        .replay
+                        .clues
+                        .iter()
+                        .find(|clue| clue.turn == source.turn)
+                    {
+                        clandestine_cards.push(clue.focus);
+                    }
                 }
                 HGroupMoveKind::LayeredFinesse
                 | HGroupMoveKind::HiddenFinesse
@@ -1282,7 +1367,12 @@ fn canonical_named_line_metrics(
             }
         }
     }
-    ignition.or(ejection).or(bluff).or(clandestine).or(layered)
+    ignition
+        .or(ejection)
+        .map(|(count, depth)| (count, depth, None))
+        .or_else(|| bluff.map(|(count, depth)| (count, depth, Some(bluff_cards))))
+        .or_else(|| clandestine.map(|(count, depth)| (count, depth, Some(clandestine_cards))))
+        .or_else(|| layered.map(|(count, depth)| (count, depth, None)))
 }
 
 fn view_distance_from_playable(source: &PlayerView, identity: Card) -> usize {
@@ -1338,6 +1428,74 @@ mod tests {
     use hanabi_protocol::HanabiLiveReplay;
 
     #[test]
+    fn reviewed_opening_does_not_merge_bluff_and_clandestine_alternatives() {
+        // User-reviewed p4v0s2 turn 2: 3 Bluff is 2-for-1; the Reverse
+        // Clandestine Finesse is 3-for-1. Neither invents extra purple plays.
+        let replay = HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s2.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(1).unwrap();
+        let source = state.view_for(state.current_player()).unwrap();
+        let team = compiled_baseline_team(&source, HGroupProfile::Max);
+        let baselines = (0..4)
+            .map(|player| {
+                projected_line_state(&source, team.projection(PlayerId::new(player)).unwrap())
+            })
+            .collect::<Vec<_>>();
+        for (target, rank, count, allowed) in [
+            (0, Rank::Three, 2, vec![CardId::new(11)]),
+            (
+                3,
+                Rank::Two,
+                3,
+                vec![CardId::new(11), CardId::new(10), CardId::new(13)],
+            ),
+        ] {
+            let outcome = clue_line_value(
+                &source,
+                HGroupProfile::Max,
+                Action::Clue {
+                    target: PlayerId::new(target),
+                    clue: Clue::Rank(rank),
+                },
+                &baselines,
+                Some(if rank == Rank::Three {
+                    HGroupMoveKind::Bluff
+                } else {
+                    HGroupMoveKind::PlayClue
+                }),
+            )
+            .unwrap();
+            assert_eq!(outcome.convention_action_count, Some(count));
+            let occupied = occupied_by_visible_connection(
+                &source,
+                &team.projection(source.observer).unwrap().replay,
+            );
+            assert!(
+                occupied.contains(&PlayerId::new(3)),
+                "Donald's green-1 obligation occupies him before either clue"
+            );
+            assert_eq!(
+                secured_critical_chop_deadline_value(
+                    &source, &baselines, &outcome, [0; 5], &occupied
+                ),
+                0,
+                "neither clue has to rescue Donald's blue-5 chop on this turn"
+            );
+            assert!(!outcome.public_actions.is_empty());
+            for action in &outcome.public_actions {
+                assert!(allowed.contains(&action.card), "{outcome:#?}");
+                assert_eq!(
+                    action.identities,
+                    IdentitySet::singleton(identity_of(&source, action.card).unwrap()),
+                    "{outcome:#?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn reviewed_turn_ten_credits_direct_and_indirect_purple_three_protection() {
         // User-reviewed p4v0s9 turn 10: both alternatives protect Donald's
         // p3 (#17), although the rank-4 clue only physically touches Cathy.
@@ -1363,7 +1521,14 @@ mod tests {
                 clue: Clue::Suit(Suit::Purple),
             },
         ] {
-            let outcome = clue_line_value(&source, HGroupProfile::Max, action, &baselines).unwrap();
+            let outcome = clue_line_value(
+                &source,
+                HGroupProfile::Max,
+                action,
+                &baselines,
+                Some(HGroupMoveKind::PlayClue),
+            )
+            .unwrap();
             assert!(
                 outcome.protected_cards.contains(&CardId::new(17)),
                 "{action:?}: {outcome:#?}"
