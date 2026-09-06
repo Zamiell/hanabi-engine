@@ -315,6 +315,34 @@ pub(super) fn compiled_baseline_team(
     })
 }
 
+/// A new clue marking is not information if convention knowledge already
+/// implies it. Fill-Ins require a strict, nonempty reduction in an owner's
+/// effective superposition on at least one touched card.
+/// <https://hanabi.github.io/level-9/#the-fill-in-clue>
+pub(super) fn fill_in_narrows_superposition(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    target: PlayerId,
+    clue: Clue,
+    touched: &[CardId],
+) -> bool {
+    let Some(before) = compiled_baseline_team(source, profile).projection(target) else {
+        return false;
+    };
+    let Some(after) = compiled_prospective_clue(source, profile, target, clue, touched)
+        .and_then(|snapshot| snapshot.projection(target))
+    else {
+        return false;
+    };
+    touched.iter().any(|id| {
+        let old = before.inferred.cards.iter().find(|card| card.card == *id);
+        let new = after.inferred.cards.iter().find(|card| card.card == *id);
+        old.zip(new).is_some_and(|(old, new)| {
+            super::primary::strictly_narrows(old.identities, new.identities)
+        })
+    })
+}
+
 /// Applies a hypothetical clue once and materializes the recipient-relative
 /// convention snapshot consumed by candidate admission, hazard checking, and
 /// strategic evaluation. All consumers therefore observe the same reducer

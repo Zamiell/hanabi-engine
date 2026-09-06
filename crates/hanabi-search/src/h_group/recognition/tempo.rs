@@ -655,7 +655,6 @@ pub(in crate::h_group) fn apply_stall_effects(
     let ObservedEvent::Clued {
         giver,
         target,
-        clue,
         touched,
         ..
     } = &entry.event
@@ -758,9 +757,18 @@ pub(in crate::h_group) fn apply_stall_effects(
     });
 
     let all_previously_gotten = touched.iter().all(|card| prior_gotten.contains(card));
-    let adds_information = touched
-        .iter()
-        .any(|card| !context.before.facts[card.index()].has_positive_clue(*clue));
+    let adds_information = touched.iter().any(|card| {
+        let before = super::super::primary::prior_superposition(
+            *card,
+            context.before.facts[card.index()],
+            context.before.stack_heights,
+            effects.clues.iter().filter(|prior| prior.turn < entry.turn),
+        );
+        let after = before.intersection(IdentitySet::from_mask(
+            context.after.facts[card.index()].identity_mask(),
+        ));
+        super::super::primary::strictly_narrows(before, after)
+    });
     let fill_in = all_previously_gotten && adds_information;
     let burn = all_previously_gotten && !adds_information;
     let ordinary = [

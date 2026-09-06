@@ -887,6 +887,15 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                     && !creates_false_anxiety_after_forced_play(view, profile, candidate))
         });
     }
+    // Hard Burns have the lowest stall precedence: do not offer one while
+    // another convention-valid clue is available.
+    // <https://hanabi.github.io/level-9/#stalling>
+    if candidates
+        .iter()
+        .any(|candidate| candidate.move_kind() != Some(HGroupMoveKind::Burn))
+    {
+        candidates.retain(|candidate| candidate.move_kind() != Some(HGroupMoveKind::Burn));
+    }
     SemanticallyAdmittedCandidates::new(candidates).finalize(deductions, profile)
 }
 
@@ -1819,7 +1828,7 @@ pub(super) fn advanced_clue_candidates(
             && delayed.is_none()
         {
             Some((HGroupMoveKind::Extra, 145))
-        } else if off_chop_five && stalling && playable == 0 {
+        } else if off_chop_five && stalling && playable == 0 && !newly_touched.is_empty() {
             Some((HGroupMoveKind::FiveStall, 80))
         } else if charm {
             // A 4 Charm is still a Play Clue on the focused 4, while also
@@ -1832,10 +1841,15 @@ pub(super) fn advanced_clue_candidates(
             Some((HGroupMoveKind::SaveClue, 50))
         } else if rule_enabled(profile, HGroupRuleId::Stalling)
             && newly_touched.is_empty()
-            && fills_in
             && (actor_locked || view.clue_tokens == MAX_CLUE_TOKENS)
         {
-            Some((HGroupMoveKind::Stall, 40))
+            if super::prospective::fill_in_narrows_superposition(
+                view, profile, target, clue, &touched,
+            ) {
+                Some((HGroupMoveKind::FillInClue, 40))
+            } else {
+                Some((HGroupMoveKind::Burn, 20))
+            }
         } else {
             None
         };
@@ -1947,6 +1961,8 @@ pub(super) fn advanced_clue_candidates(
                     | HGroupMoveKind::TempoClueChopMove
                     | HGroupMoveKind::Extra
                     | HGroupMoveKind::Stall
+                    | HGroupMoveKind::FillInClue
+                    | HGroupMoveKind::Burn
             )
             || (kind == HGroupMoveKind::FiveStall && !replay.early_game && !score_is_low);
         if !safe_generic_play && unsafe_unsuppressed_play {
@@ -1998,7 +2014,11 @@ pub(super) fn advanced_clue_candidates(
                 kind == HGroupMoveKind::FakeSave || urgently_protects_critical_chop,
                 // A Fill-In Stall may touch a playable card, but it does not
                 // acquire that play. Do not grant it scheduling credit.
-                playable > 0 && kind != HGroupMoveKind::Stall,
+                playable > 0
+                    && !matches!(
+                        kind,
+                        HGroupMoveKind::Stall | HGroupMoveKind::FillInClue | HGroupMoveKind::Burn
+                    ),
             ),
             if kind == HGroupMoveKind::LieComponentFinesse {
                 clue_focus

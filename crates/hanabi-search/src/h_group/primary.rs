@@ -2,6 +2,38 @@ use hanabi_core::{Card, CardId, Clue, ClueFacts, Rank};
 
 use super::{HGroupClueInterpretation, HGroupClueKind, HGroupSaveKind, IdentitySet};
 
+pub(super) fn strictly_narrows(before: IdentitySet, after: IdentitySet) -> bool {
+    !after.is_empty() && after != before && after.intersection(before) == after
+}
+
+/// Pre-clue promise narrowed by accumulated literal information. This is
+/// deliberately independent of the current physical face and current clue.
+pub(super) fn prior_superposition<'a>(
+    card: CardId,
+    facts: ClueFacts,
+    stacks: [u8; 5],
+    clues: impl DoubleEndedIterator<Item = &'a HGroupClueInterpretation>,
+) -> IdentitySet {
+    let literal = IdentitySet::from_mask(facts.identity_mask());
+    let Some(prior) = clues.rev().find(|prior| prior.focus == card) else {
+        return literal;
+    };
+    let promised = prior
+        .play_identities
+        .union(prior.save_identities)
+        .intersection(literal);
+    if promised.is_empty() {
+        return literal;
+    }
+    let useful = IdentitySet::from_mask(
+        promised
+            .iter()
+            .filter(|identity| identity.rank.number() > stacks[identity.suit.index()])
+            .fold(0, |mask, identity| mask | (1 << identity.index())),
+    );
+    if useful.is_empty() { promised } else { useful }
+}
+
 /// Exact identity established for a protected card without looking at its
 /// hidden face. Shared by Save and Chop Move value checks.
 pub(super) fn protected_identity_from_clues<'a>(
@@ -157,6 +189,18 @@ mod tests {
 
     fn identity(suit: Suit, rank: Rank) -> IdentitySet {
         IdentitySet::singleton(Card::new(suit, rank))
+    }
+
+    #[test]
+    fn information_gain_requires_a_nonempty_strict_subset() {
+        let four = identity(Suit::Purple, Rank::Four);
+        let five = identity(Suit::Purple, Rank::Five);
+        let both = four.union(five);
+        assert!(strictly_narrows(both, four));
+        assert!(!strictly_narrows(four, four));
+        assert!(!strictly_narrows(four, five));
+        assert!(!strictly_narrows(four, both));
+        assert!(!strictly_narrows(four, IdentitySet::default()));
     }
 
     #[test]

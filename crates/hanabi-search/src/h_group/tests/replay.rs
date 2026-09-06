@@ -101,10 +101,10 @@ fn fully_accounted_endgame_does_not_chop_move_alices_trash() {
 }
 
 /// User-reviewed p4v0s415 turn 46 on the corrected move-42 branch: #34
-/// already has a purple clue and is promised playable. Filling in its rank
-/// neither saves a new card at eight tokens nor creates a new play.
+/// already has a purple clue and is exactly p4. Re-cluing its rank neither
+/// narrows that superposition nor creates a play/save: this is a Hard Burn.
 #[test]
-fn eight_token_fill_in_preserves_existing_purple_four_play() {
+fn eight_token_reclue_of_exact_purple_four_is_a_burn() {
     let mut json: serde_json::Value = serde_json::from_str(include_str!(
         "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
     ))
@@ -121,10 +121,22 @@ fn eight_token_fill_in_preserves_existing_purple_four_play() {
     let candidate = candidates
         .iter()
         .find(|candidate| candidate.action == action)
-        .expect("eight tokens permit this literal rank fill-in");
+        .expect("eight tokens permit a last-resort Hard Burn");
+    assert_eq!(candidate.move_kind(), Some(HGroupMoveKind::Burn));
     assert!(!candidate.is_save());
     assert!(!candidate.immediate_play(), "{candidate:#?}");
     let before = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let before_inferred = infer_h_group(&before, HGroupProfile::Max);
+    let purple_four = IdentitySet::singleton(Card::new(Suit::Purple, Rank::Four));
+    assert_eq!(
+        before_inferred
+            .cards
+            .iter()
+            .find(|card| card.card == CardId::new(34))
+            .unwrap()
+            .identities,
+        purple_four
+    );
     assert!(
         infer_h_group(&before, HGroupProfile::Max)
             .playable_now
@@ -144,11 +156,27 @@ fn eight_token_fill_in_preserves_existing_purple_four_play() {
                 HGroupMoveKind::EightClueSave
                     | HGroupMoveKind::PlayClue
                     | HGroupMoveKind::TempoClue
+                    | HGroupMoveKind::FillInClue
             )));
+        assert!(
+            inferred
+                .signals
+                .iter()
+                .any(|signal| signal.turn == 45 && signal.kind == HGroupMoveKind::Burn)
+        );
         if player == PlayerId::new(0) {
+            assert_eq!(
+                inferred
+                    .cards
+                    .iter()
+                    .find(|card| card.card == CardId::new(34))
+                    .unwrap()
+                    .identities,
+                purple_four
+            );
             assert!(
                 inferred.playable_now.contains(&CardId::new(34)),
-                "the original play survives the fill-in"
+                "the original play survives the burn"
             );
         }
     }
