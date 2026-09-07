@@ -211,7 +211,20 @@ pub struct ProjectedPositionValue {
 }
 
 impl ProjectedPositionValue {
+    fn without_speculative_finesse(mut self) -> Self {
+        self.finesse_opportunities = 0;
+        self
+    }
+
     fn dominates(self, other: Self) -> bool {
+        let (self_value, other) = (
+            self.without_speculative_finesse(),
+            other.without_speculative_finesse(),
+        );
+        self_value.dominates_resources(other)
+    }
+
+    fn dominates_resources(self, other: Self) -> bool {
         self != other
             && self.score >= other.score
             && self.clues >= other.clues
@@ -221,7 +234,6 @@ impl ProjectedPositionValue {
                 >= other.score.saturating_add(other.secured_future_plays)
             && self.protected_bottom_deck_risks >= other.protected_bottom_deck_risks
             && self.visible_successors >= other.visible_successors
-            && self.finesse_opportunities >= other.finesse_opportunities
             && self.save_pressure <= other.save_pressure
             && self.foregone_touch_opportunities <= other.foregone_touch_opportunities
     }
@@ -650,7 +662,13 @@ fn best_symbolic_index(
                         .symbolic_line
                         .position_value
                         .zip(candidate.symbolic_line.position_value)
-                        .is_some_and(|(left, right)| left.dominates(right))
+                        .is_some_and(|(left, right)| {
+                            left.dominates(right)
+                                || (other.convention_priority == candidate.convention_priority
+                                    && left.without_speculative_finesse()
+                                        == right.without_speculative_finesse()
+                                    && left.finesse_opportunities > right.finesse_opportunities)
+                        })
             })
         })
         .max_by(|(left_index, left), (right_index, right)| {
@@ -1077,6 +1095,63 @@ mod tests {
     use super::*;
     use crate::SupportedConvention;
     use hanabi_core::{PlayerId, standard_deck};
+
+    #[test]
+    fn reviewed_two_for_one_beats_a_speculative_finesse_tiebreaker() {
+        // User-reviewed p4v0s1 turn 3: blue to Bob is a 2-for-1;
+        // 1s to Alice is a 1-for-1 with a speculative future y2 finesse.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(2).unwrap();
+        let information =
+            InformationSet::new(&state.view_for(state.current_player()).unwrap()).unwrap();
+        let result = plan_move(
+            &information,
+            SupportedConvention::HGroup(crate::HGroupProfile::Max),
+            PlannerConfig::default(),
+        )
+        .unwrap();
+        let blue = Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Blue),
+        };
+        let ones = Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::One),
+        };
+        assert_eq!(result.best_action, blue);
+        let blue = result
+            .root_actions
+            .iter()
+            .find(|c| c.action == blue)
+            .unwrap();
+        let ones = result
+            .root_actions
+            .iter()
+            .find(|c| c.action == ones)
+            .unwrap();
+        assert_eq!(blue.newly_touched, 2);
+        assert_eq!(ones.newly_touched, 1);
+        let b = blue.symbolic_line.position_value.unwrap();
+        let o = ones.symbolic_line.position_value.unwrap();
+        assert_eq!(
+            b.without_speculative_finesse(),
+            o.without_speculative_finesse()
+        );
+        assert!(o.finesse_opportunities > b.finesse_opportunities);
+        assert!(!o.dominates(b));
+        assert!(!b.dominates(o));
+
+        // Algorithmic ordering check, not a changed replay expectation:
+        // on a true priority tie the opportunity may decide the result.
+        let mut tied = [blue.clone(), ones.clone()];
+        tied[1].convention_priority = tied[0].convention_priority;
+        assert_eq!(best_symbolic_index(&tied, None), Some(1));
+        tied[1].symbolic_line.position_value.as_mut().unwrap().clues -= 1;
+        assert_eq!(best_symbolic_index(&tied, None), Some(0));
+    }
 
     #[test]
     fn every_reviewed_root_is_projected_despite_unequal_priorities() {

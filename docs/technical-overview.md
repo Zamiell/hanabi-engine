@@ -85,6 +85,11 @@ and do not assign a particular card, estimate a probability, or assert that a
 specific future Finesse/Bluff/Ignition exists. These fields are exposed in the
 live diagnostic JSON under `symbolicLine.positionValue`.
 
+A possible future finesse is only a tiebreaker: it can distinguish equal root
+priorities with otherwise equal frontier assessments, horizons, and stopping
+reasons. It cannot establish resource dominance, outweigh known clue efficiency,
+or protect a resource-inferior line from elimination.
+
 Among remaining choices, fewer projected strikes precede root heuristics. Other
 trajectory metrics break remaining ties. Unequal projection horizons are not
 treated as complete-game comparisons. No actual hidden hand or deck order is
