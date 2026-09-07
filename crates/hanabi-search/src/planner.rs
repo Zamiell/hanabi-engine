@@ -1151,6 +1151,33 @@ mod tests {
     use hanabi_core::{PlayerId, standard_deck};
 
     #[test]
+    fn reviewed_play_clue_is_not_penalized_only_against_discard() {
+        // Reviewed p4v0s415 turn 30: blue gets Alice's b5. Another clue's
+        // protection value must not depress blue below a zero-protection
+        // ordinary discard that is excluded from clue-only scoring.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(29).unwrap();
+        let information =
+            InformationSet::new(&state.view_for(state.current_player()).unwrap()).unwrap();
+        let result = plan_move(
+            &information,
+            SupportedConvention::HGroup(crate::HGroupProfile::Max),
+            PlannerConfig::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            result.best_action,
+            Action::Clue {
+                target: PlayerId::new(0),
+                clue: Clue::Suit(Suit::Blue),
+            }
+        );
+    }
+
+    #[test]
     fn partial_endpoint_pruning_preserves_the_reviewed_yellow_clue() {
         // Reviewed p4v0s415 turn 26: y4 gives Cathy a y5 continuation.
         // A partial b5 endpoint's extra token must not eliminate y4 and

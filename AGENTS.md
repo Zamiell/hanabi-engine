@@ -77,6 +77,20 @@ without waiting for another prompt. Stop for a non-obvious convention or
 strategy question and provide the review context below. Do not change fixtures
 or expected moves merely to obtain agreement.
 
+An unexplained disagreement is an investigation task, not automatically a
+request for user input. Do not stop merely because a candidate has a higher
+heuristic score, its projection ends at an unknown identity, or the next bug is
+in a different helper. Inspect scoring terms, actual projected actions, and
+uncertainty handling, then fix clear implementation errors and continue. Unknown
+cards must remain unknown; an unfinished forecast is neither proof that an
+action is good nor grounds to reject it automatically.
+
+Before ending a bug-fixing turn with an unresolved disagreement, state the
+specific convention/strategy question that requires the user's judgment (and why
+the documentation and already-reviewed expectations do not answer it), or the
+concrete external blocker. If no such question or blocker exists, continue
+working rather than asking the user to authorize the same investigation again.
+
 The final response must state one of: the next unresolved disagreement (with
 link, seed, turn, all candidate clues, and reasoning), all expert replays fully
 agree, or the concrete blocker preventing the next comparison. A passing focused

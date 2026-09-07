@@ -15,7 +15,7 @@ const TEAM_ACTION_DELAY_PENALTY: u16 = 2;
 const TEAM_OCCUPIED_TARGET_PENALTY: u16 = 20;
 const PLAY_OVER_SAVE_PENALTY: u16 = 80;
 const CRITICAL_CHOP_DEADLINE_PENALTY: u16 = 80;
-const BOTTOM_DECK_RISK_DEFICIT_PENALTY: u16 = 80;
+const BOTTOM_DECK_RISK_PROTECTION_BONUS: u16 = 80;
 const UNNECESSARY_CONNECTION_COMPLEXITY_PENALTY: u16 = 24;
 const STALLED_MULTI_STEP_CONNECTION_PENALTY: u16 = 280;
 // A heuristic cost for destroying a verified positional opportunity while
@@ -151,7 +151,6 @@ pub(super) fn apply_strategic_clue_values(
                 .map_or(0, |value| bottom_deck_risk_protection(source, value))
         })
         .collect::<Vec<_>>();
-    let best_bottom_deck_risk_value = bottom_deck_risk_values.iter().copied().max().unwrap_or(0);
     let has_unoccupied_immediate_target = candidates.iter().any(|candidate| {
         candidate.immediate_play() && !target_has_scheduled_play(candidate.target())
     });
@@ -185,15 +184,13 @@ pub(super) fn apply_strategic_clue_values(
                 .value
                 .penalize_opportunity(POSITIONAL_OPPORTUNITY_LOSS_PENALTY);
         }
-        // Compare protection consequences uniformly. Hard protection and Fix
-        // obligations are enforced by policy, not a move-label exemption.
-        candidate.value.penalize_teamwork(
-            BOTTOM_DECK_RISK_DEFICIT_PENALTY.saturating_mul(
-                u16::try_from(
-                    best_bottom_deck_risk_value.saturating_sub(bottom_deck_risk_values[index]),
-                )
-                .unwrap_or(u16::MAX),
-            ),
+        // Credit actual protection, independently of the other candidates.
+        // A deficit from the best clue unfairly penalizes productive clues
+        // against ordinary discards, which are outside this clue-only pass
+        // and protect none of these identities either.
+        candidate.value.reward_protection(
+            BOTTOM_DECK_RISK_PROTECTION_BONUS
+                .saturating_mul(u16::try_from(bottom_deck_risk_values[index]).unwrap_or(u16::MAX)),
         );
         let candidate_action_count = value
             .convention_action_count
@@ -1729,14 +1726,10 @@ mod tests {
         apply_strategic_clue_values(&deductions, HGroupProfile::Max, &mut with_third);
         assert!(pair[0].score() > pair[1].score());
         assert!(with_third[0].score() > with_third[1].score());
-        assert_eq!(
-            pair[0].score() - with_third[0].score(),
-            BOTTOM_DECK_RISK_DEFICIT_PENALTY
-        );
-        assert_eq!(
-            pair[1].score() - with_third[1].score(),
-            BOTTOM_DECK_RISK_DEFICIT_PENALTY
-        );
+        // Adding a protection option must not lower unrelated clues' scores
+        // against actions outside this clue-only comparison (e.g. discard).
+        assert_eq!(pair[0].score(), with_third[0].score());
+        assert_eq!(pair[1].score(), with_third[1].score());
     }
 
     #[test]

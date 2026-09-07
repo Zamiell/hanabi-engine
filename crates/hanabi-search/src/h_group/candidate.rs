@@ -55,6 +55,7 @@ pub(super) struct ClueValue {
     base: u16,
     information: u16,
     teamwork_bonus: u16,
+    protection_bonus: u16,
     teamwork_penalty: u16,
     delay_penalty: u16,
     complexity_penalty: u16,
@@ -68,6 +69,7 @@ impl ClueValue {
             base,
             information: 0,
             teamwork_bonus: 0,
+            protection_bonus: 0,
             teamwork_penalty: 0,
             delay_penalty: 0,
             complexity_penalty: 0,
@@ -80,6 +82,7 @@ impl ClueValue {
         self.base
             .saturating_add(self.information)
             .saturating_add(self.teamwork_bonus)
+            .saturating_add(self.protection_bonus)
             .saturating_sub(self.teamwork_penalty)
             .saturating_sub(self.delay_penalty)
             .saturating_sub(self.complexity_penalty)
@@ -107,6 +110,12 @@ impl ClueValue {
 
     pub(super) fn reward_teamwork(&mut self, value: u16) {
         self.teamwork_bonus = self.teamwork_bonus.saturating_add(value);
+    }
+
+    /// Strategic protection value does not grant permission to interrupt a
+    /// promised play or strengthen the clue's convention interpretation.
+    pub(super) fn reward_protection(&mut self, value: u16) {
+        self.protection_bonus = self.protection_bonus.saturating_add(value);
     }
 
     pub(super) fn penalize_delay(&mut self, value: u16) {
@@ -294,7 +303,7 @@ impl CompiledClueAction {
 
     /// A time-sensitive clue to the next player that may preempt occupancy.
     pub(super) fn is_urgent_for_next_player(self) -> bool {
-        self.score() >= 450
+        self.score().saturating_sub(self.value.protection_bonus) >= 450
             && (self.semantics.schedule.urgent_save || self.semantics.schedule.immediate_play)
     }
 
@@ -312,5 +321,19 @@ impl CompiledClueAction {
 
     pub(super) const fn set_preserves_visible_continuation(&mut self, preserves: bool) {
         self.semantics.schedule.preserves_visible_continuation = preserves;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ClueValue;
+
+    #[test]
+    fn protection_credit_does_not_change_semantic_strength() {
+        let mut value = ClueValue::new(333);
+        let strength = value.semantic_strength();
+        value.reward_protection(80);
+        assert_eq!(value.total(), 413);
+        assert_eq!(value.semantic_strength(), strength);
     }
 }
