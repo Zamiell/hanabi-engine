@@ -53,13 +53,18 @@ cards, immediately playable touches, critical-card protection, and oldest-card
 protection. Identical input therefore produces identical output without a random
 seed or iteration budget.
 
-Hard convention constraints filter the action set before these priorities are
-compared. When policy tier, within-tier priority, and explicit preference do not
-separate root actions, the planner projects each convention-predictable
-continuation. Unknown draws remain blank rather than receiving sampled
-identities, and the projection stops at the first real policy or identity
-branch. The reported trajectory compares score gain, strikes, discards, and clue
-flow without pretending to know hidden cards.
+Hard convention constraints filter the action set. Every remaining root action
+is projected, regardless of its heuristic priority. Continuations follow the
+convention policy through strategic choices, leaving unknown draws blank. They
+stop at unresolved action identities or clue touches, unavailable perspectives,
+game completion, or a 32-action safety bound. These are conditional forecasts,
+not proofs that a line wins in every hidden world.
+
+Within a policy tier, fewer projected strikes takes precedence over root
+heuristics. Other trajectory metrics (score gain, discards, and clue flow) break
+remaining ties: raw progress across differently truncated lines must not be
+mistaken for a complete-game comparison. No actual hidden hand or deck order is
+used to fill a projection's unknown cards.
 
 Before attempting an exact endgame, the planner counts worlds only up to
 `--exact-world-limit` (4096 by default) and performs a conservative complexity

@@ -4,12 +4,13 @@ use crate::{LogicalDeductions, SymbolicLineOutcome};
 
 use super::{
     ConditionalPlan, HGroupProfile, PerspectiveDepth, PerspectiveProjector, PlanFrontier,
-    ProjectedAction, ProjectedConsequences, ProspectiveTransition, h_group_predictable_action,
-    identity_of, infer_h_group_from_replay, is_playable_now,
+    ProjectedAction, ProjectedConsequences, ProspectiveTransition, identity_of,
+    infer_h_group_from_replay, is_playable_now, select_h_group_action,
 };
 
-/// Projects convention-determined public actions while leaving unknown draws
-/// blank. The line stops at the first genuine choice or identity branch.
+/// Projects the convention policy's actions while leaving unknown draws blank.
+/// Strategic choices continue under that policy; unresolved identities stop
+/// the line rather than being filled using the actual hidden hand or deck.
 pub(crate) fn project_h_group_line(
     source: &PlayerView,
     profile: HGroupProfile,
@@ -75,7 +76,7 @@ fn project_h_group_plan(
             plan.stop_at(PlanFrontier::ProjectionUnavailable);
             break;
         };
-        action = h_group_predictable_action(&next_deductions, profile);
+        action = select_h_group_action(&next_deductions, profile);
     }
     plan
 }
@@ -153,12 +154,29 @@ fn symbolic_identity(
 }
 
 fn touched_cards(source: &PlayerView, target: PlayerId, clue: Clue) -> Option<Vec<CardId>> {
-    source.hands.get(target.index()).map(|hand| {
-        hand.iter()
-            .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
-            .map(|card| card.id)
-            .collect()
-    })
+    let hand = source.hands.get(target.index())?;
+    let mut touched = Vec::new();
+    for card in hand {
+        let matches = if let Some(identity) = card.identity {
+            clue.matches(identity)
+        } else {
+            let identities = crate::IdentitySet::from_mask(card.clues.identity_mask());
+            if identities.is_empty() {
+                return None;
+            }
+            if identities.iter().all(|identity| clue.matches(identity)) {
+                true
+            } else if identities.iter().all(|identity| !clue.matches(identity)) {
+                false
+            } else {
+                return None;
+            }
+        };
+        if matches {
+            touched.push(card.id);
+        }
+    }
+    (!touched.is_empty()).then_some(touched)
 }
 
 #[cfg(test)]
@@ -167,6 +185,24 @@ mod tests {
     use hanabi_core::{FullState, PlayerId, standard_deck};
 
     use super::*;
+
+    #[test]
+    fn reviewed_save_continues_through_the_next_policy_choice() {
+        // p4v0s2 turn 8: test projection mechanics, not optimality of the Save.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s2.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(7).unwrap();
+        let view = state.view_for(state.current_player()).unwrap();
+        let root = Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(hanabi_core::Rank::Two),
+        };
+        let plan = project_h_group_plan(&view, HGroupProfile::Max, root, 32);
+        assert!(plan.len() > 1, "must advance beyond the root clue");
+        assert!(plan.len() <= 32);
+    }
 
     #[test]
     fn unknown_root_identity_ends_the_line_at_a_symbolic_branch() {

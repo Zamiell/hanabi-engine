@@ -80,9 +80,9 @@ use constraints::{ConventionConstraints, ConventionRequirementKind};
 pub use coverage::{H_GROUP_DOCUMENTATION_SECTIONS, HGroupDocumentationSection};
 pub(crate) use decision::analyze_h_group_convention;
 pub use decision::infer_h_group;
-use decision::{h_group_predictable_action, infer_h_group_from_replay, preferred_due_play_card};
 #[cfg(test)]
-use decision::{ordered_h_group_actions, select_h_group_action};
+use decision::{h_group_predictable_action, ordered_h_group_actions};
+use decision::{infer_h_group_from_replay, preferred_due_play_card, select_h_group_action};
 use effects::{ConventionJournal, ConventionReducer, EffectBatch, SignalHistory};
 use epistemic::{EpistemicState, owner_knowledge_read_model};
 use event_reducer::HGroupRuleEffects;

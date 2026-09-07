@@ -1850,6 +1850,7 @@ fn completed_connection_focus_is_due(inferred: &HGroupInferences) -> bool {
     !inferred.completed_connection_focuses.is_empty()
 }
 
+#[cfg(test)]
 pub(crate) fn h_group_predictable_action(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
@@ -2049,7 +2050,6 @@ fn hard_clue_obligation(
 }
 
 #[allow(clippy::too_many_lines)]
-#[cfg(test)]
 pub(crate) fn select_h_group_action(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,

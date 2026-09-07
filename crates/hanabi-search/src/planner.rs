@@ -175,13 +175,13 @@ pub struct PlannerActionEvaluation {
     pub immediately_playable_touched: u8,
     pub critical_touched: u8,
     pub oldest_card_touched: bool,
-    /// Convention-forced public continuation with unresolved draws kept blank.
+    /// Convention-policy continuation with unresolved draws kept blank.
     pub symbolic_line: SymbolicLineOutcome,
     pub exact: Option<ExactActionValue>,
 }
 
-/// Deterministic consequences reachable before a genuine choice or unknown
-/// identity branch interrupts the projected line.
+/// Consequences of the deterministic policy before an unresolved identity
+/// or another explicit projection frontier interrupts its line.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct SymbolicLineOutcome {
     pub actions: u8,
@@ -198,7 +198,7 @@ pub struct SymbolicLineOutcome {
 pub enum SymbolicStopReason {
     /// The game ended; no subsequent action exists.
     Terminal,
-    /// No convention-forced action remained.
+    /// No convention-policy action remained.
     #[default]
     Choice,
     /// The next action depended on an unresolved card identity.
@@ -380,26 +380,10 @@ fn symbolic_root_evaluations(
         .copied()
         .map(|action| symbolic_evaluation(deductions, action))
         .collect::<Vec<_>>();
-    // Forced-line projection is comparatively expensive and is meaningful
-    // only among candidates the convention already considers equivalent.
-    // Semantic obligations and the convention's explicit preferred action
-    // therefore remain authoritative.
-    let best_priority = evaluations
-        .iter()
-        .map(|evaluation| evaluation.convention_priority)
-        .max()
-        .unwrap_or(i32::MIN);
-    let best_priority_count = evaluations
-        .iter()
-        .filter(|evaluation| evaluation.convention_priority == best_priority)
-        .count();
-    if best_priority_count > 1 {
-        for evaluation in &mut evaluations {
-            if evaluation.convention_priority == best_priority {
-                evaluation.symbolic_line =
-                    convention.project_symbolic_line(deductions.view(), evaluation.action, 32);
-            }
-        }
+    // Scores order candidates; they must not prevent testing their lines.
+    for evaluation in &mut evaluations {
+        evaluation.symbolic_line =
+            convention.project_symbolic_line(deductions.view(), evaluation.action, 32);
     }
     evaluations
 }
@@ -623,6 +607,10 @@ fn best_symbolic_index(
         .max_by(|(left_index, left), (right_index, right)| {
             left.policy_tier
                 .cmp(&right.policy_tier)
+                // A known misplay is evidence against a line even when its
+                // root clue has a larger heuristic score. Partial progress
+                // across unequal unknown-card frontiers is not comparable.
+                .then_with(|| right.symbolic_line.strikes.cmp(&left.symbolic_line.strikes))
                 .then_with(|| left.convention_priority.cmp(&right.convention_priority))
                 .then_with(|| {
                     (preferred == Some(left.action)).cmp(&(preferred == Some(right.action)))
@@ -1040,6 +1028,48 @@ mod tests {
     use super::*;
     use crate::SupportedConvention;
     use hanabi_core::{PlayerId, standard_deck};
+
+    #[test]
+    fn every_reviewed_root_is_projected_despite_unequal_priorities() {
+        // p4v0s2 turn 8 reproduces the old unique-best projection bypass.
+        // This asserts planner mechanics, not that the Save is optimal.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s2.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(7).unwrap();
+        let view = state.view_for(state.current_player()).unwrap();
+        let information = InformationSet::new(&view).unwrap();
+        let result = plan_move(
+            &information,
+            SupportedConvention::HGroup(crate::HGroupProfile::Max),
+            PlannerConfig::default(),
+        )
+        .unwrap();
+        assert!(result.root_actions.len() >= 3);
+        assert!(
+            result
+                .root_actions
+                .iter()
+                .all(|root| root.symbolic_line.actions > 0)
+        );
+        assert!(
+            result
+                .root_actions
+                .iter()
+                .any(|root| root.symbolic_line.actions > 1)
+        );
+        let mut alternatives = vec![result.root_actions[0].clone(); 2];
+        alternatives[0].convention_priority = 1000;
+        alternatives[0].symbolic_line.strikes = 1;
+        alternatives[1].convention_priority = 1;
+        alternatives[1].symbolic_line.strikes = 0;
+        assert_eq!(
+            best_symbolic_index(&alternatives, None),
+            Some(1),
+            "a larger heuristic must not hide a projected misplay"
+        );
+    }
 
     #[test]
     fn opening_planning_is_deterministic_and_symbolic() {
