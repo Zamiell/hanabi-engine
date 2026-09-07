@@ -964,6 +964,22 @@ fn projected_line_state(
                         .and_then(|note| note.identities.iter().next())
                 })
                 .filter(|identity| is_eventually_useful(source, *identity))
+                // Invisible alternative slots promise the connection's
+                // identity, not every visible face in the candidate list.
+                // Otherwise a red-1 layer containing a red 4 manufactures
+                // an unrelated red-4 play once the lower stack is secured.
+                .filter(|identity| {
+                    replay.cards.explicitly_clued.contains(&card)
+                        || !replay.pending_connections.iter().any(|connection| {
+                            replay.pending_connections.is_active(connection)
+                                && connection.cards.contains(&card)
+                        })
+                        || replay.pending_connections.iter().any(|connection| {
+                            replay.pending_connections.is_active(connection)
+                                && connection.cards.contains(&card)
+                                && connection.expected == *identity
+                        })
+                })
                 .map(|identity| (card, identity))
         })
         .collect::<Vec<_>>();
@@ -1344,7 +1360,23 @@ fn clue_line_value(
         }));
     value.action_coverage = giver_public_actions.len();
     if let Some((action_count, connection_steps, _)) = named_line {
-        value.convention_action_count = Some(action_count);
+        value.convention_action_count = Some(if canonical_kind == Some(HGroupMoveKind::PlayClue) {
+            // A normal Play line earns only its newly secured cards, not
+            // older scheduled predecessors or every alternative blind slot.
+            // Cap by the named line's size so unrelated downstream benefits
+            // do not become extra steps in that convention line.
+            let mut secured = value
+                .public_actions
+                .iter()
+                .map(|action| action.card)
+                .collect::<Vec<_>>();
+            secured.extend(value.protected_cards.iter().copied());
+            secured.sort_unstable();
+            secured.dedup();
+            secured.len().min(action_count)
+        } else {
+            action_count
+        });
         value.convention_connection_steps = Some(connection_steps);
     }
     value.normalize();
@@ -1567,6 +1599,61 @@ mod tests {
     use super::*;
     use hanabi_core::{Clue, Suit};
     use hanabi_protocol::HanabiLiveReplay;
+
+    #[test]
+    fn reviewed_red_finesse_adds_two_plays_not_one() {
+        // User-reviewed p4v0s2 turn 5: red to Cathy secures r3 + r4;
+        // red to Donald secures only r3. Older red-1 alternative slots
+        // must not manufacture a separate red-4 promise.
+        let replay = HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s2.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(4).unwrap();
+        let source = state.view_for(state.current_player()).unwrap();
+        let team = compiled_baseline_team(&source, HGroupProfile::Max);
+        let baselines = (0..4)
+            .map(|player| {
+                projected_line_state(&source, team.projection(PlayerId::new(player)).unwrap())
+            })
+            .collect::<Vec<_>>();
+        let outcomes = [2, 3].map(|target| {
+            clue_line_value(
+                &source,
+                HGroupProfile::Max,
+                Action::Clue {
+                    target: PlayerId::new(target),
+                    clue: Clue::Suit(Suit::Red),
+                },
+                &baselines,
+                Some(HGroupMoveKind::PlayClue),
+            )
+            .unwrap()
+        });
+        let cards = outcomes.each_ref().map(|outcome| {
+            outcome
+                .public_actions
+                .iter()
+                .map(|action| action.card)
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(cards[0], vec![CardId::new(8), CardId::new(17)]);
+        assert_eq!(cards[1], vec![CardId::new(17)]);
+        assert_eq!(outcomes[0].convention_action_count, Some(2));
+        let deductions = LogicalDeductions::new(source).unwrap();
+        let candidates = super::super::h_group_clue_candidates(&deductions, HGroupProfile::Max);
+        assert_eq!(
+            candidates
+                .iter()
+                .max_by_key(|candidate| candidate.value.total())
+                .unwrap()
+                .action,
+            Action::Clue {
+                target: PlayerId::new(2),
+                clue: Clue::Suit(Suit::Red)
+            }
+        );
+    }
 
     #[test]
     fn reviewed_yellow_five_protection_is_independent_of_clue_label() {
