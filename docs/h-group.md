@@ -71,6 +71,13 @@ sequence.
    Broader confusing or stalled multi-step lines also pay complexity penalties,
    even when their nominal outcome is stronger. Lines that leave fewer teammates
    with useful promised actions separately pay a team-action-coverage penalty.
+   Play Clues receive no bonus merely for focusing chop. A separate, bounded
+   opportunity-cost heuristic penalizes a direct play that draws over an
+   available Bluff/Ejection position when the original direct touch could be
+   preserved by taking the blind play first. Critical touches are excluded;
+   unknown draws are not assigned identities. This is not proof that every
+   future clue remains legal, and it is not a blanket bonus for advanced moves.
+   Bottom-deck-risk protection is valued separately from this timing cost.
 7. From Level 8, compare conditional completion schedules for drawing an unseen
    connector now versus letting the next player draw it. Seating order, existing
    first-turn obligations, clue turns, and visible alternative copies of

@@ -18,6 +18,9 @@ const CRITICAL_CHOP_DEADLINE_PENALTY: u16 = 80;
 const BOTTOM_DECK_RISK_DEFICIT_PENALTY: u16 = 80;
 const UNNECESSARY_CONNECTION_COMPLEXITY_PENALTY: u16 = 24;
 const STALLED_MULTI_STEP_CONNECTION_PENALTY: u16 = 280;
+// A heuristic cost for destroying a verified positional opportunity while
+// postponing it in favor of a recoverable direct clue. Not a Bluff bonus.
+const POSITIONAL_OPPORTUNITY_LOSS_PENALTY: u16 = 40;
 
 /// Compares whole clue outcomes after ordinary legality and convention
 /// interpretation have produced the candidate set.
@@ -70,6 +73,7 @@ pub(super) fn apply_strategic_clue_values(
         .filter_map(|value| value.as_ref().map(LineOutcome::covered_players))
         .max()
         .unwrap_or(0);
+    let opportunity_losses = positional_opportunity_losses(source, profile, candidates);
     let immediately_actionable = values
         .iter()
         .map(|value| {
@@ -176,6 +180,11 @@ pub(super) fn apply_strategic_clue_values(
         ));
         let action_coverage = value.action_coverage;
         candidate.set_compiled_line(value);
+        if opportunity_losses[index] {
+            candidate
+                .value
+                .penalize_opportunity(POSITIONAL_OPPORTUNITY_LOSS_PENALTY);
+        }
         // Save and Fix semantics are protection obligations, not optional
         // strategic protection choices. Risk valuation must not let an
         // unrelated clue outrank the clue that satisfies such an obligation.
@@ -388,6 +397,111 @@ fn bottom_deck_risk_protection(source: &PlayerView, value: &LineOutcome) -> usiz
             identities.union(IdentitySet::singleton(identity))
         })
         .len()
+}
+
+/// Compare two concrete orders: a direct play followed by a positional
+/// clue, versus the positional clue followed by the still-available direct
+/// clue. Drawing after the direct play replaces the known blind-play position
+/// with an unknown card. The latter order preserves the direct clue's touch.
+///
+/// This deliberately does not predict the unknown draw, or treat all advanced
+/// clues as urgent. The original direct touch must remain intact after the
+/// blind play, and it must not protect a critical card requiring a Save now.
+/// <https://hanabi.github.io/level-11/#bluffs>
+fn positional_opportunity_losses(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    candidates: &[CompiledClueAction],
+) -> Vec<bool> {
+    let mut losses = vec![false; candidates.len()];
+    if source.deck_size == 0 {
+        return losses;
+    }
+    let reactor = super::next_player(source.current_player, source.hands.len());
+    for alternative in candidates {
+        if !matches!(
+            alternative.move_kind(),
+            Some(HGroupMoveKind::Bluff | HGroupMoveKind::Ejection)
+        ) {
+            continue;
+        }
+        let Action::Clue { target, clue } = alternative.action else {
+            continue;
+        };
+        let touched = source.hands[target.index()]
+            .iter()
+            .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
+            .map(|card| card.id)
+            .collect::<Vec<_>>();
+        let Some(compiled) = compiled_prospective_clue(source, profile, target, clue, &touched)
+        else {
+            continue;
+        };
+        let Some(projection) = compiled.projection(source.observer) else {
+            continue;
+        };
+        let anchor = projection.replay.signals.iter().find_map(|signal| {
+            (signal.turn == source.turn
+                && signal.target == Some(reactor)
+                && matches!(
+                    signal.kind,
+                    HGroupMoveKind::Bluff
+                        | HGroupMoveKind::FiveColorEjection
+                        | HGroupMoveKind::StackedEjection
+                )
+                && signal.cards.len() >= 2)
+                .then(|| signal.cards[0])
+        });
+        let Some(anchor) = anchor.filter(|card| {
+            identity_of(source, *card).is_some_and(|identity| is_playable_now(source, identity))
+        }) else {
+            continue;
+        };
+        let hand = &source.hands[reactor.index()];
+        let Some(anchor_position) = hand.iter().position(|card| card.id == anchor) else {
+            continue;
+        };
+        for (index, direct) in candidates.iter().enumerate() {
+            if direct.target() != reactor
+                || !direct.immediate_play()
+                || direct.purpose() != CluePurpose::Play
+                || direct.is_urgent_save()
+            {
+                continue;
+            }
+            let Action::Clue { clue, .. } = direct.action else {
+                continue;
+            };
+            let direct_touch = hand
+                .iter()
+                .enumerate()
+                .filter(|(_, card)| card.identity.is_some_and(|identity| clue.matches(identity)))
+                .collect::<Vec<_>>();
+            if direct_touch.iter().any(|(_, card)| {
+                card.id == anchor
+                    || card
+                        .identity
+                        .is_some_and(|identity| super::is_critical(source, identity))
+            }) {
+                continue;
+            }
+            let playable = direct_touch
+                .iter()
+                .filter(|(_, card)| {
+                    card.identity
+                        .is_some_and(|identity| is_playable_now(source, identity))
+                })
+                .collect::<Vec<_>>();
+            let [(position, _)] = playable.as_slice() else {
+                continue;
+            };
+            // Playing an older card then drawing shifts the known blind slot.
+            // Playing a newer card can leave that slot unchanged. Conversely,
+            // playing the anchor leaves this untouched direct focus in hand.
+            losses[index] |= *position < anchor_position;
+        }
+    }
+    losses
 }
 
 /// Finds players occupied by a visible, successful pending blind play.
@@ -1429,6 +1543,67 @@ mod tests {
     use super::*;
     use hanabi_core::{Clue, Suit};
     use hanabi_protocol::HanabiLiveReplay;
+
+    #[test]
+    fn reviewed_opening_preserves_the_three_bluff_before_a_draw() {
+        // User-reviewed p4v0s1 turn 1: Bob's p1 position enables the 3
+        // Bluff saving p3/r3. Blue plays b1 and draws over that position;
+        // playing p1 first leaves both blue cards available for a later clue.
+        let replay = HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(0).unwrap();
+        let mut source = state.view_for(state.current_player()).unwrap();
+        let deductions = LogicalDeductions::new(source.clone()).unwrap();
+        let candidates = super::super::h_group_clue_candidates(&deductions, HGroupProfile::Max);
+        let losses = positional_opportunity_losses(&source, HGroupProfile::Max, &candidates);
+        let blue = candidates
+            .iter()
+            .position(|candidate| {
+                candidate.action
+                    == Action::Clue {
+                        target: PlayerId::new(1),
+                        clue: Clue::Suit(Suit::Blue),
+                    }
+            })
+            .unwrap();
+        let bluff = candidates
+            .iter()
+            .position(|candidate| {
+                candidate.action
+                    == Action::Clue {
+                        target: PlayerId::new(3),
+                        clue: Clue::Rank(Rank::Three),
+                    }
+            })
+            .unwrap();
+        assert!(losses[blue]);
+        assert!(!losses[bluff]);
+        let team = compiled_baseline_team(&source, HGroupProfile::Max);
+        let baselines = (0..4)
+            .map(|player| {
+                projected_line_state(&source, team.projection(PlayerId::new(player)).unwrap())
+            })
+            .collect::<Vec<_>>();
+        let outcome = clue_line_value(
+            &source,
+            HGroupProfile::Max,
+            candidates[bluff].action,
+            &baselines,
+            candidates[bluff].move_kind(),
+        )
+        .unwrap();
+        assert_eq!(bottom_deck_risk_protection(&source, &outcome), 2);
+        // Algorithm-only counterfactual: without a draw, removing an older
+        // card does not replace the first finesse position.
+        source.deck_size = 0;
+        assert!(
+            positional_opportunity_losses(&source, HGroupProfile::Max, &candidates)
+                .iter()
+                .all(|loss| !loss)
+        );
+    }
 
     #[test]
     fn reviewed_opening_does_not_merge_bluff_and_clandestine_alternatives() {

@@ -58,6 +58,7 @@ pub(super) struct ClueValue {
     teamwork_penalty: u16,
     delay_penalty: u16,
     complexity_penalty: u16,
+    opportunity_penalty: u16,
 }
 
 impl ClueValue {
@@ -69,6 +70,7 @@ impl ClueValue {
             teamwork_penalty: 0,
             delay_penalty: 0,
             complexity_penalty: 0,
+            opportunity_penalty: 0,
         }
     }
 
@@ -79,6 +81,7 @@ impl ClueValue {
             .saturating_sub(self.teamwork_penalty)
             .saturating_sub(self.delay_penalty)
             .saturating_sub(self.complexity_penalty)
+            .saturating_sub(self.opportunity_penalty)
     }
 
     pub(super) fn semantic_strength(self) -> u16 {
@@ -109,6 +112,10 @@ impl ClueValue {
 
     pub(super) fn penalize_complexity(&mut self, value: u16) {
         self.complexity_penalty = self.complexity_penalty.saturating_add(value);
+    }
+
+    pub(super) fn penalize_opportunity(&mut self, value: u16) {
+        self.opportunity_penalty = self.opportunity_penalty.saturating_add(value);
     }
 }
 

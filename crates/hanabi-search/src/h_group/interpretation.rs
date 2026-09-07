@@ -26,8 +26,8 @@ use super::{
     finesse_position, five_chop_moved_card, five_pulled_card, focus,
     identity_is_queued_before_target, identity_of, identity_set, infer_h_group_from_replay,
     is_convention_trash, is_critical, is_eventually_useful, is_playable_at, is_playable_now,
-    is_unique_visible, next_player, ordered_playable_cards, pending_card_allows_identity,
-    preferred_due_play_card, projected_h_group_replay, prospective_clue_has_unsafe_connection,
+    next_player, ordered_playable_cards, pending_card_allows_identity, preferred_due_play_card,
+    projected_h_group_replay, prospective_clue_has_unsafe_connection,
     prospective_clue_marks_focus_saved, prospective_clue_primary_interpretation,
     prospective_clue_primary_kind, prospective_clue_signal_kinds, prospective_clue_view,
     prospective_play_view, prospective_stacked_ejection_card, prospective_team_clue_signal_kinds,
@@ -241,17 +241,6 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             baseline_playing.extend(cards);
         }
     }
-    let next_player_has_multi_one = view.hands[next_player.index()]
-        .iter()
-        .filter(|card| {
-            !promptable.contains(&card.id)
-                && card.identity.is_some_and(|identity| {
-                    identity.rank == Rank::One && is_playable_now(view, identity)
-                })
-        })
-        .take(2)
-        .count()
-        >= 2;
     let mut candidates = Vec::new();
 
     for action in view.legal_actions() {
@@ -703,18 +692,6 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 // trash discard. Recovering a token first preserves both
                 // tempo and the later play clue.
                 score = score.saturating_sub(50);
-            }
-            if old_chop == Some(focus)
-                && is_unique_visible(view, focus, focus_identity)
-                && (target == next_player
-                    || focus_identity.rank != Rank::One
-                    || !next_player_has_multi_one)
-            {
-                // Occupying a player with their playable chop is valuable at
-                // every distance, including an off-turn 1. Otherwise an
-                // intervening teammate is forced to spend the next clue on
-                // that chop, losing the opportunity to find a stronger line.
-                score += 120;
             }
             if is_playable_now(view, focus_identity)
                 && focus_identity.rank != Rank::Five

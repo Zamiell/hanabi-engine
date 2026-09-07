@@ -128,11 +128,3 @@ pub(super) fn is_card_identity_accounted_trash(
                     || convention_facts.known_identity(other) == Some(identity))
         })
 }
-
-pub(super) fn is_unique_visible(view: &PlayerView, excluded: CardId, identity: Card) -> bool {
-    !view
-        .hands
-        .iter()
-        .flatten()
-        .any(|card| card.id != excluded && card.identity == Some(identity))
-}
