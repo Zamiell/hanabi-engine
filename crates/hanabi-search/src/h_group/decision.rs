@@ -1663,6 +1663,11 @@ fn raw_h_group_action_priority(
             scored_discard_candidate(deductions.view(), inferred, profile)
         {
             if candidate == card {
+                if let Some(priority) =
+                    early_game_clue_handoff_priority(deductions, profile, analysis, card)
+                {
+                    return priority;
+                }
                 if let Some(priority) = super::draw_distribution::discard_priority(
                     deductions,
                     inferred,
@@ -1771,6 +1776,110 @@ fn adjust_clue_priority(
     } else {
         clue_priority
     }
+}
+
+/// Prefer swapping an interchangeable clue and discard when only the current
+/// player can discard without ending Early Game. This is a scheduling
+/// preference, not permission to discard unknown cards or delay a repair.
+/// [Ending the Early Game](https://hanabi.github.io/level-9/#ending-the-early-game).
+fn early_game_clue_handoff_priority(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+    analysis: &HGroupAnalysis,
+    discard: CardId,
+) -> Option<i32> {
+    let source = deductions.view();
+    let inferred = &analysis.inferences;
+    if !analysis.replay.early_game
+        || !rule_enabled(profile, HGroupRuleId::Stalling)
+        || source.clue_tokens == 0
+        || source.clue_tokens == MAX_CLUE_TOKENS
+        || inferred.connection.is_some()
+        || !inferred.playable_now.is_empty()
+        || !inferred.discard_now.is_empty()
+        || inferred.must_clue.contains(&source.observer)
+        || convention_known_trash_discard(source, inferred) != Some(discard)
+    {
+        return None;
+    }
+    let candidates = analysis_clue_candidates(deductions, profile, analysis);
+    if candidates
+        .iter()
+        .any(|candidate| candidate.is_urgent_save() || candidate.purpose() == CluePurpose::Fix)
+    {
+        return None;
+    }
+    let best = candidates
+        .iter()
+        .max_by_key(|candidate| candidate.score())?;
+    let next = next_player(source.observer, source.hands.len());
+    if best.purpose() != CluePurpose::Play || best.target() == next {
+        return None;
+    }
+    let outcome = super::strategic_value::scheduled_clue_outcome(source, profile, best)?;
+    // No promised actor may lose a turn when the clue moves one seat later.
+    if outcome.public_actions.is_empty()
+        || outcome
+            .public_actions
+            .iter()
+            .any(|action| action.owner == next)
+    {
+        return None;
+    }
+    let Action::Clue { target, clue } = best.action else {
+        return None;
+    };
+    let touched = source.hands[target.index()]
+        .iter()
+        .filter_map(|card| {
+            card.identity
+                .filter(|identity| clue.matches(*identity))
+                .map(|_| card.id)
+        })
+        .collect::<Vec<_>>();
+    let clued = ProspectiveTransition::clue(source, target, clue, &touched);
+    let (next_deductions, next_replay) = PerspectiveProjector::new(&clued, profile)
+        .project(next, PerspectiveDepth::NestedRecipients)?;
+    let next_inferred = infer_h_group_from_replay(&next_deductions, next_replay, profile);
+    let (next_discard, _) =
+        scored_discard_candidate(next_deductions.view(), &next_inferred, profile)?;
+    if next_inferred.connection.is_some()
+        || !next_inferred.playable_now.is_empty()
+        || !next_inferred.discard_now.is_empty()
+        || next_inferred.must_clue.contains(&next)
+        || next_inferred.chops[next.index()] != Some(next_discard)
+        || convention_known_trash_discard(next_deductions.view(), &next_inferred).is_some()
+    {
+        return None;
+    }
+    let identities = deductions.possible_identities(discard)?;
+    if identities.is_empty() {
+        return None;
+    }
+    for identity in identities.iter() {
+        let after = ProspectiveTransition::discard(source, source.observer, discard, identity);
+        let (next_deductions, next_replay) = PerspectiveProjector::new(&after, profile)
+            .project(next, PerspectiveDepth::NestedRecipients)?;
+        if !next_replay.early_game {
+            return None;
+        }
+        let future = h_group_clue_candidates_from_replay(&next_deductions, profile, &next_replay);
+        let same = future
+            .iter()
+            .find(|candidate| candidate.action == best.action)?;
+        let later =
+            super::strategic_value::scheduled_clue_outcome(next_deductions.view(), profile, same)?;
+        if later.public_actions != outcome.public_actions
+            || later.owner_actions != outcome.owner_actions
+            || later.protected_cards != outcome.protected_cards
+            || later.new_connections != outcome.new_connections
+        {
+            return None;
+        }
+    }
+    // Carry the value of the preserved clue, then apply only a one-point
+    // scheduling tiebreak. Do not make safe trash intrinsically worth more.
+    Some(101 + i32::from(best.score()))
 }
 
 /// Values passing the final clue token when the next player can use the
@@ -2149,4 +2258,54 @@ fn select_h_group_action_from_analysis(
     crate::ConventionAgnosticPolicy
         .select_action(deductions)
         .ok()
+}
+
+#[cfg(test)]
+mod early_game_handoff_tests {
+    use super::*;
+
+    #[test]
+    fn reviewed_safe_discard_handoff_requires_early_game_and_safe_trash() {
+        // User-reviewed p4v0s3 turn 9: Alice can pass green to Bob without
+        // ending Early Game; Bob's ordinary chop discard would end it.
+        let fixture = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s3.json"
+        ))
+        .expect("reviewed replay");
+        let state = fixture.state_at_turn(8).expect("legal prefix");
+        let deductions =
+            LogicalDeductions::new(state.view_for(state.current_player()).expect("actor view"))
+                .expect("valid deductions");
+        let mut analysis = build_h_group_analysis(&deductions, HGroupProfile::Max);
+        let priority = early_game_clue_handoff_priority(
+            &deductions,
+            HGroupProfile::Max,
+            &analysis,
+            CardId::new(2),
+        )
+        .expect("same clue remains available to Bob");
+        let best = analysis_clue_candidates(&deductions, HGroupProfile::Max, &analysis)
+            .iter()
+            .map(|candidate| 100 + i32::from(candidate.score()))
+            .max()
+            .unwrap();
+        assert_eq!(priority, best + 1);
+        let chop = analysis.inferences.chops[0].expect("Alice has an ordinary chop");
+        assert_eq!(
+            early_game_clue_handoff_priority(&deductions, HGroupProfile::Max, &analysis, chop,),
+            None,
+            "unknown chop must not receive the safe-discard preference"
+        );
+        analysis.replay.early_game = false;
+        assert_eq!(
+            early_game_clue_handoff_priority(
+                &deductions,
+                HGroupProfile::Max,
+                &analysis,
+                CardId::new(2),
+            ),
+            None,
+            "preserving an already-ended phase has no value"
+        );
+    }
 }

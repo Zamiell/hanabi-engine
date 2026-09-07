@@ -1044,6 +1044,29 @@ fn collect_owner_clued_superpositions(
     superpositions
 }
 
+/// Compile a scheduling alternative with the same owner-relative outcome
+/// calculation used for ordinary clue valuation.
+pub(super) fn scheduled_clue_outcome(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    candidate: &CompiledClueAction,
+) -> Option<LineOutcome> {
+    let team = compiled_baseline_team(source, profile);
+    let baselines = (0..source.hands.len())
+        .map(|player| {
+            let observer = PlayerId::new(u8::try_from(player).ok()?);
+            Some(projected_line_state(source, team.projection(observer)?))
+        })
+        .collect::<Option<Vec<_>>>()?;
+    clue_line_value(
+        source,
+        profile,
+        candidate.action,
+        &baselines,
+        candidate.move_kind(),
+    )
+}
+
 #[allow(clippy::too_many_lines)]
 fn clue_line_value(
     source: &PlayerView,
