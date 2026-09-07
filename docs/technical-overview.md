@@ -67,6 +67,13 @@ preserves the candidate without crediting its conditional blind play as certain;
 diagnostics expose `interpretationBranch` separately from an unresolved
 played-card identity.
 
+Priority forecasts use the same uncertainty boundary: a blank in another hand
+may contain the connecting card, redirecting the apparent Priority Finesse or
+requiring a Load Clue. The forecast stops before the unsupported blind play,
+without crediting a success or predicting a strike. The guard checks feasible
+identities and ignores cards drawn after the Priority signal; blanks that
+exclude the connector do not stop the line.
+
 Conversely, missing nested visibility must not erase a publicly demonstrated
 Layered Finesse. A successful off-colour blind play uniquely attributable to an
 outstanding delayed colour clue restores the relational connection when the

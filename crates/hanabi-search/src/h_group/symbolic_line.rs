@@ -47,7 +47,9 @@ fn project_h_group_plan(
             break;
         };
         let actor_inferences = infer_h_group_from_replay(&actor_deductions, actor_replay, profile);
-        if charm_depends_on_hidden_connector(&public, &actor_inferences, current) {
+        if charm_depends_on_hidden_connector(&public, &actor_inferences, current)
+            || priority_depends_on_hidden_connector(&public, &actor_inferences, current)
+        {
             plan.stop_at(PlanFrontier::InterpretationBranch);
             break;
         }
@@ -86,6 +88,51 @@ fn project_h_group_plan(
         source, &public, profile, root,
     ));
     plan
+}
+
+/// A projected reactor cannot infer a Priority Finesse from the absence of a
+/// connector when another hand is blank only to the planning observer. That
+/// connector could instead require a Prompt, Finesse, or Load Clue elsewhere.
+/// <https://hanabi.github.io/level-25/#the-load-clue>
+fn priority_depends_on_hidden_connector(
+    source: &PlayerView,
+    inferred: &super::HGroupInferences,
+    action: Action,
+) -> bool {
+    let Action::Play(card) = action else {
+        return false;
+    };
+    if !inferred.cards.iter().any(|note| {
+        note.card == card && note.play_obligation == Some(super::HGroupPlayObligation::Forced)
+    }) {
+        return false;
+    }
+    let Some(signal) = inferred.signals.iter().rev().find(|signal| {
+        signal.kind == super::HGroupMoveKind::Priority
+            && signal.target == Some(source.current_player)
+            && signal.cards.contains(&card)
+    }) else {
+        return false;
+    };
+    let Some(connector) = signal.identity else {
+        return false;
+    };
+    let Ok(deductions) = LogicalDeductions::new(source.clone()) else {
+        return true;
+    };
+    source.hands.iter().enumerate().any(|(owner, hand)| {
+        owner != source.current_player.index()
+            && hand.iter().any(|other| {
+                other.identity.is_none()
+                    && !source.history.iter().any(|entry| {
+                        entry.turn >= signal.turn
+                            && matches!(entry.event, hanabi_core::ObservedEvent::Drew { card, .. } if card == other.id)
+                    })
+                    && deductions
+                        .possible_identities(other.id)
+                        .is_none_or(|domain| domain.contains(connector))
+            })
+    })
 }
 
 /// A blank in the giver's hand is visible to the reactor. It cannot prove
@@ -264,6 +311,84 @@ mod tests {
     use hanabi_core::{FullState, PlayerId, standard_deck};
 
     use super::*;
+
+    #[test]
+    fn priority_projection_does_not_prove_absence_from_a_blank_hand() {
+        // Reviewed p4v0s415 turn 19, projected from Cathy: her hidden r5
+        // cannot be used as either present or absent in Bob's visible hands.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(18).unwrap();
+        let view = state.view_for(state.current_player()).unwrap();
+        let outcome = project_h_group_line(
+            &view,
+            HGroupProfile::Max,
+            Action::Clue {
+                target: PlayerId::new(0),
+                clue: Clue::Suit(hanabi_core::Suit::Purple),
+            },
+            32,
+        );
+        assert_eq!(outcome.strikes, 0, "{outcome:?}");
+        assert_eq!(
+            outcome.stop_reason,
+            SymbolicStopReason::UnknownInterpretation
+        );
+        assert_eq!(
+            outcome.actions, 3,
+            "stop before Bob's unsupported blind play"
+        );
+        let mut public = ProspectiveTransition::clue_by(
+            &view,
+            view.current_player,
+            PlayerId::new(0),
+            Clue::Suit(hanabi_core::Suit::Purple),
+            &[CardId::new(19), CardId::new(24)],
+        );
+        for (actor, card, identity) in [
+            (
+                3,
+                17,
+                Card::new(hanabi_core::Suit::Red, hanabi_core::Rank::Four),
+            ),
+            (
+                0,
+                19,
+                Card::new(hanabi_core::Suit::Purple, hanabi_core::Rank::One),
+            ),
+        ] {
+            public = ProspectiveTransition::successful_play(
+                &public,
+                PlayerId::new(actor),
+                CardId::new(card),
+                identity,
+            );
+        }
+        let (deductions, state) = PerspectiveProjector::new(&public, HGroupProfile::Max)
+            .project(public.current_player, PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        let inferred = infer_h_group_from_replay(&deductions, state, HGroupProfile::Max);
+        let play = Action::Play(CardId::new(25));
+        assert!(priority_depends_on_hidden_connector(
+            &public, &inferred, play
+        ));
+        // Algorithmic domain boundary: if every blank excludes red, none can
+        // redirect this r5 Priority interpretation. This is not a fixture edit.
+        for card in public
+            .hands
+            .iter_mut()
+            .flatten()
+            .filter(|card| card.identity.is_none())
+        {
+            card.clues
+                .add_negative_clue(Clue::Suit(hanabi_core::Suit::Red));
+        }
+        assert!(!priority_depends_on_hidden_connector(
+            &public, &inferred, play
+        ));
+    }
 
     #[test]
     fn excluded_connector_identities_do_not_create_a_charm_branch() {
