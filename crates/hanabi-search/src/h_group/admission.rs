@@ -104,7 +104,11 @@ pub(super) fn good_touch(context: GoodTouchContext<'_>) -> bool {
                         || (identity.rank == Rank::One
                             && candidate.identity.is_none()
                             && context.convention_cards.iter().any(|note| {
-                                note.card == candidate.id && note.identities.contains(identity)
+                                note.card == candidate.id
+                                    && note.promised_identity.map_or_else(
+                                        || note.identities.contains(identity),
+                                        |promised| promised == identity,
+                                    )
                             })))
             })
         {

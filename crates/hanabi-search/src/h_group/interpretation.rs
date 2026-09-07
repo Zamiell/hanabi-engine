@@ -7,7 +7,6 @@
 use super::admission::{
     GoodTouchContext, clue_accounts_for_every_copy, duplicates_known_good_touch, good_touch,
 };
-#[cfg(test)]
 use super::decision::{analysis_clue_candidates, build_h_group_analysis};
 use super::interpretation_resolution::{
     candidate_replaces, named_interpretation_replaces_ordinary,
@@ -47,7 +46,6 @@ pub(super) use knowledge::{
     two_save_allowed,
 };
 
-#[cfg(test)]
 #[allow(clippy::too_many_lines)]
 pub(super) fn h_group_clue_candidates(
     deductions: &LogicalDeductions,
@@ -661,6 +659,9 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             continue;
         }
         let is_continuation_clue = rule_enabled(profile, HGroupRuleId::Extras)
+            // A continuation can delay this recipient's new play behind their
+            // own obligation, not behind an unrelated player's pending layer.
+            && replay.pending_connections.iter().any(|connection| connection.actor == target)
             && prospective_clue_signal_kinds(view, profile, target, clue, &touched)
                 .contains(&HGroupMoveKind::ContinuationClue);
         if play_score.is_some()

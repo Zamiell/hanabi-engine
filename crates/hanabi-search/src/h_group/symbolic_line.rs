@@ -78,6 +78,9 @@ fn project_h_group_plan(
         };
         action = select_h_group_action(&next_deductions, profile);
     }
+    plan.assess(super::frontier_value::evaluate(
+        source, &public, profile, root,
+    ));
     plan
 }
 

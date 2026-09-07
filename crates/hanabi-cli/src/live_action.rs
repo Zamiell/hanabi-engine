@@ -273,6 +273,18 @@ fn planner_details_json(
                 "cluesSpent": evaluation.symbolic_line.clues_spent,
                 "cluesGained": evaluation.symbolic_line.clues_gained,
                 "strikes": evaluation.symbolic_line.strikes,
+                "positionValue": evaluation.symbolic_line.position_value.map(|value| json!({
+                    "score": value.score,
+                    "clues": value.clues,
+                    "exposedCriticalChops": value.exposed_critical_chops,
+                    "blockedCluedCards": value.blocked_clued_cards,
+                    "securedFuturePlays": value.secured_future_plays,
+                    "protectedBottomDeckRisks": value.protected_bottom_deck_risks,
+                    "visibleSuccessors": value.visible_successors,
+                    "finesseOpportunities": value.finesse_opportunities,
+                    "savePressure": value.save_pressure,
+                    "foregoneTouchOpportunities": value.foregone_touch_opportunities,
+                })),
                 "identityBranch": matches!(
                     evaluation.symbolic_line.stop_reason,
                     hanabi_search::SymbolicStopReason::UnknownIdentity

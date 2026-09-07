@@ -60,10 +60,27 @@ stop at unresolved action identities or clue touches, unavailable perspectives,
 game completion, or a 32-action safety bound. These are conditional forecasts,
 not proofs that a line wins in every hidden world.
 
-Within a policy tier, fewer projected strikes takes precedence over root
-heuristics. Other trajectory metrics (score gain, discards, and clue flow) break
-remaining ties: raw progress across differently truncated lines must not be
-mistaken for a complete-game comparison. No actual hidden hand or deck order is
+For lines with the same action horizon and stopping reason, the planner first
+removes resource-dominated choices within the same policy tier. Frontier
+assessment includes score, clue tokens, secured future plays, protection of
+single-visible-copy identities against bottom-deck risk, exposed critical chops,
+and blocked clued cards. A played card counts toward both current score and
+total secured progress, so playing a promise does not lose its value. Clued
+ambiguity is not automatically a hand blockage: visible predecessor coverage can
+make every remaining identity feasible to play soon.
+
+The assessment also records conditional options: visible successors, a successor
+on another player's finesse position if that player clues instead of drawing,
+possible additional useful touches after a loaded Save recipient draws, and
+possible consecutive-Save pressure on the newly exposed chop. Token shortages
+increase that pressure. Unknown-draw possibilities use remaining identity counts
+and do not assign a particular card, estimate a probability, or assert that a
+specific future Finesse/Bluff/Ignition exists. These fields are exposed in the
+live diagnostic JSON under `symbolicLine.positionValue`.
+
+Among remaining choices, fewer projected strikes precede root heuristics. Other
+trajectory metrics break remaining ties. Unequal projection horizons are not
+treated as complete-game comparisons. No actual hidden hand or deck order is
 used to fill a projection's unknown cards.
 
 Before attempting an exact endgame, the planner counts worlds only up to

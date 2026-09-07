@@ -1,5 +1,41 @@
 use super::*;
 
+#[test]
+fn reviewed_yellow_play_is_not_a_redundant_invisible_alternative() {
+    let state = expert_replay_p4v0s2().state_at_turn(7).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    // User-reviewed p4v0s2 turn 8: y1 is new information even though Bob
+    // already has g2 to play; loading the hand is strategy, not illegality.
+    let d = LogicalDeductions::new(view).unwrap();
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    let yellow = candidates
+        .iter()
+        .find(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(1),
+                    clue: Clue::Suit(Suit::Yellow),
+                }
+        })
+        .unwrap();
+    assert!(yellow.immediate_play());
+    assert_eq!(yellow.move_kind(), Some(HGroupMoveKind::PlayClue));
+    let blue = candidates
+        .iter()
+        .find(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(0),
+                    clue: Clue::Suit(Suit::Blue),
+                }
+        })
+        .unwrap();
+    assert!(
+        yellow.score() < blue.score(),
+        "give idle Alice an action rather than loading Bob"
+    );
+}
+
 /// User-reviewed p4v0s2 turn 8: Cathy supplies b2 behind a playable r1
 /// layer. Alice needs only b1 + b3, so 4s to Bob cannot be a 4 Charm.
 /// <https://hanabi.github.io/level-23/#the-4-charm>

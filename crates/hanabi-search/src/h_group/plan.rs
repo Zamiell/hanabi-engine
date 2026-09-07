@@ -49,9 +49,13 @@ pub(super) enum PlanFrontier {
 pub(super) struct ConditionalPlan {
     steps: Vec<PlanStep>,
     frontier: PlanFrontier,
+    position_value: Option<crate::ProjectedPositionValue>,
 }
 
 impl ConditionalPlan {
+    pub(super) fn assess(&mut self, value: Option<crate::ProjectedPositionValue>) {
+        self.position_value = value;
+    }
     pub(super) fn push(&mut self, projected: ProjectedAction, consequences: ProjectedConsequences) {
         let depends_on = self.steps.len().checked_sub(1);
         self.steps.push(PlanStep {
@@ -71,6 +75,7 @@ impl ConditionalPlan {
 
     pub(super) fn summarize(&self) -> SymbolicLineOutcome {
         let mut outcome = SymbolicLineOutcome {
+            position_value: self.position_value,
             actions: u8::try_from(self.steps.len()).unwrap_or(u8::MAX),
             stop_reason: match self.frontier {
                 PlanFrontier::Terminal => SymbolicStopReason::Terminal,

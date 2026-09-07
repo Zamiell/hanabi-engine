@@ -191,6 +191,40 @@ pub struct SymbolicLineOutcome {
     pub clues_gained: u8,
     pub strikes: u8,
     pub stop_reason: SymbolicStopReason,
+    /// Resource and opportunity assessment at the known projection frontier.
+    pub position_value: Option<ProjectedPositionValue>,
+}
+
+/// Observable resources and conditional opportunities, not a sampled world.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ProjectedPositionValue {
+    pub score: u8,
+    pub clues: u8,
+    pub exposed_critical_chops: u8,
+    pub blocked_clued_cards: u8,
+    pub secured_future_plays: u8,
+    pub protected_bottom_deck_risks: u8,
+    pub visible_successors: u8,
+    pub finesse_opportunities: u8,
+    pub save_pressure: u8,
+    pub foregone_touch_opportunities: u8,
+}
+
+impl ProjectedPositionValue {
+    fn dominates(self, other: Self) -> bool {
+        self != other
+            && self.score >= other.score
+            && self.clues >= other.clues
+            && self.exposed_critical_chops <= other.exposed_critical_chops
+            && self.blocked_clued_cards <= other.blocked_clued_cards
+            && self.score.saturating_add(self.secured_future_plays)
+                >= other.score.saturating_add(other.secured_future_plays)
+            && self.protected_bottom_deck_risks >= other.protected_bottom_deck_risks
+            && self.visible_successors >= other.visible_successors
+            && self.finesse_opportunities >= other.finesse_opportunities
+            && self.save_pressure <= other.save_pressure
+            && self.foregone_touch_opportunities <= other.foregone_touch_opportunities
+    }
 }
 
 /// Why a deterministic symbolic continuation stopped.
@@ -604,6 +638,19 @@ fn best_symbolic_index(
     evaluations
         .iter()
         .enumerate()
+        .filter(|(_, candidate)| {
+            !evaluations.iter().any(|other| {
+                other.policy_tier == candidate.policy_tier
+                    && other.symbolic_line.strikes <= candidate.symbolic_line.strikes
+                    && other.symbolic_line.actions == candidate.symbolic_line.actions
+                    && other.symbolic_line.stop_reason == candidate.symbolic_line.stop_reason
+                    && other
+                        .symbolic_line
+                        .position_value
+                        .zip(candidate.symbolic_line.position_value)
+                        .is_some_and(|(left, right)| left.dominates(right))
+            })
+        })
         .max_by(|(left_index, left), (right_index, right)| {
             left.policy_tier
                 .cmp(&right.policy_tier)

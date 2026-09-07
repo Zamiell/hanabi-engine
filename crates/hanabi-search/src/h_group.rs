@@ -38,6 +38,7 @@ mod effects;
 mod epistemic;
 mod event_reducer;
 mod facts;
+mod frontier_value;
 mod hand;
 mod hypothesis;
 mod identity;
