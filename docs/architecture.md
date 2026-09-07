@@ -186,6 +186,16 @@ request either observer-only interpretation or nested recipient modeling.
   and stores projected consequences in dependency-linked `PlanStep` nodes.
   `symbolic_line.rs` builds this `ConditionalPlan`; new draws remain blank and
   projection stops at an explicit frontier before the plan is summarized.
+- `frontier_value.rs` keeps conditional successor opportunities separate from
+  secured plays. After a stack advances, it can test whether a compatible card
+  already hidden in the planner's hand would let the next free teammate give an
+  admitted Play Clue. The temporary assumption never enters the actual line or
+  shared knowledge, and blank draws are not assigned identities. With equal
+  recorded progress and safety, this opportunity can outweigh a surplus clue
+  token. Both lines must cover a bounded near-term reserve: one productive clue,
+  exposed critical chops, mandatory repairs, and any consecutive-save pressure.
+  This is a strategic tiebreaker, not a probability estimate or exhaustive proof
+  that every future clue need is funded.
 - `hypothesis.rs` owns mutually exclusive whole-history interpretations. Each
   alternative retains its own connections, promises, and identity claims, so
   ordinary and empathy readings cannot be merged card-by-card.

@@ -70,6 +70,7 @@ pub(super) fn evaluate(
     let mut value = ProjectedPositionValue {
         score: narrow(frontier.play_stacks.iter().map(Vec::len).sum()),
         clues: frontier.clue_tokens,
+        clue_demand: 1,
         ..ProjectedPositionValue::default()
     };
     let mut secured = IdentitySet::default();
@@ -78,6 +79,9 @@ pub(super) fn evaluate(
         let (d, replay) = PerspectiveProjector::new(frontier, profile)
             .project(actor, PerspectiveDepth::NestedRecipients)?;
         let inferred = infer_h_group_from_replay(&d, replay, profile);
+        if inferred.must_clue.contains(&actor) {
+            value.clue_demand = value.clue_demand.saturating_add(1);
+        }
         if inferred.playable_now.is_empty() {
             if let Some(chop) = inferred.chops.get(player).copied().flatten() {
                 if frontier.hands[player]
@@ -157,7 +161,102 @@ pub(super) fn evaluate(
         }
     }
     add_root_opportunities(source, profile, root, &mut value)?;
+    value.clue_demand = value
+        .clue_demand
+        .saturating_add(value.exposed_critical_chops)
+        .saturating_add(if value.save_pressure > 0 { 2 } else { 0 });
     Some(value)
+}
+
+/// Check an explicit conditional branch immediately after a stack advances.
+/// Only cards already hidden in the planning player's hand are considered;
+/// blank draws are not silently assumed to contain the desired successor.
+/// The next teammate must be free and have an admitted Play Clue in that
+/// branch. Neither this branch nor its assumed identity enters public belief.
+pub(super) fn conditional_successor(
+    source: &PlayerView,
+    after: &PlayerView,
+    profile: HGroupProfile,
+    played: Card,
+) -> Option<Card> {
+    if played.rank == Rank::Five
+        || after.clue_tokens == 0
+        || after.current_player == source.observer
+    {
+        return None;
+    }
+    let successor = Card::new(played.suit, Rank::ALL[usize::from(played.rank.number())]);
+    if unseen(after, successor) == 0
+        || after
+            .hands
+            .iter()
+            .flatten()
+            .any(|card| card.identity == Some(successor))
+    {
+        return None;
+    }
+    let d = LogicalDeductions::new(after.clone()).ok()?;
+    let notes = super::infer_h_group(&d, profile);
+    let giver = after.current_player;
+    let (giver_d, giver_replay) = PerspectiveProjector::new(after, profile)
+        .project(giver, PerspectiveDepth::NestedRecipients)?;
+    let giver_notes = infer_h_group_from_replay(&giver_d, giver_replay, profile);
+    if !giver_notes.playable_now.is_empty()
+        || giver_notes.connection.is_some()
+        || !giver_notes.discard_now.is_empty()
+        || giver_notes.must_clue.contains(&giver)
+    {
+        return None;
+    }
+    for card in &after.hands[source.observer.index()] {
+        if card.identity.is_some()
+            || !source.hands[source.observer.index()]
+                .iter()
+                .any(|old| old.id == card.id)
+            || !d
+                .possible_identities(card.id)
+                .is_some_and(|domain| domain.contains(successor))
+            || !notes
+                .cards
+                .iter()
+                .any(|note| note.card == card.id && note.identities.contains(successor))
+        {
+            continue;
+        }
+        let mut branch = after.clone();
+        branch.hands[source.observer.index()]
+            .iter_mut()
+            .find(|slot| slot.id == card.id)?
+            .identity = Some(successor);
+        let Some((branch_d, replay)) = PerspectiveProjector::new(&branch, profile)
+            .project(giver, PerspectiveDepth::NestedRecipients)
+        else {
+            continue;
+        };
+        let branch_notes = infer_h_group_from_replay(&branch_d, replay.clone(), profile);
+        if branch_notes.connection.is_some()
+            || !branch_notes.playable_now.is_empty()
+            || !branch_notes.discard_now.is_empty()
+            || branch_notes.must_clue.contains(&giver)
+        {
+            continue;
+        }
+        let candidates = super::h_group_clue_candidates_from_replay(&branch_d, profile, &replay);
+        if candidates.iter().any(|candidate| {
+            candidate.is_urgent_save() || candidate.purpose() == super::CluePurpose::Fix
+        }) {
+            continue;
+        }
+        if candidates.iter().any(|candidate| {
+            candidate.target() == source.observer
+                && candidate.purpose() == super::CluePurpose::Play
+                && candidate.immediate_play()
+                && matches!(candidate.action, Action::Clue { clue, .. } if clue.matches(successor))
+        }) {
+            return Some(successor);
+        }
+    }
+    None
 }
 
 fn add_root_opportunities(
@@ -274,6 +373,101 @@ fn consecutive_save_pressure(tokens: u8) -> u8 {
 mod tests {
     use super::*;
     use hanabi_core::Clue;
+
+    #[test]
+    fn reviewed_blue_two_opportunity_beats_a_surplus_five_token() {
+        // User-reviewed p4v0s3 turn 36: Cathy can clue b3 if Donald has it;
+        // otherwise she discards. His actual b3 is never supplied to planning.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s3.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(35).unwrap();
+        let view = state.view_for(state.current_player()).unwrap();
+        assert!(view.hands[3].iter().all(|card| card.identity.is_none()));
+        let result = crate::analyze_position(
+            &view,
+            crate::SupportedConvention::HGroup(HGroupProfile::Max),
+            crate::PlannerConfig::default(),
+        )
+        .unwrap();
+        let blue = Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Blue),
+        };
+        let purple = Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Purple),
+        };
+        assert_eq!(result.planner.best_action, blue);
+        let value = |action| {
+            result
+                .planner
+                .root_actions
+                .iter()
+                .find(|c| c.action == action)
+                .unwrap()
+                .symbolic_line
+                .position_value
+                .unwrap()
+        };
+        assert!(value(blue).conditional_successors > value(purple).conditional_successors);
+        assert!(value(blue).clues < value(purple).clues);
+        assert_eq!(value(blue).score, value(purple).score);
+
+        let b2 = Card::new(Suit::Blue, Rank::Two);
+        // Build the reviewed prefix with blank draws, exactly as Donald
+        // projects it. Later actual draws can change Cathy's available turn.
+        let after = super::super::ProspectiveTransition::clue(
+            &view,
+            PlayerId::new(1),
+            Clue::Suit(Suit::Blue),
+            &[hanabi_core::CardId::new(30)],
+        );
+        let after = super::super::ProspectiveTransition::play(
+            &after,
+            PlayerId::new(0),
+            hanabi_core::CardId::new(1),
+            Card::new(Suit::Red, Rank::Three),
+            true,
+        );
+        let mut after = super::super::ProspectiveTransition::play(
+            &after,
+            PlayerId::new(1),
+            hanabi_core::CardId::new(30),
+            b2,
+            true,
+        );
+        assert_eq!(
+            conditional_successor(&view, &after, HGroupProfile::Max, b2),
+            Some(Card::new(Suit::Blue, Rank::Three))
+        );
+        let original = after.clone();
+        for card in &mut after.hands[3] {
+            card.clues.add_negative_clue(Clue::Rank(Rank::Three));
+        }
+        assert_eq!(
+            conditional_successor(&view, &after, HGroupProfile::Max, b2),
+            None,
+            "the opportunity requires an owner-compatible hidden identity"
+        );
+        after = original;
+        after.clue_tokens = 0;
+        assert_eq!(
+            conditional_successor(&view, &after, HGroupProfile::Max, b2),
+            None,
+            "a teammate cannot give the conditional clue without a token"
+        );
+        assert_eq!(
+            conditional_successor(
+                &view,
+                &after,
+                HGroupProfile::Max,
+                Card::new(Suit::Purple, Rank::Five)
+            ),
+            None
+        );
+    }
 
     #[test]
     fn reviewed_turn_eight_compares_productivity_and_waiting_options() {

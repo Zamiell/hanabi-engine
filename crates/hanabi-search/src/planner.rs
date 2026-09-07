@@ -206,6 +206,10 @@ pub struct ProjectedPositionValue {
     pub protected_bottom_deck_risks: u8,
     pub visible_successors: u8,
     pub finesse_opportunities: u8,
+    /// Feasible, clueable hidden successors; not secured plays or probabilities.
+    pub conditional_successors: u8,
+    /// Bounded near-term reserve: a productive clue plus known save/repair needs.
+    pub clue_demand: u8,
     pub save_pressure: u8,
     pub foregone_touch_opportunities: u8,
 }
@@ -213,7 +217,28 @@ pub struct ProjectedPositionValue {
 impl ProjectedPositionValue {
     fn without_speculative_finesse(mut self) -> Self {
         self.finesse_opportunities = 0;
+        self.conditional_successors = 0;
+        self.clue_demand = 0;
         self
+    }
+
+    /// Unknown successors can break a genuine progress tie, but cannot buy
+    /// away a token needed for a save, repair, or the follow-up clue itself.
+    fn conditional_continuation_preference(self, other: Self) -> Option<bool> {
+        let demand = self.clue_demand.max(other.clue_demand);
+        if self.clues < demand
+            || other.clues < demand
+            || self.conditional_successors == other.conditional_successors
+        {
+            return None;
+        }
+        let mut left = self.without_speculative_finesse();
+        let mut right = other.without_speculative_finesse();
+        left.clues = 0;
+        right.clues = 0;
+        left.clue_demand = 0;
+        right.clue_demand = 0;
+        (left == right).then_some(self.conditional_successors > other.conditional_successors)
     }
 
     fn dominates(self, other: Self) -> bool {
@@ -701,6 +726,9 @@ fn endpoint_prefers(other: &PlannerActionEvaluation, candidate: &PlannerActionEv
             .position_value
             .zip(candidate.symbolic_line.position_value)
             .is_some_and(|(left, right)| {
+                if let Some(preferred) = left.conditional_continuation_preference(right) {
+                    return preferred;
+                }
                 left.dominates(right)
                     || (other.convention_priority == candidate.convention_priority
                         && left.without_speculative_finesse()
@@ -1147,6 +1175,42 @@ impl std::error::Error for PlannerError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn conditional_opportunities_cannot_spend_needed_tokens_or_known_progress() {
+        let opportunity = ProjectedPositionValue {
+            clues: 2,
+            clue_demand: 1,
+            conditional_successors: 1,
+            ..ProjectedPositionValue::default()
+        };
+        let mut refund = ProjectedPositionValue {
+            clues: 3,
+            clue_demand: 1,
+            ..ProjectedPositionValue::default()
+        };
+        assert_eq!(
+            opportunity.conditional_continuation_preference(refund),
+            Some(true)
+        );
+        assert_eq!(
+            refund.conditional_continuation_preference(opportunity),
+            Some(false)
+        );
+        refund.clue_demand = 3;
+        assert_eq!(
+            opportunity.conditional_continuation_preference(refund),
+            None
+        );
+        assert!(refund.dominates(opportunity));
+        refund.clue_demand = 1;
+        refund.score = 1;
+        assert_eq!(
+            opportunity.conditional_continuation_preference(refund),
+            None
+        );
+        assert!(refund.dominates(opportunity));
+    }
     use crate::SupportedConvention;
     use hanabi_core::{PlayerId, standard_deck};
 

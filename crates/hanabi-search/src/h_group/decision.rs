@@ -1557,9 +1557,7 @@ fn endgame_progress_priority(
         return None;
     }
     let plan = endgame_completion_plan(deductions, profile, analysis)?;
-    if plan.unresolved_fives.is_empty()
-        || usize::from(view.clue_tokens) < plan.unresolved_fives.len()
-    {
+    if plan.unresolved_fives.is_empty() || view.clue_tokens == 0 {
         return None;
     }
     let Action::Clue { target, clue } = candidate.action else {
@@ -1573,6 +1571,25 @@ fn endgame_progress_priority(
                 && card.identity.is_some_and(|identity| clue.matches(identity))
         });
     if !advances_plan {
+        return None;
+    }
+    // Fund the sequence, not every remaining clue up front. One clue can
+    // secure multiple 5s, and each completed 5 refunds a token before the
+    // remaining one-for-one clues are needed. Never count an unseen 5.
+    let secured_fives = if is_multi_action_ignition {
+        plan.unresolved_fives.len()
+    } else {
+        view.hands[target.index()]
+            .iter()
+            .filter(|card| {
+                plan.unresolved_fives.contains(&card.id)
+                    && card.identity.is_some_and(|identity| clue.matches(identity))
+            })
+            .count()
+    };
+    let remaining_clues = plan.unresolved_fives.len().saturating_sub(secured_fives);
+    let funded_clues = usize::from(view.clue_tokens - 1) + secured_fives;
+    if funded_clues < remaining_clues {
         return None;
     }
     let best_clue_coverage = analysis_clue_candidates(deductions, profile, analysis)

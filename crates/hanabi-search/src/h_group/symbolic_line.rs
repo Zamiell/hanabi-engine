@@ -29,6 +29,7 @@ fn project_h_group_plan(
     let mut plan = ConditionalPlan::default();
     let mut public = source.clone();
     let mut action = Some(root);
+    let mut conditional_successors = crate::IdentitySet::default();
 
     while let Some(current) = action {
         if public.status != hanabi_core::GameStatus::InProgress {
@@ -63,6 +64,18 @@ fn project_h_group_plan(
             plan.stop_at(PlanFrontier::IdentityBranch);
             break;
         };
+        if consequences.score_gain > 0 {
+            if let Action::Play(card) = current {
+                if let Some(played) = identity_of(&public, card) {
+                    if let Some(successor) = super::frontier_value::conditional_successor(
+                        source, &after, profile, played,
+                    ) {
+                        conditional_successors =
+                            conditional_successors.union(crate::IdentitySet::singleton(successor));
+                    }
+                }
+            }
+        }
         plan.push(
             ProjectedAction {
                 actor,
@@ -84,9 +97,12 @@ fn project_h_group_plan(
         };
         action = select_h_group_action(&next_deductions, profile);
     }
-    plan.assess(super::frontier_value::evaluate(
-        source, &public, profile, root,
-    ));
+    let mut value = super::frontier_value::evaluate(source, &public, profile, root);
+    if let Some(value) = &mut value {
+        value.conditional_successors =
+            u8::try_from(conditional_successors.len()).unwrap_or(u8::MAX);
+    }
+    plan.assess(value);
     plan
 }
 
