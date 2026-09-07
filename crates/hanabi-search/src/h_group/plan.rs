@@ -38,6 +38,7 @@ pub(super) enum PlanFrontier {
     #[default]
     Choice,
     IdentityBranch,
+    InterpretationBranch,
     Limit,
     ProjectionUnavailable,
 }
@@ -81,6 +82,7 @@ impl ConditionalPlan {
                 PlanFrontier::Terminal => SymbolicStopReason::Terminal,
                 PlanFrontier::Choice => SymbolicStopReason::Choice,
                 PlanFrontier::IdentityBranch => SymbolicStopReason::UnknownIdentity,
+                PlanFrontier::InterpretationBranch => SymbolicStopReason::UnknownInterpretation,
                 PlanFrontier::Limit => SymbolicStopReason::Limit,
                 PlanFrontier::ProjectionUnavailable => SymbolicStopReason::ProjectionUnavailable,
             },

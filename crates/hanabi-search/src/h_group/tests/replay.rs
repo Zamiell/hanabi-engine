@@ -1,5 +1,48 @@
 use super::*;
 
+/// Reviewed fixture opening, alternative clue: a blank in Alice's hand is
+/// not evidence that Bob lacks a visible external b3 connector. This tests
+/// projection uncertainty, not the optimality of an invented continuation.
+#[test]
+fn fifth_opening_charm_projection_preserves_hidden_connector_uncertainty() {
+    let state = expert_replay_p4v0s1().state_at_turn(0).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let d = LogicalDeductions::new(view.clone()).unwrap();
+    let action = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Rank(Rank::Four),
+    };
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    assert_eq!(
+        candidates
+            .iter()
+            .find(|c| c.action == action)
+            .unwrap()
+            .move_kind(),
+        Some(HGroupMoveKind::Charm)
+    );
+    let outcome =
+        super::super::symbolic_line::project_h_group_line(&view, HGroupProfile::Max, action, 32);
+    assert_eq!(
+        outcome.actions, 1,
+        "do not credit the conditional blind play"
+    );
+    assert_eq!(outcome.score_gain, 0);
+    assert_eq!(
+        outcome.stop_reason,
+        crate::SymbolicStopReason::UnknownInterpretation
+    );
+    let mut after = state.clone();
+    after.apply(action).unwrap();
+    let bob = LogicalDeductions::new(after.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    assert!(
+        !infer_h_group(&bob, HGroupProfile::Max)
+            .signals
+            .iter()
+            .any(|s| s.kind == HGroupMoveKind::Charm)
+    );
+}
+
 #[test]
 fn reviewed_yellow_play_is_not_a_redundant_invisible_alternative() {
     let state = expert_replay_p4v0s2().state_at_turn(7).unwrap();

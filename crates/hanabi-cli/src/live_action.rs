@@ -289,6 +289,10 @@ fn planner_details_json(
                     evaluation.symbolic_line.stop_reason,
                     hanabi_search::SymbolicStopReason::UnknownIdentity
                 ),
+                "interpretationBranch": matches!(
+                    evaluation.symbolic_line.stop_reason,
+                    hanabi_search::SymbolicStopReason::UnknownInterpretation
+                ),
                 "reachedLimit": matches!(
                     evaluation.symbolic_line.stop_reason,
                     hanabi_search::SymbolicStopReason::Limit

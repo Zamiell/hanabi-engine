@@ -47,6 +47,10 @@ fn project_h_group_plan(
             break;
         };
         let actor_inferences = infer_h_group_from_replay(&actor_deductions, actor_replay, profile);
+        if charm_depends_on_hidden_connector(&public, &actor_inferences, current) {
+            plan.stop_at(PlanFrontier::InterpretationBranch);
+            break;
+        }
         let Some((after, consequences)) = apply_symbolic_action(
             &public,
             &actor_deductions,
@@ -82,6 +86,78 @@ fn project_h_group_plan(
         source, &public, profile, root,
     ));
     plan
+}
+
+/// A blank in the giver's hand is visible to the reactor. It cannot prove
+/// that three blind plays are required in the reactor's hand.
+/// Source: <https://hanabi.github.io/level-23/#the-4-charm>
+fn charm_depends_on_hidden_connector(
+    source: &PlayerView,
+    inferred: &super::HGroupInferences,
+    action: Action,
+) -> bool {
+    let Action::Play(card) = action else {
+        return false;
+    };
+    let Some(signal) = inferred.signals.iter().rev().find(|signal| {
+        signal.turn + 1 == source.turn
+            && signal.kind == super::HGroupMoveKind::Charm
+            && signal.target == Some(source.current_player)
+            && signal.cards.contains(&card)
+    }) else {
+        return false;
+    };
+    let Some(clue) = inferred.clues.iter().find(|clue| clue.turn == signal.turn) else {
+        return false;
+    };
+    let Some(focus) = identity_of(source, clue.focus) else {
+        return true;
+    };
+    let Ok(deductions) = LogicalDeductions::new(source.clone()) else {
+        return true;
+    };
+    let explicitly_clued = source
+        .hands
+        .iter()
+        .flatten()
+        .filter(|card| super::was_clued_before(source, signal.turn, card.id))
+        .map(|card| card.id)
+        .collect();
+    for (owner, hand) in source.hands.iter().enumerate() {
+        if owner == source.current_player.index() {
+            continue;
+        }
+        for (slot, card) in hand
+            .iter()
+            .enumerate()
+            .filter(|(_, card)| card.identity.is_none())
+        {
+            let Some(domain) = deductions.possible_identities(card.id) else {
+                return true;
+            };
+            for identity in domain
+                .iter()
+                .filter(|identity| identity.suit == focus.suit && identity.rank < focus.rank)
+            {
+                // A possibility probe, not a determinized rollout: no points
+                // or future actions from this assignment are credited.
+                let mut possible = source.clone();
+                possible.hands[owner][slot].identity = Some(identity);
+                if super::recognition::four_charm_blind_plays(
+                    &possible,
+                    source.current_player,
+                    focus,
+                    clue.stack_heights,
+                    &explicitly_clued,
+                    signal.turn,
+                ) < 3
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 fn apply_symbolic_action(
@@ -188,6 +264,47 @@ mod tests {
     use hanabi_core::{FullState, PlayerId, standard_deck};
 
     use super::*;
+
+    #[test]
+    fn excluded_connector_identities_do_not_create_a_charm_branch() {
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(0).unwrap();
+        let view = state.view_for(state.current_player()).unwrap();
+        let target = PlayerId::new(2);
+        let clue = Clue::Rank(hanabi_core::Rank::Four);
+        let mut public = ProspectiveTransition::clue_by(
+            &view,
+            view.current_player,
+            target,
+            clue,
+            &touched_cards(&view, target, clue).unwrap(),
+        );
+        let (d, r) = PerspectiveProjector::new(&public, HGroupProfile::Max)
+            .project(public.current_player, PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        let inferred = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+        let action = Action::Play(CardId::new(4));
+        assert!(charm_depends_on_hidden_connector(
+            &public, &inferred, action
+        ));
+        // Algorithmic domain boundary, not a proposed game continuation:
+        // ruling out blue on every blank rules out the external blue connector.
+        for card in public
+            .hands
+            .iter_mut()
+            .flatten()
+            .filter(|card| card.identity.is_none())
+        {
+            card.clues
+                .add_negative_clue(Clue::Suit(hanabi_core::Suit::Blue));
+        }
+        assert!(!charm_depends_on_hidden_connector(
+            &public, &inferred, action
+        ));
+    }
 
     #[test]
     fn reviewed_save_continues_through_the_next_policy_choice() {

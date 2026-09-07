@@ -60,6 +60,13 @@ stop at unresolved action identities or clue touches, unavailable perspectives,
 game completion, or a 32-action safety bound. These are conditional forecasts,
 not proofs that a line wins in every hidden world.
 
+A 4 Charm forecast also stops at `UnknownInterpretation` if a blank card visible
+to the reactor could supply an external connector and reduce the required blind
+plays below three. Blanks are not proof that such connectors are absent. This
+preserves the candidate without crediting its conditional blind play as certain;
+diagnostics expose `interpretationBranch` separately from an unresolved
+played-card identity.
+
 For lines with the same action horizon and stopping reason, the planner first
 removes resource-dominated choices within the same policy tier. Frontier
 assessment includes score, clue tokens, secured future plays, protection of

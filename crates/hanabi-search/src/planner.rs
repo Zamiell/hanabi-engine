@@ -237,6 +237,8 @@ pub enum SymbolicStopReason {
     Choice,
     /// The next action depended on an unresolved card identity.
     UnknownIdentity,
+    /// Hidden information can change the next player's convention interpretation.
+    UnknownInterpretation,
     /// The configured symbolic-action bound was reached.
     Limit,
     /// A nested player perspective could not be reconstructed.
