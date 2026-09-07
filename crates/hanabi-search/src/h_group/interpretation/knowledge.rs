@@ -816,6 +816,26 @@ fn compile_convention_card_inferences(
                             clue.turn,
                             clue.focus,
                         );
+                    // An unproven external Finesse is a live alternative,
+                    // not an inefficient route through the clue's collateral.
+                    // https://hanabi.github.io/level-2/#reverse-finesses
+                    let external_finesse_remains_live = clue.hypotheses.iter().any(|hypothesis| {
+                        hypothesis.connection_steps.iter().any(|step| {
+                            (step.actor.index() + view.hands.len() - clue.giver.index())
+                                % view.hands.len()
+                                > (clue.target.index() + view.hands.len() - clue.giver.index())
+                                    % view.hands.len()
+                                && step.kind == super::super::HGroupConnectionKind::Finesse
+                                && usize::from(step.expected.rank.number())
+                                    > view.play_stacks[step.expected.suit.index()].len()
+                                && step.cards.iter().any(|card| {
+                                    !clue.touched.contains(card)
+                                        && view.hands[step.actor.index()]
+                                            .iter()
+                                            .any(|held| held.id == *card)
+                                })
+                        })
+                    });
                     let delayed_plan_was_demonstrated =
                         clue.play_identities.iter().any(|identity| {
                             if view.play_stacks[identity.suit.index()].len()
@@ -924,6 +944,7 @@ fn compile_convention_card_inferences(
                         } else if !queued_interpretation_is_live
                             && !has_existing_prompt_for_delayed_identity
                             && !loaded_color_clue_remains_ambiguous
+                            && !external_finesse_remains_live
                         {
                             // A direct Play promise is fixed at clue time. A
                             // lower card demonstrated later cannot migrate an
@@ -1006,7 +1027,7 @@ fn compile_convention_card_inferences(
                                 })
                                 .fold(0, |mask, identity| mask | (1 << identity.index())),
                         );
-                        if !direct.is_empty() {
+                        if !direct.is_empty() && !external_finesse_remains_live {
                             narrowed = direct;
                         }
                     }

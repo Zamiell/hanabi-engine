@@ -2684,6 +2684,43 @@ fn third_replay_move_two_scores_rank_three_as_a_bluff_not_a_delayed_play() {
 }
 
 #[test]
+fn third_replay_yellow_to_bob_must_not_expose_critical_chop() {
+    // User-reviewed p4v0s2 turn 25: y2 through Donald's y1 is still
+    // possible, so Alice cannot rely on Bob playing the focused y1.
+    let state = expert_replay_p4v0s2().state_at_turn(24).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let after = prospective_clue_view(
+        &view,
+        PlayerId::new(1),
+        Clue::Suit(Suit::Yellow),
+        &[CardId::new(5), CardId::new(28)],
+    );
+    let (d, r) = projected_h_group_replay(&after, HGroupProfile::Max, PlayerId::new(1)).unwrap();
+    let inferred = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+    assert_eq!(
+        inferred
+            .cards
+            .iter()
+            .find(|card| card.card == CardId::new(5))
+            .unwrap()
+            .identities,
+        IdentitySet::singleton(Card::new(Suit::Yellow, Rank::One))
+            .union(IdentitySet::singleton(Card::new(Suit::Yellow, Rank::Two)))
+    );
+    assert!(!inferred.playable_now.contains(&CardId::new(5)));
+    let deductions = LogicalDeductions::new(view).unwrap();
+    assert!(
+        !h_group_clue_candidates(&deductions, HGroupProfile::Max)
+            .iter()
+            .any(|c| c.action
+                == Action::Clue {
+                    target: PlayerId::new(1),
+                    clue: Clue::Suit(Suit::Yellow)
+                })
+    );
+}
+
+#[test]
 fn third_replay_turn_six_blue_is_a_five_color_ejection() {
     // User-reviewed p4v0s2 turn 6: Cathy ejects p2 #9 and Donald saves b5 #12.
     // https://hanabi.github.io/level-16/#the-5-color-ejection-5ce
