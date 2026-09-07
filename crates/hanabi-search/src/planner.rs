@@ -649,53 +649,107 @@ fn best_symbolic_index(
     evaluations: &[PlannerActionEvaluation],
     preferred: Option<Action>,
 ) -> Option<usize> {
-    evaluations
-        .iter()
-        .enumerate()
-        .filter(|(_, candidate)| {
-            !evaluations.iter().any(|other| {
-                other.policy_tier == candidate.policy_tier
-                    && other.symbolic_line.strikes <= candidate.symbolic_line.strikes
-                    && other.symbolic_line.actions == candidate.symbolic_line.actions
-                    && other.symbolic_line.stop_reason == candidate.symbolic_line.stop_reason
-                    && other
-                        .symbolic_line
-                        .position_value
-                        .zip(candidate.symbolic_line.position_value)
-                        .is_some_and(|(left, right)| {
-                            left.dominates(right)
-                                || (other.convention_priority == candidate.convention_priority
-                                    && left.without_speculative_finesse()
-                                        == right.without_speculative_finesse()
-                                    && left.finesse_opportunities > right.finesse_opportunities)
-                        })
+    // Comparable endpoints and heuristic fallback can create cycles. Do not
+    // destructively prune one edge of a cycle, then pick its weakest survivor.
+    // Build the complete preference graph and retain its top strongly connected
+    // component (the candidates which can reach every other candidate).
+    let count = evaluations.len();
+    let mut reaches = vec![vec![false; count]; count];
+    for left in 0..count {
+        reaches[left][left] = true;
+        for right in left + 1..count {
+            let a = &evaluations[left];
+            let b = &evaluations[right];
+            let left_wins = if endpoint_prefers(a, b) {
+                true
+            } else if endpoint_prefers(b, a) {
+                false
+            } else {
+                symbolic_fallback_order(a, b, preferred, left, right).is_gt()
+            };
+            reaches[left][right] = left_wins;
+            reaches[right][left] = !left_wins;
+        }
+    }
+    for via in 0..count {
+        for from in 0..count {
+            for to in 0..count {
+                reaches[from][to] |= reaches[from][via] && reaches[via][to];
+            }
+        }
+    }
+    (0..count)
+        .filter(|index| reaches[*index].iter().all(|reachable| *reachable))
+        .max_by(|left, right| {
+            symbolic_fallback_order(
+                &evaluations[*left],
+                &evaluations[*right],
+                preferred,
+                *left,
+                *right,
+            )
+        })
+}
+
+fn endpoint_prefers(other: &PlannerActionEvaluation, candidate: &PlannerActionEvaluation) -> bool {
+    other.policy_tier == candidate.policy_tier
+        && other.symbolic_line.strikes <= candidate.symbolic_line.strikes
+        && other.symbolic_line.actions == candidate.symbolic_line.actions
+        && other.symbolic_line.stop_reason == candidate.symbolic_line.stop_reason
+        && other
+            .symbolic_line
+            .position_value
+            .zip(candidate.symbolic_line.position_value)
+            .is_some_and(|(left, right)| {
+                left.dominates(right)
+                    || (other.convention_priority == candidate.convention_priority
+                        && left.without_speculative_finesse()
+                            == right.without_speculative_finesse()
+                        && left.finesse_opportunities > right.finesse_opportunities)
             })
-        })
-        .max_by(|(left_index, left), (right_index, right)| {
-            left.policy_tier
-                .cmp(&right.policy_tier)
-                // A known misplay is evidence against a line even when its
-                // root clue has a larger heuristic score. Partial progress
-                // across unequal unknown-card frontiers is not comparable.
-                .then_with(|| right.symbolic_line.strikes.cmp(&left.symbolic_line.strikes))
-                .then_with(|| left.convention_priority.cmp(&right.convention_priority))
-                .then_with(|| {
-                    (preferred == Some(left.action)).cmp(&(preferred == Some(right.action)))
+}
+
+fn symbolic_fallback_order(
+    left: &PlannerActionEvaluation,
+    right: &PlannerActionEvaluation,
+    preferred: Option<Action>,
+    left_index: usize,
+    right_index: usize,
+) -> std::cmp::Ordering {
+    left.policy_tier
+        .cmp(&right.policy_tier)
+        // A known misplay is evidence against a line even when its
+        // root clue has a larger heuristic score. Partial progress
+        // across unequal unknown-card frontiers is not comparable.
+        .then_with(|| right.symbolic_line.strikes.cmp(&left.symbolic_line.strikes))
+        // These are root-action costs, not endpoint progress. Apply them in
+        // the fallback too: an Early Save's known waiting opportunity must
+        // not disappear merely because endpoint comparisons form a cycle.
+        .then_with(|| {
+            left.symbolic_line
+                .position_value
+                .zip(right.symbolic_line.position_value)
+                .map_or(std::cmp::Ordering::Equal, |(a, b)| {
+                    b.save_pressure.cmp(&a.save_pressure).then_with(|| {
+                        b.foregone_touch_opportunities
+                            .cmp(&a.foregone_touch_opportunities)
+                    })
                 })
-                .then_with(|| left.symbolic_line.compare(right.symbolic_line))
-                .then_with(|| left.certainly_playable.cmp(&right.certainly_playable))
-                .then_with(|| left.certainly_useless.cmp(&right.certainly_useless))
-                .then_with(|| left.critical_touched.cmp(&right.critical_touched))
-                .then_with(|| left.oldest_card_touched.cmp(&right.oldest_card_touched))
-                .then_with(|| {
-                    left.immediately_playable_touched
-                        .cmp(&right.immediately_playable_touched)
-                })
-                .then_with(|| left.newly_touched.cmp(&right.newly_touched))
-                // Stable candidate order wins exact ties.
-                .then_with(|| right_index.cmp(left_index))
         })
-        .map(|(index, _)| index)
+        .then_with(|| left.convention_priority.cmp(&right.convention_priority))
+        .then_with(|| (preferred == Some(left.action)).cmp(&(preferred == Some(right.action))))
+        .then_with(|| left.symbolic_line.compare(right.symbolic_line))
+        .then_with(|| left.certainly_playable.cmp(&right.certainly_playable))
+        .then_with(|| left.certainly_useless.cmp(&right.certainly_useless))
+        .then_with(|| left.critical_touched.cmp(&right.critical_touched))
+        .then_with(|| left.oldest_card_touched.cmp(&right.oldest_card_touched))
+        .then_with(|| {
+            left.immediately_playable_touched
+                .cmp(&right.immediately_playable_touched)
+        })
+        .then_with(|| left.newly_touched.cmp(&right.newly_touched))
+        // Stable candidate order wins exact ties.
+        .then_with(|| right_index.cmp(&left_index))
 }
 
 fn best_exact_index(
@@ -1095,6 +1149,58 @@ mod tests {
     use super::*;
     use crate::SupportedConvention;
     use hanabi_core::{PlayerId, standard_deck};
+
+    #[test]
+    fn partial_endpoint_pruning_preserves_the_reviewed_yellow_clue() {
+        // Reviewed p4v0s415 turn 26: y4 gives Cathy a y5 continuation.
+        // A partial b5 endpoint's extra token must not eliminate y4 and
+        // thereby hand the decision to an unprojected discard.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(25).unwrap();
+        let information =
+            InformationSet::new(&state.view_for(state.current_player()).unwrap()).unwrap();
+        let result = plan_move(
+            &information,
+            SupportedConvention::HGroup(crate::HGroupProfile::Max),
+            PlannerConfig::default(),
+        )
+        .unwrap();
+        let yellow = Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Yellow),
+        };
+        let blue = Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue),
+        };
+        assert_eq!(result.best_action, yellow);
+        // A genuinely acyclic pair retains endpoint preference. The fix is
+        // cycle handling, not globally disabling endpoint comparison.
+        let pair = result
+            .root_actions
+            .iter()
+            .filter(|candidate| candidate.action == yellow || candidate.action == blue)
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(pair[best_symbolic_index(&pair, None).unwrap()].action, blue);
+        // Algorithmic invariants: this cycle resolves to the reviewed winner,
+        // independently of enumeration order or removal of its blue member.
+        let mut candidates = result.root_actions.clone();
+        candidates.retain(|candidate| candidate.action != blue);
+        assert_eq!(
+            candidates[best_symbolic_index(&candidates, None).unwrap()].action,
+            yellow
+        );
+        candidates = result.root_actions;
+        candidates.reverse();
+        assert_eq!(
+            candidates[best_symbolic_index(&candidates, None).unwrap()].action,
+            yellow
+        );
+    }
 
     #[test]
     fn reviewed_two_for_one_beats_a_speculative_finesse_tiebreaker() {

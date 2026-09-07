@@ -82,14 +82,24 @@ updated from the demonstrated connection; the connector's physical slot remains
 subject to normal layered-play resolution. Ambiguous attributions and
 already-explained blind plays do not trigger this recovery.
 
-For lines with the same action horizon and stopping reason, the planner first
-removes resource-dominated choices within the same policy tier. Frontier
-assessment includes score, clue tokens, secured future plays, protection of
-single-visible-copy identities against bottom-deck risk, exposed critical chops,
-and blocked clued cards. A played card counts toward both current score and
-total secured progress, so playing a promise does not lose its value. Clued
-ambiguity is not automatically a hand blockage: visible predecessor coverage can
-make every remaining identity feasible to play soon.
+For lines with the same action horizon and stopping reason, the planner compares
+resource dominance within the same policy tier. Otherwise it uses the stable
+heuristic ranking, with predicted strikes and the existing root-action costs
+(consecutive-Save pressure and foregone useful-touch opportunities) taking
+precedence. These costs apply in both endpoint and fallback comparisons rather
+than vanishing at an incomparable forecast horizon. These comparisons can
+conflict: A can beat B on endpoint resources, B can beat C on heuristics, and C
+can beat A. The selector builds a preference graph, retains its top strongly
+connected component, and resolves a cycle using the stable ranking. It never
+irreversibly eliminates one member of a cycle before considering the other
+comparisons. Unambiguous endpoint improvements still win; endpoint summaries are
+not claimed to prove strategic dominance. Frontier assessment includes score,
+clue tokens, secured future plays, protection of single-visible-copy identities
+against bottom-deck risk, exposed critical chops, and blocked clued cards. A
+played card counts toward both current score and total secured progress, so
+playing a promise does not lose its value. Clued ambiguity is not automatically
+a hand blockage: visible predecessor coverage can make every remaining identity
+feasible to play soon.
 
 The assessment also records conditional options: visible successors, a successor
 on another player's finesse position if that player clues instead of drawing,
