@@ -59,6 +59,7 @@ pub(super) struct ClueValue {
     delay_penalty: u16,
     complexity_penalty: u16,
     opportunity_penalty: u16,
+    owner_knowledge_penalty: u16,
 }
 
 impl ClueValue {
@@ -71,6 +72,7 @@ impl ClueValue {
             delay_penalty: 0,
             complexity_penalty: 0,
             opportunity_penalty: 0,
+            owner_knowledge_penalty: 0,
         }
     }
 
@@ -82,6 +84,7 @@ impl ClueValue {
             .saturating_sub(self.delay_penalty)
             .saturating_sub(self.complexity_penalty)
             .saturating_sub(self.opportunity_penalty)
+            .saturating_sub(self.owner_knowledge_penalty)
     }
 
     pub(super) fn semantic_strength(self) -> u16 {
@@ -116,6 +119,12 @@ impl ClueValue {
 
     pub(super) fn penalize_opportunity(&mut self, value: u16) {
         self.opportunity_penalty = self.opportunity_penalty.saturating_add(value);
+    }
+
+    pub(super) fn rank_below_owner_refinement(&mut self, better_score: u16) {
+        self.owner_knowledge_penalty = self
+            .owner_knowledge_penalty
+            .saturating_add(self.total().saturating_sub(better_score.saturating_sub(1)));
     }
 }
 

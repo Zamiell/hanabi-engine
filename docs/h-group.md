@@ -77,7 +77,12 @@ sequence.
    preserved by taking the blind play first. Critical touches are excluded;
    unknown draws are not assigned identities. This is not proof that every
    future clue remains legal, and it is not a blanket bonus for advanced moves.
-   Bottom-deck-risk protection is valued separately from this timing cost.
+   Bottom-deck-risk protection is valued separately from this timing cost. Its
+   comparison is uniform across clue labels; urgent Saves and Fixes remain
+   policy constraints, not exemptions from risk scoring. When two clues protect
+   the same cards and establish the same public line, the one that gives owners
+   additional playable commitments without broadening any clued identity domain
+   or adding connections ranks above the less informative alternative.
 7. From Level 8, compare conditional completion schedules for drawing an unseen
    connector now versus letting the next player draw it. Seating order, existing
    first-turn obligations, clue turns, and visible alternative copies of

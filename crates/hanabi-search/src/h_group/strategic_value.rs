@@ -185,24 +185,16 @@ pub(super) fn apply_strategic_clue_values(
                 .value
                 .penalize_opportunity(POSITIONAL_OPPORTUNITY_LOSS_PENALTY);
         }
-        // Save and Fix semantics are protection obligations, not optional
-        // strategic protection choices. Risk valuation must not let an
-        // unrelated clue outrank the clue that satisfies such an obligation.
-        // An advanced clue with urgent Save semantics fulfills that same
-        // obligation; its move label must not change this comparison.
-        if !matches!(candidate.purpose(), CluePurpose::Fix | CluePurpose::Save)
-            && candidate.move_kind() != Some(HGroupMoveKind::FixClue)
-            && !candidate.is_urgent_save()
-        {
-            candidate.value.penalize_teamwork(
-                BOTTOM_DECK_RISK_DEFICIT_PENALTY.saturating_mul(
-                    u16::try_from(
-                        best_bottom_deck_risk_value.saturating_sub(bottom_deck_risk_values[index]),
-                    )
-                    .unwrap_or(u16::MAX),
-                ),
-            );
-        }
+        // Compare protection consequences uniformly. Hard protection and Fix
+        // obligations are enforced by policy, not a move-label exemption.
+        candidate.value.penalize_teamwork(
+            BOTTOM_DECK_RISK_DEFICIT_PENALTY.saturating_mul(
+                u16::try_from(
+                    best_bottom_deck_risk_value.saturating_sub(bottom_deck_risk_values[index]),
+                )
+                .unwrap_or(u16::MAX),
+            ),
+        );
         let candidate_action_count = value
             .convention_action_count
             .unwrap_or(value.action_coverage)
@@ -368,6 +360,38 @@ pub(super) fn apply_strategic_clue_values(
             UNNECESSARY_CONNECTION_COMPLEXITY_PENALTY
                 .saturating_mul(u16::try_from(unnecessary_connections).unwrap_or(u16::MAX)),
         );
+    }
+    // Semantic refinement overrides legacy base-category preferences only
+    // when all protected cards and public actions are unchanged. Process the
+    // strongest knowledge first so chains of refinements remain ordered.
+    let mut order = (0..candidates.len()).collect::<Vec<_>>();
+    order.sort_by_key(|index| {
+        core::cmp::Reverse(
+            values[*index]
+                .as_ref()
+                .map_or(0, |value| value.owner_actions.len()),
+        )
+    });
+    for index in order {
+        let Some(value) = &values[index] else {
+            continue;
+        };
+        let ceiling = values
+            .iter()
+            .enumerate()
+            .filter(|(other_index, other)| {
+                candidates[*other_index].target() == candidates[index].target()
+                    && other
+                        .as_ref()
+                        .is_some_and(|other| other.strictly_improves_owner_knowledge(value))
+            })
+            .map(|(other_index, _)| candidates[other_index].score())
+            .min();
+        if let Some(better_score) = ceiling {
+            candidates[index]
+                .value
+                .rank_below_owner_refinement(better_score);
+        }
     }
 }
 
@@ -1543,6 +1567,90 @@ mod tests {
     use super::*;
     use hanabi_core::{Clue, Suit};
     use hanabi_protocol::HanabiLiveReplay;
+
+    #[test]
+    fn reviewed_yellow_five_protection_is_independent_of_clue_label() {
+        // User-reviewed p4v0s3 turn 5: both clues protect y5 #8, but
+        // yellow gives Cathy the exact identity and its future play.
+        let replay = HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s3.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(4).unwrap();
+        let source = state.view_for(state.current_player()).unwrap();
+        let team = compiled_baseline_team(&source, HGroupProfile::Max);
+        let baselines = (0..4)
+            .map(|player| {
+                projected_line_state(&source, team.projection(PlayerId::new(player)).unwrap())
+            })
+            .collect::<Vec<_>>();
+        let outcomes = [Clue::Suit(Suit::Yellow), Clue::Rank(Rank::Five)].map(|clue| {
+            clue_line_value(
+                &source,
+                HGroupProfile::Max,
+                Action::Clue {
+                    target: PlayerId::new(2),
+                    clue,
+                },
+                &baselines,
+                Some(HGroupMoveKind::PlayClue),
+            )
+            .unwrap()
+        });
+        assert_eq!(outcomes[0].protected_cards, vec![CardId::new(8)]);
+        assert_eq!(outcomes[0].protected_cards, outcomes[1].protected_cards);
+        assert_eq!(
+            bottom_deck_risk_protection(&source, &outcomes[0]),
+            bottom_deck_risk_protection(&source, &outcomes[1])
+        );
+        assert!(outcomes[0].strictly_improves_owner_knowledge(&outcomes[1]));
+        assert!(!outcomes[1].strictly_improves_owner_knowledge(&outcomes[0]));
+        // Invariant: losing a protected card cannot qualify as refinement.
+        let mut loses_protection = outcomes[0].clone();
+        loses_protection.protected_cards.clear();
+        assert!(!loses_protection.strictly_improves_owner_knowledge(&outcomes[1]));
+        let deductions = LogicalDeductions::new(source.clone()).unwrap();
+        let available = super::super::h_group_clue_candidates(&deductions, HGroupProfile::Max);
+        let mut pair = [Clue::Suit(Suit::Yellow), Clue::Rank(Rank::Five)].map(|clue| {
+            *available
+                .iter()
+                .find(|candidate| {
+                    candidate.action
+                        == Action::Clue {
+                            target: PlayerId::new(2),
+                            clue,
+                        }
+                })
+                .unwrap()
+        });
+        pair[0].value = super::super::ClueValue::new(383);
+        pair[1].value = super::super::ClueValue::new(400);
+        let mut with_third = pair.to_vec();
+        let mut third = *available
+            .iter()
+            .find(|candidate| {
+                candidate.action
+                    == Action::Clue {
+                        target: PlayerId::new(3),
+                        clue: Clue::Rank(Rank::Two),
+                    }
+            })
+            .unwrap();
+        third.value = super::super::ClueValue::new(400);
+        with_third.push(third);
+        apply_strategic_clue_values(&deductions, HGroupProfile::Max, &mut pair);
+        apply_strategic_clue_values(&deductions, HGroupProfile::Max, &mut with_third);
+        assert!(pair[0].score() > pair[1].score());
+        assert!(with_third[0].score() > with_third[1].score());
+        assert_eq!(
+            pair[0].score() - with_third[0].score(),
+            BOTTOM_DECK_RISK_DEFICIT_PENALTY
+        );
+        assert_eq!(
+            pair[1].score() - with_third[1].score(),
+            BOTTOM_DECK_RISK_DEFICIT_PENALTY
+        );
+    }
 
     #[test]
     fn reviewed_opening_preserves_the_three_bluff_before_a_draw() {

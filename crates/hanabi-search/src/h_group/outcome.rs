@@ -82,6 +82,30 @@ pub(super) struct LineOutcome {
 }
 
 impl LineOutcome {
+    /// Same protection and public line, but strictly more of that line is
+    /// understood by card owners. No card's clued domain may become broader
+    /// or incomparable, and no extra connection complexity is introduced.
+    pub(super) fn strictly_improves_owner_knowledge(&self, other: &Self) -> bool {
+        self.public_actions == other.public_actions
+            && self.protected_cards == other.protected_cards
+            && self.known_trash == other.known_trash
+            && self.new_connections <= other.new_connections
+            && self.owner_actions.len() > other.owner_actions.len()
+            && other
+                .owner_actions
+                .iter()
+                .all(|action| self.owner_actions.contains(action))
+            && self.clued_superpositions.len() == other.clued_superpositions.len()
+            && other.clued_superpositions.iter().all(|prior| {
+                self.clued_superpositions.iter().any(|now| {
+                    now.card == prior.card
+                        && now.owner == prior.owner
+                        && !now.identities.is_empty()
+                        && now.identities.intersection(prior.identities) == now.identities
+                })
+            })
+    }
+
     pub(super) fn play_consequences(&self) -> impl Iterator<Item = &RecipientCardConsequence> {
         self.recipient_consequences.iter().filter(|consequence| {
             matches!(
