@@ -60,13 +60,16 @@ fn same_turn_signal(signals: &ConventionJournal, turn: u32, kind: HGroupMoveKind
 
 /// Counts only the blind steps needed to connect a 4 Play Clue. Previously
 /// clued exact connectors are Prompts and therefore do not count toward the
-/// three-blind-play threshold for a 4 Charm.
-fn four_charm_blind_plays(
+/// three-blind-play threshold for a 4 Charm. Visible connections in other
+/// hands also do not require blind plays in the reacting player's hand.
+/// Source: <https://hanabi.github.io/level-23/#the-4-charm>
+pub(super) fn four_charm_blind_plays(
     view: &PlayerView,
     actor: PlayerId,
     focus_identity: Card,
     stack_heights: [u8; 5],
     explicitly_clued: &CardSet,
+    turn: u32,
 ) -> usize {
     let height = stack_heights[focus_identity.suit.index()];
     ((height + 1)..focus_identity.rank.number())
@@ -77,6 +80,25 @@ fn four_charm_blind_plays(
                     && (card.identity == Some(needed)
                         || IdentitySet::from_mask(card.clues.identity_mask())
                             == IdentitySet::singleton(needed))
+            }) && !view.hands.iter().enumerate().any(|(player, hand)| {
+                if player == actor.index() {
+                    return false;
+                }
+                // A visible face alone is not a connector: it must be a
+                // Prompt, or reachable through successful finesse layers.
+                hand.iter().any(|card| {
+                    explicitly_clued.contains(&card.id)
+                        && was_clued_before(view, turn, card.id)
+                        && card.identity == Some(needed)
+                }) || super::interpretation::visible_finesse_connects_at(
+                    hand,
+                    needed,
+                    None,
+                    explicitly_clued,
+                    &CardSet::default(),
+                    true,
+                    stack_heights,
+                )
             })
         })
         .count()

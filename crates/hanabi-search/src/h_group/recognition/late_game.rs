@@ -633,6 +633,7 @@ pub(in crate::h_group) fn apply_charm_effects(
                     focus_identity,
                     stack_heights,
                     explicitly_clued,
+                    entry.turn,
                 ) < 3
                 {
                     // Prompt steps do not count, and an ordinary Finesse of
@@ -709,6 +710,7 @@ pub(in crate::h_group) fn apply_charm_effects(
                     focus_identity,
                     prior.stack_heights,
                     explicitly_clued,
+                    prior.turn,
                 ) < 3
                 || was_clued_before(view, prior.turn, prior.focus)
                 || signals.has_at_turn(prior.turn, HGroupMoveKind::Charm)

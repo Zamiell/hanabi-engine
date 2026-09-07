@@ -569,7 +569,14 @@ pub(in crate::h_group) fn apply_out_of_order_effects(
             return false;
         }
         let actor = next_player(*giver, hands.len());
-        if four_charm_blind_plays(view, actor, focus_identity, stack_heights, explicitly_clued) < 3
+        if four_charm_blind_plays(
+            view,
+            actor,
+            focus_identity,
+            stack_heights,
+            explicitly_clued,
+            entry.turn,
+        ) < 3
         {
             return false;
         }

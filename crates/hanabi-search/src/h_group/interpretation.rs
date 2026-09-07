@@ -1614,6 +1614,17 @@ pub(super) fn advanced_clue_candidates(
                     && identity_of(view, focus).is_some_and(|identity| {
                         identity.rank == Rank::Four
                             && view.play_stacks[identity.suit.index()].is_empty()
+                            && super::recognition::four_charm_blind_plays(
+                                view,
+                                charm_actor,
+                                identity,
+                                std::array::from_fn(|suit| {
+                                    u8::try_from(view.play_stacks[suit].len())
+                                        .expect("standard stack height")
+                                }),
+                                &replay.cards.explicitly_clued,
+                                view.turn,
+                            ) >= 3
                     })
                     && finesse_position(&view.hands[charm_actor.index()], gotten, 3)
                         .and_then(|card| card.identity)
@@ -2804,14 +2815,37 @@ pub(super) fn visible_finesse_connects(
     already_playing: &CardSet,
     special_finesses: bool,
 ) -> bool {
-    let mut stack_heights = std::array::from_fn(|suit| {
+    let stack_heights = std::array::from_fn(|suit| {
         u8::try_from(view.play_stacks[suit].len()).expect("a Hanabi stack has at most five cards")
     });
+    visible_finesse_connects_at(
+        hand,
+        expected,
+        Some(focus),
+        gotten,
+        already_playing,
+        special_finesses,
+        stack_heights,
+    )
+}
+
+/// Historical-stack variant shared by convention precedence checks.
+pub(super) fn visible_finesse_connects_at(
+    hand: &[ObservedCard],
+    expected: Card,
+    focus: Option<CardId>,
+    gotten: &CardSet,
+    already_playing: &CardSet,
+    special_finesses: bool,
+    mut stack_heights: [u8; 5],
+) -> bool {
     for (position, card) in hand
         .iter()
         .rev()
         .filter(|card| {
-            card.id != focus && !gotten.contains(&card.id) && !already_playing.contains(&card.id)
+            Some(card.id) != focus
+                && !gotten.contains(&card.id)
+                && !already_playing.contains(&card.id)
         })
         .enumerate()
     {

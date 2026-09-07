@@ -1,5 +1,59 @@
 use super::*;
 
+/// User-reviewed p4v0s2 turn 8: Cathy supplies b2 behind a playable r1
+/// layer. Alice needs only b1 + b3, so 4s to Bob cannot be a 4 Charm.
+/// <https://hanabi.github.io/level-23/#the-4-charm>
+#[test]
+fn third_replay_four_charm_counts_blind_plays_in_the_reactors_hand() {
+    let fixture = expert_replay_p4v0s2();
+    let state = fixture.state_at_turn(7).unwrap();
+    for observer in [PlayerId::new(0), PlayerId::new(3)] {
+        let view = state.view_for(observer).unwrap();
+        let explicit = view
+            .hands
+            .iter()
+            .flatten()
+            .filter(|card| was_clued_before(&view, view.turn, card.id))
+            .map(|card| card.id)
+            .collect();
+        assert_eq!(
+            super::super::recognition::four_charm_blind_plays(
+                &view,
+                PlayerId::new(0),
+                Card::new(Suit::Blue, Rank::Four),
+                std::array::from_fn(|suit| u8::try_from(view.play_stacks[suit].len()).unwrap()),
+                &explicit,
+                view.turn,
+            ),
+            2
+        );
+    }
+    let deductions =
+        LogicalDeductions::new(state.view_for(state.current_player()).unwrap()).unwrap();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    for clue in [Clue::Rank(Rank::Four), Clue::Suit(Suit::Blue)] {
+        let action = Action::Clue {
+            target: PlayerId::new(1),
+            clue,
+        };
+        assert!(
+            !candidates
+                .iter()
+                .any(|candidate| candidate.action == action)
+        );
+        let mut after = state.clone();
+        after.apply(action).unwrap();
+        let d = LogicalDeductions::new(after.view_for(PlayerId::new(0)).unwrap()).unwrap();
+        let replay = replay_h_group(&d, HGroupProfile::Max);
+        assert!(
+            !replay
+                .signals
+                .iter()
+                .any(|signal| signal.turn == 7 && signal.kind == HGroupMoveKind::Charm)
+        );
+    }
+}
+
 /// User-reviewed p4v0s415 turn 46: every needed identity is already secured.
 /// Eight tokens cannot turn Cathy's y1 or g4 into a useful Save.
 #[test]
