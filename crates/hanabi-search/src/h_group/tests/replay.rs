@@ -2684,6 +2684,63 @@ fn third_replay_move_two_scores_rank_three_as_a_bluff_not_a_delayed_play() {
 }
 
 #[test]
+fn third_replay_turn_six_blue_is_a_five_color_ejection() {
+    // User-reviewed p4v0s2 turn 6: Cathy ejects p2 #9 and Donald saves b5 #12.
+    // https://hanabi.github.io/level-16/#the-5-color-ejection-5ce
+    let state = expert_replay_p4v0s2().state_at_turn(5).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let deductions = LogicalDeductions::new(view.clone()).unwrap();
+    let after = prospective_clue_view(
+        &view,
+        PlayerId::new(3),
+        Clue::Suit(Suit::Blue),
+        &[CardId::new(12)],
+    );
+    let (cathy, _) =
+        projected_h_group_replay(&after, HGroupProfile::Max, PlayerId::new(2)).unwrap();
+    assert_eq!(
+        select_h_group_action(&cathy, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(9)))
+    );
+    let action = Action::Clue {
+        target: PlayerId::new(3),
+        clue: Clue::Suit(Suit::Blue),
+    };
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate.action == action),
+        "{candidates:#?}"
+    );
+    let analysis = analyze_h_group_convention(&deductions, HGroupProfile::Max);
+    assert!(
+        analysis
+            .actions
+            .iter()
+            .any(|candidate| candidate.0 == action),
+        "{:?}",
+        analysis.actions
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(action)
+    );
+    let after_play = expert_replay_p4v0s2().state_at_turn(7).unwrap();
+    let donald = LogicalDeductions::new(after_play.view_for(PlayerId::new(3)).unwrap()).unwrap();
+    let knowledge = infer_h_group(&donald, HGroupProfile::Max);
+    assert_eq!(
+        knowledge
+            .cards
+            .iter()
+            .find(|card| card.card == CardId::new(12))
+            .unwrap()
+            .identities,
+        IdentitySet::singleton(Card::new(Suit::Blue, Rank::Five))
+    );
+}
+
+#[test]
 fn cathy_does_not_stomp_donalds_pending_purple_finesse() {
     // User-reviewed p4v0s2 turn 3 after Bob's hypothetical purple to Alice.
     // Project Cathy from Bob's view, without revealing Bob's own cards.

@@ -179,8 +179,11 @@ pub(super) fn apply_strategic_clue_values(
         // Save and Fix semantics are protection obligations, not optional
         // strategic protection choices. Risk valuation must not let an
         // unrelated clue outrank the clue that satisfies such an obligation.
+        // An advanced clue with urgent Save semantics fulfills that same
+        // obligation; its move label must not change this comparison.
         if !matches!(candidate.purpose(), CluePurpose::Fix | CluePurpose::Save)
             && candidate.move_kind() != Some(HGroupMoveKind::FixClue)
+            && !candidate.is_urgent_save()
         {
             candidate.value.penalize_teamwork(
                 BOTTOM_DECK_RISK_DEFICIT_PENALTY.saturating_mul(

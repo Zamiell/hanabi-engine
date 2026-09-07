@@ -1113,8 +1113,13 @@ fn derive_convention_constraints(
             clues
                 .iter()
                 .filter(|candidate| {
+                    // Keep every clue satisfying this protection obligation,
+                    // including advanced moves such as a 5 Color Ejection.
+                    // The first matching Save is not the only valid means.
                     candidate.action == urgent.action
-                        || (candidate.target() == urgent.target() && candidate.immediate_play())
+                        || (candidate.target() == urgent.target()
+                            && (candidate.immediate_play()
+                                || hard_clue_obligation(view, replay, candidate)))
                 })
                 .map(|candidate| candidate.action),
         );
