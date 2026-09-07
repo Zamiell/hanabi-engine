@@ -67,6 +67,14 @@ preserves the candidate without crediting its conditional blind play as certain;
 diagnostics expose `interpretationBranch` separately from an unresolved
 played-card identity.
 
+Conversely, missing nested visibility must not erase a publicly demonstrated
+Layered Finesse. A successful off-colour blind play uniquely attributable to an
+outstanding delayed colour clue restores the relational connection when the
+blind player's hand is blank in that observer projection. The focus identity is
+updated from the demonstrated connection; the connector's physical slot remains
+subject to normal layered-play resolution. Ambiguous attributions and
+already-explained blind plays do not trigger this recovery.
+
 For lines with the same action horizon and stopping reason, the planner first
 removes resource-dominated choices within the same policy tier. Frontier
 assessment includes score, clue tokens, secured future plays, protection of

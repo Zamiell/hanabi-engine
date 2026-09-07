@@ -1,5 +1,57 @@
 use super::*;
 
+#[test]
+fn demonstrated_yellow_layer_is_shared_across_observer_projections() {
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    for turn in [4, 8, 11, 12] {
+        let state = fixture.state_at_turn(turn).unwrap();
+        for observer in 0..4 {
+            let view = state.view_for(PlayerId::new(observer)).unwrap();
+            let (d, r) = PerspectiveProjector::new(&view, HGroupProfile::Max)
+                .project(PlayerId::new(0), PerspectiveDepth::NestedRecipients)
+                .unwrap();
+            let inferred = infer_h_group_from_replay(&d, r.clone(), HGroupProfile::Max);
+            let note = inferred
+                .cards
+                .iter()
+                .find(|n| n.card == CardId::new(2))
+                .unwrap();
+            assert_eq!(
+                note.identities,
+                IdentitySet::singleton(Card::new(Suit::Yellow, Rank::Two)),
+                "turn={turn} source={observer} clues={:?} signals={:?} pending={:?}",
+                r.clues,
+                r.signals,
+                r.pending_connections
+            );
+            assert!(!inferred.playable_now.contains(&CardId::new(2)));
+            assert!(
+                r.pending_connections.iter().any(|connection| {
+                    connection.actor == PlayerId::new(3)
+                        && connection.focus == CardId::new(2)
+                        && connection.expected == Card::new(Suit::Yellow, Rank::One)
+                }),
+                "the public y1 obligation must remain assigned to Donald"
+            );
+        }
+    }
+    let state = fixture.state_at_turn(11).unwrap();
+    let view = state.view_for(PlayerId::new(3)).unwrap();
+    let outcome = super::super::symbolic_line::project_h_group_line(
+        &view,
+        HGroupProfile::Max,
+        Action::Play(CardId::new(18)),
+        32,
+    );
+    assert_eq!(
+        outcome.strikes, 0,
+        "b3 continuation must not invent a y1 play from Alice's y2"
+    );
+}
+
 /// Reviewed fixture opening, alternative clue: a blank in Alice's hand is
 /// not evidence that Bob lacks a visible external b3 connector. This tests
 /// projection uncertainty, not the optimality of an invented continuation.

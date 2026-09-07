@@ -54,6 +54,7 @@ mod plan;
 mod play_order;
 mod primary;
 mod prospective;
+mod public_layers;
 mod rationality;
 mod recognition;
 mod rule_engine;
@@ -2180,6 +2181,94 @@ fn replay_h_group_inner_uncached(
                 identity,
                 successful,
             } => {
+                if rule_enabled(profile, HGroupRuleId::SpecialFinesses) {
+                    if let Some(proof) = public_layers::demonstrated_hidden_layer(
+                        view,
+                        entry,
+                        &hands,
+                        &clues,
+                        &facts,
+                        &explicitly_clued,
+                        &forced_playable,
+                        &pending_connections,
+                        stack_heights,
+                    ) {
+                        let clue = &mut clues[proof.clue_index];
+                        pending_connections.cancel_where(
+                            entry.turn,
+                            ConnectionTransitionReason::Superseded,
+                            |connection| connection.focus == clue.focus,
+                        );
+                        for old in clue
+                            .focus_identities
+                            .iter()
+                            .filter(|identity| *identity != proof.focus_identity)
+                        {
+                            push_signal(
+                                &mut signals,
+                                entry,
+                                clue.giver,
+                                Some(clue.target),
+                                HGroupMoveKind::Retraction,
+                                vec![clue.focus],
+                                Some(old),
+                            );
+                        }
+                        clue.kind = HGroupClueKind::Play;
+                        clue.focus_identities = IdentitySet::singleton(proof.focus_identity);
+                        clue.play_identities = clue.focus_identities;
+                        clue.hypotheses = vec![ClueInterpretationHypothesis {
+                            focus_identity: proof.focus_identity,
+                            connection_steps: vec![ClueConnectionStep {
+                                actor: proof.actor,
+                                cards: proof.cards.clone(),
+                                expected: proof.expected,
+                                kind: HGroupConnectionKind::Finesse,
+                            }],
+                            required_fix: None,
+                            loaded: false,
+                        }];
+                        let promise = pending_connections.start(
+                            clue.turn,
+                            ConnectionObligation {
+                                promise: PromiseId::UNASSIGNED,
+                                actor: proof.actor,
+                                cards: proof.cards.clone(),
+                                expected: proof.expected,
+                                focus_identity: proof.focus_identity,
+                                kind: HGroupConnectionKind::Finesse,
+                                focus: clue.focus,
+                                step: 0,
+                            },
+                        );
+                        invisibly_clued.extend_from(
+                            EffectSource::Promise(promise),
+                            proof
+                                .cards
+                                .iter()
+                                .copied()
+                                .filter(|candidate| candidate != card),
+                        );
+                        push_signal(
+                            &mut signals,
+                            entry,
+                            clue.giver,
+                            Some(clue.target),
+                            HGroupMoveKind::Context,
+                            vec![clue.focus],
+                            Some(proof.focus_identity),
+                        );
+                        push_signal(
+                            &mut signals,
+                            entry,
+                            clue.giver,
+                            Some(proof.actor),
+                            HGroupMoveKind::LayeredFinesse,
+                            proof.cards,
+                            Some(proof.expected),
+                        );
+                    }
+                }
                 // A successful off-suit blind play can demonstrate that a
                 // visible, later Finesse connector was only one branch of an
                 // Ambiguous Layered Finesse. The player immediately after the

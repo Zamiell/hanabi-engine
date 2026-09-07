@@ -1301,7 +1301,14 @@ fn other_player_projection_is_unsafe(
                 giver_baseline.inferred.cards.iter().any(|card| {
                     card.card != connection.card
                         && giver_promptable.contains(&card.card)
-                        && card.identities.contains(connection.identity)
+                        // A layered slot can physically hold another card,
+                        // but its shared obligation reserves only the promised
+                        // identity. Do not turn slot-location uncertainty into
+                        // additional Good Touch promises.
+                        && card.promised_identity.map_or_else(
+                            || card.identities.contains(connection.identity),
+                            |promised| promised == connection.identity,
+                        )
                 });
             other_baseline
                 .inferred
