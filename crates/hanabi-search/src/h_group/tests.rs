@@ -488,20 +488,20 @@ fn final_play_clues_advance_the_plan_before_surplus_known_trash_discards() {
         let expected_priority = decision
             .actions
             .iter()
-            .find_map(|(action, _, priority, _, _)| (*action == expected).then_some(*priority))
+            .find_map(|candidate| (candidate.action == expected).then_some(candidate.preference))
             .expect("the final Play Clue is admitted");
         let trash_priority = decision
             .actions
             .iter()
-            .filter_map(|(action, _, priority, _, _)| {
-                matches!(action, Action::Discard(_)).then_some(*priority)
+            .filter_map(|candidate| {
+                matches!(candidate.action, Action::Discard(_)).then_some(candidate.preference)
             })
             .max()
             .expect("the actor has a known-trash discard");
 
         assert!(
             expected_priority > trash_priority,
-            "move {} should advance an outstanding final play ({expected_priority}) instead of creating a surplus clue token ({trash_priority})",
+            "move {} should advance an outstanding final play ({expected_priority:?}) instead of creating a surplus clue token ({trash_priority:?})",
             turn + 1,
         );
         assert_eq!(decision.preferred, Some(expected));
@@ -525,8 +525,8 @@ fn third_replay_final_play_clues_advance_before_surplus_known_trash() {
     let trash_priority = decision
         .actions
         .iter()
-        .filter_map(|(action, _, priority, _, _)| {
-            matches!(action, Action::Discard(_)).then_some(*priority)
+        .filter_map(|candidate| {
+            matches!(candidate.action, Action::Discard(_)).then_some(candidate.preference)
         })
         .max()
         .expect("Donald has known trash");
@@ -546,7 +546,7 @@ fn third_replay_final_play_clues_advance_before_surplus_known_trash() {
         let clue_priority = decision
             .actions
             .iter()
-            .find_map(|(candidate, _, priority, _, _)| (*candidate == action).then_some(*priority))
+            .find_map(|candidate| (candidate.action == action).then_some(candidate.preference))
             .expect("both direct yellow-5 clues are admitted");
         assert!(
             clue_priority > trash_priority,

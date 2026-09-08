@@ -15,6 +15,14 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  msrv:
+    name: Minimum supported Rust (1.85)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: rustup toolchain install 1.85.0 --profile minimal
+      - run: cargo +1.85.0 check --workspace --all-targets --all-features --locked
+
   quality:
     name: Build, test, and lint
     runs-on: ubuntu-latest

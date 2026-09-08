@@ -12,7 +12,7 @@ use super::{
 /// symbolic here rather than flattened into unrelated marginal domains.
 pub(super) struct ConventionConstraintGraph {
     common: Vec<(CardId, IdentitySet)>,
-    alternatives: Vec<Vec<(CardId, IdentitySet)>>,
+    factors: Vec<Vec<Vec<(CardId, IdentitySet)>>>,
 }
 
 impl ConventionConstraintGraph {
@@ -30,7 +30,7 @@ impl ConventionConstraintGraph {
             .iter()
             .map(|card| card.id)
             .collect::<Vec<_>>();
-        let mut alternatives = vec![Vec::new()];
+        let mut factors = Vec::new();
 
         for claim in replay.cards.facts.identity_claims().iter().filter(|claim| {
             claim.relation == IdentityClaimRelation::OneOf && !is_connection_claim(claim.source)
@@ -80,7 +80,7 @@ impl ConventionConstraintGraph {
                         .collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>();
-            alternatives = cross_product(alternatives, &claim_alternatives);
+            factors.push(claim_alternatives);
         }
 
         let view = deductions.view();
@@ -111,42 +111,18 @@ impl ConventionConstraintGraph {
                         .collect::<Vec<_>>()
                 })
                 .collect::<Vec<_>>();
-            alternatives = cross_product(alternatives, &promise_alternatives);
+            factors.push(promise_alternatives);
         }
 
-        if alternatives == [Vec::new()] {
-            alternatives.clear();
-        }
-        Self {
-            common,
-            alternatives,
-        }
+        Self { common, factors }
     }
 
     pub(super) fn into_belief_constraints(self) -> BeliefConstraints {
         BeliefConstraints {
             constraints: self.common,
-            branches: self.alternatives,
+            factors: self.factors,
         }
     }
-}
-
-fn cross_product(
-    existing: Vec<Vec<(CardId, IdentitySet)>>,
-    alternatives: &[Vec<(CardId, IdentitySet)>],
-) -> Vec<Vec<(CardId, IdentitySet)>> {
-    existing
-        .into_iter()
-        .flat_map(|branch| {
-            alternatives.iter().map(move |alternative| {
-                branch
-                    .iter()
-                    .copied()
-                    .chain(alternative.iter().copied())
-                    .collect()
-            })
-        })
-        .collect()
 }
 
 fn is_connection_claim(kind: HGroupMoveKind) -> bool {
@@ -169,15 +145,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn cross_product_preserves_mutually_exclusive_relations() {
+    fn constraint_graph_retains_factors_without_expanding_them() {
         let first = vec![vec![(CardId::new(1), IdentitySet::all())]];
         let second = vec![
             vec![(CardId::new(2), IdentitySet::all())],
             vec![(CardId::new(3), IdentitySet::all())],
         ];
-        let product = cross_product(first, &second);
-        assert_eq!(product.len(), 2);
-        assert_eq!(product[0].len(), 2);
-        assert_eq!(product[1].len(), 2);
+        let graph = ConventionConstraintGraph {
+            common: Vec::new(),
+            factors: vec![first.clone(), second.clone()],
+        };
+        assert_eq!(graph.into_belief_constraints().factors, vec![first, second]);
     }
 }

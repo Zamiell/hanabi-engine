@@ -73,7 +73,7 @@ pub(super) struct CompiledObserverProjection {
 pub(super) struct TeamConventionSnapshot {
     source: PlayerView,
     profile: HGroupProfile,
-    projections: Rc<RefCell<Vec<Option<CompiledObserverProjection>>>>,
+    projections: Rc<RefCell<Vec<Option<Rc<CompiledObserverProjection>>>>>,
 }
 
 impl TeamConventionSnapshot {
@@ -86,18 +86,18 @@ impl TeamConventionSnapshot {
         }
     }
 
-    pub(super) fn projection(&self, observer: PlayerId) -> Option<CompiledObserverProjection> {
+    pub(super) fn projection(&self, observer: PlayerId) -> Option<Rc<CompiledObserverProjection>> {
         if let Some(cached) = self.projections.borrow()[observer.index()].clone() {
             return Some(cached);
         }
         let (deductions, replay) = projected_h_group_replay(&self.source, self.profile, observer)?;
         let deductions = Arc::new(deductions);
         let inferred = infer_h_group_from_replay(&deductions, replay.clone(), self.profile);
-        let projection = CompiledObserverProjection {
+        let projection = Rc::new(CompiledObserverProjection {
             deductions,
             replay,
             inferred,
-        };
+        });
         self.projections.borrow_mut()[observer.index()] = Some(projection.clone());
         Some(projection)
     }
@@ -120,14 +120,42 @@ pub(super) struct CompiledProspectiveClue {
     turn: u32,
     after: PlayerView,
     team: TeamConventionSnapshot,
+    line_evidence: Rc<RefCell<CompiledLineCache>>,
 }
 
+type CompiledLineCache = Vec<(
+    Option<HGroupMoveKind>,
+    Option<Rc<super::compiled_line::CompiledLineEvidence>>,
+)>;
+
 impl CompiledProspectiveClue {
+    pub(super) fn line_evidence(
+        &self,
+        source: &PlayerView,
+        kind: Option<HGroupMoveKind>,
+    ) -> Option<Rc<super::compiled_line::CompiledLineEvidence>> {
+        debug_assert_eq!(source.turn, self.turn);
+        debug_assert_eq!(source.observer, self.after.observer);
+        if let Some((_, cached)) = self
+            .line_evidence
+            .borrow()
+            .iter()
+            .find(|(key, _)| *key == kind)
+        {
+            return cached.clone();
+        }
+        let compiled = super::compiled_line::compile(source, self, kind).map(Rc::new);
+        self.line_evidence
+            .borrow_mut()
+            .push((kind, compiled.clone()));
+        compiled
+    }
+
     pub(super) const fn after(&self) -> &PlayerView {
         &self.after
     }
 
-    pub(super) fn projection(&self, observer: PlayerId) -> Option<CompiledObserverProjection> {
+    pub(super) fn projection(&self, observer: PlayerId) -> Option<Rc<CompiledObserverProjection>> {
         self.team.projection(observer)
     }
 
@@ -165,11 +193,16 @@ struct ProspectiveSaveKey {
 }
 
 struct ProspectiveAnalysisCache {
-    source_address: usize,
     profile: HGroupProfile,
     baseline_team: TeamConventionSnapshot,
     clue_snapshots: Vec<(ProspectiveClueKey, Option<CompiledProspectiveClue>)>,
     save_validations: Vec<(ProspectiveSaveKey, bool)>,
+}
+
+impl ProspectiveAnalysisCache {
+    fn matches(&self, source: &PlayerView, profile: HGroupProfile) -> bool {
+        self.profile == profile && self.baseline_team.source == *source
+    }
 }
 
 thread_local! {
@@ -199,7 +232,6 @@ pub(super) fn with_prospective_analysis_cache<T>(
     operation: impl FnOnce() -> T,
 ) -> T {
     let replacement = ProspectiveAnalysisCache {
-        source_address: core::ptr::from_ref(source).addr(),
         profile,
         baseline_team: TeamConventionSnapshot::new(source.clone(), profile),
         clue_snapshots: Vec::new(),
@@ -214,12 +246,11 @@ fn prospective_baseline_projection(
     source: &PlayerView,
     profile: HGroupProfile,
     observer: PlayerId,
-) -> Option<CompiledObserverProjection> {
-    let source_address = core::ptr::from_ref(source).addr();
+) -> Option<Rc<CompiledObserverProjection>> {
     let cached_team = PROSPECTIVE_ANALYSIS_CACHE.with(|cache| {
         let cache = cache.borrow();
         let cache = cache.as_ref()?;
-        if cache.source_address != source_address || cache.profile != profile {
+        if !cache.matches(source, profile) {
             return None;
         }
         Some(cache.baseline_team.clone())
@@ -302,12 +333,11 @@ pub(super) fn compiled_baseline_team(
     source: &PlayerView,
     profile: HGroupProfile,
 ) -> TeamConventionSnapshot {
-    let source_address = core::ptr::from_ref(source).addr();
     PROSPECTIVE_ANALYSIS_CACHE.with(|cache| {
         cache
             .borrow()
             .as_ref()
-            .filter(|cache| cache.source_address == source_address && cache.profile == profile)
+            .filter(|cache| cache.matches(source, profile))
             .map_or_else(
                 || TeamConventionSnapshot::new(source.clone(), profile),
                 |cache| cache.baseline_team.clone(),
@@ -359,11 +389,10 @@ pub(super) fn compiled_prospective_clue(
         clue,
         touched: touched.to_vec(),
     };
-    let source_address = core::ptr::from_ref(source).addr();
     if let Some(cached) = PROSPECTIVE_ANALYSIS_CACHE.with(|cache| {
         let cache = cache.borrow();
         let cache = cache.as_ref()?;
-        (cache.source_address == source_address && cache.profile == profile)
+        (cache.matches(source, profile))
             .then(|| {
                 cache
                     .clue_snapshots
@@ -385,11 +414,12 @@ pub(super) fn compiled_prospective_clue(
         turn: source.turn,
         after,
         team,
+        line_evidence: Rc::new(RefCell::new(Vec::new())),
     });
     PROSPECTIVE_ANALYSIS_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if let Some(cache) = cache.as_mut() {
-            if cache.source_address == source_address && cache.profile == profile {
+            if cache.matches(source, profile) {
                 cache.clue_snapshots.push((key, computed.clone()));
             }
         }
@@ -433,6 +463,26 @@ mod tests {
                 false,
             );
             PROSPECTIVE_SNAPSHOT_REDUCTIONS.with(|count| assert_eq!(count.get(), 1));
+            let first =
+                compiled_prospective_clue(&source, HGroupProfile::Max, target, clue, &touched)
+                    .unwrap();
+            let same_position = source.clone();
+            let second = compiled_prospective_clue(
+                &same_position,
+                HGroupProfile::Max,
+                target,
+                clue,
+                &touched,
+            )
+            .unwrap();
+            assert!(Rc::ptr_eq(
+                &first.projection(target).unwrap(),
+                &second.projection(target).unwrap()
+            ));
+            let first_line = first.line_evidence(&source, None).unwrap();
+            let second_line = second.line_evidence(&same_position, None).unwrap();
+            assert!(Rc::ptr_eq(&first_line, &second_line));
+            PROSPECTIVE_SNAPSHOT_REDUCTIONS.with(|count| assert_eq!(count.get(), 1));
         });
     }
 
@@ -462,11 +512,10 @@ fn cached_save_validation(
     profile: HGroupProfile,
     key: &ProspectiveSaveKey,
 ) -> Option<bool> {
-    let source_address = core::ptr::from_ref(source).addr();
     PROSPECTIVE_ANALYSIS_CACHE.with(|cache| {
         let cache = cache.borrow();
         let cache = cache.as_ref()?;
-        if cache.source_address != source_address || cache.profile != profile {
+        if !cache.matches(source, profile) {
             return None;
         }
         cache
@@ -482,11 +531,10 @@ fn cache_save_validation(
     key: ProspectiveSaveKey,
     safe: bool,
 ) {
-    let source_address = core::ptr::from_ref(source).addr();
     PROSPECTIVE_ANALYSIS_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();
         if let Some(cache) = cache.as_mut() {
-            if cache.source_address == source_address && cache.profile == profile {
+            if cache.matches(source, profile) {
                 cache.save_validations.push((key, safe));
             }
         }

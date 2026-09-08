@@ -7,6 +7,7 @@
 pub mod action;
 pub mod card;
 pub mod ids;
+pub mod public_transition;
 pub mod state;
 pub mod view;
 

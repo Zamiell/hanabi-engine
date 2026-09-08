@@ -45,6 +45,16 @@ fn run() -> Result<(), CliError> {
         Command::LiveAction(arguments) => live_action::run(&arguments),
         Command::LiveSession(arguments) => live_action::run_session(&arguments),
         Command::ReplayLink(arguments) => replay_link::run(&arguments),
+        Command::ProtocolInfo => {
+            println!(
+                "{}",
+                serde_json::json!({
+                    "protocol": "hanabi-live-session", "version": 1,
+                    "capabilities": ["planning-details", "exact-budgets"],
+                })
+            );
+            Ok(())
+        }
     }
 }
 
@@ -119,7 +129,7 @@ fn analyze_planner(
             println!(
                 "{marker}  {:<42} priority {:>6.2}  playable {}  critical {}  new {}  line {}/+{}",
                 action_label(view, players, evaluation.action),
-                evaluation.convention_priority,
+                evaluation.preference.within_category(),
                 evaluation.immediately_playable_touched,
                 evaluation.critical_touched,
                 evaluation.newly_touched,
@@ -253,6 +263,7 @@ struct LiveActionArguments {
 }
 
 enum Command {
+    ProtocolInfo,
     ReplayLink(replay_link::Arguments),
     Analyze(AnalyzeArguments),
     LiveAction(LiveActionArguments),
@@ -268,6 +279,7 @@ fn parse_arguments() -> Result<Option<Command>, CliError> {
         return Ok(None);
     }
     match command.as_str() {
+        "protocol-info" if arguments.next().is_none() => Ok(Some(Command::ProtocolInfo)),
         "replay-link" => {
             replay_link::parse(&mut arguments).map(|value| value.map(Command::ReplayLink))
         }
@@ -449,6 +461,7 @@ fn print_usage_to_stderr() {
 fn usage() -> &'static str {
     "Usage:\n  hanabi-engine analyze <replay.json> --turn <N> [options]\n  \
      hanabi-engine replay-link <replay.json> [--turn <N>]\n  \
+     hanabi-engine protocol-info\n  \
      hanabi-engine live-action [options] < live-snapshot.json\n\n\
      hanabi-engine live-session [options] < session-requests.ndjson\n\n\
      Turn N is the position after N completed game actions; turn 0 is the initial deal.\n\n\

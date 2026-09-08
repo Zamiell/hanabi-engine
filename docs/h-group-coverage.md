@@ -9,17 +9,18 @@ The engine's convention inventory is pinned to `hanabi.github.io` revision
 `dd55b51aa622f709059a17e0d6afc2adb8402408`. It contains every level-three
 heading in levels 1–25 and the Max extras pages: 357 unique sections in total.
 The machine-readable inventory, including an exact website URL for every
-section, lives in `H_GROUP_DOCUMENTATION_SECTIONS`.
+section, lives in the test-only `H_GROUP_DOCUMENTATION_SECTIONS` inventory in
+`crates/hanabi-search/src/h_group/coverage.rs`. It is not a production API.
 
 Not every heading defines an independent state transition. The documentation
 also contains definitions, examples, principles, precedence rules, mistakes,
 illegal moves, and flowcharts. Those sections are implemented through the shared
 clue interpreter, identity constraints, connection graph, candidate rejections,
 and strategic evaluator. Named moves and strategies have a dedicated
-`HGroupMoveKind`, and their production implementation and source URL are
-enforced by architecture tests. This avoids pretending that a chapter-wide
-handler proves coverage while also avoiding duplicate transition systems for
-compositions such as a Trash Push Finesse.
+`HGroupMoveKind`; architecture tests check exact source links and behavioral
+invariants. Merely finding a move's name in production source is not evidence of
+a correct implementation, so the old reference-count assertion was removed.
+Composed moves reuse the shared interpretation system.
 
 ## Numbered levels
 

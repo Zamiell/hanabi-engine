@@ -174,6 +174,20 @@ def make_bot(
 
 
 class PersistentEngineTests(unittest.TestCase):
+    def test_versioned_handshake_accepts_only_supported_protocol(self) -> None:
+        for version, accepted in [(1, True), (2, False), (True, False)]:
+            response = mock.Mock(returncode=0, stderr="", stdout=json.dumps({
+                "protocol": "hanabi-live-session", "version": version,
+                "capabilities": ["planning-details", "exact-budgets"],
+            }))
+            with mock.patch.object(engine_process.subprocess, "run", return_value=response) as run:
+                if accepted:
+                    bridge.validate_engine_binary(Path("engine"))
+                else:
+                    with self.assertRaises(bridge.EngineProcessError):
+                        bridge.validate_engine_binary(Path("engine"))
+            self.assertEqual(run.call_args.args[0], ["engine", "protocol-info"])
+
     def test_closed_engine_cannot_restart(self) -> None:
         engine = bridge.PersistentEngine(["unused-engine"], 1)
         engine.close()
@@ -352,6 +366,34 @@ class PersistentEngineTests(unittest.TestCase):
 
 
 class BotConcurrencyTests(unittest.TestCase):
+    def test_submission_is_atomic_and_rejects_duplicates_and_stale_results(self) -> None:
+        bot, socket = make_bot(RecordingEngine)
+        try:
+            bot.handle_init(init_message(7))
+            game = bot.games[7]
+            acquired: list[bool] = []
+
+            def probe_lock() -> None:
+                locked = bot.lock.acquire(blocking=False)
+                acquired.append(locked)
+                if locked:
+                    bot.lock.release()
+
+            def send(_message: str) -> None:
+                probe = threading.Thread(target=probe_lock)
+                probe.start()
+                probe.join(timeout=1)
+                self.assertFalse(probe.is_alive())
+
+            action = {"tableID": 7, "type": 0, "target": 0}
+            with mock.patch.object(socket, "send", side_effect=send):
+                self.assertFalse(bot._send_current_action(7, game.turn, game.generation - 1, action))
+                self.assertTrue(bot._send_current_action(7, game.turn, game.generation, action))
+                self.assertFalse(bot._send_current_action(7, game.turn, game.generation, action))
+            self.assertEqual(acquired, [False])
+        finally:
+            bot.shutdown()
+
     def setUp(self) -> None:
         RecordingEngine.instances = []
 

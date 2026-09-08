@@ -12,14 +12,14 @@ use super::HGroupLevel;
 
 /// One third-level subsection in the pinned numbered or Max documentation.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct HGroupDocumentationSection {
-    pub profile: HGroupProfile,
-    pub title: &'static str,
-    pub source_url: &'static str,
+struct HGroupDocumentationSection {
+    profile: HGroupProfile,
+    title: &'static str,
+    source_url: &'static str,
 }
 
 /// Every third-level subsection in levels 1-25 and the Max extras index pages.
-pub const H_GROUP_DOCUMENTATION_SECTIONS: [HGroupDocumentationSection; 357] = [
+const H_GROUP_DOCUMENTATION_SECTIONS: [HGroupDocumentationSection; 357] = [
     HGroupDocumentationSection {
         profile: HGroupProfile::Level(HGroupLevel::Level1),
         title: "The Chop",
@@ -1818,6 +1818,7 @@ mod tests {
         assert_eq!(H_GROUP_DOCUMENTATION_SECTIONS.len(), 357);
         let mut urls = HashSet::new();
         for section in H_GROUP_DOCUMENTATION_SECTIONS {
+            assert!(!section.title.is_empty());
             assert!(section.source_url.starts_with("https://hanabi.github.io/"));
             assert!(
                 urls.insert(section.source_url),

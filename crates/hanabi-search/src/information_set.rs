@@ -79,13 +79,13 @@ impl WorldCount {
 
 /// Convention-derived restrictions on the root belief state.
 ///
-/// `constraints` always apply. Each entry in `branches` is an additional,
-/// mutually-exclusive conjunction; an empty branch list means that only the
-/// common constraints apply.
+/// `constraints` always apply. Each factor is a disjunction of mutually
+/// exclusive conjunctions. All factors must hold. No factors means only the
+/// common constraints apply; an empty factor is a contradiction.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct BeliefConstraints {
     pub constraints: Vec<(CardId, IdentitySet)>,
-    pub branches: Vec<Vec<(CardId, IdentitySet)>>,
+    pub factors: Vec<Vec<Vec<(CardId, IdentitySet)>>>,
 }
 
 impl IdentitySet {
@@ -449,26 +449,45 @@ impl InformationSet {
     /// Counting stops as soon as `limit + 1` worlds have been found. This is
     /// the inexpensive gate used by exact endgame planning; it avoids trying
     /// to represent the astronomical opening belief space.
+    ///
+    /// # Panics
+    /// Panics only if the internally created unlimited control is interrupted.
     #[must_use]
     pub fn world_count_up_to(&self, belief: &BeliefConstraints, limit: u64) -> WorldCount {
+        self.world_count_with_control(belief, limit, &crate::AnalysisControl::default())
+            .expect("unlimited world counting cannot be interrupted")
+    }
+
+    pub(crate) fn world_count_with_control(
+        &self,
+        belief: &BeliefConstraints,
+        limit: u64,
+        control: &crate::AnalysisControl,
+    ) -> Result<WorldCount, crate::AnalysisStopped> {
         let stop_after = limit.saturating_add(1);
         let mut worlds = 0_u64;
-        self.visit_belief_masks(belief, |masks| {
+        let mut stopped = None;
+        self.visit_belief_masks(belief, control, |masks| {
             let mut counts = self.deductions.remaining_counts;
-            count_identity_worlds(
+            stopped = count_identity_worlds(
                 masks,
                 self.deck_cards.len(),
                 0,
                 &mut counts,
                 stop_after,
                 &mut worlds,
-            );
-            worlds < stop_after
-        });
+                control,
+            )
+            .err();
+            stopped.is_none() && worlds < stop_after
+        })?;
+        if let Some(error) = stopped {
+            return Err(error);
+        }
         if worlds <= limit {
-            WorldCount::Exact(worlds)
+            Ok(WorldCount::Exact(worlds))
         } else {
-            WorldCount::LowerBound(stop_after)
+            Ok(WorldCount::LowerBound(stop_after))
         }
     }
 
@@ -495,7 +514,7 @@ impl InformationSet {
             });
         };
 
-        self.visit_worlds_after_count(belief, visitor)
+        self.visit_worlds_after_count(belief, &crate::AnalysisControl::default(), visitor)
     }
 
     /// Materializes worlds after the caller has already completed the bounded
@@ -504,15 +523,17 @@ impl InformationSet {
         &self,
         belief: &BeliefConstraints,
         capacity: usize,
+        control: &crate::AnalysisControl,
     ) -> Result<Vec<FullState>, EnumerateWorldsError> {
         let mut worlds = Vec::with_capacity(capacity);
-        self.visit_worlds_after_count(belief, |world| worlds.push(world))?;
+        self.visit_worlds_after_count(belief, control, |world| worlds.push(world))?;
         Ok(worlds)
     }
 
     fn visit_worlds_after_count(
         &self,
         belief: &BeliefConstraints,
+        control: &crate::AnalysisControl,
         mut visitor: impl FnMut(FullState),
     ) -> Result<u64, EnumerateWorldsError> {
         let placeholder = Card::new(Suit::Red, Rank::One);
@@ -522,12 +543,12 @@ impl InformationSet {
             .to_vec();
         let mut visited = 0_u64;
         let mut error = None;
-        self.visit_belief_masks(belief, |masks| {
+        self.visit_belief_masks(belief, control, |masks| {
             let mut locations = self.deductions.unknown_hand_cards.clone();
             locations.extend(self.deck_cards.iter().copied());
             let mut cards = base_cards.clone();
             let mut counts = self.deductions.remaining_counts;
-            visit_identity_worlds(
+            let finished = visit_identity_worlds(
                 &locations,
                 masks,
                 0,
@@ -544,9 +565,14 @@ impl InformationSet {
                         false
                     }
                 },
+                control,
             );
-            error.is_none()
-        });
+            finished && error.is_none()
+        })
+        .map_err(EnumerateWorldsError::Stopped)?;
+        control
+            .checkpoint()
+            .map_err(EnumerateWorldsError::Stopped)?;
         if let Some(source) = error {
             return Err(EnumerateWorldsError::WorldConstruction(source));
         }
@@ -556,23 +582,38 @@ impl InformationSet {
     fn visit_belief_masks(
         &self,
         belief: &BeliefConstraints,
+        control: &crate::AnalysisControl,
         mut visitor: impl FnMut(&[u32]) -> bool,
-    ) {
+    ) -> Result<(), crate::AnalysisStopped> {
         let base_masks = self.constrained_masks(&belief.constraints);
         if base_masks.contains(&0) {
-            return;
+            return Ok(());
         }
-        if belief.branches.is_empty() {
-            let _ = visitor(&base_masks);
-            return;
-        }
-        for branch in &belief.branches {
-            let mut masks = base_masks.clone();
-            self.intersect_masks(&mut masks, branch);
-            if !masks.contains(&0) && !visitor(&masks) {
-                return;
+        self.visit_factors(&belief.factors, &base_masks, &mut visitor, control)?;
+        Ok(())
+    }
+
+    /// Descend only as far as the bounded world visitor requests. Intersecting
+    /// at each level also prunes contradictions before expanding later factors.
+    fn visit_factors(
+        &self,
+        factors: &[Vec<Vec<(CardId, IdentitySet)>>],
+        masks: &[u32],
+        visitor: &mut impl FnMut(&[u32]) -> bool,
+        control: &crate::AnalysisControl,
+    ) -> Result<bool, crate::AnalysisStopped> {
+        control.checkpoint()?;
+        let Some((factor, remaining)) = factors.split_first() else {
+            return Ok(visitor(masks));
+        };
+        for alternative in factor {
+            let mut next = masks.to_vec();
+            self.intersect_masks(&mut next, alternative);
+            if !next.contains(&0) && !self.visit_factors(remaining, &next, visitor, control)? {
+                return Ok(false);
             }
         }
+        Ok(true)
     }
 
     fn constrained_masks(&self, constraints: &[(CardId, IdentitySet)]) -> Vec<u32> {
@@ -603,14 +644,16 @@ fn count_identity_worlds(
     counts: &mut Counts,
     stop_after: u64,
     worlds: &mut u64,
-) {
+    control: &crate::AnalysisControl,
+) -> Result<(), crate::AnalysisStopped> {
+    control.checkpoint()?;
     if *worlds >= stop_after {
-        return;
+        return Ok(());
     }
     let location_count = hand_masks.len() + deck_len;
     if slot == location_count {
         *worlds += 1;
-        return;
+        return Ok(());
     }
     let allowed = hand_masks
         .get(slot)
@@ -621,12 +664,22 @@ fn count_identity_worlds(
             continue;
         }
         counts[identity] -= 1;
-        count_identity_worlds(hand_masks, deck_len, slot + 1, counts, stop_after, worlds);
+        let result = count_identity_worlds(
+            hand_masks,
+            deck_len,
+            slot + 1,
+            counts,
+            stop_after,
+            worlds,
+            control,
+        );
         counts[identity] += 1;
+        result?;
         if *worlds >= stop_after {
-            return;
+            return Ok(());
         }
     }
+    Ok(())
 }
 
 fn visit_identity_worlds(
@@ -636,7 +689,11 @@ fn visit_identity_worlds(
     counts: &mut Counts,
     cards: &mut [Card],
     visitor: &mut impl FnMut(&[Card]) -> bool,
+    control: &crate::AnalysisControl,
 ) -> bool {
+    if control.checkpoint().is_err() {
+        return false;
+    }
     if slot == locations.len() {
         return visitor(cards);
     }
@@ -650,7 +707,15 @@ fn visit_identity_worlds(
         }
         counts[identity] -= 1;
         cards[locations[slot].index()] = identity_from_index(identity);
-        if !visit_identity_worlds(locations, hand_masks, slot + 1, counts, cards, visitor) {
+        if !visit_identity_worlds(
+            locations,
+            hand_masks,
+            slot + 1,
+            counts,
+            cards,
+            visitor,
+            control,
+        ) {
             counts[identity] += 1;
             return false;
         }
@@ -853,6 +918,7 @@ impl std::error::Error for InformationSetError {}
 /// Failure while exhaustively materializing a bounded belief state.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EnumerateWorldsError {
+    Stopped(crate::AnalysisStopped),
     LimitExceeded { limit: u64, at_least: u64 },
     WorldConstruction(WorldConstructionError),
 }
@@ -860,6 +926,7 @@ pub enum EnumerateWorldsError {
 impl fmt::Display for EnumerateWorldsError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Stopped(error) => error.fmt(formatter),
             Self::LimitExceeded { limit, at_least } => write!(
                 formatter,
                 "belief contains at least {at_least} worlds, exceeding exact limit {limit}"
@@ -874,6 +941,7 @@ impl fmt::Display for EnumerateWorldsError {
 impl std::error::Error for EnumerateWorldsError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
+            Self::Stopped(error) => Some(error),
             Self::LimitExceeded { .. } => None,
             Self::WorldConstruction(error) => Some(error),
         }
@@ -894,6 +962,40 @@ mod tests {
         assert_eq!(
             information.world_count_up_to(&BeliefConstraints::default(), 32),
             WorldCount::LowerBound(33)
+        );
+    }
+
+    #[test]
+    fn lazy_factors_stop_without_expansion_and_preserve_contradictions() {
+        let state = FullState::new_standard(2, standard_deck()).unwrap();
+        let information = InformationSet::new(&state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+        let first_card = information.deductions.unknown_hand_cards[0];
+        let red = IdentitySet::singleton(Card::new(Suit::Red, Rank::One));
+        let factor = vec![
+            vec![(first_card, red)],
+            vec![(first_card, IdentitySet::all().without(red))],
+        ];
+        // Forty factors would have required a trillion eager branch entries.
+        let belief = BeliefConstraints {
+            constraints: Vec::new(),
+            factors: vec![factor; 40],
+        };
+        assert_eq!(
+            information.world_count_up_to(&belief, 1),
+            WorldCount::LowerBound(2)
+        );
+        let impossible = BeliefConstraints {
+            constraints: Vec::new(),
+            factors: vec![Vec::new()],
+        };
+        assert_eq!(
+            information.world_count_up_to(&impossible, 1),
+            WorldCount::Exact(0)
+        );
+        let control = crate::AnalysisControl::new(crate::CancellationToken::default(), None, 2);
+        assert_eq!(
+            information.world_count_with_control(&belief, 1, &control),
+            Err(crate::AnalysisStopped::WorkLimit)
         );
     }
 

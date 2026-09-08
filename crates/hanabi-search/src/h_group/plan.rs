@@ -138,12 +138,24 @@ impl ResourceSchedule {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProjectionEvidence {
+    /// Promised identities assumed while modeling another player's view.
+    /// These are not observed identities or exhaustive-world proofs.
+    pub assumptions: Vec<PerspectiveAssumption>,
     pub dependencies: Vec<super::DependencyAssessment>,
     pub steps: Vec<PlanStep>,
     pub alternatives: Vec<ConditionalAlternative>,
     pub frontier: PlanFrontier,
     pub resources: ResourceSchedule,
     pub windows: Vec<super::ActionWindow>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PerspectiveAssumption {
+    pub turn: u32,
+    pub source_observer: PlayerId,
+    pub modeled_observer: PlayerId,
+    pub card: CardId,
+    pub identity: Card,
 }
 
 /// A partial-order-ready convention plan. The present projector emits a
@@ -156,6 +168,13 @@ pub(super) struct ConditionalPlan {
 }
 
 impl ConditionalPlan {
+    pub(super) fn record_assumptions(&mut self, assumptions: &[PerspectiveAssumption]) {
+        for assumption in assumptions {
+            if !self.evidence.assumptions.contains(assumption) {
+                self.evidence.assumptions.push(*assumption);
+            }
+        }
+    }
     pub(super) fn assess_dependencies(
         &mut self,
         dependencies: Vec<super::DependencyAssessment>,

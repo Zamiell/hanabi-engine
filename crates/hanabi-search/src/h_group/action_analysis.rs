@@ -1,4 +1,3 @@
-use crate::ConventionPolicyTier;
 use hanabi_core::{Action, PlayerId};
 
 use super::ActionPreference;
@@ -23,8 +22,6 @@ pub(super) enum HGroupActionKind {
 pub(super) struct CompiledHGroupAction {
     pub(super) action: Action,
     pub(super) kind: HGroupActionKind,
-    pub(super) policy_tier: ConventionPolicyTier,
-    pub(super) priority: i32,
     pub(super) preference: ActionPreference,
 }
 

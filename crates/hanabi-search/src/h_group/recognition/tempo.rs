@@ -636,20 +636,19 @@ pub(in crate::h_group) fn apply_stall_effects(
         .iter()
         .all(|card| prior_gotten.contains(card));
 
-    if let ObservedEvent::Played { card, .. } = entry.event
-        && context.before.clue_tokens == 0
-        && actor_locked
-    {
-        push_signal(
-            effects.signals,
-            entry,
-            actor,
-            Some(actor),
-            HGroupMoveKind::AnxietyPlay,
-            vec![card],
-            None,
-        );
-        return;
+    if let ObservedEvent::Played { card, .. } = entry.event {
+        if context.before.clue_tokens == 0 && actor_locked {
+            push_signal(
+                effects.signals,
+                entry,
+                actor,
+                Some(actor),
+                HGroupMoveKind::AnxietyPlay,
+                vec![card],
+                None,
+            );
+            return;
+        }
     }
 
     let ObservedEvent::Clued {

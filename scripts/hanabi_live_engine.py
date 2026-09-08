@@ -28,7 +28,7 @@ def engine_environment() -> dict[str, str]:
 def validate_engine_binary(engine: Path) -> None:
     try:
         result = subprocess.run(
-            [str(engine), "--help"],
+            [str(engine), "protocol-info"],
             text=True,
             capture_output=True,
             timeout=10,
@@ -37,18 +37,25 @@ def validate_engine_binary(engine: Path) -> None:
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise EngineProcessError(f"could not inspect engine binary: {error}") from error
-    help_text = result.stdout + result.stderr
+    output = result.stdout + result.stderr
     if result.returncode != 0:
-        detail = help_text.strip() or f"exit status {result.returncode}"
+        detail = output.strip() or f"exit status {result.returncode}"
         raise EngineProcessError(f"engine self-check failed: {detail}")
-    if (
-        "hanabi-engine live-session" not in help_text
-        or "--include-planning-details" not in help_text
-        or "--exact-world-limit" not in help_text
+    try:
+        handshake = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        handshake = None
+    if not (
+        isinstance(handshake, dict)
+        and handshake.get("protocol") == "hanabi-live-session"
+        and type(handshake.get("version")) is int
+        and handshake.get("version") == 1
+        and isinstance(handshake.get("capabilities"), list)
+        and "planning-details" in handshake["capabilities"]
+        and "exact-budgets" in handshake["capabilities"]
     ):
         raise EngineProcessError(
-            "engine binary is older than the live bridge and does not support "
-            "the deterministic live-session protocol; rebuild it with "
+            "engine binary is incompatible with live-session protocol version 1; rebuild it with "
             "'cargo build --release --locked'"
         )
 

@@ -1,8 +1,8 @@
+use super::line_state::{ProjectedLineState, card_owner, projected_line_state};
 use super::{
     Action, ActionCommitment, Card, CardId, CluePurpose, CluedCardSuperposition,
-    CompiledClueAction, CompiledObserverProjection, CompiledProspectiveClue, EpistemicState,
-    HGroupConnection, HGroupMoveKind, HGroupProfile, HGroupRuleId, IdentitySet, LineOutcome,
-    LogicalDeductions, PlayerId, PlayerView, Rank, RecipientCardConsequence,
+    CompiledClueAction, HGroupConnection, HGroupMoveKind, HGroupProfile, HGroupRuleId, IdentitySet,
+    LineOutcome, LogicalDeductions, PlayerId, PlayerView, Rank, RecipientCardConsequence,
     RecipientCardDisposition, card_is_trash, compiled_baseline_team, compiled_prospective_clue,
     identity_of, is_eventually_useful, is_playable_at, is_playable_now, rule_enabled,
 };
@@ -50,7 +50,7 @@ pub(super) fn apply_strategic_clue_values(
             );
             baseline_team
                 .projection(observer)
-                .map(|projection| projected_line_state(source, projection))
+                .map(|projection| projected_line_state(source, &projection))
         })
         .collect::<Option<Vec<_>>>();
     let Some(baselines) = baselines else {
@@ -458,21 +458,10 @@ fn positional_opportunity_losses(
         else {
             continue;
         };
-        let Some(projection) = compiled.projection(source.observer) else {
+        let Some(evidence) = compiled.line_evidence(source, alternative.move_kind()) else {
             continue;
         };
-        let anchor = projection.replay.signals.iter().find_map(|signal| {
-            (signal.turn == source.turn
-                && signal.target == Some(reactor)
-                && matches!(
-                    signal.kind,
-                    HGroupMoveKind::Bluff
-                        | HGroupMoveKind::FiveColorEjection
-                        | HGroupMoveKind::StackedEjection
-                )
-                && signal.cards.len() >= 2)
-                .then(|| signal.cards[0])
-        });
+        let anchor = evidence.positional_anchor;
         let Some(anchor) = anchor.filter(|card| {
             identity_of(source, *card).is_some_and(|identity| is_playable_now(source, identity))
         }) else {
@@ -774,276 +763,6 @@ fn clue_establishes_actor_recognized_action(
     Some(false)
 }
 
-#[derive(Clone)]
-struct ProjectedLineState {
-    giver_visible_commitments: Vec<(CardId, Card)>,
-    giver_visible_promises: Vec<(CardId, Card)>,
-    epistemic: EpistemicState,
-    owner_promises: Vec<(CardId, IdentitySet)>,
-    owner_clued_superpositions: Vec<(CardId, IdentitySet)>,
-    connection: Option<HGroupConnection>,
-    connection_lines: Vec<(PlayerId, CardId, Card, Vec<CardId>)>,
-    playable_now: Vec<CardId>,
-    chop: Option<CardId>,
-    chop_moved: super::CardSet,
-    causal_cards: super::CardSet,
-}
-
-impl ProjectedLineState {
-    /// Team coverage is evaluated by the clue giver, who may legally use the
-    /// visible identities in teammates' hands. This projection is kept
-    /// separate from owner knowledge so it can never establish Clarity equivalence.
-    fn closed_public_commitments(&self, source: &PlayerView) -> Vec<(CardId, Card)> {
-        let mut closed = self.giver_visible_commitments.clone();
-        loop {
-            let mut changed = false;
-            for (card, identity) in &self.giver_visible_promises {
-                if closed.iter().any(|(known, _)| known == card) {
-                    continue;
-                }
-                let stack_height = source.play_stacks[identity.suit.index()].len();
-                let lower_promises_are_secured = Rank::ALL.iter().copied().all(|rank| {
-                    let number = usize::from(rank.number());
-                    number <= stack_height
-                        || number >= usize::from(identity.rank.number())
-                        || closed.iter().any(|(_, secured)| {
-                            secured.suit == identity.suit && secured.rank == rank
-                        })
-                });
-                if lower_promises_are_secured {
-                    closed.push((*card, *identity));
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-        closed.sort_unstable_by_key(|(card, identity)| (card.index(), identity.index()));
-        closed.dedup();
-        closed
-    }
-
-    /// Owner-relative counterpart used only to decide whether two clues have
-    /// identical outcomes for the Clarity Principle. Team coverage retains
-    /// the established public projection above; equivalence is stricter and
-    /// must not use identities visible only to another player.
-    fn closed_owner_commitments(&self, source: &PlayerView) -> Vec<(CardId, Card)> {
-        let mut closed = self
-            .epistemic
-            .own_beliefs()
-            .filter_map(|belief| {
-                belief
-                    .known_identity()
-                    .filter(|identity| is_eventually_useful(source, *identity))
-                    .map(|identity| (belief.card, identity))
-            })
-            .collect::<Vec<_>>();
-        loop {
-            let mut changed = false;
-            for (card, identities) in &self.owner_promises {
-                if closed.iter().any(|(known, _)| known == card) {
-                    continue;
-                }
-                // Good Touch excludes identities already committed to other
-                // useful cards, but it does not reveal which of several
-                // remaining future identities this card is. In particular, a
-                // purple card that could be purple 4 or purple 5 does not
-                // become a promised purple 4 merely because purple 2 and 3
-                // are scheduled to play.
-                let claimed = closed
-                    .iter()
-                    .fold(IdentitySet::default(), |set, (_, identity)| {
-                        set.union(IdentitySet::singleton(*identity))
-                    });
-                let remaining = identities.without(claimed);
-                let Some(identity) = (remaining.len() == 1)
-                    .then(|| remaining.iter().next())
-                    .flatten()
-                else {
-                    continue;
-                };
-                let stack_height = source.play_stacks[identity.suit.index()].len();
-                let lower_promises_are_secured = Rank::ALL.iter().copied().all(|rank| {
-                    let number = usize::from(rank.number());
-                    number <= stack_height
-                        || number >= usize::from(identity.rank.number())
-                        || closed.iter().any(|(_, secured)| {
-                            secured.suit == identity.suit && secured.rank == rank
-                        })
-                });
-                if lower_promises_are_secured {
-                    closed.push((*card, identity));
-                    changed = true;
-                }
-            }
-            if !changed {
-                break;
-            }
-        }
-        closed.sort_unstable_by_key(|(card, identity)| (card.index(), identity.index()));
-        closed.dedup();
-        closed
-    }
-}
-
-#[allow(clippy::too_many_lines)]
-fn projected_line_state(
-    source: &PlayerView,
-    projection: CompiledObserverProjection,
-) -> ProjectedLineState {
-    let observer = projection.deductions.view().observer;
-    let replay = projection.replay;
-    let connection_lines = replay
-        .pending_connections
-        .iter()
-        .map(|connection| {
-            (
-                connection.actor,
-                connection.focus,
-                connection.expected,
-                connection.cards.clone(),
-            )
-        })
-        .collect();
-    let promised = replay
-        .cards
-        .explicitly_clued
-        .union(&replay.cards.invisibly_clued)
-        .copied()
-        .collect::<Vec<_>>();
-    let chop_moved = replay.cards.chop_moved.materialized().clone();
-    let causal_cards = replay
-        .transitions
-        .iter()
-        .rev()
-        .find(|transition| Some(transition.turn) == source.history.last().map(|entry| entry.turn))
-        .into_iter()
-        .flat_map(|transition| transition.delta.added_cards())
-        .collect();
-    let inferred = projection.inferred;
-    let chop = inferred.chops[observer.index()];
-    let playable_now = inferred.playable_now.clone();
-    let epistemic = EpistemicState::from_analysis(&projection.deductions, &inferred);
-    let mut giver_visible_commitments = inferred
-        .cards
-        .iter()
-        .filter_map(|note| {
-            note.identities
-                .iter()
-                .next()
-                .filter(|_| note.identities.len() == 1)
-                .filter(|identity| {
-                    identity_of(source, note.card).is_none_or(|actual| actual == *identity)
-                })
-                .filter(|identity| is_eventually_useful(source, *identity))
-                .map(|identity| (note.card, identity))
-        })
-        .collect::<Vec<_>>();
-    giver_visible_commitments.extend(inferred.playable_now.iter().filter_map(|card| {
-        identity_of(source, *card)
-            .filter(|identity| is_playable_now(source, *identity))
-            .map(|identity| (*card, identity))
-    }));
-    giver_visible_commitments
-        .sort_unstable_by_key(|(card, identity)| (card.index(), identity.index()));
-    giver_visible_commitments.dedup();
-    let mut giver_visible_promises = promised
-        .iter()
-        .copied()
-        .filter_map(|card| {
-            identity_of(source, card)
-                .or_else(|| {
-                    inferred
-                        .cards
-                        .iter()
-                        .find(|note| note.card == card && note.identities.len() == 1)
-                        .and_then(|note| note.identities.iter().next())
-                })
-                .filter(|identity| is_eventually_useful(source, *identity))
-                // Invisible alternative slots promise the connection's
-                // identity, not every visible face in the candidate list.
-                // Otherwise a red-1 layer containing a red 4 manufactures
-                // an unrelated red-4 play once the lower stack is secured.
-                .filter(|identity| {
-                    replay.cards.explicitly_clued.contains(&card)
-                        || !replay.pending_connections.iter().any(|connection| {
-                            replay.pending_connections.is_active(connection)
-                                && connection.cards.contains(&card)
-                        })
-                        || replay.pending_connections.iter().any(|connection| {
-                            replay.pending_connections.is_active(connection)
-                                && connection.cards.contains(&card)
-                                && connection.expected == *identity
-                        })
-                })
-                .map(|identity| (card, identity))
-        })
-        .collect::<Vec<_>>();
-    giver_visible_promises
-        .sort_unstable_by_key(|(card, identity)| (card.index(), identity.index()));
-    giver_visible_promises.dedup();
-    let owner_clued_superpositions =
-        collect_owner_clued_superpositions(source, observer, &epistemic, &promised);
-    let mut owner_promises = promised
-        .into_iter()
-        .filter_map(|card| {
-            if card_owner(source, card) != Some(observer) {
-                return None;
-            }
-            epistemic
-                .belief(card)
-                .map(|belief| belief.identities)
-                .map(|identities| {
-                    IdentitySet::from_mask(
-                        identities
-                            .iter()
-                            .filter(|identity| is_eventually_useful(source, *identity))
-                            .fold(0, |mask, identity| mask | (1 << identity.index())),
-                    )
-                })
-                .filter(|identities| !identities.is_empty())
-                .map(|identities| (card, identities))
-        })
-        .collect::<Vec<_>>();
-    owner_promises.sort_unstable_by_key(|(card, _)| card.index());
-    owner_promises.dedup();
-    ProjectedLineState {
-        giver_visible_commitments,
-        giver_visible_promises,
-        epistemic,
-        owner_promises,
-        owner_clued_superpositions,
-        connection: inferred.connection,
-        connection_lines,
-        playable_now,
-        chop,
-        chop_moved,
-        causal_cards,
-    }
-}
-
-fn collect_owner_clued_superpositions(
-    source: &PlayerView,
-    observer: PlayerId,
-    epistemic: &EpistemicState,
-    clued_cards: &[CardId],
-) -> Vec<(CardId, IdentitySet)> {
-    let mut superpositions = clued_cards
-        .iter()
-        .copied()
-        .filter(|card| card_owner(source, *card) == Some(observer))
-        .filter_map(|card| {
-            epistemic
-                .belief(card)
-                .map(|belief| (card, belief.identities))
-        })
-        .collect::<Vec<_>>();
-    superpositions.sort_unstable_by_key(|(card, _)| card.index());
-    superpositions.dedup();
-    superpositions
-}
-
 /// Compile a scheduling alternative with the same owner-relative outcome
 /// calculation used for ordinary clue valuation.
 pub(super) fn scheduled_clue_outcome(
@@ -1055,7 +774,10 @@ pub(super) fn scheduled_clue_outcome(
     let baselines = (0..source.hands.len())
         .map(|player| {
             let observer = PlayerId::new(u8::try_from(player).ok()?);
-            Some(projected_line_state(source, team.projection(observer)?))
+            Some(projected_line_state(
+                source,
+                team.projection(observer)?.as_ref(),
+            ))
         })
         .collect::<Option<Vec<_>>>()?;
     clue_line_value(
@@ -1086,47 +808,16 @@ fn clue_line_value(
     let compiled = compiled_prospective_clue(source, profile, target, clue, &touched)?;
     let after_clue = compiled.after();
     let mut value = LineOutcome::default();
-    let named_line = canonical_named_line_metrics(source, &compiled, canonical_kind);
-    let giver_projection = compiled.projection(source.observer)?;
-    let ignition_cards = giver_projection
-        .replay
-        .signals
-        .iter()
-        .filter(|signal| {
-            signal.turn == source.turn
-                && matches!(
-                    signal.kind,
-                    HGroupMoveKind::ReplayDoubleIgnition
-                        | HGroupMoveKind::UnnecessaryIgnition
-                        | HGroupMoveKind::UnnecessaryMove
-                        | HGroupMoveKind::TrashDoubleIgnition
-                        | HGroupMoveKind::PokeDoubleIgnition
-                        | HGroupMoveKind::BombDoubleIgnition
-                        | HGroupMoveKind::BombTripleIgnition
-                )
-        })
-        .flat_map(|signal| signal.cards.iter().copied())
-        .collect::<Vec<_>>();
-    let charm_focus = giver_projection
-        .replay
-        .signals
-        .has_at_turn(source.turn, HGroupMoveKind::Charm)
-        .then(|| {
-            giver_projection
-                .replay
-                .clues
-                .iter()
-                .rev()
-                .find(|clue| clue.turn == source.turn)
-                .map(|clue| clue.focus)
-        })
-        .flatten();
+    let evidence = compiled.line_evidence(source, canonical_kind)?;
+    debug_assert_eq!(evidence.observer, source.observer);
+    let ignition_cards = &evidence.ignition_cards;
+    let charm_focus = evidence.charm_focus;
     let mut giver_public_actions = Vec::new();
     let caused_by_clue = |card: CardId, identity: Card| {
         touched.contains(&card)
             || touched
                 .iter()
-                .chain(&ignition_cards)
+                .chain(ignition_cards)
                 .copied()
                 .any(|touched_card| {
                     identity_of(source, touched_card).is_some_and(|touched_identity| {
@@ -1147,12 +838,8 @@ fn clue_line_value(
         let observer =
             PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
         let projection = compiled.projection(observer)?;
-        let conflicts_with_giver = charm_focus.is_none()
-            && projection
-                .replay
-                .signals
-                .has_at_turn(source.turn, HGroupMoveKind::Charm);
-        let after = projected_line_state(after_clue, projection);
+        let conflicts_with_giver = evidence.conflicting_observers.contains(&observer);
+        let after = projected_line_state(after_clue, &projection);
         record_clued_superpositions(&mut value, observer, &after);
         let changed_connection_cards = after
             .connection_lines
@@ -1305,7 +992,7 @@ fn clue_line_value(
             record_new_connection(&mut value, source, connection);
         }
     }
-    giver_public_actions.extend(ignition_cards.into_iter().filter_map(|card| {
+    giver_public_actions.extend(ignition_cards.iter().copied().filter_map(|card| {
         identity_of(source, card)
             .and_then(|identity| card_owner(source, card).map(|owner| (card, owner, identity)))
             .map(|(card, owner, identity)| ActionCommitment::exact(card, owner, identity))
@@ -1325,7 +1012,10 @@ fn clue_line_value(
     // in the canonical Bluff/Clandestine line. Keep only that line's cards,
     // and never count two different identities on the same visible card.
     // https://hanabi.github.io/level-11/#mistaking-a-layered-finesse-for-a-bluff
-    let canonical_cards = named_line.as_ref().and_then(|(_, _, cards)| cards.as_ref());
+    let canonical_cards = evidence
+        .named
+        .as_ref()
+        .and_then(|line| line.playable_cards.as_ref());
     let consistent = |commitment: &ActionCommitment| {
         canonical_cards.is_none_or(|cards| {
             cards.contains(&commitment.card)
@@ -1379,7 +1069,9 @@ fn clue_line_value(
             })
         }));
     value.action_coverage = giver_public_actions.len();
-    if let Some((action_count, connection_steps, _)) = named_line {
+    if let Some(line) = &evidence.named {
+        let action_count = line.secured_actions;
+        let connection_steps = line.connection_steps;
         value.convention_action_count = Some(if canonical_kind == Some(HGroupMoveKind::PlayClue) {
             // A normal Play line earns only its newly secured cards, not
             // older scheduled predecessors or every alternative blind slot.
@@ -1401,183 +1093,6 @@ fn clue_line_value(
     }
     value.normalize();
     Some(value)
-}
-
-/// Returns the action count and blind-play depth of the canonical named line.
-///
-/// Different observers can retain provisional alternatives for the same
-/// clue. In Bluff Seat, a recognized Bluff takes precedence over an apparent
-/// Layered Finesse. A Clandestine Finesse, meanwhile, includes every layered
-/// blind play plus the clued focus. Keeping this precedence here prevents the
-/// outcome comparison from adding mutually exclusive observer projections.
-#[allow(clippy::too_many_lines)]
-fn canonical_named_line_metrics(
-    source: &PlayerView,
-    team: &CompiledProspectiveClue,
-    canonical_kind: Option<HGroupMoveKind>,
-) -> Option<(usize, usize, Option<Vec<CardId>>)> {
-    let mut bluff = None;
-    let mut clandestine = None;
-    let mut bluff_cards = Vec::new();
-    let mut clandestine_cards = Vec::new();
-    let mut layered = None;
-    let mut ejection = None;
-    let mut ignition = None;
-    for player in 0..source.hands.len() {
-        let observer =
-            PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
-        let projection = team.projection(observer)?;
-        for signal in projection
-            .replay
-            .signals
-            .iter()
-            .filter(|signal| signal.turn == source.turn)
-        {
-            match signal.kind {
-                HGroupMoveKind::Bluff => {
-                    if canonical_kind != Some(HGroupMoveKind::Bluff) {
-                        continue;
-                    }
-                    let blind_plays = signal.cards.len().saturating_sub(1);
-                    // Efficiency includes the protected focus even for a 3
-                    // Bluff. It is not a claim that the 3 can play yet.
-                    let mut secured_cards = signal.cards.clone();
-                    if let Some(clue) = projection
-                        .replay
-                        .clues
-                        .iter()
-                        .find(|clue| clue.turn == source.turn)
-                    {
-                        secured_cards.extend(clue.new_non_focus.iter().copied().filter(|card| {
-                            identity_of(source, *card)
-                                .is_some_and(|identity| is_eventually_useful(source, identity))
-                        }));
-                    }
-                    secured_cards.sort_unstable();
-                    secured_cards.dedup();
-                    bluff = Some((secured_cards.len(), blind_plays));
-                    bluff_cards.clone_from(&signal.cards);
-                    if bluff_cards.last().is_some_and(|card| {
-                        identity_of(source, *card).is_none_or(|identity| {
-                            view_distance_from_playable(source, identity) > 1
-                        })
-                    }) {
-                        bluff_cards.pop();
-                    }
-                }
-                HGroupMoveKind::ClandestineFinesse => {
-                    // An alternative observer's Clandestine reading cannot
-                    // replace the admitted ordinary line's connector cards.
-                    // Ordinary candidate classification can include a
-                    // Clandestine line, but it must be the giver's reading.
-                    if observer != source.observer {
-                        continue;
-                    }
-                    clandestine = Some((signal.cards.len() + 1, signal.cards.len()));
-                    clandestine_cards.clone_from(&signal.cards);
-                    if let Some(clue) = projection
-                        .replay
-                        .clues
-                        .iter()
-                        .find(|clue| clue.turn == source.turn)
-                    {
-                        clandestine_cards.push(clue.focus);
-                    }
-                }
-                HGroupMoveKind::LayeredFinesse
-                | HGroupMoveKind::HiddenFinesse
-                | HGroupMoveKind::QueuedFinesse
-                | HGroupMoveKind::AmbiguousFinesse => {
-                    layered = Some((signal.cards.len() + 1, signal.cards.len()));
-                }
-                HGroupMoveKind::FiveColorEjection
-                | HGroupMoveKind::Ejection
-                | HGroupMoveKind::OutOfPositionEjection
-                | HGroupMoveKind::StackedEjection => {
-                    // Focus-only identity annotations are not action signals.
-                    // The full signal contains one ejected card followed by
-                    // touched cards; those touches are not additional plays.
-                    // https://hanabi.github.io/level-16/#ejections
-                    if signal.cards.len() < 2 {
-                        continue;
-                    }
-                    let commitments =
-                        projected_line_state(source, team.projection(source.observer)?)
-                            .closed_public_commitments(source);
-                    let focus_is_secured = projection
-                        .replay
-                        .clues
-                        .iter()
-                        .find(|clue| clue.turn == source.turn)
-                        .and_then(|clue| identity_of(source, clue.focus))
-                        .is_some_and(|focus| {
-                            is_eventually_useful(source, focus)
-                                && (1..focus.rank.number()).all(|rank| {
-                                    usize::from(rank)
-                                        <= source.play_stacks[focus.suit.index()].len()
-                                        || commitments.iter().any(|(_, promised)| {
-                                            promised.suit == focus.suit
-                                                && promised.rank.number() == rank
-                                        })
-                                })
-                        });
-                    ejection = Some((1 + usize::from(focus_is_secured), 1));
-                }
-                HGroupMoveKind::Charm => {
-                    if observer != source.observer {
-                        // The blind player necessarily treats their hidden
-                        // Fourth Finesse Position as possibly playable. Only
-                        // the clue giver can verify that the Charm is safe;
-                        // another observer's provisional reading must not
-                        // inflate the deterministic team line.
-                        continue;
-                    }
-                    // The signal contains the immediate Fourth-Finesse-
-                    // Position blind play and the long-term focused 4. Only
-                    // the former is a deterministic continuation now; the 4
-                    // still depends on its ordinary intervening stack cards.
-                    // Source: https://hanabi.github.io/level-23/#the-4-charm
-                    ejection = Some((1, 1));
-                }
-                HGroupMoveKind::UnnecessaryIgnition => {
-                    let pushed = projection
-                        .replay
-                        .signals
-                        .iter()
-                        .filter(|other| {
-                            other.turn == source.turn
-                                && other.kind == HGroupMoveKind::UnnecessaryMove
-                        })
-                        .map(|other| other.cards.len())
-                        .sum::<usize>();
-                    ignition = Some((signal.cards.len() + pushed, signal.cards.len() + pushed));
-                }
-                HGroupMoveKind::ReplayDoubleIgnition
-                | HGroupMoveKind::TrashDoubleIgnition
-                | HGroupMoveKind::PokeDoubleIgnition
-                | HGroupMoveKind::BombDoubleIgnition
-                | HGroupMoveKind::BombTripleIgnition => {
-                    // Every card named by an Ignition signal is an immediate
-                    // blind-play obligation. These remain real line actions
-                    // even when the clue giver sees that the physical cards
-                    // happen to be playable.
-                    ignition = Some((signal.cards.len(), signal.cards.len()));
-                }
-                _ => {}
-            }
-        }
-    }
-    ignition
-        .or(ejection)
-        .map(|(count, depth)| (count, depth, None))
-        .or_else(|| bluff.map(|(count, depth)| (count, depth, Some(bluff_cards))))
-        .or_else(|| clandestine.map(|(count, depth)| (count, depth, Some(clandestine_cards))))
-        .or_else(|| layered.map(|(count, depth)| (count, depth, None)))
-}
-
-fn view_distance_from_playable(source: &PlayerView, identity: Card) -> usize {
-    usize::from(identity.rank.number())
-        .saturating_sub(source.play_stacks[identity.suit.index()].len() + 1)
 }
 
 fn record_clued_superpositions(
@@ -1612,15 +1127,6 @@ fn record_new_connection(
     value.new_connections += 1;
 }
 
-fn card_owner(source: &PlayerView, card: CardId) -> Option<PlayerId> {
-    source
-        .hands
-        .iter()
-        .position(|hand| hand.iter().any(|candidate| candidate.id == card))
-        .and_then(|index| u8::try_from(index).ok())
-        .map(PlayerId::new)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1641,7 +1147,7 @@ mod tests {
         let team = compiled_baseline_team(&source, HGroupProfile::Max);
         let baselines = (0..4)
             .map(|player| {
-                projected_line_state(&source, team.projection(PlayerId::new(player)).unwrap())
+                projected_line_state(&source, &team.projection(PlayerId::new(player)).unwrap())
             })
             .collect::<Vec<_>>();
         let outcomes = [2, 3].map(|target| {
@@ -1695,7 +1201,7 @@ mod tests {
         let team = compiled_baseline_team(&source, HGroupProfile::Max);
         let baselines = (0..4)
             .map(|player| {
-                projected_line_state(&source, team.projection(PlayerId::new(player)).unwrap())
+                projected_line_state(&source, &team.projection(PlayerId::new(player)).unwrap())
             })
             .collect::<Vec<_>>();
         let outcomes = [Clue::Suit(Suit::Yellow), Clue::Rank(Rank::Five)].map(|clue| {
@@ -1801,7 +1307,7 @@ mod tests {
         let team = compiled_baseline_team(&source, HGroupProfile::Max);
         let baselines = (0..4)
             .map(|player| {
-                projected_line_state(&source, team.projection(PlayerId::new(player)).unwrap())
+                projected_line_state(&source, &team.projection(PlayerId::new(player)).unwrap())
             })
             .collect::<Vec<_>>();
         let outcome = clue_line_value(
@@ -1836,7 +1342,7 @@ mod tests {
         let team = compiled_baseline_team(&source, HGroupProfile::Max);
         let baselines = (0..4)
             .map(|player| {
-                projected_line_state(&source, team.projection(PlayerId::new(player)).unwrap())
+                projected_line_state(&source, &team.projection(PlayerId::new(player)).unwrap())
             })
             .collect::<Vec<_>>();
         for (target, rank, count, allowed) in [
@@ -1904,7 +1410,7 @@ mod tests {
         let team = compiled_baseline_team(&source, HGroupProfile::Max);
         let baselines = (0..4)
             .map(|player| {
-                projected_line_state(&source, team.projection(PlayerId::new(player)).unwrap())
+                projected_line_state(&source, &team.projection(PlayerId::new(player)).unwrap())
             })
             .collect::<Vec<_>>();
         for action in [

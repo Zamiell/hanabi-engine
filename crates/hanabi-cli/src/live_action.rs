@@ -87,11 +87,21 @@ fn decide(
     .map_err(CliError::AnalyzePosition)?;
     Ok(LiveDecisionResponse {
         action: HanabiLiveActionCommand::from_engine_action(table_id, analysis.planner.best_action),
-        logical_deductions: logical_deductions_json(analysis.information.deductions()),
-        convention_inferences: convention_inferences_json(
-            analysis.convention_analysis.inferences.clone(),
-        ),
-        planning: planning_json(table_id, &analysis, arguments.objective),
+        logical_deductions: if arguments.include_planning_details {
+            logical_deductions_json(analysis.information.deductions())
+        } else {
+            Value::Null
+        },
+        convention_inferences: if arguments.include_planning_details {
+            convention_inferences_json(analysis.convention_analysis.inferences.clone())
+        } else {
+            Value::Null
+        },
+        planning: if arguments.include_planning_details {
+            planning_json(table_id, &analysis, arguments.objective)
+        } else {
+            Value::Null
+        },
     })
 }
 
@@ -256,6 +266,7 @@ fn planner_details_json(
         "consideredWorlds": result.world_count.worlds(),
         "worldCountExact": result.world_count.is_exact(),
         "exactNodes": result.exact_nodes,
+        "exactStatus": format!("{:?}", result.exact_status),
         "comparisons": result.comparisons.iter().map(|comparison| json!({
             "left": HanabiLiveActionCommand::from_engine_action(table_id, comparison.left),
             "right": HanabiLiveActionCommand::from_engine_action(table_id, comparison.right),
@@ -267,7 +278,9 @@ fn planner_details_json(
         "rootActions": result.root_actions.iter().map(|evaluation| json!({
             "action": HanabiLiveActionCommand::from_engine_action(table_id, evaluation.action),
             "selected": evaluation.action == best_action,
-            "conventionPriority": evaluation.convention_priority,
+            "conventionPriority": evaluation.preference.within_category(),
+            "policyTier": format!("{:?}", evaluation.preference.policy_tier()),
+            "advancesTerminalPlan": evaluation.preference.advances_terminal_plan(),
             "preference": {
                 "terminalProgress": evaluation.preference.advances_terminal_plan(),
                 "withinCategory": evaluation.preference.within_category(),
@@ -286,20 +299,7 @@ fn planner_details_json(
                 "cluesSpent": evaluation.symbolic_line.clues_spent,
                 "cluesGained": evaluation.symbolic_line.clues_gained,
                 "strikes": evaluation.symbolic_line.strikes,
-                "positionValue": evaluation.symbolic_line.position_value.map(|value| json!({
-                    "score": value.score,
-                    "clues": value.clues,
-                    "exposedCriticalChops": value.exposed_critical_chops,
-                    "blockedCluedCards": value.blocked_clued_cards,
-                    "securedFuturePlays": value.secured_future_plays,
-                    "protectedBottomDeckRisks": value.protected_bottom_deck_risks,
-                    "visibleSuccessors": value.visible_successors,
-                    "finesseOpportunities": value.finesse_opportunities,
-                    "conditionalSuccessors": value.conditional_successors,
-                    "clueDemand": value.clue_demand,
-                    "savePressure": value.save_pressure,
-                    "foregoneTouchOpportunities": value.foregone_touch_opportunities,
-                })),
+                "positionValue": evaluation.symbolic_line.position_value.map(position_value_json),
                 "identityBranch": matches!(
                     evaluation.symbolic_line.stop_reason,
                     hanabi_search::SymbolicStopReason::UnknownIdentity
@@ -332,6 +332,23 @@ fn card_ids_json(cards: &[hanabi_core::CardId]) -> Vec<usize> {
     cards.iter().map(|card| card.index()).collect()
 }
 
+fn position_value_json(value: hanabi_search::ProjectedPositionValue) -> Value {
+    json!({
+        "score": value.score,
+        "clues": value.clues,
+        "exposedCriticalChops": value.exposed_critical_chops,
+        "blockedCluedCards": value.blocked_clued_cards,
+        "securedFuturePlays": value.secured_future_plays,
+        "protectedBottomDeckRisks": value.protected_bottom_deck_risks,
+        "visibleSuccessors": value.visible_successors,
+        "finesseOpportunities": value.finesse_opportunities,
+        "conditionalSuccessors": value.conditional_successors,
+        "clueDemand": value.clue_demand,
+        "savePressure": value.save_pressure,
+        "foregoneTouchOpportunities": value.foregone_touch_opportunities,
+    })
+}
+
 fn projected_step_json(table_id: u64, step: &hanabi_search::PlanStep) -> Value {
     json!({
         "turn": step.turn + 1, "actor": step.projected.actor.index(),
@@ -350,6 +367,12 @@ fn condition_json(condition: hanabi_search::HiddenCardCondition) -> Value {
 
 fn projection_evidence_json(table_id: u64, evidence: &hanabi_search::ProjectionEvidence) -> Value {
     json!({
+        "assumptions": evidence.assumptions.iter().map(|assumption| json!({
+            "turn": assumption.turn + 1,
+            "sourceObserver": assumption.source_observer.index(),
+            "modeledObserver": assumption.modeled_observer.index(),
+            "card": assumption.card.index(), "identity": identity_json(assumption.identity),
+        })).collect::<Vec<_>>(),
         "steps": evidence.steps.iter().map(|step| projected_step_json(table_id, step)).collect::<Vec<_>>(),
         "alternatives": evidence.alternatives.iter().map(|alternative| json!({
             "afterStep": alternative.after_step, "if": condition_json(alternative.condition),

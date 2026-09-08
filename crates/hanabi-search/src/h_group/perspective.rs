@@ -2,15 +2,14 @@ use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use hanabi_core::{
-    Card, CardId, Clue, ClueFacts, EndReason, GameStatus, MAX_CLUE_TOKENS, MAX_STRIKES,
-    ObservedCard, ObservedEvent, ObservedHistoryEntry, PlayerId, PlayerView, Rank,
+    Card, CardId, Clue, ClueFacts, GameStatus, ObservedCard, ObservedEvent, ObservedHistoryEntry,
+    PlayerId, PlayerView, Rank,
 };
 
 use crate::{HGroupProfile, LogicalDeductions, information_set::HandAssignmentVisit};
 
 use super::{
-    HGroupState, PerspectiveDepth, convention_card_inferences, identity_of, next_player,
-    replay_h_group_inner,
+    HGroupState, PerspectiveDepth, convention_card_inferences, identity_of, replay_h_group_inner,
 };
 
 /// Central observer projection used by all giver/recipient convention checks.
@@ -22,6 +21,14 @@ pub(super) struct PerspectiveProjector<'a> {
     source: &'a PlayerView,
     profile: HGroupProfile,
     source_known_cards: OnceLock<HashMap<CardId, Card>>,
+}
+
+/// A conditional reasoning input, deliberately not a `PlayerView`. The
+/// deductions below describe the stated assumptions, not simulator truth.
+pub(super) struct ConditionalObserverProjection {
+    pub(super) deductions: LogicalDeductions,
+    pub(super) replay: HGroupState,
+    pub(super) assumptions: Vec<super::PerspectiveAssumption>,
 }
 
 impl<'a> PerspectiveProjector<'a> {
@@ -38,6 +45,15 @@ impl<'a> PerspectiveProjector<'a> {
         observer: PlayerId,
         depth: PerspectiveDepth,
     ) -> Option<(LogicalDeductions, HGroupState)> {
+        let projected = self.project_with_evidence(observer, depth)?;
+        Some((projected.deductions, projected.replay))
+    }
+
+    pub(super) fn project_with_evidence(
+        &self,
+        observer: PlayerId,
+        depth: PerspectiveDepth,
+    ) -> Option<ConditionalObserverProjection> {
         let source_hand_is_resolved = self.source.hands[self.source.observer.index()]
             .iter()
             .all(|card| card.identity.is_some());
@@ -46,9 +62,8 @@ impl<'a> PerspectiveProjector<'a> {
             && !source_hand_is_resolved
         {
             self.source_known_cards.get_or_init(|| {
-                // Another player can see convention-resolved cards in the
-                // source observer's hand. Compute that observer-relative map
-                // once when this projector is reused for several recipients.
+                // Hypothesize what another player sees if our convention
+                // promises are right. This map must not become observed truth.
                 let mut source_observation = self.source.clone();
                 for card in &mut source_observation.hands[self.source.observer.index()] {
                     card.identity = None;
@@ -82,13 +97,23 @@ impl<'a> PerspectiveProjector<'a> {
             EMPTY.get_or_init(HashMap::new)
         };
         let mut view = self.source.clone();
+        let mut assumptions = Vec::new();
         view.observer = observer;
         for (player, hand) in view.hands.iter_mut().enumerate() {
             for card in hand {
                 card.identity = (player != observer.index())
                     .then(|| {
-                        identity_of(self.source, card.id)
-                            .or_else(|| source_known_cards.get(&card.id).copied())
+                        identity_of(self.source, card.id).or_else(|| {
+                            let identity = source_known_cards.get(&card.id).copied()?;
+                            assumptions.push(super::PerspectiveAssumption {
+                                turn: self.source.turn,
+                                source_observer: self.source.observer,
+                                modeled_observer: observer,
+                                card: card.id,
+                                identity,
+                            });
+                            Some(identity)
+                        })
                     })
                     .flatten();
             }
@@ -107,7 +132,11 @@ impl<'a> PerspectiveProjector<'a> {
         }
         let deductions = LogicalDeductions::new(view).ok()?;
         let replay = replay_h_group_inner(&deductions, self.profile, depth, false);
-        Some((deductions, replay))
+        Some(ConditionalObserverProjection {
+            deductions,
+            replay,
+            assumptions,
+        })
     }
 
     /// Projects an owned fully resolved sampled world without cloning it a
@@ -301,13 +330,12 @@ impl ProspectiveTransition {
             after.strikes = after.strikes.saturating_add(1);
         }
         if !play || successful && identity.rank == Rank::Five {
-            after.clue_tokens = after.clue_tokens.saturating_add(1).min(MAX_CLUE_TOKENS);
+            after.clue_tokens = hanabi_core::public_transition::refunded_clues(after.clue_tokens);
         }
-        if after.strikes >= MAX_STRIKES {
-            after.status = GameStatus::Finished(EndReason::TooManyStrikes);
-        } else if after.play_stacks.iter().map(Vec::len).sum::<usize>() == 25 {
-            after.status = GameStatus::Finished(EndReason::PerfectScore);
-        }
+        after.status = hanabi_core::public_transition::status_after_play(
+            after.play_stacks.iter().map(Vec::len).sum(),
+            after.strikes,
+        );
         if source.deck_size > 0 && after.status == GameStatus::InProgress {
             let drawn = CardId::new(50 - source.deck_size);
             after.hands[player.index()].push(ObservedCard {
@@ -336,30 +364,63 @@ impl ProspectiveTransition {
     }
 
     fn finish_turn(source: &PlayerView, after: &mut PlayerView, actor: PlayerId) {
-        if after.status == GameStatus::InProgress {
-            if let Some(remaining) = source.final_turns_remaining {
-                let remaining = remaining.saturating_sub(1);
-                after.final_turns_remaining = Some(remaining);
-                if remaining == 0 {
-                    after.status = GameStatus::Finished(EndReason::FinalRoundComplete);
-                }
-            }
-        }
+        (
+            after.current_player,
+            after.status,
+            after.final_turns_remaining,
+        ) = hanabi_core::public_transition::finish_public_turn(
+            actor,
+            u8::try_from(source.hands.len()).expect("standard player count"),
+            after.status,
+            source.final_turns_remaining,
+            after.final_turns_remaining,
+        );
         after.turn = source.turn.saturating_add(1);
-        after.current_player = if after.status == GameStatus::InProgress {
-            next_player(actor, source.hands.len())
-        } else {
-            actor
-        };
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use hanabi_core::{Action, FullState, PlayerId, Rank, standard_deck};
+    use hanabi_core::{
+        Action, EndReason, FullState, MAX_CLUE_TOKENS, PlayerId, Rank, standard_deck,
+    };
 
     use super::*;
     use crate::{HGroupLevel, HGroupProfile};
+
+    #[test]
+    fn reviewed_false_promise_is_labeled_as_a_projection_assumption() {
+        // p4v0s415, after move 6: Alice's g4 is promised as r1 until fixed.
+        // Bob may model that promise, but Alice has never observed its face.
+        let fixture = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        ))
+        .unwrap();
+        let state = fixture.state_at_turn(6).unwrap();
+        let source = state.view_for(PlayerId::new(0)).unwrap();
+        let snapshot = source.clone();
+        let projected = PerspectiveProjector::new(&source, HGroupProfile::Max)
+            .project_with_evidence(PlayerId::new(1), PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        let assumed = projected
+            .assumptions
+            .iter()
+            .find(|assumption| assumption.card == CardId::new(3))
+            .expect("the promised red 1 is a conditional identity");
+        assert_eq!(
+            assumed.identity,
+            Card::new(hanabi_core::Suit::Red, Rank::One)
+        );
+        assert_eq!(identity_of(&source, assumed.card), None);
+        assert_eq!(
+            identity_of(projected.deductions.view(), assumed.card),
+            Some(assumed.identity)
+        );
+        assert_eq!(
+            source, snapshot,
+            "projection cannot modify the legal source observation"
+        );
+    }
 
     #[test]
     fn prospective_transitions_match_the_simulator_through_the_final_round() {

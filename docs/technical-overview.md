@@ -39,9 +39,9 @@ Hidden simulator truth is never passed to an action-selection policy.
 
 Logical feasibility uses compact 25-bit identity sets and Hall-capacity
 matching. A canonical convention constraint graph intersects per-card domains
-and retains mutually exclusive branches for both ambiguous connections and
-relational `OneOf` claims. Demonstrated branches are resolved against public
-history before the graph reaches exact world enumeration.
+and lazily traverses factored, mutually exclusive alternatives for ambiguous
+connections and relational `OneOf` claims. Demonstrated branches are resolved
+against public history before the graph reaches exact world enumeration.
 
 ## Deterministic planning
 
@@ -53,12 +53,13 @@ cards, immediately playable touches, critical-card protection, and oldest-card
 protection. Identical input therefore produces identical output without a random
 seed or iteration budget.
 
-Hard convention constraints filter the action set. Every remaining root action
-is projected, regardless of its heuristic priority. Continuations follow the
-convention policy through strategic choices, leaving unknown draws blank. They
-stop at unresolved action identities or clue touches, unavailable perspectives,
-game completion, or a 32-action safety bound. These are conditional forecasts,
-not proofs that a line wins in every hidden world.
+Hard convention constraints filter the action set. Unless exact search proves
+the choice first, every remaining root action is projected, regardless of its
+heuristic priority. Continuations follow the convention policy through strategic
+choices, leaving unknown draws blank. They stop at unresolved action identities
+or clue touches, unavailable perspectives, game completion, or a 32-action
+safety bound. These are conditional forecasts, not proofs that a line wins in
+every hidden world.
 
 A 4 Charm forecast also stops at `UnknownInterpretation` if a blank card visible
 to the reactor could supply an external connector and reduce the required blind
@@ -138,7 +139,13 @@ first. If the node ceiling is reached, partial exact results are discarded and
 the symbolic result is used.
 
 Planning details report the `symbolic` or `exact` phase, bounded world count,
-exact node count, root priorities, and exact action values when available.
+exact node count (including abandoned work), `exactStatus`, structured root
+preferences, and exact action values when available. Exact proofs bypass unused
+symbolic continuations. The library's `analyze_position_with_control`
+additionally supports a request-wide cooperative deadline, cancellation token,
+and work limit; interruption returns an error rather than comparing incomplete
+candidates. See [architecture](architecture.md#bounded-requests) for the atomic
+compiler checkpoint limitation.
 
 ## Convention architecture
 
@@ -308,6 +315,14 @@ engine processes, and trace recording. A persistent `hanabi-engine live-session`
 process reconstructs a player-safe `PlayerView` from newline-delimited updates
 and returns one action. `live-action` is the one-shot equivalent used for
 testing and snapshot reproduction.
+
+Before connecting, the launcher validates `hanabi-engine protocol-info`: a JSON
+handshake naming `hanabi-live-session`, version 1, and required capabilities. It
+no longer infers compatibility from help text. Action submission validates table
+generation, turn, actor, terminal state, and duplicate status under the same
+lock as sending; updates cannot invalidate a result in between the check and
+send. This deliberately holds the lock through the bounded transport send.
+Action-only responses do not construct unused diagnostic JSON.
 
 Live play defaults to H-Group `max` and the `perfect-score` objective. A failed
 engine session is rebuilt from the complete scrubbed snapshot. Reconnection

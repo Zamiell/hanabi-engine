@@ -19,6 +19,20 @@ convention interpretation was correct.
 The expensive `h_group_max_self_play_200` benchmark remains separate from
 `check.sh`. Its scores measure performance, not convention correctness.
 
+`crates/hanabi-protocol/tests/fixtures/expert-manifest.json` is the
+action-parity contract: it records each seed's reviewed boundary, continuation
+provenance, convention profile, objective, and checks. The comparison helper
+consumes those values and prints the actual reviewed/total move counts. A
+catalog test requires exactly one entry per expert fixture. A generated
+continuation is never silently promoted to reviewed strategy by a passing
+legality check.
+
+Infrastructure contracts additionally cover cancellation without partial
+decisions, lazy constraint traversal, shared snapshot identity, versioned CLI
+handshakes, and atomic stale-result rejection in the live bridge. These are
+algorithm/protocol assertions, not new invented convention examples. CI includes
+a Rust 1.85 workspace build, independently of stable-toolchain linting.
+
 ## Pending continuation review: p4v0s415
 
 Move 35 is the user-approved purple clue to Alice; move 36 is the approved

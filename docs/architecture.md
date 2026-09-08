@@ -59,9 +59,20 @@ blank-card plan summary / exact endgame solver
 The giver, recipient, and hypothetical analyzer all use `PerspectiveProjector`.
 Projection depth is an enum, not a boolean, so a call site must explicitly
 request either observer-only interpretation or nested recipient modeling.
+`ConditionalObserverProjection` records convention-promised identities used to
+model another observer. These are assumptions, not observations; symbolic
+`ProjectionEvidence.assumptions` retains their turn, source, modeled observer,
+card, and identity. The original legal `PlayerView` is never modified.
 
 ## Boundary responsibilities
 
+- `history_reducer.rs` owns the mutable replay state and separate clue, play,
+  discard, and draw handlers. An event's immutable input and mutable outcome are
+  separate. Post-event recognizers still receive only `HGroupRuleEffects`;
+  moving the dispatcher does not change their execution order or authority.
+- `hanabi-core::public_transition` owns token refunds, play termination, and
+  final-round advancement shared by simulator and blank-card transitions. Their
+  identity visibility and draw representation remain separate.
 - `turn_context.rs` owns temporal access. A historical rule cannot ask for an
   identity revealed by a future play, discard, or draw. `ActorBeliefBefore`
   groups the acting player's pre-event discard knowledge so a visible card face
@@ -133,6 +144,19 @@ request either observer-only interpretation or nested recipient modeling.
   ordered connection alternatives are retained symbolically. A claim
   demonstrated by a revealed card excludes that identity from its surviving
   candidates instead of incorrectly forcing one of them to inherit it.
+  Independent disjunctions remain factored. World counting traverses them
+  lazily, pruning contradictory masks and stopping at the world/work limit; it
+  never materializes their Cartesian product. An empty factor means no
+  consistent world, not unrestricted knowledge.
+- `compiled_line.rs` compiles observer-relative named-line counts, playable
+  cards, positional anchors, and conflicting interpretations once per clue
+  classification. `line_state.rs` supplies the shared pure commitment read
+  model. Strategic scoring consumes this evidence instead of scanning signal
+  history and selecting a fresh interpretation.
+- Prospective and exact-observation caches return immutable shared handles.
+  Prospective cache identity is the complete source position plus profile, not
+  the address of a temporary `PlayerView`. Nested scopes restore their
+  predecessor; cache state is not persistent convention truth.
 - `outcome.rs` retains clue consequences before strategy converts genuine
   preferences to numeric ordering. Giver-visible team coverage and
   owner-relative promised-action and clued-card-superposition equivalence for
@@ -203,10 +227,11 @@ request either observer-only interpretation or nested recipient modeling.
   heuristic, not an exhaustive scheduling proof.
 - Planner comparisons retain named deciding dimensions, distinguish equivalent
   from incomparable endpoints, and expose preference cycles. Structured
-  `ActionPreference` survives the convention/planner boundary; encoded numeric
-  priorities remain diagnostics. Canonical action order, not enumeration order,
-  resolves final symbolic ties. Exact-search results retain their outcome
-  statistics rather than fabricating symbolic pairwise explanations.
+  `ActionPreference` is the single ordering value, including policy tier;
+  redundant scalar/tier fields have been removed. Diagnostics derive numeric
+  values from it. Canonical action order, not enumeration order, resolves final
+  symbolic ties. Exact-search results retain their outcome statistics rather
+  than fabricating symbolic pairwise explanations.
 - `frontier_value.rs` keeps conditional successor opportunities separate from
   secured plays. After a stack advances, it can test whether a compatible card
   already hidden in the planner's hand would let the next free teammate give an
@@ -231,7 +256,7 @@ request either observer-only interpretation or nested recipient modeling.
   Moves, Bluffs, advanced connections, special discards, Trash moves, late-game
   rules, and Extras. Observer knowledge derivation and candidate validation
   likewise live in focused `interpretation/` modules. `h_group.rs` retains
-  history reduction and connection scheduling.
+  connection scheduling; the event dispatcher lives in `history_reducer.rs`.
 - `transition.rs` is the production causal boundary. Every retained public event
   has an exact compact `ConventionTransitionDelta` of materialized card facts
   and owner-knowledge effects; rule proposals also retain exact card
@@ -246,6 +271,22 @@ request either observer-only interpretation or nested recipient modeling.
 Shared card and hand semantics live in focused modules. New rule families go in
 a focused recognition module and register with the one rule engine; they do not
 create a second interpretation path.
+
+## Bounded requests
+
+`analyze_position_with_control` shares one explicit `AnalysisControl` across
+compiler checkpoints, factored world counting/materialization, symbolic steps,
+and exact nodes. It supports cancellation, a deadline, and a work limit; the
+ordinary entry point uses unlimited request control plus the normal exact
+world/node limits. Request cancellation returns an error, never a decision based
+on only some candidates. A convention compilation and frontier assessment are
+currently atomic, so a deadline is cooperative, not a hard latency bound.
+
+Exact search runs before symbolic continuation work when its gate admits a
+proof. If exact search exhausts its own node/depth limit, all symbolic
+candidates are evaluated. `exact_status` and `exact_nodes` retain the abort
+reason and work already spent; an interrupted request is not an exhaustive
+proof.
 
 ## Invariants
 
@@ -287,6 +328,8 @@ change an observer's `EpistemicState`, and that candidate signal and hazard
 inspection share one prospective convention snapshot. They also run all expert
 replays through every observer, prove canonical focus domains cannot be widened
 by owner projection, and exercise generated legal histories.
+Module-name/source-string assertions have been removed: those did not prove
+behavior or enforce ownership. Exact website-link documentation checks remain.
 
 The `game-p4v0s415.json` expert replay regression runs these checks for every
 prefix and every observer. Temporal tests separately assert that future own-card

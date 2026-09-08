@@ -166,9 +166,6 @@ impl ExactActionValue {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlannerActionEvaluation {
     pub action: Action,
-    pub policy_tier: ConventionPolicyTier,
-    /// Legacy diagnostic encoding; ordering consumes `preference` instead.
-    pub convention_priority: i32,
     pub preference: crate::ActionPreference,
     pub certainly_playable: bool,
     pub certainly_useless: bool,
@@ -310,9 +307,22 @@ pub struct PlannerResult {
     /// configured exact-world limit.
     pub world_count: WorldCount,
     pub exact_nodes: u64,
+    /// Why exhaustive solving completed, was skipped, or was abandoned.
+    pub exact_status: ExactSearchStatus,
     pub root_actions: Vec<PlannerActionEvaluation>,
     /// Pairwise symbolic comparisons, retained rather than reconstructed by diagnostics.
     pub comparisons: Vec<CandidateComparison>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ExactSearchStatus {
+    TerminalProof,
+    Completed,
+    WorldLimit,
+    SingleCandidate,
+    PreflightLimit,
+    NodeLimit,
+    DepthLimit,
 }
 
 /// The strongest applicable dimension in a symbolic comparison.
@@ -387,6 +397,23 @@ pub(crate) fn plan_move_with_analysis(
     analysis: &ConventionAnalysis,
     config: PlannerConfig,
 ) -> Result<PlannerResult, PlannerError> {
+    plan_move_with_control(
+        information_set,
+        convention,
+        analysis,
+        config,
+        &crate::AnalysisControl::default(),
+    )
+}
+
+pub(crate) fn plan_move_with_control(
+    information_set: &InformationSet,
+    convention: SupportedConvention,
+    analysis: &ConventionAnalysis,
+    config: PlannerConfig,
+    control: &crate::AnalysisControl,
+) -> Result<PlannerResult, PlannerError> {
+    control.checkpoint().map_err(PlannerError::Stopped)?;
     let objective = config.objective;
     let deductions = information_set.deductions();
     let candidates = planning_candidates(analysis);
@@ -394,10 +421,16 @@ pub(crate) fn plan_move_with_analysis(
         return Err(PlannerError::NoCandidateActions);
     }
     let preferred = analysis.preferred_action;
-    let mut evaluations = symbolic_root_evaluations(deductions, convention, &candidates);
+    let mut evaluations = candidates
+        .iter()
+        .copied()
+        .map(|action| symbolic_evaluation(deductions, action))
+        .collect::<Vec<_>>();
 
     let belief = &analysis.belief_constraints;
-    let count = information_set.world_count_up_to(belief, config.exact_world_limit);
+    let count = information_set
+        .world_count_with_control(belief, config.exact_world_limit, control)
+        .map_err(PlannerError::Stopped)?;
     let counted_worlds = count.worlds();
     if count == WorldCount::Exact(0) {
         return Err(PlannerError::ConventionBeliefConflict);
@@ -420,13 +453,16 @@ pub(crate) fn plan_move_with_analysis(
             counted_worlds,
             &mut evaluations,
             preferred,
+            control,
         )?;
+        control.checkpoint().map_err(PlannerError::Stopped)?;
         if let Some((best_index, tested_actions)) = proof {
             return Ok(PlannerResult {
                 best_action: evaluations[best_index].action,
                 phase: PlannerPhase::Exact,
                 world_count: count,
                 exact_nodes: tested_actions,
+                exact_status: ExactSearchStatus::TerminalProof,
                 root_actions: evaluations,
                 comparisons: Vec::new(),
             });
@@ -444,71 +480,109 @@ pub(crate) fn plan_move_with_analysis(
             candidates.len(),
             config.exact_node_limit,
         );
+    let mut exact_nodes = 0;
+    let mut exact_status = if !count.is_exact() {
+        ExactSearchStatus::WorldLimit
+    } else if candidates.len() == 1 {
+        ExactSearchStatus::SingleCandidate
+    } else {
+        ExactSearchStatus::PreflightLimit
+    };
     if full_exact_search {
-        let worlds = information_set
-            .collect_worlds_after_count(
-                belief,
-                usize::try_from(counted_worlds).unwrap_or(usize::MAX),
-            )
-            .map_err(PlannerError::EnumerateWorlds)?;
-        let mut budget = ExactBudget {
-            used: 0,
-            limit: config.exact_node_limit,
-        };
-        match evaluate_exact_root(
-            &worlds,
+        let (best, nodes, status) = run_exact_search(
+            information_set,
             convention,
-            objective,
-            &evaluations,
-            preferred,
-            &mut budget,
-        ) {
-            Ok((values, proven)) => {
-                for (evaluation, value) in evaluations.iter_mut().zip(values) {
-                    evaluation.exact = value;
-                }
-                let best_index = proven
-                    .or_else(|| best_exact_index(&evaluations, objective, preferred))
-                    .ok_or(PlannerError::NoCandidateActions)?;
-                return Ok(PlannerResult {
-                    best_action: evaluations[best_index].action,
-                    phase: PlannerPhase::Exact,
-                    world_count: count,
-                    exact_nodes: budget.used,
-                    root_actions: evaluations,
-                    comparisons: Vec::new(),
-                });
-            }
-            Err(ExactAbort::BudgetExceeded | ExactAbort::DepthExceeded) => {}
-            Err(ExactAbort::InvalidCurrentPlayer | ExactAbort::NoCandidateActions) => {
-                return Err(PlannerError::NoCandidateActions);
-            }
-            Err(ExactAbort::InformationSet(error)) => {
-                return Err(PlannerError::InformationSet(error));
-            }
-            Err(ExactAbort::Rule(error)) => return Err(PlannerError::Rule(error)),
+            config,
+            analysis,
+            counted_worlds,
+            &mut evaluations,
+            control,
+        )?;
+        exact_nodes = nodes;
+        exact_status = status;
+        if let Some(index) = best {
+            return Ok(PlannerResult {
+                best_action: evaluations[index].action,
+                phase: PlannerPhase::Exact,
+                world_count: count,
+                exact_nodes,
+                exact_status,
+                root_actions: evaluations,
+                comparisons: Vec::new(),
+            });
         }
     }
 
-    symbolic_result(evaluations, preferred, count)
+    project_symbolic_roots(deductions, convention, &mut evaluations, control)?;
+    symbolic_result(evaluations, preferred, count, exact_nodes, exact_status)
 }
 
-fn symbolic_root_evaluations(
+fn run_exact_search(
+    information: &InformationSet,
+    convention: SupportedConvention,
+    config: PlannerConfig,
+    analysis: &ConventionAnalysis,
+    counted_worlds: u64,
+    evaluations: &mut [PlannerActionEvaluation],
+    control: &crate::AnalysisControl,
+) -> Result<(Option<usize>, u64, ExactSearchStatus), PlannerError> {
+    let worlds = information
+        .collect_worlds_after_count(
+            &analysis.belief_constraints,
+            usize::try_from(counted_worlds).unwrap_or(usize::MAX),
+            control,
+        )
+        .map_err(PlannerError::EnumerateWorlds)?;
+    let mut budget = ExactBudget {
+        used: 0,
+        limit: config.exact_node_limit,
+        control,
+    };
+    let status = match evaluate_exact_root(
+        &worlds,
+        convention,
+        config.objective,
+        evaluations,
+        analysis.preferred_action,
+        &mut budget,
+    ) {
+        Ok((values, proven)) => {
+            for (evaluation, value) in evaluations.iter_mut().zip(values) {
+                evaluation.exact = value;
+            }
+            let best = proven
+                .or_else(|| {
+                    best_exact_index(evaluations, config.objective, analysis.preferred_action)
+                })
+                .ok_or(PlannerError::NoCandidateActions)?;
+            return Ok((Some(best), budget.used, ExactSearchStatus::Completed));
+        }
+        Err(ExactAbort::BudgetExceeded) => ExactSearchStatus::NodeLimit,
+        Err(ExactAbort::DepthExceeded) => ExactSearchStatus::DepthLimit,
+        Err(ExactAbort::InvalidCurrentPlayer | ExactAbort::NoCandidateActions) => {
+            return Err(PlannerError::NoCandidateActions);
+        }
+        Err(ExactAbort::InformationSet(error)) => return Err(PlannerError::InformationSet(error)),
+        Err(ExactAbort::Rule(error)) => return Err(PlannerError::Rule(error)),
+        Err(ExactAbort::Stopped(error)) => return Err(PlannerError::Stopped(error)),
+    };
+    Ok((None, budget.used, status))
+}
+
+fn project_symbolic_roots(
     deductions: &LogicalDeductions,
     convention: SupportedConvention,
-    candidates: &[ConventionAction],
-) -> Vec<PlannerActionEvaluation> {
-    let mut evaluations = candidates
-        .iter()
-        .copied()
-        .map(|action| symbolic_evaluation(deductions, action))
-        .collect::<Vec<_>>();
+    evaluations: &mut [PlannerActionEvaluation],
+    control: &crate::AnalysisControl,
+) -> Result<(), PlannerError> {
     // Scores order candidates; they must not prevent testing their lines.
-    for evaluation in &mut evaluations {
-        (evaluation.symbolic_line, evaluation.projection) =
-            convention.project_symbolic_projection(deductions.view(), evaluation.action, 32);
+    for evaluation in evaluations {
+        control.checkpoint().map_err(PlannerError::Stopped)?;
+        (evaluation.symbolic_line, evaluation.projection) = convention
+            .project_symbolic_projection(deductions.view(), evaluation.action, 32, control)
+            .map_err(PlannerError::Stopped)?;
     }
-    evaluations
+    control.checkpoint().map_err(PlannerError::Stopped)
 }
 
 fn try_terminal_perfect_proof(
@@ -517,11 +591,13 @@ fn try_terminal_perfect_proof(
     world_count: u64,
     evaluations: &mut [PlannerActionEvaluation],
     preferred: Option<Action>,
+    control: &crate::AnalysisControl,
 ) -> Result<Option<(usize, u64)>, PlannerError> {
     let worlds = information_set
         .collect_worlds_after_count(
             &analysis.belief_constraints,
             usize::try_from(world_count).unwrap_or(usize::MAX),
+            control,
         )
         .map_err(PlannerError::EnumerateWorlds)?;
     prove_unanimous_terminal_perfect(&worlds, evaluations, preferred).map_err(PlannerError::Rule)
@@ -531,6 +607,8 @@ fn symbolic_result(
     evaluations: Vec<PlannerActionEvaluation>,
     preferred: Option<Action>,
     world_count: WorldCount,
+    exact_nodes: u64,
+    exact_status: ExactSearchStatus,
 ) -> Result<PlannerResult, PlannerError> {
     let (best_index, comparisons) = compare_symbolic_candidates(&evaluations, preferred);
     let best_index = best_index.ok_or(PlannerError::NoCandidateActions)?;
@@ -538,7 +616,8 @@ fn symbolic_result(
         best_action: evaluations[best_index].action,
         phase: PlannerPhase::Symbolic,
         world_count,
-        exact_nodes: 0,
+        exact_nodes,
+        exact_status,
         root_actions: evaluations,
         comparisons,
     })
@@ -559,9 +638,8 @@ fn planning_candidates(analysis: &ConventionAnalysis) -> Cow<'_, [ConventionActi
                     .copied()
                     .unwrap_or(ConventionAction {
                         action: forced,
-                        policy_tier: ConventionPolicyTier::Required,
-                        priority: 0,
-                        preference: crate::ActionPreference::new(0, false),
+                        preference: crate::ActionPreference::new(0, false)
+                            .with_policy_tier(ConventionPolicyTier::Required),
                         reason: crate::ConventionActionReason::Fallback,
                     }),
             ])
@@ -672,8 +750,6 @@ fn symbolic_evaluation(
         };
     PlannerActionEvaluation {
         action,
-        policy_tier: convention_action.policy_tier,
-        convention_priority: convention_action.priority,
         preference: convention_action.preference,
         certainly_playable: assessment.is_some_and(|value| value.certainly_playable),
         certainly_useless: assessment.is_some_and(|value| value.certainly_useless),
@@ -792,7 +868,7 @@ fn compare_endpoints(
     left: &PlannerActionEvaluation,
     right: &PlannerActionEvaluation,
 ) -> EndpointComparison {
-    if left.policy_tier != right.policy_tier
+    if left.preference.policy_tier() != right.preference.policy_tier()
         || left.preference.advances_terminal_plan() != right.preference.advances_terminal_plan()
         || left.symbolic_line.strikes != right.symbolic_line.strikes
         || left.symbolic_line.actions != right.symbolic_line.actions
@@ -848,7 +924,9 @@ fn symbolic_fallback_comparison(
         .zip(right.symbolic_line.position_value);
     let dimensions = [
         (
-            left.policy_tier.cmp(&right.policy_tier),
+            left.preference
+                .policy_tier()
+                .cmp(&right.preference.policy_tier()),
             ComparisonReason::PolicyTier,
         ),
         (
@@ -958,7 +1036,11 @@ fn best_exact_index(
                     objective,
                 );
             exact
-                .then_with(|| left.policy_tier.cmp(&right.policy_tier))
+                .then_with(|| {
+                    left.preference
+                        .policy_tier()
+                        .cmp(&right.preference.policy_tier())
+                })
                 .then_with(|| left.preference.cmp(&right.preference))
                 .then_with(|| {
                     (preferred == Some(left.action)).cmp(&(preferred == Some(right.action)))
@@ -983,7 +1065,7 @@ fn evaluate_exact_root(
     let mut ordered = candidates.iter().enumerate().collect::<Vec<_>>();
     ordered.sort_by_key(|(index, candidate)| {
         (
-            core::cmp::Reverse(candidate.policy_tier),
+            core::cmp::Reverse(candidate.preference.policy_tier()),
             core::cmp::Reverse(candidate.preference),
             core::cmp::Reverse(preferred == Some(candidate.action)),
             *index,
@@ -1079,7 +1161,9 @@ fn solve_observation_group(
     if let Some(value) = equivalent_terminal_actions(&view, worlds, objective)? {
         return Ok(value);
     }
+    budget.control.checkpoint().map_err(ExactAbort::Stopped)?;
     let analysis = analysis_cache.compile(view, convention)?;
+    budget.control.checkpoint().map_err(ExactAbort::Stopped)?;
     let preferred = analysis.preferred_action;
     let candidates = planning_candidates(&analysis);
     if candidates.is_empty() {
@@ -1093,12 +1177,12 @@ fn solve_observation_group(
     let mut ordered = candidates.iter().copied().enumerate().collect::<Vec<_>>();
     ordered.sort_by_key(|(index, candidate)| {
         (
-            core::cmp::Reverse(candidate.priority),
+            core::cmp::Reverse(candidate.preference),
             core::cmp::Reverse(preferred == Some(candidate.action)),
             *index,
         )
     });
-    let mut best: Option<(ExactActionValue, i32, bool, usize)> = None;
+    let mut best: Option<(ExactActionValue, crate::ActionPreference, bool, usize)> = None;
     for (index, candidate) in ordered {
         let action = candidate.action;
         budget.consume()?;
@@ -1116,7 +1200,7 @@ fn solve_observation_group(
             analysis_cache,
             depth + 1,
         )?;
-        let priority = candidate.priority;
+        let priority = candidate.preference;
         let is_preferred = preferred == Some(action);
         let replace = best.as_ref().is_none_or(
             |(current, current_priority, current_preferred, current_index)| {
@@ -1238,7 +1322,7 @@ fn final_round_max_plays(world: &FullState, heights: [u8; 5], actor: usize, rema
 /// expensive history reduction.
 #[derive(Default)]
 struct ConventionAnalysisCache {
-    entries: HashMap<PlayerView, ConventionAnalysis>,
+    entries: HashMap<PlayerView, std::rc::Rc<ConventionAnalysis>>,
     #[cfg(test)]
     compilations: usize,
 }
@@ -1248,13 +1332,13 @@ impl ConventionAnalysisCache {
         &mut self,
         view: PlayerView,
         convention: SupportedConvention,
-    ) -> Result<ConventionAnalysis, ExactAbort> {
+    ) -> Result<std::rc::Rc<ConventionAnalysis>, ExactAbort> {
         if let Some(cached) = self.entries.get(&view) {
             return Ok(cached.clone());
         }
         let deductions =
             LogicalDeductions::new(view.clone()).map_err(ExactAbort::InformationSet)?;
-        let compiled = convention.analyze(&deductions);
+        let compiled = std::rc::Rc::new(convention.analyze(&deductions));
         self.entries.insert(view, compiled.clone());
         #[cfg(test)]
         {
@@ -1280,13 +1364,15 @@ fn terminal_value(state: &FullState) -> ExactActionValue {
     }
 }
 
-struct ExactBudget {
+struct ExactBudget<'a> {
     used: u64,
     limit: u64,
+    control: &'a crate::AnalysisControl,
 }
 
-impl ExactBudget {
+impl ExactBudget<'_> {
     fn consume(&mut self) -> Result<(), ExactAbort> {
+        self.control.checkpoint().map_err(ExactAbort::Stopped)?;
         if self.used >= self.limit {
             return Err(ExactAbort::BudgetExceeded);
         }
@@ -1297,6 +1383,7 @@ impl ExactBudget {
 
 #[derive(Debug)]
 enum ExactAbort {
+    Stopped(crate::AnalysisStopped),
     BudgetExceeded,
     DepthExceeded,
     InvalidCurrentPlayer,
@@ -1308,6 +1395,7 @@ enum ExactAbort {
 /// Failure returned by deterministic planning.
 #[derive(Debug, PartialEq)]
 pub enum PlannerError {
+    Stopped(crate::AnalysisStopped),
     ConventionBeliefConflict,
     NoCandidateActions,
     EnumerateWorlds(EnumerateWorldsError),
@@ -1318,6 +1406,7 @@ pub enum PlannerError {
 impl fmt::Display for PlannerError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Stopped(error) => error.fmt(formatter),
             Self::ConventionBeliefConflict => formatter.write_str(
                 "convention identity constraints contradict the logical information set",
             ),
@@ -1503,7 +1592,6 @@ mod tests {
         // Algorithmic ordering check, not a changed replay expectation:
         // on a true priority tie the opportunity may decide the result.
         let mut tied = [blue.clone(), ones.clone()];
-        tied[1].convention_priority = tied[0].convention_priority;
         tied[1].preference = tied[0].preference;
         assert_eq!(best_symbolic_index(&tied, None), Some(1));
         tied[1].symbolic_line.position_value.as_mut().unwrap().clues -= 1;
@@ -1540,9 +1628,6 @@ mod tests {
             let mut reordered = result.root_actions.clone();
             reordered.rotate_left(offset);
             reordered.reverse();
-            for (index, root) in reordered.iter_mut().enumerate() {
-                root.convention_priority = if index % 2 == 0 { i32::MIN } else { i32::MAX };
-            }
             let (index, _) = compare_symbolic_candidates(&reordered, None);
             assert_eq!(reordered[index.unwrap()].action, selected_action);
         }
@@ -1572,10 +1657,8 @@ mod tests {
                 .any(|root| root.symbolic_line.actions > 1)
         );
         let mut alternatives = vec![result.root_actions[0].clone(); 2];
-        alternatives[0].convention_priority = 1000;
         alternatives[0].preference = crate::ActionPreference::new(1000, false);
         alternatives[0].symbolic_line.strikes = 1;
-        alternatives[1].convention_priority = 1;
         alternatives[1].preference = crate::ActionPreference::new(1, false);
         alternatives[1].symbolic_line.strikes = 0;
         assert_eq!(
@@ -1615,16 +1698,13 @@ mod tests {
             actions: vec![
                 ConventionAction {
                     action: first,
-                    policy_tier: ConventionPolicyTier::Admitted,
-                    priority: 900,
                     preference: crate::ActionPreference::new(900, false),
                     reason: crate::ConventionActionReason::PromisedPlay,
                 },
                 ConventionAction {
                     action: forced,
-                    policy_tier: ConventionPolicyTier::Required,
-                    priority: 400,
-                    preference: crate::ActionPreference::new(400, false),
+                    preference: crate::ActionPreference::new(400, false)
+                        .with_policy_tier(ConventionPolicyTier::Required),
                     reason: crate::ConventionActionReason::PromisedPlay,
                 },
             ],
@@ -1636,9 +1716,8 @@ mod tests {
             planning_candidates(&analysis).as_ref(),
             &[ConventionAction {
                 action: forced,
-                policy_tier: ConventionPolicyTier::Required,
-                priority: 400,
-                preference: crate::ActionPreference::new(400, false),
+                preference: crate::ActionPreference::new(400, false)
+                    .with_policy_tier(ConventionPolicyTier::Required),
                 reason: crate::ConventionActionReason::PromisedPlay,
             }]
         );
@@ -1651,15 +1730,12 @@ mod tests {
         let legal = deductions.view().legal_actions();
         let low_required = ConventionAction {
             action: legal[0],
-            policy_tier: ConventionPolicyTier::Required,
-            priority: 1,
-            preference: crate::ActionPreference::new(1, false),
+            preference: crate::ActionPreference::new(1, false)
+                .with_policy_tier(ConventionPolicyTier::Required),
             reason: crate::ConventionActionReason::PromisedPlay,
         };
         let high_admitted = ConventionAction {
             action: legal[1],
-            policy_tier: ConventionPolicyTier::Admitted,
-            priority: 10_000,
             preference: crate::ActionPreference::new(10_000, false),
             reason: crate::ConventionActionReason::OtherClue,
         };
@@ -1749,6 +1825,7 @@ mod tests {
                 .collect_worlds_after_count(
                     &crate::BeliefConstraints::default(),
                     usize::try_from(result.world_count.worlds()).unwrap(),
+                    &crate::AnalysisControl::default(),
                 )
                 .unwrap();
             assert_eq!(

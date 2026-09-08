@@ -355,7 +355,7 @@ impl FullState {
         self.validate_action(action)?;
 
         let actor = self.current_player;
-        let deck_was_empty = self.draw_pile.is_empty();
+        let previous_remaining = self.final_turns_remaining;
         let mut drawn = None;
 
         match action {
@@ -369,7 +369,8 @@ impl FullState {
                 if successful {
                     self.play_stacks[identity.suit.index()].push(card);
                     if identity.rank == Rank::Five {
-                        self.clue_tokens = self.clue_tokens.saturating_add(1).min(MAX_CLUE_TOKENS);
+                        self.clue_tokens =
+                            crate::public_transition::refunded_clues(self.clue_tokens);
                     }
                 } else {
                     self.discard_pile.push(card);
@@ -382,18 +383,18 @@ impl FullState {
                     successful,
                 });
 
-                if self.strikes == MAX_STRIKES {
-                    self.status = GameStatus::Finished(EndReason::TooManyStrikes);
-                } else if self.score() == 25 {
-                    self.status = GameStatus::Finished(EndReason::PerfectScore);
-                } else {
+                self.status = crate::public_transition::status_after_play(
+                    usize::from(self.score()),
+                    self.strikes,
+                );
+                if self.status == GameStatus::InProgress {
                     drawn = self.draw_for(actor);
                 }
             }
             Action::Discard(card) => {
                 self.remove_from_current_hand(card);
                 self.discard_pile.push(card);
-                self.clue_tokens += 1;
+                self.clue_tokens = crate::public_transition::refunded_clues(self.clue_tokens);
                 self.push_event(GameEvent::Discarded {
                     player: actor,
                     card,
@@ -402,25 +403,15 @@ impl FullState {
             }
         }
 
-        if self.status == GameStatus::InProgress && deck_was_empty {
-            let remaining = self
-                .final_turns_remaining
-                .as_mut()
-                .expect("an empty deck starts the final round");
-            *remaining -= 1;
-            if *remaining == 0 {
-                self.status = GameStatus::Finished(EndReason::FinalRoundComplete);
-            }
-        }
-
-        self.turn += 1;
-        if self.status == GameStatus::InProgress {
-            let next = (actor.index() + 1) % self.hands.len();
-            self.current_player = PlayerId::new(
-                next.try_into()
-                    .expect("standard Hanabi has at most five players"),
+        (self.current_player, self.status, self.final_turns_remaining) =
+            crate::public_transition::finish_public_turn(
+                actor,
+                self.num_players(),
+                self.status,
+                previous_remaining,
+                self.final_turns_remaining,
             );
-        }
+        self.turn += 1;
 
         debug_assert!(self.validate().is_ok());
         Ok(TurnResult {

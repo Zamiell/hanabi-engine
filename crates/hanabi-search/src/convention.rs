@@ -169,11 +169,7 @@ pub enum ConventionInferences {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ConventionAction {
     pub action: hanabi_core::Action,
-    /// Hard semantic tier. Numeric priority is only a tie-break within this
-    /// tier and cannot outweigh a convention-required action.
-    pub policy_tier: ConventionPolicyTier,
-    pub priority: i32,
-    /// The compiled preference is authoritative; priority is a diagnostic encoding.
+    /// Single authoritative ordering value, including the hard policy tier.
     pub preference: crate::ActionPreference,
     pub reason: ConventionActionReason,
 }
@@ -313,8 +309,6 @@ impl SupportedConvention {
                     .into_iter()
                     .map(|action| ConventionAction {
                         action,
-                        policy_tier: ConventionPolicyTier::Admitted,
-                        priority: 100,
                         preference: crate::ActionPreference::new(100, false),
                         reason: ConventionActionReason::ConventionFree,
                     })
@@ -326,22 +320,9 @@ impl SupportedConvention {
             },
             Self::HGroup(profile) => {
                 let decision = crate::h_group::analyze_h_group_convention(deductions, profile);
-                let actions = decision
-                    .actions
-                    .into_iter()
-                    .map(
-                        |(action, policy_tier, priority, preference, reason)| ConventionAction {
-                            action,
-                            policy_tier,
-                            priority,
-                            preference,
-                            reason,
-                        },
-                    )
-                    .collect();
                 ConventionAnalysis {
                     inferences: ConventionInferences::HGroup(Box::new(decision.inferences)),
-                    actions,
+                    actions: decision.actions,
                     rejected_actions: decision.rejected_actions,
                     preferred_action: decision.preferred,
                     forced_action: decision.forced,
@@ -356,14 +337,16 @@ impl SupportedConvention {
         view: &hanabi_core::PlayerView,
         root: hanabi_core::Action,
         limit: u8,
-    ) -> (crate::SymbolicLineOutcome, crate::ProjectionEvidence) {
+        control: &crate::AnalysisControl,
+    ) -> Result<(crate::SymbolicLineOutcome, crate::ProjectionEvidence), crate::AnalysisStopped>
+    {
         match self {
-            Self::None => (
+            Self::None => Ok((
                 crate::SymbolicLineOutcome::default(),
                 crate::ProjectionEvidence::default(),
-            ),
+            )),
             Self::HGroup(profile) => {
-                crate::h_group::project_h_group_projection(view, profile, root, limit)
+                crate::h_group::project_h_group_projection(view, profile, root, limit, control)
             }
         }
     }

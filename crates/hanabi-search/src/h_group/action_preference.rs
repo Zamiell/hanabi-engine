@@ -23,6 +23,16 @@ impl ActionPreference {
         self.policy_tier = policy_tier;
     }
 
+    pub(crate) const fn with_policy_tier(mut self, tier: ConventionPolicyTier) -> Self {
+        self.policy_tier = tier;
+        self
+    }
+
+    #[must_use]
+    pub const fn policy_tier(self) -> ConventionPolicyTier {
+        self.policy_tier
+    }
+
     #[must_use]
     pub const fn advances_terminal_plan(self) -> bool {
         self.advances_terminal_plan

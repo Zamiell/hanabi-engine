@@ -1,0 +1,42 @@
+[
+  {
+    "seed": "p4v0s415",
+    "reviewedThrough": 36,
+    "continuation": "engine-generated",
+    "profile": "max",
+    "objective": "perfect-score",
+    "checks": ["legality", "reviewed-action-parity"]
+  },
+  {
+    "seed": "p4v0s9",
+    "reviewedThrough": null,
+    "continuation": "human-reviewed",
+    "profile": "max",
+    "objective": "perfect-score",
+    "checks": ["legality", "reviewed-action-parity"]
+  },
+  {
+    "seed": "p4v0s2",
+    "reviewedThrough": null,
+    "continuation": "human-reviewed",
+    "profile": "max",
+    "objective": "perfect-score",
+    "checks": ["legality", "reviewed-action-parity"]
+  },
+  {
+    "seed": "p4v0s3",
+    "reviewedThrough": null,
+    "continuation": "human-reviewed",
+    "profile": "max",
+    "objective": "perfect-score",
+    "checks": ["legality", "reviewed-action-parity"]
+  },
+  {
+    "seed": "p4v0s1",
+    "reviewedThrough": null,
+    "continuation": "human-reviewed",
+    "profile": "max",
+    "objective": "perfect-score",
+    "checks": ["legality", "reviewed-action-parity"]
+  }
+]

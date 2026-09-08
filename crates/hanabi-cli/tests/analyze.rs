@@ -41,6 +41,29 @@ fn live_snapshot() -> serde_json::Value {
     })
 }
 
+#[test]
+fn protocol_handshake_is_versioned_json_not_help_text() {
+    let output = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
+        .arg("protocol-info")
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let info: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(info["protocol"], "hanabi-live-session");
+    assert_eq!(info["version"], 1);
+    let capabilities = info["capabilities"].as_array().unwrap();
+    assert!(capabilities.contains(&serde_json::json!("planning-details")));
+    assert!(capabilities.contains(&serde_json::json!("exact-budgets")));
+    assert!(
+        !Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
+            .args(["protocol-info", "unexpected"])
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+}
+
 fn traced_opening_snapshot() -> serde_json::Value {
     serde_json::json!({
         "tableID": 39,

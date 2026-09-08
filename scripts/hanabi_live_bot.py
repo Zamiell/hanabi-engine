@@ -532,15 +532,7 @@ class HanabiEngineBot:
             if not isinstance(action_value, dict):
                 raise EngineProcessError("engine response action is not a JSON object")
             action = action_value
-            with self.lock:
-                game = self.games.get(table_id)
-                current = (
-                    game is not None
-                    and game.generation == generation
-                    and game.turn == turn
-                    and game.current_player == int(game.our_player_index)
-                    and not game.terminal
-                )
+            current = self._send_current_action(table_id, turn, generation, action)
             if not current:
                 log(f"Discarding stale engine result for table {table_id}, turn {turn}.")
                 if trace_context is not None:
@@ -551,10 +543,6 @@ class HanabiEngineBot:
                         action=action,
                     )
                 return
-            if int(action.get("tableID", -1)) != table_id:
-                raise EngineProcessError("engine response targets the wrong table")
-            log(f"Table {table_id}, turn {turn}: sending {action}")
-            self.send("action", action)
             if trace_context is not None:
                 self._trace(
                     "finish_decision",
@@ -562,10 +550,6 @@ class HanabiEngineBot:
                     "sent",
                     action=action,
                 )
-            with self.lock:
-                game = self.games.get(table_id)
-                if game is not None and game.generation == generation:
-                    game.last_decided_turn = turn
         except (EngineProcessError, OSError, TypeError, ValueError) as error:
             log(f"Engine failed on table {table_id}, turn {turn}: {error}")
             if trace_context is not None:
@@ -580,6 +564,29 @@ class HanabiEngineBot:
                 game = self.games.get(table_id)
                 if game is not None and game.generation == generation:
                     game.in_flight = False
+
+    def _send_current_action(
+        self, table_id: int, turn: int, generation: int, action: dict[str, Any]
+    ) -> bool:
+        """Serialize validation and submission against session/level/turn updates."""
+        with self.lock:
+            game = self.games.get(table_id)
+            if (
+                game is None
+                or game.generation != generation
+                or game.turn != turn
+                or game.current_player != game.our_player_index
+                or game.terminal
+                or game.last_decided_turn == turn
+                or self.stop_event.is_set()
+            ):
+                return False
+            if int(action.get("tableID", -1)) != table_id:
+                raise EngineProcessError("engine response targets the wrong table")
+            log(f"Table {table_id}, turn {turn}: sending {action}")
+            self.send("action", action)
+            game.last_decided_turn = turn
+            return True
 
     def _request_action(
         self,

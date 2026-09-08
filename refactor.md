@@ -29,6 +29,79 @@ Commit hashes refer to this repository's Git history.
 - Caches are scoped to one immutable position or exact solve. They may reuse a
   pure semantic result, but may not become a second mutable convention state.
 
+## 2026-09-08: completing the repository audit
+
+### Why
+
+The September 7 boundaries were incomplete: exact descendants still used a
+separate scalar priority, strategic scoring reconstructed named interpretations,
+caches copied large results and matched temporary addresses, and convention
+constraints expanded all combinations before applying a world limit. The live
+bridge also needed stronger compatibility and submission contracts.
+
+### Changes
+
+- `ActionPreference` now owns all action ordering, including policy tier.
+  Removed redundant fields and the five-element decision tuple; replaced the
+  score-800 connection escape with explicit permissible-response checks.
+- `compiled_line.rs` owns cached observer-relative line interpretation evidence;
+  `line_state.rs` is the shared pure commitment read model. Strategic scoring no
+  longer inspects signal history to select another interpretation.
+- An owned `ReplayReducer` dispatches clue, play, discard and draw handlers,
+  separating immutable event input from outcomes. It preserves post-event rule
+  order and the restricted `HGroupRuleEffects` capability.
+- Core public-transition functions now share refunds, termination, and final
+  round clocks between real and symbolic transitions, without sharing hidden
+  identities or changing blank draws.
+- Cross-observer promise assumptions have a distinct typed representation and
+  appear in symbolic evidence. A reviewed false-promise regression checks that
+  the legal source observation is untouched.
+- World constraints remain factored and are traversed lazily. Prospective and
+  exact-observation caches return immutable shared handles; prospective cache
+  matching uses source position and profile instead of an address.
+- Request-wide cooperative cancellation/deadline/work control covers compiler
+  checkpoints, world enumeration, projection steps and exact nodes. It returns
+  no partial decision. Exact proofs precede unused symbolic work; abandoned
+  exact attempts retain their reason and nodes consumed before fallback.
+- Added a fixture review manifest and coverage/catalog checks. Moved the
+  documentation inventory behind `cfg(test)`. Removed source-spelling tests
+  while retaining behavioral, temporal, perspective and website-link contracts.
+- Added a versioned CLI handshake, lazy diagnostic JSON, atomic stale-result
+  validation/send, and protocol/concurrency regressions. Rust 1.85 CI exposed
+  two incompatible let-chains, which were rewritten and checked locally.
+
+### Preserve and re-audit
+
+These changes extend the August 27–29 and September 3/7 designs. They do not
+replace the fact journal, owner compiler, connection manager or conditional
+planner with independent knowledge stores. No fixture actions changed.
+
+Convention compilation and frontier assessment remain atomic work units:
+cancellation is cooperative, not a hard latency guarantee. Assumption metadata
+is not an exhaustive proof. The clue handler still contains substantial
+convention-specific ordering; future decomposition must preserve its reviewed
+semantics rather than mechanically reorder recognizers.
+
+The earlier validation statement overstated coverage: **four replays have full
+action parity; p4v0s415 has only its first 36 actions reviewed**. Its generated
+suffix is checked for legality, not optimality. The manifest makes this
+distinction executable. The coverage failure recorded below was already fixed in
+`cb25877`, before this audit implementation.
+
+### Measurement and validation
+
+The isolated reviewed blue-2 opportunity test took 25.99s before the pass,
+25.37s after shared prospective handles, and 25.47s after content-based
+matching. Final samples were 25.62s, 25.50s and 25.56s. This does **not**
+establish a meaningful speedup; the pass primarily reduces structural risk and
+pathological allocation. A new test traverses 40 binary factors without
+allocating their trillion-entry eager product. Timings exclude compilation.
+
+Final `scripts/check.sh` passed 329 Rust tests and 21 Python tests, with zero
+Hawk findings, in 4m21s (baseline: 4m16s). All declared replay review boundaries
+agree, and the separate Rust 1.85 workspace check passes. Details are recorded
+in `docs/audit-implementation.md`.
+
 ## 2026-09-07: retained planning evidence and explicit comparison contracts
 
 ### Why
@@ -71,8 +144,9 @@ are unchanged.
 
 ### Validation
 
-All five expert replays still agree on every action. The non-fail-fast Rust run
-completed with 326 passing, one failing, and 28 skipped tests. The existing
+Action-parity checks passed for four complete replays and p4v0s415's reviewed
+36-move prefix (see the correction above). The non-fail-fast Rust run completed
+with 326 passing, one failing, and 28 skipped tests. The existing
 `second_replay_move_thirty_one_can_defer_to_a_more_efficient_clue` coverage
 assertion remains at one versus the expected two; neither its expectation nor
 the fixture was weakened. This also prevents `scripts/check.sh` from succeeding.

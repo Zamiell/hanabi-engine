@@ -884,8 +884,6 @@ fn analyze_h_group_actions_from_analysis(
             CompiledHGroupAction {
                 action,
                 kind: classify_h_group_action(action, inferred, clue),
-                policy_tier: ConventionPolicyTier::Admitted,
-                priority,
                 preference: ActionPreference::new(
                     terminal_progress.map_or(priority, TerminalPlanProgress::within_category),
                     terminal_progress.is_some(),
@@ -916,14 +914,14 @@ fn analyze_h_group_actions_from_analysis(
         .filter(|candidate| constraints.allows(candidate.action))
         .collect::<Vec<_>>();
     for candidate in &mut analyzed {
-        candidate.policy_tier = if constraints.kind().is_some() {
+        let policy_tier = if constraints.kind().is_some() {
             ConventionPolicyTier::Required
         } else if candidate.kind == HGroupActionKind::Fallback {
             ConventionPolicyTier::Fallback
         } else {
             ConventionPolicyTier::Admitted
         };
-        candidate.preference.set_policy_tier(candidate.policy_tier);
+        candidate.preference.set_policy_tier(policy_tier);
     }
     let (ranked_preferred, _constraint_reason) = derive_preferred_action(
         deductions,
@@ -963,13 +961,7 @@ fn analyze_h_group_actions_from_analysis(
 /// inference pass.
 pub(crate) struct HGroupConventionDecision {
     pub(crate) inferences: HGroupInferences,
-    pub(crate) actions: Vec<(
-        Action,
-        ConventionPolicyTier,
-        i32,
-        ActionPreference,
-        ConventionActionReason,
-    )>,
+    pub(crate) actions: Vec<crate::ConventionAction>,
     pub(crate) rejected_actions: Vec<RejectedConventionAction>,
     pub(crate) preferred: Option<Action>,
     pub(crate) forced: Option<Action>,
@@ -996,14 +988,10 @@ pub(crate) fn analyze_h_group_convention(
     let ranked = actions
         .actions
         .iter()
-        .map(|candidate| {
-            (
-                candidate.action,
-                candidate.policy_tier,
-                candidate.priority,
-                candidate.preference,
-                convention_action_reason(candidate.kind),
-            )
+        .map(|candidate| crate::ConventionAction {
+            action: candidate.action,
+            preference: candidate.preference,
+            reason: convention_action_reason(candidate.kind),
         })
         .collect();
     let preferred = select_h_group_action_from_analysis(deductions, profile, &analysis);
@@ -1147,7 +1135,14 @@ fn derive_convention_constraints(
             analyzed
                 .iter()
                 .filter(|candidate| {
-                    candidate.kind == HGroupActionKind::Connection || candidate.priority >= 800
+                    candidate.kind == HGroupActionKind::Connection
+                        || connection_response_allowed(
+                            view,
+                            inferred,
+                            profile,
+                            clues,
+                            candidate.action,
+                        )
                 })
                 .map(|candidate| candidate.action),
         );
@@ -1619,6 +1614,33 @@ fn endgame_progress(
     ))
 }
 
+/// Semantic interruptions of a pending connection. Admissibility must never
+/// be inferred from the magnitude of a heuristic score.
+fn connection_response_allowed(
+    view: &PlayerView,
+    inferred: &HGroupInferences,
+    profile: HGroupProfile,
+    clues: &[CompiledClueAction],
+    action: Action,
+) -> bool {
+    if let Action::Play(card) = action {
+        if inferred.cards.iter().any(|inference| {
+            inference.card == card
+                && inference.play_obligation == Some(HGroupPlayObligation::Forced)
+        }) {
+            return true;
+        }
+    }
+    inferred.connection.is_some_and(|connection| {
+        paused_priority_play(view, inferred, profile, connection)
+            .is_some_and(|card| action == Action::Play(card))
+            || clues.iter().any(|candidate| {
+                candidate.action == action
+                    && clue_can_defer_connection(view, inferred, profile, connection, candidate)
+            })
+    })
+}
+
 fn raw_h_group_action_priority(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
@@ -1626,13 +1648,13 @@ fn raw_h_group_action_priority(
     action: Action,
 ) -> i32 {
     let inferred = &analysis.inferences;
-    if let Action::Play(card) = action
-        && inferred.cards.iter().any(|inference| {
+    if let Action::Play(card) = action {
+        if inferred.cards.iter().any(|inference| {
             inference.card == card
                 && inference.play_obligation == Some(HGroupPlayObligation::Forced)
-        })
-    {
-        return 900;
+        }) {
+            return 900;
+        }
     }
     if inferred
         .connection

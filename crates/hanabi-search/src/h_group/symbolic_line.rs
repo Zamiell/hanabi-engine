@@ -26,22 +26,42 @@ pub(crate) fn project_h_group_projection(
     profile: HGroupProfile,
     root: Action,
     limit: u8,
-) -> (SymbolicLineOutcome, super::ProjectionEvidence) {
-    let plan = project_h_group_plan(source, profile, root, limit);
-    (plan.summarize(), plan.into_evidence())
+    control: &crate::AnalysisControl,
+) -> Result<(SymbolicLineOutcome, super::ProjectionEvidence), crate::AnalysisStopped> {
+    let plan = project_h_group_plan_with_control(source, profile, root, limit, control)?;
+    Ok((plan.summarize(), plan.into_evidence()))
 }
 
+#[cfg(test)]
 fn project_h_group_plan(
     source: &PlayerView,
     profile: HGroupProfile,
     root: Action,
     limit: u8,
 ) -> ConditionalPlan {
+    project_h_group_plan_with_control(
+        source,
+        profile,
+        root,
+        limit,
+        &crate::AnalysisControl::default(),
+    )
+    .expect("unlimited analysis completes")
+}
+
+fn project_h_group_plan_with_control(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    root: Action,
+    limit: u8,
+    control: &crate::AnalysisControl,
+) -> Result<ConditionalPlan, crate::AnalysisStopped> {
     let mut plan = ConditionalPlan::new(source.clue_tokens);
     let mut public = source.clone();
     let mut action = Some(root);
 
     while let Some(current) = action {
+        control.checkpoint()?;
         if public.status != hanabi_core::GameStatus::InProgress {
             plan.stop_at(PlanFrontier::Terminal);
             break;
@@ -51,12 +71,15 @@ fn project_h_group_plan(
             break;
         }
         let actor = public.current_player;
-        let Some((actor_deductions, actor_replay)) = PerspectiveProjector::new(&public, profile)
-            .project(actor, PerspectiveDepth::NestedRecipients)
+        let Some(projected) = PerspectiveProjector::new(&public, profile)
+            .project_with_evidence(actor, PerspectiveDepth::NestedRecipients)
         else {
             plan.stop_at(PlanFrontier::ProjectionUnavailable);
             break;
         };
+        plan.record_assumptions(&projected.assumptions);
+        let actor_deductions = projected.deductions;
+        let actor_replay = projected.replay;
         let actor_inferences = infer_h_group_from_replay(&actor_deductions, actor_replay, profile);
         plan.record_window(super::ActionWindow::from_inferences(
             actor_deductions.view(),
@@ -107,17 +130,19 @@ fn project_h_group_plan(
             break;
         }
         let next = public.current_player;
-        let Some((next_deductions, _)) = PerspectiveProjector::new(&public, profile)
-            .project(next, PerspectiveDepth::NestedRecipients)
+        let Some(projected) = PerspectiveProjector::new(&public, profile)
+            .project_with_evidence(next, PerspectiveDepth::NestedRecipients)
         else {
             plan.stop_at(PlanFrontier::ProjectionUnavailable);
             break;
         };
-        action = select_h_group_action(&next_deductions, profile);
+        plan.record_assumptions(&projected.assumptions);
+        action = select_h_group_action(&projected.deductions, profile);
     }
     let value = super::frontier_value::evaluate(source, &public, profile, root);
+    control.checkpoint()?;
     plan.assess(value);
-    plan
+    Ok(plan)
 }
 
 #[cfg(test)]

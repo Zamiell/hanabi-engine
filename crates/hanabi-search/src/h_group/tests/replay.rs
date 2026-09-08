@@ -635,16 +635,90 @@ fn elimination_finesse_is_admitted_and_understood_by_its_owner() {
     );
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Review {
+    seed: String,
+    reviewed_through: Option<usize>,
+    continuation: String,
+    profile: String,
+    objective: String,
+    checks: Vec<String>,
+}
+
+fn expert_reviews() -> Vec<Review> {
+    serde_json::from_str(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/expert-manifest.json"
+    ))
+    .unwrap()
+}
+
+#[test]
+fn every_expert_fixture_has_one_explicit_review_contract() {
+    let manifest = expert_reviews();
+    let mut registered = manifest
+        .iter()
+        .map(|review| format!("game-{}.json", review.seed))
+        .collect::<Vec<_>>();
+    registered.sort();
+    assert!(
+        registered.windows(2).all(|pair| pair[0] != pair[1]),
+        "duplicate review contract"
+    );
+    let directory =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../hanabi-protocol/tests/fixtures");
+    let mut fixtures = std::fs::read_dir(directory)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| {
+            name.starts_with("game-")
+                && std::path::Path::new(name)
+                    .extension()
+                    .and_then(|extension| extension.to_str())
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("json"))
+        })
+        .collect::<Vec<_>>();
+    fixtures.sort();
+    assert_eq!(
+        registered, fixtures,
+        "new fixtures must declare their review boundary"
+    );
+}
+
 fn assert_expert_replay_matches_engine(seed: &str, replay: &HanabiLiveReplay) {
-    for turn in 0..u32::try_from(replay.actions.len()).expect("replay fits in u32") {
+    let manifest = expert_reviews();
+    assert_eq!(
+        manifest.iter().filter(|review| review.seed == seed).count(),
+        1
+    );
+    let review = manifest.iter().find(|review| review.seed == seed).unwrap();
+    let profile = review.profile.parse().unwrap();
+    assert_eq!(review.checks, ["legality", "reviewed-action-parity"]);
+    assert_eq!(
+        review.continuation,
+        if review.reviewed_through.is_some() {
+            "engine-generated"
+        } else {
+            "human-reviewed"
+        }
+    );
+    replay.replay().expect("entire fixture remains rules-legal");
+    let through = review.reviewed_through.unwrap_or(replay.actions.len());
+    assert!(through > 0 && through <= replay.actions.len());
+    eprintln!(
+        "{seed}: reviewed action parity {through}/{} moves; suffix provenance: {}",
+        replay.actions.len(),
+        review.continuation
+    );
+    for turn in 0..u32::try_from(through).expect("replay fits in u32") {
         let state = replay.state_at_turn(turn).expect("fixture prefix is legal");
         let actor = state.current_player();
         let view = state.view_for(actor).expect("current player has a view");
         let analysis = crate::analyze_position(
             &view,
-            crate::SupportedConvention::HGroup(HGroupProfile::Max),
+            crate::SupportedConvention::HGroup(profile),
             crate::PlannerConfig {
-                objective: crate::PlanningObjective::PerfectScore,
+                objective: review.objective.parse().unwrap(),
                 ..crate::PlannerConfig::default()
             },
         )
@@ -669,15 +743,14 @@ fn assert_expert_replay_matches_engine(seed: &str, replay: &HanabiLiveReplay) {
         // Print before the large diagnostics so the review link is easy to find.
         eprintln!("{review}");
         let deductions = LogicalDeductions::new(view).expect("fixture position is logical");
-        let clue_candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
-        let replay = replay_h_group(&deductions, HGroupProfile::Max);
+        let clue_candidates = h_group_clue_candidates(&deductions, profile);
+        let replay = replay_h_group(&deductions, profile);
         let admitted = clue_candidates
             .iter()
             .map(|candidate| candidate.action)
             .collect::<Vec<_>>();
-        let rejected =
-            h_group_rejected_clues_from_replay(&deductions, HGroupProfile::Max, &replay, &admitted);
-        let inferences = infer_h_group(&deductions, HGroupProfile::Max);
+        let rejected = h_group_rejected_clues_from_replay(&deductions, profile, &replay, &admitted);
+        let inferences = infer_h_group(&deductions, profile);
         assert_eq!(
             analysis.planner.best_action,
             expected,
@@ -691,13 +764,12 @@ fn assert_expert_replay_matches_engine(seed: &str, replay: &HanabiLiveReplay) {
 /// The user approved moves through 36. The generated suffix awaits review;
 /// it is validated for legality, not frozen as optimal strategy.
 #[test]
-fn optimized_expert_replay_matches_engine() {
-    let mut replay = HanabiLiveReplay::from_json(include_str!(
+fn first_expert_replay_reviewed_prefix_matches_engine() {
+    let replay = HanabiLiveReplay::from_json(include_str!(
         "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
     ))
     .expect("active replay is valid");
     replay.replay().expect("generated continuation is legal");
-    replay.actions.truncate(36);
     assert_expert_replay_matches_engine("p4v0s415", &replay);
 }
 
@@ -2940,7 +3012,7 @@ fn third_replay_turn_six_blue_is_a_five_color_ejection() {
         analysis
             .actions
             .iter()
-            .any(|candidate| candidate.0 == action),
+            .any(|candidate| candidate.action == action),
         "{:?}",
         analysis.actions
     );
