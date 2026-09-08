@@ -1466,6 +1466,13 @@ fn canonical_named_line_metrics(
                     }
                 }
                 HGroupMoveKind::ClandestineFinesse => {
+                    // An alternative observer's Clandestine reading cannot
+                    // replace the admitted ordinary line's connector cards.
+                    // Ordinary candidate classification can include a
+                    // Clandestine line, but it must be the giver's reading.
+                    if observer != source.observer {
+                        continue;
+                    }
                     clandestine = Some((signal.cards.len() + 1, signal.cards.len()));
                     clandestine_cards.clone_from(&signal.cards);
                     if let Some(clue) = projection

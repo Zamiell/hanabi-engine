@@ -381,6 +381,28 @@ fn second_replay_move_thirty_one_can_defer_to_a_more_efficient_clue() {
 }
 
 #[test]
+fn second_replay_rank_four_preserves_the_givers_connector() {
+    // Reviewed p4v0s9 turn 31: Cathy's line uses Donald's visible green 3,
+    // not another observer's alternative Clandestine line through Bob.
+    let state = expert_replay_p4v0s9().state_at_turn(30).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let deductions = LogicalDeductions::new(view.clone()).unwrap();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let action = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Rank(Rank::Four),
+    };
+    let candidate = candidates.iter().find(|candidate| candidate.action == action).unwrap();
+    let outcome = super::strategic_value::scheduled_clue_outcome(
+        &view, HGroupProfile::Max, candidate,
+    ).unwrap();
+    assert!(outcome.public_actions.iter().any(|action| {
+        action.card == CardId::new(32)
+            && action.identities == IdentitySet::singleton(Card::new(Suit::Green, Rank::Three))
+    }), "another observer's Clandestine alternative must not erase Donald's green 3");
+}
+
+#[test]
 fn second_replay_move_thirty_three_admits_the_rank_five_clue() {
     let fixture = expert_replay_p4v0s9();
     let state = fixture
