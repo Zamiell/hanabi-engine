@@ -16,17 +16,22 @@ pub use convention::{
     SupportedConvention,
 };
 pub use h_group::{
+    ActionPreference, ActionWindow, ConditionalAlternative, DependencyAssessment, DependencyStatus,
     H_GROUP_DOCUMENTATION_SECTIONS, H_GROUP_LEVELS, HGroupCardInference, HGroupClueInterpretation,
     HGroupClueKind, HGroupConnection, HGroupConnectionKind, HGroupConnectionPromise,
     HGroupDocumentationSection, HGroupIdentityStatus, HGroupInferences, HGroupLevelDescriptor,
-    HGroupMoveKind, HGroupPhase, HGroupPlayObligation, HGroupSaveKind, HGroupSignal, infer_h_group,
+    HGroupMoveKind, HGroupPhase, HGroupPlayObligation, HGroupSaveKind, HGroupSignal,
+    HiddenCardCondition, PlanFrontier, PlanStep, ProjectedAction, ProjectedConsequences,
+    ProjectionEvidence, ProjectionRequirement, ProjectionRequirementKind, ResourceSchedule,
+    TokenTransition, TurnCommitment, infer_h_group,
 };
 pub use information_set::{
     BeliefConstraints, EnumerateWorldsError, IdentitySet, InformationSet, InformationSetError,
     LogicalDeductions, WorldCount,
 };
 pub use planner::{
-    ExactActionValue, ParsePlanningObjectiveError, PlannerActionEvaluation, PlannerConfig,
-    PlannerError, PlannerPhase, PlannerResult, PlanningObjective, ProjectedPositionValue,
-    SymbolicLineOutcome, SymbolicStopReason, plan_move,
+    CandidateComparison, ComparisonReason, EndpointComparison, ExactActionValue,
+    ParsePlanningObjectiveError, PlannerActionEvaluation, PlannerConfig, PlannerError,
+    PlannerPhase, PlannerResult, PlanningObjective, ProjectedPositionValue, SymbolicLineOutcome,
+    SymbolicStopReason, plan_move,
 };

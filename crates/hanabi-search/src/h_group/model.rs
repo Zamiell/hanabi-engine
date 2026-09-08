@@ -253,6 +253,8 @@ pub struct HGroupCardInference {
 /// H-Group-specific conclusions for the player owning the view.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct HGroupInferences {
+    /// Dependencies required before a forecast can treat an action as deterministic.
+    pub projection_requirements: Vec<super::ProjectionRequirement>,
     pub clues: Vec<HGroupClueInterpretation>,
     /// Current chop for every player, in player order.
     pub chops: Vec<Option<CardId>>,

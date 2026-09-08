@@ -53,6 +53,7 @@ mod perspective;
 mod plan;
 mod play_order;
 mod primary;
+mod projection_requirements;
 mod prospective;
 mod public_layers;
 mod rationality;
@@ -65,8 +66,10 @@ mod transition;
 mod turn_context;
 
 use action_analysis::{CompiledHGroupAction, HGroupActionKind, HGroupActionSet};
-use action_preference::{ActionPreference, TerminalPlanProgress};
+pub use action_preference::ActionPreference;
+use action_preference::TerminalPlanProgress;
 use action_schedule::{ActionSchedule, StackTimeline};
+pub use action_schedule::{ActionWindow, TurnCommitment};
 use bluff::{
     BluffTargetKind, bluff_play_connects, bluff_target_kind_at, bluff_target_order_is_legal,
 };
@@ -128,9 +131,16 @@ use outcome::{
     RecipientCardDisposition,
 };
 use perspective::{PerspectiveProjector, ProspectiveTransition};
-use plan::{ConditionalPlan, PlanFrontier, ProjectedAction, ProjectedConsequences};
+use plan::ConditionalPlan;
+pub use plan::{
+    ConditionalAlternative, HiddenCardCondition, PlanFrontier, PlanStep, ProjectedAction,
+    ProjectedConsequences, ProjectionEvidence, ResourceSchedule, TokenTransition,
+};
 use play_order::ordered_playable_cards;
 use primary::{ClueInterpretationPlan, PrimaryClueInputs};
+pub use projection_requirements::{
+    DependencyAssessment, DependencyStatus, ProjectionRequirement, ProjectionRequirementKind,
+};
 #[cfg(test)]
 use prospective::prospective_clue_hazard;
 use prospective::{
@@ -148,7 +158,7 @@ use rationality::{DeclinedAlternativeContext, declined_superior_clue_inferences}
 use rule_engine::{RuleExecutionContext, apply_post_event_rules};
 use rules::{HGroupRuleId, RulePhase, rule_enabled};
 use strategic_value::apply_strategic_clue_values;
-pub(crate) use symbolic_line::project_h_group_line;
+pub(crate) use symbolic_line::project_h_group_projection;
 #[cfg(test)]
 use transition::FactChangeKind;
 use transition::{

@@ -167,8 +167,9 @@ impl ExactActionValue {
 pub struct PlannerActionEvaluation {
     pub action: Action,
     pub policy_tier: ConventionPolicyTier,
-    /// Convention ordering, derived solely from the legal observation.
+    /// Legacy diagnostic encoding; ordering consumes `preference` instead.
     pub convention_priority: i32,
+    pub preference: crate::ActionPreference,
     pub certainly_playable: bool,
     pub certainly_useless: bool,
     pub newly_touched: u8,
@@ -177,6 +178,7 @@ pub struct PlannerActionEvaluation {
     pub oldest_card_touched: bool,
     /// Convention-policy continuation with unresolved draws kept blank.
     pub symbolic_line: SymbolicLineOutcome,
+    pub projection: crate::ProjectionEvidence,
     pub exact: Option<ExactActionValue>,
 }
 
@@ -206,7 +208,8 @@ pub struct ProjectedPositionValue {
     pub protected_bottom_deck_risks: u8,
     pub visible_successors: u8,
     pub finesse_opportunities: u8,
-    /// Feasible, clueable hidden successors; not secured plays or probabilities.
+    /// Presence (0 or 1) of a checked hidden-successor alternative. Independent
+    /// alternatives are not counted as simultaneous plays or probabilities.
     pub conditional_successors: u8,
     /// Bounded near-term reserve: a productive clue plus known save/repair needs.
     pub clue_demand: u8,
@@ -308,6 +311,51 @@ pub struct PlannerResult {
     pub world_count: WorldCount,
     pub exact_nodes: u64,
     pub root_actions: Vec<PlannerActionEvaluation>,
+    /// Pairwise symbolic comparisons, retained rather than reconstructed by diagnostics.
+    pub comparisons: Vec<CandidateComparison>,
+}
+
+/// The strongest applicable dimension in a symbolic comparison.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ComparisonReason {
+    PolicyTier,
+    TerminalProgress,
+    KnownStrikes,
+    EndpointResources,
+    ConditionalOpportunity,
+    SpeculativeFinesse,
+    SavePressure,
+    WaitingOpportunity,
+    ConventionPreference,
+    PreferredAction,
+    LineProgress,
+    PlayCertainty,
+    TrashCertainty,
+    CriticalTouch,
+    OldestTouch,
+    PlayableTouch,
+    NewTouch,
+    StableOrder,
+}
+
+/// Partial endpoint order. Incomparable does not mean equivalent or inferior.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum EndpointComparison {
+    PreferLeft(ComparisonReason),
+    PreferRight(ComparisonReason),
+    Equivalent,
+    Incomparable,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CandidateComparison {
+    pub left: Action,
+    pub right: Action,
+    pub endpoint: EndpointComparison,
+    pub preferred: Action,
+    pub reason: ComparisonReason,
+    /// The preference graph contains a path back across this edge.
+    pub in_cycle: bool,
 }
 
 /// Plans from known information without random world construction.
@@ -380,6 +428,7 @@ pub(crate) fn plan_move_with_analysis(
                 world_count: count,
                 exact_nodes: tested_actions,
                 root_actions: evaluations,
+                comparisons: Vec::new(),
             });
         }
     }
@@ -427,6 +476,7 @@ pub(crate) fn plan_move_with_analysis(
                     world_count: count,
                     exact_nodes: budget.used,
                     root_actions: evaluations,
+                    comparisons: Vec::new(),
                 });
             }
             Err(ExactAbort::BudgetExceeded | ExactAbort::DepthExceeded) => {}
@@ -455,8 +505,8 @@ fn symbolic_root_evaluations(
         .collect::<Vec<_>>();
     // Scores order candidates; they must not prevent testing their lines.
     for evaluation in &mut evaluations {
-        evaluation.symbolic_line =
-            convention.project_symbolic_line(deductions.view(), evaluation.action, 32);
+        (evaluation.symbolic_line, evaluation.projection) =
+            convention.project_symbolic_projection(deductions.view(), evaluation.action, 32);
     }
     evaluations
 }
@@ -482,14 +532,15 @@ fn symbolic_result(
     preferred: Option<Action>,
     world_count: WorldCount,
 ) -> Result<PlannerResult, PlannerError> {
-    let best_index =
-        best_symbolic_index(&evaluations, preferred).ok_or(PlannerError::NoCandidateActions)?;
+    let (best_index, comparisons) = compare_symbolic_candidates(&evaluations, preferred);
+    let best_index = best_index.ok_or(PlannerError::NoCandidateActions)?;
     Ok(PlannerResult {
         best_action: evaluations[best_index].action,
         phase: PlannerPhase::Symbolic,
         world_count,
         exact_nodes: 0,
         root_actions: evaluations,
+        comparisons,
     })
 }
 
@@ -510,6 +561,7 @@ fn planning_candidates(analysis: &ConventionAnalysis) -> Cow<'_, [ConventionActi
                         action: forced,
                         policy_tier: ConventionPolicyTier::Required,
                         priority: 0,
+                        preference: crate::ActionPreference::new(0, false),
                         reason: crate::ConventionActionReason::Fallback,
                     }),
             ])
@@ -549,7 +601,7 @@ fn prove_unanimous_terminal_perfect(
     preferred: Option<Action>,
 ) -> Result<Option<(usize, u64)>, RuleError> {
     let mut tested_actions = 0_u64;
-    let mut best: Option<(usize, i32, bool)> = None;
+    let mut best: Option<(usize, crate::ActionPreference, bool)> = None;
     for (index, evaluation) in evaluations.iter_mut().enumerate() {
         if !matches!(evaluation.action, Action::Play(_)) {
             continue;
@@ -576,7 +628,7 @@ fn prove_unanimous_terminal_perfect(
             continue;
         }
         evaluation.exact = Some(value);
-        let priority = evaluation.convention_priority;
+        let priority = evaluation.preference;
         let is_preferred = preferred == Some(evaluation.action);
         let replace =
             best.as_ref()
@@ -622,6 +674,7 @@ fn symbolic_evaluation(
         action,
         policy_tier: convention_action.policy_tier,
         convention_priority: convention_action.priority,
+        preference: convention_action.preference,
         certainly_playable: assessment.is_some_and(|value| value.certainly_playable),
         certainly_useless: assessment.is_some_and(|value| value.certainly_useless),
         newly_touched,
@@ -629,6 +682,7 @@ fn symbolic_evaluation(
         critical_touched,
         oldest_card_touched,
         symbolic_line: SymbolicLineOutcome::default(),
+        projection: crate::ProjectionEvidence::default(),
         exact: None,
     }
 }
@@ -670,32 +724,48 @@ fn is_publicly_critical(view: &PlayerView, identity: hanabi_core::Card) -> bool 
     discarded + 1 >= usize::from(identity.rank.copies())
 }
 
+#[cfg(test)]
 fn best_symbolic_index(
     evaluations: &[PlannerActionEvaluation],
     preferred: Option<Action>,
 ) -> Option<usize> {
-    // Comparable endpoints and heuristic fallback can create cycles. Do not
-    // destructively prune one edge of a cycle, then pick its weakest survivor.
-    // Build the complete preference graph and retain its top strongly connected
-    // component (the candidates which can reach every other candidate).
+    compare_symbolic_candidates(evaluations, preferred).0
+}
+
+fn compare_symbolic_candidates(
+    evaluations: &[PlannerActionEvaluation],
+    preferred: Option<Action>,
+) -> (Option<usize>, Vec<CandidateComparison>) {
     let count = evaluations.len();
     let mut reaches = vec![vec![false; count]; count];
+    let mut comparisons = Vec::new();
     for left in 0..count {
         reaches[left][left] = true;
         for right in left + 1..count {
             let a = &evaluations[left];
             let b = &evaluations[right];
-            let left_wins = if endpoint_prefers(a, b) {
-                true
-            } else if endpoint_prefers(b, a) {
-                false
-            } else {
-                symbolic_fallback_order(a, b, preferred, left, right).is_gt()
+            let endpoint = compare_endpoints(a, b);
+            let (ordering, reason) = match endpoint {
+                EndpointComparison::PreferLeft(reason) => (Ordering::Greater, reason),
+                EndpointComparison::PreferRight(reason) => (Ordering::Less, reason),
+                EndpointComparison::Equivalent | EndpointComparison::Incomparable => {
+                    symbolic_fallback_comparison(a, b, preferred)
+                }
             };
-            reaches[left][right] = left_wins;
-            reaches[right][left] = !left_wins;
+            reaches[left][right] = ordering.is_gt();
+            reaches[right][left] = !ordering.is_gt();
+            comparisons.push(CandidateComparison {
+                left: a.action,
+                right: b.action,
+                endpoint,
+                preferred: if ordering.is_gt() { a.action } else { b.action },
+                reason,
+                in_cycle: false,
+            });
         }
     }
+    // Preserve the established cycle-safe selection. A partial endpoint order
+    // plus heuristic fallback is not assumed to be transitive.
     for via in 0..count {
         for from in 0..count {
             for to in 0..count {
@@ -703,81 +773,170 @@ fn best_symbolic_index(
             }
         }
     }
-    (0..count)
+    let mut edge = 0;
+    for (left, row) in reaches.iter().enumerate() {
+        for (right, other) in reaches.iter().enumerate().skip(left + 1) {
+            comparisons[edge].in_cycle = row[right] && other[left];
+            edge += 1;
+        }
+    }
+    let selected = (0..count)
         .filter(|index| reaches[*index].iter().all(|reachable| *reachable))
         .max_by(|left, right| {
-            symbolic_fallback_order(
-                &evaluations[*left],
-                &evaluations[*right],
-                preferred,
-                *left,
-                *right,
-            )
-        })
+            symbolic_fallback_comparison(&evaluations[*left], &evaluations[*right], preferred).0
+        });
+    (selected, comparisons)
 }
 
-fn endpoint_prefers(other: &PlannerActionEvaluation, candidate: &PlannerActionEvaluation) -> bool {
-    other.policy_tier == candidate.policy_tier
-        && other.symbolic_line.strikes <= candidate.symbolic_line.strikes
-        && other.symbolic_line.actions == candidate.symbolic_line.actions
-        && other.symbolic_line.stop_reason == candidate.symbolic_line.stop_reason
-        && other
-            .symbolic_line
-            .position_value
-            .zip(candidate.symbolic_line.position_value)
-            .is_some_and(|(left, right)| {
-                if let Some(preferred) = left.conditional_continuation_preference(right) {
-                    return preferred;
-                }
-                left.dominates(right)
-                    || (other.convention_priority == candidate.convention_priority
-                        && left.without_speculative_finesse()
-                            == right.without_speculative_finesse()
-                        && left.finesse_opportunities > right.finesse_opportunities)
-            })
+fn compare_endpoints(
+    left: &PlannerActionEvaluation,
+    right: &PlannerActionEvaluation,
+) -> EndpointComparison {
+    if left.policy_tier != right.policy_tier
+        || left.preference.advances_terminal_plan() != right.preference.advances_terminal_plan()
+        || left.symbolic_line.strikes != right.symbolic_line.strikes
+        || left.symbolic_line.actions != right.symbolic_line.actions
+        || left.symbolic_line.stop_reason != right.symbolic_line.stop_reason
+    {
+        return EndpointComparison::Incomparable;
+    }
+    let Some((a, b)) = left
+        .symbolic_line
+        .position_value
+        .zip(right.symbolic_line.position_value)
+    else {
+        return EndpointComparison::Incomparable;
+    };
+    if let Some(prefers_left) = a.conditional_continuation_preference(b) {
+        return if prefers_left {
+            EndpointComparison::PreferLeft(ComparisonReason::ConditionalOpportunity)
+        } else {
+            EndpointComparison::PreferRight(ComparisonReason::ConditionalOpportunity)
+        };
+    }
+    if a.dominates(b) {
+        return EndpointComparison::PreferLeft(ComparisonReason::EndpointResources);
+    }
+    if b.dominates(a) {
+        return EndpointComparison::PreferRight(ComparisonReason::EndpointResources);
+    }
+    if left.preference == right.preference
+        && a.without_speculative_finesse() == b.without_speculative_finesse()
+        && a.finesse_opportunities != b.finesse_opportunities
+    {
+        return if a.finesse_opportunities > b.finesse_opportunities {
+            EndpointComparison::PreferLeft(ComparisonReason::SpeculativeFinesse)
+        } else {
+            EndpointComparison::PreferRight(ComparisonReason::SpeculativeFinesse)
+        };
+    }
+    if a == b {
+        EndpointComparison::Equivalent
+    } else {
+        EndpointComparison::Incomparable
+    }
 }
 
-fn symbolic_fallback_order(
+fn symbolic_fallback_comparison(
     left: &PlannerActionEvaluation,
     right: &PlannerActionEvaluation,
     preferred: Option<Action>,
-    left_index: usize,
-    right_index: usize,
-) -> std::cmp::Ordering {
-    left.policy_tier
-        .cmp(&right.policy_tier)
-        // A known misplay is evidence against a line even when its
-        // root clue has a larger heuristic score. Partial progress
-        // across unequal unknown-card frontiers is not comparable.
-        .then_with(|| right.symbolic_line.strikes.cmp(&left.symbolic_line.strikes))
-        // These are root-action costs, not endpoint progress. Apply them in
-        // the fallback too: an Early Save's known waiting opportunity must
-        // not disappear merely because endpoint comparisons form a cycle.
-        .then_with(|| {
-            left.symbolic_line
-                .position_value
-                .zip(right.symbolic_line.position_value)
-                .map_or(std::cmp::Ordering::Equal, |(a, b)| {
-                    b.save_pressure.cmp(&a.save_pressure).then_with(|| {
-                        b.foregone_touch_opportunities
-                            .cmp(&a.foregone_touch_opportunities)
-                    })
-                })
-        })
-        .then_with(|| left.convention_priority.cmp(&right.convention_priority))
-        .then_with(|| (preferred == Some(left.action)).cmp(&(preferred == Some(right.action))))
-        .then_with(|| left.symbolic_line.compare(right.symbolic_line))
-        .then_with(|| left.certainly_playable.cmp(&right.certainly_playable))
-        .then_with(|| left.certainly_useless.cmp(&right.certainly_useless))
-        .then_with(|| left.critical_touched.cmp(&right.critical_touched))
-        .then_with(|| left.oldest_card_touched.cmp(&right.oldest_card_touched))
-        .then_with(|| {
+) -> (Ordering, ComparisonReason) {
+    let resources = left
+        .symbolic_line
+        .position_value
+        .zip(right.symbolic_line.position_value);
+    let dimensions = [
+        (
+            left.policy_tier.cmp(&right.policy_tier),
+            ComparisonReason::PolicyTier,
+        ),
+        (
+            right.symbolic_line.strikes.cmp(&left.symbolic_line.strikes),
+            ComparisonReason::KnownStrikes,
+        ),
+        (
+            left.preference
+                .advances_terminal_plan()
+                .cmp(&right.preference.advances_terminal_plan()),
+            ComparisonReason::TerminalProgress,
+        ),
+        (
+            resources.map_or(Ordering::Equal, |(a, b)| {
+                b.save_pressure.cmp(&a.save_pressure)
+            }),
+            ComparisonReason::SavePressure,
+        ),
+        (
+            resources.map_or(Ordering::Equal, |(a, b)| {
+                b.foregone_touch_opportunities
+                    .cmp(&a.foregone_touch_opportunities)
+            }),
+            ComparisonReason::WaitingOpportunity,
+        ),
+        (
+            left.preference
+                .within_category()
+                .cmp(&right.preference.within_category()),
+            ComparisonReason::ConventionPreference,
+        ),
+        (
+            (preferred == Some(left.action)).cmp(&(preferred == Some(right.action))),
+            ComparisonReason::PreferredAction,
+        ),
+        (
+            left.symbolic_line.compare(right.symbolic_line),
+            ComparisonReason::LineProgress,
+        ),
+        (
+            left.certainly_playable.cmp(&right.certainly_playable),
+            ComparisonReason::PlayCertainty,
+        ),
+        (
+            left.certainly_useless.cmp(&right.certainly_useless),
+            ComparisonReason::TrashCertainty,
+        ),
+        (
+            left.critical_touched.cmp(&right.critical_touched),
+            ComparisonReason::CriticalTouch,
+        ),
+        (
+            left.oldest_card_touched.cmp(&right.oldest_card_touched),
+            ComparisonReason::OldestTouch,
+        ),
+        (
             left.immediately_playable_touched
-                .cmp(&right.immediately_playable_touched)
-        })
-        .then_with(|| left.newly_touched.cmp(&right.newly_touched))
-        // Stable candidate order wins exact ties.
-        .then_with(|| right_index.cmp(&left_index))
+                .cmp(&right.immediately_playable_touched),
+            ComparisonReason::PlayableTouch,
+        ),
+        (
+            left.newly_touched.cmp(&right.newly_touched),
+            ComparisonReason::NewTouch,
+        ),
+        (
+            stable_action_key(right.action).cmp(&stable_action_key(left.action)),
+            ComparisonReason::StableOrder,
+        ),
+    ];
+    dimensions
+        .into_iter()
+        .find(|(order, _)| *order != Ordering::Equal)
+        .unwrap_or((Ordering::Equal, ComparisonReason::StableOrder))
+}
+
+fn stable_action_key(action: Action) -> (u8, usize, usize) {
+    match action {
+        Action::Play(card) => (0, card.index(), 0),
+        Action::Discard(card) => (1, card.index(), 0),
+        Action::Clue {
+            target,
+            clue: Clue::Suit(suit),
+        } => (2, target.index(), suit.index()),
+        Action::Clue {
+            target,
+            clue: Clue::Rank(rank),
+        } => (3, target.index(), rank.index()),
+    }
 }
 
 fn best_exact_index(
@@ -800,7 +959,7 @@ fn best_exact_index(
                 );
             exact
                 .then_with(|| left.policy_tier.cmp(&right.policy_tier))
-                .then_with(|| left.convention_priority.cmp(&right.convention_priority))
+                .then_with(|| left.preference.cmp(&right.preference))
                 .then_with(|| {
                     (preferred == Some(left.action)).cmp(&(preferred == Some(right.action)))
                 })
@@ -825,7 +984,7 @@ fn evaluate_exact_root(
     ordered.sort_by_key(|(index, candidate)| {
         (
             core::cmp::Reverse(candidate.policy_tier),
-            core::cmp::Reverse(candidate.convention_priority),
+            core::cmp::Reverse(candidate.preference),
             core::cmp::Reverse(preferred == Some(candidate.action)),
             *index,
         )
@@ -1345,6 +1504,7 @@ mod tests {
         // on a true priority tie the opportunity may decide the result.
         let mut tied = [blue.clone(), ones.clone()];
         tied[1].convention_priority = tied[0].convention_priority;
+        tied[1].preference = tied[0].preference;
         assert_eq!(best_symbolic_index(&tied, None), Some(1));
         tied[1].symbolic_line.position_value.as_mut().unwrap().clues -= 1;
         assert_eq!(best_symbolic_index(&tied, None), Some(0));
@@ -1368,6 +1528,37 @@ mod tests {
         )
         .unwrap();
         assert!(result.root_actions.len() >= 3);
+        // Algorithmic contracts on real candidates: ordering and legacy
+        // diagnostic numbers cannot change the semantic decision.
+        let (selected, comparisons) = compare_symbolic_candidates(&result.root_actions, None);
+        let selected_action = result.root_actions[selected.unwrap()].action;
+        assert_eq!(
+            comparisons.len(),
+            result.root_actions.len() * (result.root_actions.len() - 1) / 2
+        );
+        for offset in 0..result.root_actions.len() {
+            let mut reordered = result.root_actions.clone();
+            reordered.rotate_left(offset);
+            reordered.reverse();
+            for (index, root) in reordered.iter_mut().enumerate() {
+                root.convention_priority = if index % 2 == 0 { i32::MIN } else { i32::MAX };
+            }
+            let (index, _) = compare_symbolic_candidates(&reordered, None);
+            assert_eq!(reordered[index.unwrap()].action, selected_action);
+        }
+        for root in &result.root_actions {
+            assert_eq!(
+                root.projection.steps.len(),
+                usize::from(root.symbolic_line.actions)
+            );
+            assert!(root.projection.resources.unfunded_turn.is_none());
+        }
+        let mut incomparable = result.root_actions[0].clone();
+        incomparable.symbolic_line.actions = incomparable.symbolic_line.actions.saturating_add(1);
+        assert_eq!(
+            compare_endpoints(&result.root_actions[0], &incomparable),
+            EndpointComparison::Incomparable
+        );
         assert!(
             result
                 .root_actions
@@ -1382,8 +1573,10 @@ mod tests {
         );
         let mut alternatives = vec![result.root_actions[0].clone(); 2];
         alternatives[0].convention_priority = 1000;
+        alternatives[0].preference = crate::ActionPreference::new(1000, false);
         alternatives[0].symbolic_line.strikes = 1;
         alternatives[1].convention_priority = 1;
+        alternatives[1].preference = crate::ActionPreference::new(1, false);
         alternatives[1].symbolic_line.strikes = 0;
         assert_eq!(
             best_symbolic_index(&alternatives, None),
@@ -1424,12 +1617,14 @@ mod tests {
                     action: first,
                     policy_tier: ConventionPolicyTier::Admitted,
                     priority: 900,
+                    preference: crate::ActionPreference::new(900, false),
                     reason: crate::ConventionActionReason::PromisedPlay,
                 },
                 ConventionAction {
                     action: forced,
                     policy_tier: ConventionPolicyTier::Required,
                     priority: 400,
+                    preference: crate::ActionPreference::new(400, false),
                     reason: crate::ConventionActionReason::PromisedPlay,
                 },
             ],
@@ -1443,6 +1638,7 @@ mod tests {
                 action: forced,
                 policy_tier: ConventionPolicyTier::Required,
                 priority: 400,
+                preference: crate::ActionPreference::new(400, false),
                 reason: crate::ConventionActionReason::PromisedPlay,
             }]
         );
@@ -1457,12 +1653,14 @@ mod tests {
             action: legal[0],
             policy_tier: ConventionPolicyTier::Required,
             priority: 1,
+            preference: crate::ActionPreference::new(1, false),
             reason: crate::ConventionActionReason::PromisedPlay,
         };
         let high_admitted = ConventionAction {
             action: legal[1],
             policy_tier: ConventionPolicyTier::Admitted,
             priority: 10_000,
+            preference: crate::ActionPreference::new(10_000, false),
             reason: crate::ConventionActionReason::OtherClue,
         };
         let evaluations = [

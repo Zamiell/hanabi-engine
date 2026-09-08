@@ -488,12 +488,12 @@ fn final_play_clues_advance_the_plan_before_surplus_known_trash_discards() {
         let expected_priority = decision
             .actions
             .iter()
-            .find_map(|(action, _, priority, _)| (*action == expected).then_some(*priority))
+            .find_map(|(action, _, priority, _, _)| (*action == expected).then_some(*priority))
             .expect("the final Play Clue is admitted");
         let trash_priority = decision
             .actions
             .iter()
-            .filter_map(|(action, _, priority, _)| {
+            .filter_map(|(action, _, priority, _, _)| {
                 matches!(action, Action::Discard(_)).then_some(*priority)
             })
             .max()
@@ -525,7 +525,7 @@ fn third_replay_final_play_clues_advance_before_surplus_known_trash() {
     let trash_priority = decision
         .actions
         .iter()
-        .filter_map(|(action, _, priority, _)| {
+        .filter_map(|(action, _, priority, _, _)| {
             matches!(action, Action::Discard(_)).then_some(*priority)
         })
         .max()
@@ -546,7 +546,7 @@ fn third_replay_final_play_clues_advance_before_surplus_known_trash() {
         let clue_priority = decision
             .actions
             .iter()
-            .find_map(|(candidate, _, priority, _)| (*candidate == action).then_some(*priority))
+            .find_map(|(candidate, _, priority, _, _)| (*candidate == action).then_some(*priority))
             .expect("both direct yellow-5 clues are admitted");
         assert!(
             clue_priority > trash_priority,

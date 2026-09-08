@@ -29,6 +29,57 @@ Commit hashes refer to this repository's Git history.
 - Caches are scoped to one immutable position or exact solve. They may reuse a
   pure semantic result, but may not become a second mutable convention state.
 
+## 2026-09-07: retained planning evidence and explicit comparison contracts
+
+### Why
+
+Recent fixes exposed a gap between convention facts and strategic decisions:
+numeric boundary conversions obscured terminal intent, projections discarded
+their actual steps, and conditional opportunities survived only as counters.
+Separate funding and scheduling checks made explanations difficult to audit.
+
+### Changes
+
+- Extended September 3's `ActionPreference` through the planner and exact-search
+  tie breaks. Terminal progress remains typed; scalar priorities are diagnostic.
+- Retained pairwise comparison reasons, equivalent versus incomparable
+  endpoints, and cycle membership. Final symbolic ties use canonical action
+  order. Added contracts checking enumeration-order and diagnostic-number
+  independence.
+- Extended August's existing `ConditionalPlan`, rather than replacing it with
+  another planner. Results retain steps, dependency frontier, actor windows,
+  conditional identities, concrete follow-up clues, deadlines, and branch-local
+  token funding. Alternatives never accumulate into guaranteed progress.
+- Centralized token-cap and prefix-funding mechanics in `ResourceSchedule` and
+  derived scheduling windows from the existing action/inference read model.
+  Handoffs, terminal-five funding, and frontier reserves use these shared paths.
+- Moved Priority/Charm uncertainty declarations into inference compilation. The
+  projector consumes typed requirements and retains assessment witnesses; it no
+  longer reconstructs these convention meanings from signal history.
+- Exposed the retained evidence in live planner diagnostics and added funding,
+  branch-isolation, and comparison invariants without invented game histories.
+
+### Preserve
+
+This extends the earlier fact journal, owner compiler, compiled clue, action
+schedule, and conditional-plan boundaries. It does not introduce another source
+of knowledge or assign identities to blank draws. Conditional checks remain
+bounded opportunities, not exhaustive possible-world proofs. Strategic reserve
+estimates and within-category utility still contain heuristics; retained
+evidence makes them inspectable, not mathematically optimal. Reviewed fixtures
+are unchanged.
+
+### Validation
+
+All five expert replays still agree on every action. The non-fail-fast Rust run
+completed with 326 passing, one failing, and 28 skipped tests. The existing
+`second_replay_move_thirty_one_can_defer_to_a_more_efficient_clue` coverage
+assertion remains at one versus the expected two; neither its expectation nor
+the fixture was weakened. This also prevents `scripts/check.sh` from succeeding.
+The checks after its fail-fast test stage were run separately: documentation,
+Python typing and 19 Python tests, and workspace dead-public-code checks passed.
+Build, formatting, and Clippy also passed.
+
 ## 2026-09-04: self-play causality and terminal proof bounds
 
 ### Why

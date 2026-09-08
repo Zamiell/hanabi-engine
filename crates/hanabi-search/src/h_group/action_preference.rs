@@ -4,14 +4,14 @@ use crate::ConventionPolicyTier;
 /// available for planner diagnostics, but semantic categories are compared
 /// explicitly by H-Group action selection.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub(super) struct ActionPreference {
+pub struct ActionPreference {
     policy_tier: ConventionPolicyTier,
     advances_terminal_plan: bool,
     within_category: i32,
 }
 
 impl ActionPreference {
-    pub(super) const fn new(within_category: i32, advances_terminal_plan: bool) -> Self {
+    pub(crate) const fn new(within_category: i32, advances_terminal_plan: bool) -> Self {
         Self {
             policy_tier: ConventionPolicyTier::Admitted,
             advances_terminal_plan,
@@ -19,14 +19,23 @@ impl ActionPreference {
         }
     }
 
-    pub(super) const fn set_policy_tier(&mut self, policy_tier: ConventionPolicyTier) {
+    pub(crate) const fn set_policy_tier(&mut self, policy_tier: ConventionPolicyTier) {
         self.policy_tier = policy_tier;
+    }
+
+    #[must_use]
+    pub const fn advances_terminal_plan(self) -> bool {
+        self.advances_terminal_plan
+    }
+
+    #[must_use]
+    pub const fn within_category(self) -> i32 {
+        self.within_category
     }
 }
 
-/// Named components of the legacy scalar exported to the generic planner.
-/// Keeping this encoding at the boundary prevents decision rules from adding
-/// unrelated score constants inline.
+/// Named terminal-progress components. The scalar encoding remains available
+/// for diagnostics; decision ordering consumes the structured preference.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct TerminalPlanProgress {
     discard_threshold: i32,
@@ -34,6 +43,10 @@ pub(super) struct TerminalPlanProgress {
 }
 
 impl TerminalPlanProgress {
+    pub(super) const fn within_category(self) -> i32 {
+        100 + self.clue_value
+    }
+
     pub(super) const fn new(discard_threshold: i32, clue_value: i32) -> Self {
         Self {
             discard_threshold,

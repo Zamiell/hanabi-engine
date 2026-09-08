@@ -70,17 +70,17 @@ pub(super) fn evaluate(
     let mut value = ProjectedPositionValue {
         score: narrow(frontier.play_stacks.iter().map(Vec::len).sum()),
         clues: frontier.clue_tokens,
-        clue_demand: 1,
         ..ProjectedPositionValue::default()
     };
     let mut secured = IdentitySet::default();
+    let mut mandatory_clues = 0_u8;
     for player in 0..frontier.hands.len() {
         let actor = PlayerId::new(narrow(player));
         let (d, replay) = PerspectiveProjector::new(frontier, profile)
             .project(actor, PerspectiveDepth::NestedRecipients)?;
         let inferred = infer_h_group_from_replay(&d, replay, profile);
         if inferred.must_clue.contains(&actor) {
-            value.clue_demand = value.clue_demand.saturating_add(1);
+            mandatory_clues = mandatory_clues.saturating_add(1);
         }
         if inferred.playable_now.is_empty() {
             if let Some(chop) = inferred.chops.get(player).copied().flatten() {
@@ -161,10 +161,11 @@ pub(super) fn evaluate(
         }
     }
     add_root_opportunities(source, profile, root, &mut value)?;
-    value.clue_demand = value
-        .clue_demand
-        .saturating_add(value.exposed_critical_chops)
-        .saturating_add(if value.save_pressure > 0 { 2 } else { 0 });
+    value.clue_demand = super::ResourceSchedule::reserve(
+        value.exposed_critical_chops,
+        mandatory_clues,
+        value.save_pressure > 0,
+    );
     Some(value)
 }
 
@@ -178,7 +179,7 @@ pub(super) fn conditional_successor(
     after: &PlayerView,
     profile: HGroupProfile,
     played: Card,
-) -> Option<Card> {
+) -> Option<super::ConditionalAlternative> {
     if played.rank == Rank::Five
         || after.clue_tokens == 0
         || after.current_player == source.observer
@@ -201,11 +202,7 @@ pub(super) fn conditional_successor(
     let (giver_d, giver_replay) = PerspectiveProjector::new(after, profile)
         .project(giver, PerspectiveDepth::NestedRecipients)?;
     let giver_notes = infer_h_group_from_replay(&giver_d, giver_replay, profile);
-    if !giver_notes.playable_now.is_empty()
-        || giver_notes.connection.is_some()
-        || !giver_notes.discard_now.is_empty()
-        || giver_notes.must_clue.contains(&giver)
-    {
+    if !super::ActionWindow::from_inferences(giver_d.view(), &giver_notes).is_free() {
         return None;
     }
     for card in &after.hands[source.observer.index()] {
@@ -234,11 +231,7 @@ pub(super) fn conditional_successor(
             continue;
         };
         let branch_notes = infer_h_group_from_replay(&branch_d, replay.clone(), profile);
-        if branch_notes.connection.is_some()
-            || !branch_notes.playable_now.is_empty()
-            || !branch_notes.discard_now.is_empty()
-            || branch_notes.must_clue.contains(&giver)
-        {
+        if !super::ActionWindow::from_inferences(branch_d.view(), &branch_notes).is_free() {
             continue;
         }
         let candidates = super::h_group_clue_candidates_from_replay(&branch_d, profile, &replay);
@@ -247,13 +240,39 @@ pub(super) fn conditional_successor(
         }) {
             continue;
         }
-        if candidates.iter().any(|candidate| {
+        if let Some(candidate) = candidates.iter().find(|candidate| {
             candidate.target() == source.observer
                 && candidate.purpose() == super::CluePurpose::Play
                 && candidate.immediate_play()
                 && matches!(candidate.action, Action::Clue { clue, .. } if clue.matches(successor))
         }) {
-            return Some(successor);
+            let mut resources = super::ResourceSchedule::new(after.clue_tokens);
+            if !resources.apply(after.turn, 1, 0) {
+                continue;
+            }
+            return Some(super::ConditionalAlternative {
+                after_step: 0,
+                condition: super::HiddenCardCondition {
+                    observer: source.observer,
+                    owner: source.observer,
+                    card: card.id,
+                    identity: successor,
+                },
+                follow_up: super::PlanStep {
+                    turn: after.turn,
+                    depends_on: None,
+                    projected: super::ProjectedAction {
+                        actor: giver,
+                        action: candidate.action,
+                    },
+                    consequences: super::ProjectedConsequences {
+                        clues_spent: 1,
+                        ..super::ProjectedConsequences::default()
+                    },
+                },
+                latest_turn: after.turn,
+                resources,
+            });
         }
     }
     None
@@ -438,11 +457,24 @@ mod tests {
             b2,
             true,
         );
-        assert_eq!(
-            conditional_successor(&view, &after, HGroupProfile::Max, b2),
-            Some(Card::new(Suit::Blue, Rank::Three))
-        );
         let original = after.clone();
+        let branch = conditional_successor(&view, &after, HGroupProfile::Max, b2).unwrap();
+        assert_eq!(
+            branch.condition.identity,
+            Card::new(Suit::Blue, Rank::Three)
+        );
+        assert_eq!(
+            after, original,
+            "a conditional assumption must not mutate the ordinary line"
+        );
+        assert_eq!(branch.condition.observer, view.observer);
+        assert_eq!(branch.condition.owner, view.observer);
+        assert_eq!(branch.follow_up.projected.actor, after.current_player);
+        assert_eq!(branch.latest_turn, after.turn);
+        assert_eq!(branch.resources.tokens, after.clue_tokens - 1);
+        assert!(
+            matches!(branch.follow_up.projected.action, Action::Clue { target, .. } if target == view.observer)
+        );
         for card in &mut after.hands[3] {
             card.clues.add_negative_clue(Clue::Rank(Rank::Three));
         }

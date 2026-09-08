@@ -132,6 +132,20 @@ fn semantic_lifecycle_has_single_module_owners() {
     let interpretation = include_str!("../interpretation.rs");
     let extras = include_str!("../recognition/extras.rs");
     let late_game = include_str!("../recognition/late_game.rs");
+    let projector = include_str!("../symbolic_line.rs");
+    let production = projector.split("mod tests {").next().unwrap();
+    assert!(
+        !production.contains("HGroupMoveKind::"),
+        "the projector consumes declared dependencies, not convention recognizers"
+    );
+    assert!(
+        !production.contains(".signals"),
+        "projection requirements are compiled by inference, not rediscovered from signals"
+    );
+    assert!(
+        production.contains("plan.summarize()"),
+        "summary and retained evidence must derive from the same plan"
+    );
 
     assert!(
         !decision.contains("HGroupMoveKind::FixClue"),

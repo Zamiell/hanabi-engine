@@ -256,10 +256,23 @@ fn planner_details_json(
         "consideredWorlds": result.world_count.worlds(),
         "worldCountExact": result.world_count.is_exact(),
         "exactNodes": result.exact_nodes,
+        "comparisons": result.comparisons.iter().map(|comparison| json!({
+            "left": HanabiLiveActionCommand::from_engine_action(table_id, comparison.left),
+            "right": HanabiLiveActionCommand::from_engine_action(table_id, comparison.right),
+            "preferred": HanabiLiveActionCommand::from_engine_action(table_id, comparison.preferred),
+            "endpoint": format!("{:?}", comparison.endpoint),
+            "reason": format!("{:?}", comparison.reason),
+            "inCycle": comparison.in_cycle,
+        })).collect::<Vec<_>>(),
         "rootActions": result.root_actions.iter().map(|evaluation| json!({
             "action": HanabiLiveActionCommand::from_engine_action(table_id, evaluation.action),
             "selected": evaluation.action == best_action,
             "conventionPriority": evaluation.convention_priority,
+            "preference": {
+                "terminalProgress": evaluation.preference.advances_terminal_plan(),
+                "withinCategory": evaluation.preference.within_category(),
+            },
+            "projection": projection_evidence_json(table_id, &evaluation.projection),
             "certainlyPlayable": evaluation.certainly_playable,
             "certainlyUseless": evaluation.certainly_useless,
             "newlyTouched": evaluation.newly_touched,
@@ -282,6 +295,8 @@ fn planner_details_json(
                     "protectedBottomDeckRisks": value.protected_bottom_deck_risks,
                     "visibleSuccessors": value.visible_successors,
                     "finesseOpportunities": value.finesse_opportunities,
+                    "conditionalSuccessors": value.conditional_successors,
+                    "clueDemand": value.clue_demand,
                     "savePressure": value.save_pressure,
                     "foregoneTouchOpportunities": value.foregone_touch_opportunities,
                 })),
@@ -315,6 +330,61 @@ fn planner_details_json(
 
 fn card_ids_json(cards: &[hanabi_core::CardId]) -> Vec<usize> {
     cards.iter().map(|card| card.index()).collect()
+}
+
+fn projected_step_json(table_id: u64, step: &hanabi_search::PlanStep) -> Value {
+    json!({
+        "turn": step.turn + 1, "actor": step.projected.actor.index(),
+        "action": HanabiLiveActionCommand::from_engine_action(table_id, step.projected.action),
+        "dependsOn": step.depends_on,
+        "scoreGain": step.consequences.score_gain, "strikes": step.consequences.strikes,
+        "cluesSpent": step.consequences.clues_spent, "cluesGained": step.consequences.clues_gained,
+        "discards": step.consequences.discards,
+    })
+}
+
+fn condition_json(condition: hanabi_search::HiddenCardCondition) -> Value {
+    json!({"observer": condition.observer.index(), "owner": condition.owner.index(),
+        "card": condition.card.index(), "identity": identity_json(condition.identity)})
+}
+
+fn projection_evidence_json(table_id: u64, evidence: &hanabi_search::ProjectionEvidence) -> Value {
+    json!({
+        "steps": evidence.steps.iter().map(|step| projected_step_json(table_id, step)).collect::<Vec<_>>(),
+        "alternatives": evidence.alternatives.iter().map(|alternative| json!({
+            "afterStep": alternative.after_step, "if": condition_json(alternative.condition),
+            "followUp": projected_step_json(table_id, &alternative.follow_up),
+            "latestTurn": alternative.latest_turn + 1,
+            "resources": {"initialTokens": alternative.resources.initial_tokens,
+                "tokens": alternative.resources.tokens,
+                "unfundedTurn": alternative.resources.unfunded_turn.map(|turn| turn + 1)},
+        })).collect::<Vec<_>>(),
+        "frontier": format!("{:?}", evidence.frontier),
+        "dependencies": evidence.dependencies.iter().map(|assessment| {
+            let (status, witness) = match &assessment.status {
+                hanabi_search::DependencyStatus::Supported => ("supported", None),
+                hanabi_search::DependencyStatus::Conditional { witness } => ("conditional", *witness),
+                hanabi_search::DependencyStatus::Contradicted => ("contradicted", None),
+            };
+            json!({"actor": assessment.requirement.actor.index(),
+                "action": HanabiLiveActionCommand::from_engine_action(table_id, assessment.requirement.action),
+                "evidenceTurn": assessment.requirement.evidence_turn + 1,
+                "requirement": format!("{:?}", assessment.requirement.kind),
+                "status": status, "witness": witness.map(condition_json)})
+        }).collect::<Vec<_>>(),
+        "windows": evidence.windows.iter().map(|window| json!({
+            "turn": window.turn + 1, "actor": window.actor.index(), "earlyGame": window.early_game,
+            "commitment": window.commitment.map(|commitment| format!("{commitment:?}")),
+        })).collect::<Vec<_>>(),
+        "resources": {
+            "initialTokens": evidence.resources.initial_tokens, "tokens": evidence.resources.tokens,
+            "unfundedTurn": evidence.resources.unfunded_turn.map(|turn| turn + 1),
+            "transitions": evidence.resources.transitions.iter().map(|entry| json!({
+                "turn": entry.turn + 1, "before": entry.before, "spent": entry.spent,
+                "gained": entry.gained, "after": entry.after,
+            })).collect::<Vec<_>>(),
+        },
+    })
 }
 
 fn identity_set_json(identities: IdentitySet) -> Vec<Value> {

@@ -5,6 +5,54 @@ use super::{
     identity_of, is_playable_at, next_player,
 };
 
+/// Scheduling read model of one actor-relative inference result, not another
+/// owner of convention obligations. Shared by forecasts and handoff checks.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ActionWindow {
+    pub actor: PlayerId,
+    pub turn: u32,
+    pub early_game: bool,
+    pub commitment: Option<TurnCommitment>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TurnCommitment {
+    Connection,
+    Play,
+    Discard,
+    Clue,
+}
+
+impl ActionWindow {
+    pub(crate) fn from_inferences(view: &PlayerView, inferred: &super::HGroupInferences) -> Self {
+        let commitment = if inferred.connection.is_some() {
+            Some(TurnCommitment::Connection)
+        } else if !inferred.playable_now.is_empty() {
+            Some(TurnCommitment::Play)
+        } else if !inferred.discard_now.is_empty() {
+            Some(TurnCommitment::Discard)
+        } else if inferred.must_clue.contains(&view.observer) {
+            Some(TurnCommitment::Clue)
+        } else {
+            None
+        };
+        Self {
+            actor: view.observer,
+            turn: view.turn,
+            early_game: inferred.early_game,
+            commitment,
+        }
+    }
+
+    pub(crate) const fn is_free(self) -> bool {
+        self.commitment.is_none()
+    }
+
+    pub(crate) const fn can_give_clue(self) -> bool {
+        matches!(self.commitment, None | Some(TurnCommitment::Clue))
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ScheduledAction {
     Play,

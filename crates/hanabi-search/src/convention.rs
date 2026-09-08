@@ -173,6 +173,8 @@ pub struct ConventionAction {
     /// tier and cannot outweigh a convention-required action.
     pub policy_tier: ConventionPolicyTier,
     pub priority: i32,
+    /// The compiled preference is authoritative; priority is a diagnostic encoding.
+    pub preference: crate::ActionPreference,
     pub reason: ConventionActionReason,
 }
 
@@ -313,6 +315,7 @@ impl SupportedConvention {
                         action,
                         policy_tier: ConventionPolicyTier::Admitted,
                         priority: 100,
+                        preference: crate::ActionPreference::new(100, false),
                         reason: ConventionActionReason::ConventionFree,
                     })
                     .collect(),
@@ -326,12 +329,15 @@ impl SupportedConvention {
                 let actions = decision
                     .actions
                     .into_iter()
-                    .map(|(action, policy_tier, priority, reason)| ConventionAction {
-                        action,
-                        policy_tier,
-                        priority,
-                        reason,
-                    })
+                    .map(
+                        |(action, policy_tier, priority, preference, reason)| ConventionAction {
+                            action,
+                            policy_tier,
+                            priority,
+                            preference,
+                            reason,
+                        },
+                    )
                     .collect();
                 ConventionAnalysis {
                     inferences: ConventionInferences::HGroup(Box::new(decision.inferences)),
@@ -345,16 +351,19 @@ impl SupportedConvention {
         }
     }
 
-    pub(crate) fn project_symbolic_line(
+    pub(crate) fn project_symbolic_projection(
         self,
         view: &hanabi_core::PlayerView,
         root: hanabi_core::Action,
         limit: u8,
-    ) -> crate::SymbolicLineOutcome {
+    ) -> (crate::SymbolicLineOutcome, crate::ProjectionEvidence) {
         match self {
-            Self::None => crate::SymbolicLineOutcome::default(),
+            Self::None => (
+                crate::SymbolicLineOutcome::default(),
+                crate::ProjectionEvidence::default(),
+            ),
             Self::HGroup(profile) => {
-                crate::h_group::project_h_group_line(view, profile, root, limit)
+                crate::h_group::project_h_group_projection(view, profile, root, limit)
             }
         }
     }

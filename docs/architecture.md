@@ -186,6 +186,27 @@ request either observer-only interpretation or nested recipient modeling.
   and stores projected consequences in dependency-linked `PlanStep` nodes.
   `symbolic_line.rs` builds this `ConditionalPlan`; new draws remain blank and
   projection stops at an explicit frontier before the plan is summarized.
+  `ProjectionEvidence` retains the actual steps, stopping frontier, actor
+  windows, and token ledger in the planner result and live diagnostics.
+  Conditional alternatives name their observer, hidden-card assumption, enabling
+  step, concrete follow-up clue, deadline, and independent funding. They never
+  add guaranteed plays or merge mutually exclusive identities into ordinary
+  steps.
+- `projection_requirements.rs` compiles Priority/Charm uncertainty requirements
+  alongside inference. The projector assesses these declared dependencies and
+  records supported, conditional (with a witness when available), or
+  contradicted results; it does not rescan convention signals to rediscover
+  those rules.
+- `ActionWindow` derives scheduling commitments from the existing inference read
+  model. `ResourceSchedule` checks prefix funding and token caps for plans, clue
+  handoffs, and terminal-five funding. The frontier's reserve remains a bounded
+  heuristic, not an exhaustive scheduling proof.
+- Planner comparisons retain named deciding dimensions, distinguish equivalent
+  from incomparable endpoints, and expose preference cycles. Structured
+  `ActionPreference` survives the convention/planner boundary; encoded numeric
+  priorities remain diagnostics. Canonical action order, not enumeration order,
+  resolves final symbolic ties. Exact-search results retain their outcome
+  statistics rather than fabricating symbolic pairwise explanations.
 - `frontier_value.rs` keeps conditional successor opportunities separate from
   secured plays. After a stack advances, it can test whether a compatible card
   already hidden in the planner's hand would let the next free teammate give an

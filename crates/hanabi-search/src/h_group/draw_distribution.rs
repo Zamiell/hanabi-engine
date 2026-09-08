@@ -21,6 +21,7 @@ pub(super) fn discard_priority(
     discard: CardId,
 ) -> Option<i32> {
     let view = deductions.view();
+    super::ResourceSchedule::discard_then_clue(view.clue_tokens, view.turn)?;
     let remaining_plays = 25_usize.saturating_sub(view.play_stacks.iter().map(Vec::len).sum());
     if !rule_enabled(profile, HGroupRuleId::EndGame)
         || view.deck_size < view.hands.len()
@@ -93,9 +94,8 @@ pub(super) fn discard_priority(
             next_replay.clone(),
             profile,
         );
-        if next_inferred.connection.is_some()
-            || !next_inferred.playable_now.is_empty()
-            || !next_inferred.discard_now.is_empty()
+        if !super::ActionWindow::from_inferences(next_deductions.view(), &next_inferred)
+            .can_give_clue()
             || !h_group_clue_candidates_from_replay(&next_deductions, profile, &next_replay)
                 .iter()
                 .any(|candidate| candidate.action == best.action && candidate.immediate_play())
@@ -128,11 +128,7 @@ pub(super) fn completion_times(
             super::PlayerId::new(u8::try_from((view.observer.index() + offset) % players).ok()?);
         let (d, replay) = projector.project(actor, PerspectiveDepth::NestedRecipients)?;
         let notes = super::decision::infer_h_group_from_replay(&d, replay, profile);
-        if notes.connection.is_some()
-            || !notes.playable_now.is_empty()
-            || !notes.discard_now.is_empty()
-            || notes.must_clue.contains(&actor)
-        {
+        if !super::ActionWindow::from_inferences(d.view(), &notes).is_free() {
             busy.push(offset);
         }
     }

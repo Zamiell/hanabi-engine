@@ -405,6 +405,7 @@ pub(super) fn infer_h_group_from_replay(
                     || card.sources.iter().all(|source| source.turn() <= view.turn))
         })
     }));
+    inferred.projection_requirements = super::projection_requirements::compile(view, &inferred);
     inferred
 }
 
@@ -878,18 +879,17 @@ fn analyze_h_group_actions_from_analysis(
                 .iter()
                 .find(|candidate| candidate.action == action);
             let priority = raw_h_group_action_priority(deductions, profile, analysis, action);
-            let advances_terminal_plan = clue
-                .and_then(|candidate| {
-                    endgame_progress_priority(deductions, profile, analysis, candidate)
-                        .filter(|progress| *progress > 100 + i32::from(candidate.score()))
-                })
-                .is_some();
+            let terminal_progress = clue
+                .and_then(|candidate| endgame_progress(deductions, profile, analysis, candidate));
             CompiledHGroupAction {
                 action,
                 kind: classify_h_group_action(action, inferred, clue),
                 policy_tier: ConventionPolicyTier::Admitted,
                 priority,
-                preference: ActionPreference::new(priority, advances_terminal_plan),
+                preference: ActionPreference::new(
+                    terminal_progress.map_or(priority, TerminalPlanProgress::within_category),
+                    terminal_progress.is_some(),
+                ),
             }
         })
         .collect::<Vec<_>>();
@@ -963,7 +963,13 @@ fn analyze_h_group_actions_from_analysis(
 /// inference pass.
 pub(crate) struct HGroupConventionDecision {
     pub(crate) inferences: HGroupInferences,
-    pub(crate) actions: Vec<(Action, ConventionPolicyTier, i32, ConventionActionReason)>,
+    pub(crate) actions: Vec<(
+        Action,
+        ConventionPolicyTier,
+        i32,
+        ActionPreference,
+        ConventionActionReason,
+    )>,
     pub(crate) rejected_actions: Vec<RejectedConventionAction>,
     pub(crate) preferred: Option<Action>,
     pub(crate) forced: Option<Action>,
@@ -995,6 +1001,7 @@ pub(crate) fn analyze_h_group_convention(
                 candidate.action,
                 candidate.policy_tier,
                 candidate.priority,
+                candidate.preference,
                 convention_action_reason(candidate.kind),
             )
         })
@@ -1532,12 +1539,12 @@ fn endgame_completion_plan<'analysis>(
 
 /// A known-trash discard is dominated when it only creates a surplus token
 /// while leaving an inevitable final Play Clue for the next teammate to give.
-fn endgame_progress_priority(
+fn endgame_progress(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
     analysis: &HGroupAnalysis,
     candidate: &CompiledClueAction,
-) -> Option<i32> {
+) -> Option<TerminalPlanProgress> {
     let view = deductions.view();
     let is_multi_action_ignition = matches!(
         candidate.move_kind(),
@@ -1588,8 +1595,8 @@ fn endgame_progress_priority(
             .count()
     };
     let remaining_clues = plan.unresolved_fives.len().saturating_sub(secured_fives);
-    let funded_clues = usize::from(view.clue_tokens - 1) + secured_fives;
-    if funded_clues < remaining_clues {
+    if !super::ResourceSchedule::funds_final_fives(view.clue_tokens, secured_fives, remaining_clues)
+    {
         return None;
     }
     let best_clue_coverage = analysis_clue_candidates(deductions, profile, analysis)
@@ -1606,11 +1613,10 @@ fn endgame_progress_priority(
         return None;
     }
     let (_, discard_score) = scored_discard_candidate(view, &analysis.inferences, profile)?;
-    let ordinary_priority = 100 + i32::from(candidate.score());
-    let progress_priority =
-        TerminalPlanProgress::new(i32::from(discard_score), i32::from(candidate.score()))
-            .encoded_priority();
-    Some(ordinary_priority.max(progress_priority))
+    Some(TerminalPlanProgress::new(
+        i32::from(discard_score),
+        i32::from(candidate.score()),
+    ))
 }
 
 fn raw_h_group_action_priority(
@@ -1707,8 +1713,10 @@ fn raw_h_group_action_priority(
         .iter()
         .find(|candidate| candidate.action == action);
     let clue_priority = clue_candidate.map_or(25, |candidate| {
-        endgame_progress_priority(deductions, profile, analysis, candidate)
-            .unwrap_or_else(|| 100 + i32::from(candidate.score()))
+        endgame_progress(deductions, profile, analysis, candidate).map_or_else(
+            || 100 + i32::from(candidate.score()),
+            TerminalPlanProgress::encoded_priority,
+        )
     });
     adjust_clue_priority(
         deductions,
@@ -1806,6 +1814,7 @@ fn early_game_clue_handoff_priority(
     discard: CardId,
 ) -> Option<i32> {
     let source = deductions.view();
+    super::ResourceSchedule::discard_then_clue(source.clue_tokens, source.turn)?;
     let inferred = &analysis.inferences;
     if !analysis.replay.early_game
         || !rule_enabled(profile, HGroupRuleId::Stalling)
@@ -1860,10 +1869,7 @@ fn early_game_clue_handoff_priority(
     let next_inferred = infer_h_group_from_replay(&next_deductions, next_replay, profile);
     let (next_discard, _) =
         scored_discard_candidate(next_deductions.view(), &next_inferred, profile)?;
-    if next_inferred.connection.is_some()
-        || !next_inferred.playable_now.is_empty()
-        || !next_inferred.discard_now.is_empty()
-        || next_inferred.must_clue.contains(&next)
+    if !super::ActionWindow::from_inferences(next_deductions.view(), &next_inferred).is_free()
         || next_inferred.chops[next.index()] != Some(next_discard)
         || convention_known_trash_discard(next_deductions.view(), &next_inferred).is_some()
     {
@@ -1914,6 +1920,7 @@ fn deferred_teamwork_priority(
     discard: CardId,
 ) -> Option<i32> {
     let source = deductions.view();
+    super::ResourceSchedule::discard_then_clue(source.clue_tokens, source.turn)?;
     if source.clue_tokens != 1 || !rule_enabled(profile, HGroupRuleId::SpecialFinesses) {
         return None;
     }

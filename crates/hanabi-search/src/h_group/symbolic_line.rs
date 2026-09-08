@@ -11,6 +11,7 @@ use super::{
 /// Projects the convention policy's actions while leaving unknown draws blank.
 /// Strategic choices continue under that policy; unresolved identities stop
 /// the line rather than being filled using the actual hidden hand or deck.
+#[cfg(test)]
 pub(crate) fn project_h_group_line(
     source: &PlayerView,
     profile: HGroupProfile,
@@ -20,16 +21,25 @@ pub(crate) fn project_h_group_line(
     project_h_group_plan(source, profile, root, limit).summarize()
 }
 
+pub(crate) fn project_h_group_projection(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    root: Action,
+    limit: u8,
+) -> (SymbolicLineOutcome, super::ProjectionEvidence) {
+    let plan = project_h_group_plan(source, profile, root, limit);
+    (plan.summarize(), plan.into_evidence())
+}
+
 fn project_h_group_plan(
     source: &PlayerView,
     profile: HGroupProfile,
     root: Action,
     limit: u8,
 ) -> ConditionalPlan {
-    let mut plan = ConditionalPlan::default();
+    let mut plan = ConditionalPlan::new(source.clue_tokens);
     let mut public = source.clone();
     let mut action = Some(root);
-    let mut conditional_successors = crate::IdentitySet::default();
 
     while let Some(current) = action {
         if public.status != hanabi_core::GameStatus::InProgress {
@@ -48,9 +58,17 @@ fn project_h_group_plan(
             break;
         };
         let actor_inferences = infer_h_group_from_replay(&actor_deductions, actor_replay, profile);
-        if charm_depends_on_hidden_connector(&public, &actor_inferences, current)
-            || priority_depends_on_hidden_connector(&public, &actor_inferences, current)
-        {
+        plan.record_window(super::ActionWindow::from_inferences(
+            actor_deductions.view(),
+            &actor_inferences,
+        ));
+        let dependencies = actor_inferences
+            .projection_requirements
+            .iter()
+            .filter(|requirement| requirement.action == current)
+            .map(|requirement| super::projection_requirements::assess(&public, requirement))
+            .collect();
+        if !plan.assess_dependencies(dependencies) {
             plan.stop_at(PlanFrontier::InterpretationBranch);
             break;
         }
@@ -67,16 +85,16 @@ fn project_h_group_plan(
         if consequences.score_gain > 0 {
             if let Action::Play(card) = current {
                 if let Some(played) = identity_of(&public, card) {
-                    if let Some(successor) = super::frontier_value::conditional_successor(
+                    if let Some(alternative) = super::frontier_value::conditional_successor(
                         source, &after, profile, played,
                     ) {
-                        conditional_successors =
-                            conditional_successors.union(crate::IdentitySet::singleton(successor));
+                        plan.add_alternative(alternative);
                     }
                 }
             }
         }
         plan.push(
+            public.turn,
             ProjectedAction {
                 actor,
                 action: current,
@@ -97,130 +115,25 @@ fn project_h_group_plan(
         };
         action = select_h_group_action(&next_deductions, profile);
     }
-    let mut value = super::frontier_value::evaluate(source, &public, profile, root);
-    if let Some(value) = &mut value {
-        value.conditional_successors =
-            u8::try_from(conditional_successors.len()).unwrap_or(u8::MAX);
-    }
+    let value = super::frontier_value::evaluate(source, &public, profile, root);
     plan.assess(value);
     plan
 }
 
-/// A projected reactor cannot infer a Priority Finesse from the absence of a
-/// connector when another hand is blank only to the planning observer. That
-/// connector could instead require a Prompt, Finesse, or Load Clue elsewhere.
-/// <https://hanabi.github.io/level-25/#the-load-clue>
-fn priority_depends_on_hidden_connector(
+#[cfg(test)]
+fn has_unresolved_requirement(
     source: &PlayerView,
     inferred: &super::HGroupInferences,
     action: Action,
 ) -> bool {
-    let Action::Play(card) = action else {
-        return false;
-    };
-    if !inferred.cards.iter().any(|note| {
-        note.card == card && note.play_obligation == Some(super::HGroupPlayObligation::Forced)
-    }) {
-        return false;
-    }
-    let Some(signal) = inferred.signals.iter().rev().find(|signal| {
-        signal.kind == super::HGroupMoveKind::Priority
-            && signal.target == Some(source.current_player)
-            && signal.cards.contains(&card)
-    }) else {
-        return false;
-    };
-    let Some(connector) = signal.identity else {
-        return false;
-    };
-    let Ok(deductions) = LogicalDeductions::new(source.clone()) else {
-        return true;
-    };
-    source.hands.iter().enumerate().any(|(owner, hand)| {
-        owner != source.current_player.index()
-            && hand.iter().any(|other| {
-                other.identity.is_none()
-                    && !source.history.iter().any(|entry| {
-                        entry.turn >= signal.turn
-                            && matches!(entry.event, hanabi_core::ObservedEvent::Drew { card, .. } if card == other.id)
-                    })
-                    && deductions
-                        .possible_identities(other.id)
-                        .is_none_or(|domain| domain.contains(connector))
-            })
-    })
-}
-
-/// A blank in the giver's hand is visible to the reactor. It cannot prove
-/// that three blind plays are required in the reactor's hand.
-/// Source: <https://hanabi.github.io/level-23/#the-4-charm>
-fn charm_depends_on_hidden_connector(
-    source: &PlayerView,
-    inferred: &super::HGroupInferences,
-    action: Action,
-) -> bool {
-    let Action::Play(card) = action else {
-        return false;
-    };
-    let Some(signal) = inferred.signals.iter().rev().find(|signal| {
-        signal.turn + 1 == source.turn
-            && signal.kind == super::HGroupMoveKind::Charm
-            && signal.target == Some(source.current_player)
-            && signal.cards.contains(&card)
-    }) else {
-        return false;
-    };
-    let Some(clue) = inferred.clues.iter().find(|clue| clue.turn == signal.turn) else {
-        return false;
-    };
-    let Some(focus) = identity_of(source, clue.focus) else {
-        return true;
-    };
-    let Ok(deductions) = LogicalDeductions::new(source.clone()) else {
-        return true;
-    };
-    let explicitly_clued = source
-        .hands
+    inferred
+        .projection_requirements
         .iter()
-        .flatten()
-        .filter(|card| super::was_clued_before(source, signal.turn, card.id))
-        .map(|card| card.id)
-        .collect();
-    for (owner, hand) in source.hands.iter().enumerate() {
-        if owner == source.current_player.index() {
-            continue;
-        }
-        for (slot, card) in hand
-            .iter()
-            .enumerate()
-            .filter(|(_, card)| card.identity.is_none())
-        {
-            let Some(domain) = deductions.possible_identities(card.id) else {
-                return true;
-            };
-            for identity in domain
-                .iter()
-                .filter(|identity| identity.suit == focus.suit && identity.rank < focus.rank)
-            {
-                // A possibility probe, not a determinized rollout: no points
-                // or future actions from this assignment are credited.
-                let mut possible = source.clone();
-                possible.hands[owner][slot].identity = Some(identity);
-                if super::recognition::four_charm_blind_plays(
-                    &possible,
-                    source.current_player,
-                    focus,
-                    clue.stack_heights,
-                    &explicitly_clued,
-                    signal.turn,
-                ) < 3
-                {
-                    return true;
-                }
-            }
-        }
-    }
-    false
+        .filter(|requirement| requirement.action == action)
+        .any(|requirement| {
+            super::projection_requirements::assess(source, requirement).status
+                != super::DependencyStatus::Supported
+        })
 }
 
 fn apply_symbolic_action(
@@ -387,9 +300,7 @@ mod tests {
             .unwrap();
         let inferred = infer_h_group_from_replay(&deductions, state, HGroupProfile::Max);
         let play = Action::Play(CardId::new(25));
-        assert!(priority_depends_on_hidden_connector(
-            &public, &inferred, play
-        ));
+        assert!(has_unresolved_requirement(&public, &inferred, play));
         // Algorithmic domain boundary: if every blank excludes red, none can
         // redirect this r5 Priority interpretation. This is not a fixture edit.
         for card in public
@@ -401,9 +312,7 @@ mod tests {
             card.clues
                 .add_negative_clue(Clue::Suit(hanabi_core::Suit::Red));
         }
-        assert!(!priority_depends_on_hidden_connector(
-            &public, &inferred, play
-        ));
+        assert!(!has_unresolved_requirement(&public, &inferred, play));
     }
 
     #[test]
@@ -428,9 +337,7 @@ mod tests {
             .unwrap();
         let inferred = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
         let action = Action::Play(CardId::new(4));
-        assert!(charm_depends_on_hidden_connector(
-            &public, &inferred, action
-        ));
+        assert!(has_unresolved_requirement(&public, &inferred, action));
         // Algorithmic domain boundary, not a proposed game continuation:
         // ruling out blue on every blank rules out the external blue connector.
         for card in public
@@ -442,9 +349,7 @@ mod tests {
             card.clues
                 .add_negative_clue(Clue::Suit(hanabi_core::Suit::Blue));
         }
-        assert!(!charm_depends_on_hidden_connector(
-            &public, &inferred, action
-        ));
+        assert!(!has_unresolved_requirement(&public, &inferred, action));
     }
 
     #[test]
