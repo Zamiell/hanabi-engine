@@ -61,7 +61,6 @@ mod projection_requirements;
 mod prospective;
 use history_reducer::replay_h_group_inner_uncached;
 mod public_layers;
-mod rationality;
 mod recognition;
 mod rule_engine;
 mod rules;
@@ -95,7 +94,7 @@ use decision::{infer_h_group_from_replay, preferred_due_play_card, select_h_grou
 use effects::{ConventionJournal, ConventionReducer, EffectBatch, SignalHistory};
 use epistemic::{EpistemicState, owner_knowledge_read_model};
 use event_reducer::HGroupRuleEffects;
-use facts::{ConventionFacts, DeclinedAlternativeInference, IdentityClaimRelation};
+use facts::{ConventionFacts, IdentityClaimRelation};
 use hand::{
     chop, finesse_position, finesse_position_id, five_chop_moved_card, five_pulled_card, focus,
     is_critical, remove_card,
@@ -158,7 +157,6 @@ use prospective::{
     subjective_action_context_before, subjective_convention_cards, subjective_playable_cards,
     with_prospective_analysis_cache,
 };
-use rationality::{DeclinedAlternativeContext, declined_superior_clue_inferences};
 use rule_engine::{RuleExecutionContext, apply_post_event_rules};
 use rules::{HGroupRuleId, RulePhase, rule_enabled};
 use strategic_value::apply_strategic_clue_values;

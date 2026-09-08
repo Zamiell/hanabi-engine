@@ -94,30 +94,6 @@ impl<'a> ConventionKnowledgeCompiler<'a> {
         }
     }
 
-    fn apply_declined_alternatives(&mut self) {
-        for inference in self.replay.cards.facts.declined_alternatives() {
-            let allowed = IdentitySet::singleton(inference.identity);
-            if self
-                .knowledge
-                .cards
-                .iter()
-                .find(|card| card.card == inference.card)
-                .is_none_or(|card| !card.identities.contains(inference.identity))
-            {
-                continue;
-            }
-            self.knowledge.update(
-                inference.card,
-                KnowledgeSource::DeclinedAlternative {
-                    turn: inference.turn,
-                    chosen: inference.chosen,
-                    superior: inference.superior,
-                },
-                |card| card.identities = card.identities.intersection(allowed),
-            );
-        }
-    }
-
     /// Applies Good Touch from identities that have become exact through a
     /// direct Play clue or a demonstrated connection.
     ///
@@ -704,7 +680,6 @@ fn compile_convention_card_inferences(
     let view = deductions.view();
     let mut compiler = ConventionKnowledgeCompiler::new(deductions, replay);
     compiler.apply_replay_closure();
-    compiler.apply_declined_alternatives();
     let knowledge = &mut compiler.knowledge;
 
     for clue in &replay.clues {

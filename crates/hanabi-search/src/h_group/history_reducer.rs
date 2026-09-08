@@ -5,20 +5,19 @@ use super::{
     ActorBeliefBefore, BluffTargetKind, Card, CardId, CardSet, Clue, ClueConnectionStep, ClueFacts,
     ClueInterpretationHypothesis, ClueInterpretationPlan, ConnectionManager, ConnectionObligation,
     ConnectionPlanningContext, ConnectionTransitionReason, ConventionCardSetSnapshot,
-    ConventionCardState, ConventionJournal, ConventionKnowledge, ConventionReducer,
-    ConventionTransitionDelta, ConventionTransitionResult, CurrentClueTouches,
-    DeclinedAlternativeContext, DirectPlayDeclines, EffectBatch, EffectSource, FixObligations,
-    HGroupClueInterpretation, HGroupClueKind, HGroupConnectionKind, HGroupMoveKind, HGroupProfile,
-    HGroupRuleEffects, HGroupRuleId, HGroupState, HGroupTurnContext, HGroupTurnSnapshot,
-    HGroupTurnView, HistoricalView, IdentitySet, LogicalDeductions, MAX_CLUE_TOKENS, ObservedEvent,
-    ObservedHistoryEntry, PerspectiveDepth, PlayerId, PlayerSet, PlayerView, PrimaryClueInputs,
-    PromiseId, PromptableBeforeClue, ProvenancedCardSet, Rank, RuleExecutionContext,
-    SubjectiveReplayRequest, Suit, active_invisibly_clued, apply_post_event_rules,
-    bluff_play_connects, bluff_target_kind_at, bluff_target_order_is_legal,
+    ConventionCardState, ConventionJournal, ConventionKnowledge, ConventionTransitionDelta,
+    ConventionTransitionResult, CurrentClueTouches, DirectPlayDeclines, EffectSource,
+    FixObligations, HGroupClueInterpretation, HGroupClueKind, HGroupConnectionKind, HGroupMoveKind,
+    HGroupProfile, HGroupRuleEffects, HGroupRuleId, HGroupState, HGroupTurnContext,
+    HGroupTurnSnapshot, HGroupTurnView, HistoricalView, IdentitySet, LogicalDeductions,
+    MAX_CLUE_TOKENS, ObservedEvent, ObservedHistoryEntry, PerspectiveDepth, PlayerId, PlayerSet,
+    PlayerView, PrimaryClueInputs, PromiseId, PromptableBeforeClue, ProvenancedCardSet, Rank,
+    RuleExecutionContext, SubjectiveReplayRequest, Suit, active_invisibly_clued,
+    apply_post_event_rules, bluff_play_connects, bluff_target_kind_at, bluff_target_order_is_legal,
     build_convention_knowledge, chop, claimed_identities_at_clue,
-    clue_permits_direct_play_deferral, declined_superior_clue_inferences, elimination_finesse_card,
-    finesse_position_id, five_chop_moved_card, focus, interpretation, is_playable_at,
-    loaded_connection_plan, next_player, primary, protected_cards, public_layers, push_signal,
+    clue_permits_direct_play_deferral, elimination_finesse_card, finesse_position_id,
+    five_chop_moved_card, focus, interpretation, is_playable_at, loaded_connection_plan,
+    next_player, primary, protected_cards, public_layers, push_signal,
     reconcile_connection_fact_lifecycles, record_declined_direct_plays, remove_card, rule_enabled,
     snapshot_good_touch_identities, snapshot_play_identities, snapshot_save_identities,
     subjective_action_context_before, was_clued_before, was_clued_before_with,
@@ -1363,27 +1362,6 @@ impl ReplayReducer {
                 .last()
                 .expect("the current clue was just appended")
                 .clone();
-            let declined_alternatives =
-                declined_superior_clue_inferences(&DeclinedAlternativeContext {
-                    view,
-                    profile,
-                    clue: &current_clue,
-                    hands: &self.hands,
-                    clue_facts: &self.facts,
-                    historical,
-                    gotten: &gotten,
-                    promptable_before: &previously_promptable,
-                    already_playing: self.already_playing.materialized(),
-                    pending: &self.pending_connections,
-                    convention_facts: &convention_facts_before_clue,
-                    chop_moved: self.chop_moved.materialized(),
-                });
-            for inference in declined_alternatives {
-                ConventionReducer::apply(
-                    EffectBatch::declined_alternative(inference),
-                    &mut self.signals,
-                );
-            }
             let signal_kind = match kind {
                 HGroupClueKind::Play | HGroupClueKind::PlayOrSave => Some(HGroupMoveKind::PlayClue),
                 HGroupClueKind::Save(_) => Some(HGroupMoveKind::SaveClue),

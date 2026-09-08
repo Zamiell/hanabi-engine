@@ -2479,39 +2479,6 @@ fn third_replay_declined_rank_four_resolves_alices_card_as_yellow_four() {
 
     assert_eq!(card.identities, IdentitySet::singleton(yellow_four));
     assert!(inferred.playable_now.contains(&CardId::new(2)));
-    assert!(
-        replay
-            .cards
-            .facts
-            .declined_alternatives()
-            .iter()
-            .any(|inference| {
-                inference.turn == 30
-                    && inference.actor == PlayerId::new(2)
-                    && inference.card == CardId::new(2)
-                    && inference.identity == yellow_four
-                    && inference.chosen
-                        == Action::Clue {
-                            target: PlayerId::new(0),
-                            clue: Clue::Rank(Rank::Two),
-                        }
-                    && inference.superior
-                        == Action::Clue {
-                            target: PlayerId::new(1),
-                            clue: Clue::Rank(Rank::Four),
-                        }
-            })
-    );
-    assert!(
-        replay
-            .knowledge
-            .effects_for(CardId::new(2))
-            .any(|effect| matches!(
-                effect.source(),
-                KnowledgeSource::DeclinedAlternative { turn: 30, .. }
-            )),
-        "the exact identity retains the declined-alternative provenance",
-    );
     assert_eq!(
         select_h_group_action(&deductions, HGroupProfile::Max),
         Some(Action::Play(CardId::new(2))),

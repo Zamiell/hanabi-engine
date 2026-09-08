@@ -1987,8 +1987,7 @@ fn deferred_teamwork_priority(
 
 /// Counts only a convention-established multi-action line when deciding
 /// whether to spend a turn manufacturing a clue token. Projection closure can
-/// expose incidental future actions (including conclusions drawn later from a
-/// declined alternative), but an ordinary one-for-one Play Clue is still a
+/// expose incidental future actions, but an ordinary one-for-one Play Clue is still a
 /// one-action comparison for Teamwork deferral.
 fn deferred_teamwork_action_count(candidate: &CompiledClueAction) -> u8 {
     if candidate.connection_steps() > 0 {

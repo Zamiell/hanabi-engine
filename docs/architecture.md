@@ -135,10 +135,10 @@ card, and identity. The original legal `PlayerView` is never modified.
   without recognizing convention moves a second time. Ordinary inference cannot
   widen a domain; only a typed Fix/reinterpretation may replace it.
 - `ConventionKnowledgeCompiler` in `interpretation/knowledge.rs` applies owner
-  knowledge in named, ordered passes: replay closure, declined alternatives,
-  established and promised Good Touch, transfer/ejection reinterpretations,
-  connection promises, current focus, forced plays, and implicit saves. A new
-  inference belongs in one pass rather than an unstructured final-note sweep.
+  knowledge in named, ordered passes: replay closure, established and promised
+  Good Touch, transfer/ejection reinterpretations, connection promises, current
+  focus, forced plays, and implicit saves. A new inference belongs in one pass
+  rather than an unstructured final-note sweep.
 - `constraint_graph.rs` is the single bridge from convention state to exact
   world constraints. Per-card domains, unresolved relational `OneOf` claims, and
   ordered connection alternatives are retained symbolically. A claim
@@ -245,12 +245,9 @@ card, and identity. The original legal `PlayerView` is never modified.
 - `hypothesis.rs` owns mutually exclusive whole-history interpretations. Each
   alternative retains its own connections, promises, and identity claims, so
   ordinary and empathy readings cannot be merged card-by-card.
-- `rationality.rs` owns narrowly scoped inverse-planning deductions. It may
-  infer an identity from a clue giver declining a strictly stronger,
-  convention-valid alternative only when the counterfactual is unique. The
-  resulting `DeclinedAlternativeInference` records the actor, turn, chosen clue,
-  superior clue, card, and identity; owner knowledge consumes that fact through
-  an explicit provenance-bearing effect rather than a replay-specific exception.
+- Declining a longer clue line does not establish an exact card identity. The
+  former inverse-planning deduction was removed: comparing chain lengths alone
+  does not prove that an alternative was preferable or unavailable.
 - `recognition.rs` is now only the level-gated registry surface and shared
   imports. Cohesive modules own Basic moves, Tempo and emergency discards, Chop
   Moves, Bluffs, advanced connections, special discards, Trash moves, late-game
@@ -317,9 +314,6 @@ Every completed replay reduction validates that:
   effect program;
 - ordinary knowledge effects only narrow identity domains; replacement requires
   explicit reinterpretation provenance; and
-- inverse-planning deductions retain the observed and counterfactual actions
-  that justify them, and ambiguous or conflicting counterfactuals produce no
-  identity restriction; and
 - pure owner projection reproduces the convention compiler's result without
   recognizing clue meaning again.
 
