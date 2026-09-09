@@ -127,6 +127,8 @@ pub(super) struct HGroupTurnView<'a> {
 /// observer-visible simulator truth with what the acting player knew.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) struct ActorBeliefBefore {
+    /// The played card was already due as a connection/blind-play response.
+    pub(super) played_obligation: bool,
     /// Whether the actor considered the discarded card their ordinary chop.
     pub(super) normal_chop_discard: bool,
     /// Exact identity the actor knew for the discarded card, if any.

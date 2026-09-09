@@ -150,14 +150,24 @@ pub(crate) fn apply_chop_move_effects(
         return;
     };
     let hand = &context.after.hands[target.index()];
-    let mut gotten = protected_cards(
+    let mut protected = protected_cards(
         effects.explicitly_clued,
         effects.invisibly_clued,
         effects.chop_moved,
     );
+    // Chop protection does not establish an identity claim. In particular,
+    // a visible copy on an unclued chop-moved card cannot make a second
+    // copy "accounted for" from only the giver's perspective.
+    // https://hanabi.github.io/level-4/#the-trash-chop-move-tcm
+    let mut gotten = protected_cards(
+        effects.explicitly_clued,
+        effects.invisibly_clued,
+        &super::CardSet::default(),
+    );
     // Current touches cannot account for themselves; TCM identities must
     // already have been accounted for before positive clue facts are applied.
     for card in touched {
+        protected.remove(card);
         gotten.remove(card);
     }
     let clue_domain_is_accounted =
@@ -171,7 +181,7 @@ pub(crate) fn apply_chop_move_effects(
         return;
     }
     let five_chop_moved = (*clue == Clue::Rank(Rank::Five))
-        .then(|| five_chop_moved_card(hand, touched, &gotten))
+        .then(|| five_chop_moved_card(hand, touched, &protected))
         .flatten();
     let all_trash = !touched.is_empty()
         && touched

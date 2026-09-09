@@ -1316,7 +1316,11 @@ pub(in crate::h_group) fn apply_unnecessary_move_effects(
         Some(origin.target),
         kind,
         affected,
-        Some(*identity),
+        // These are the newly pushed/ignited/chop-moved cards, not the
+        // card that was just played. Its revealed identity must not become
+        // an exact identity claim on these different, still-unknown cards.
+        // https://hanabi.github.io/level-24/
+        None,
     );
     push_signal(
         effects.signals,
@@ -1427,7 +1431,11 @@ pub(in crate::h_group) fn apply_priority_effects(
                     | HGroupMoveKind::AmbiguousFinesse
             )
     });
-    if !played_is_known || fixed_cards.contains(card) || advances_existing_connection {
+    if !played_is_known
+        || fixed_cards.contains(card)
+        || context.actor_before.played_obligation
+        || advances_existing_connection
+    {
         // Priority communicates a deliberate choice between otherwise-free
         // plays. Playing the first card of an existing connection is already
         // explained by that connection and cannot create an unrelated

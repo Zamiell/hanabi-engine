@@ -1,0 +1,24 @@
+{
+  "actions": [
+    {
+      "target": 1,
+      "type": 2,
+      "value": 2
+    },
+    {
+      "target": 6,
+      "type": 0
+    },
+    {
+      "target": 0,
+      "type": 2,
+      "value": 4
+    },
+    {
+      "target": 15,
+      "type": 0
+    }
+  ],
+  "players": ["Alice", "Bob", "Cathy", "Donald"],
+  "seed": "p4v0s16"
+}

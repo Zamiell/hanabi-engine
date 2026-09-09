@@ -158,6 +158,17 @@ impl ReplayReducer {
     ) -> HGroupState {
         let view = deductions.view();
         for (entry_index, entry) in view.history.iter().enumerate() {
+            let played_obligation = match &entry.event {
+                ObservedEvent::Played { player, card, .. } => {
+                    self.forced_playable.contains(card)
+                        || self.pending_connections.iter().any(|connection| {
+                            connection.actor == *player
+                                && connection.cards.first() == Some(card)
+                                && self.pending_connections.is_active(connection)
+                        })
+                }
+                _ => false,
+            };
             let event_connection_transition_start = self.pending_connections.transitions().len();
             let event_card_snapshot = ConventionCardSetSnapshot::capture(
                 &self.explicitly_clued,
@@ -264,6 +275,7 @@ impl ReplayReducer {
                     early_game: self.early_game,
                 },
                 actor_before: ActorBeliefBefore {
+                    played_obligation,
                     normal_chop_discard: actor_saw_normal_discard,
                     discarded_identity: actor_known_discard_identity,
                 },

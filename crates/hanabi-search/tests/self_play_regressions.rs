@@ -3,6 +3,104 @@
 use hanabi_protocol::HanabiLiveReplay;
 use hanabi_search::{HGroupProfile, InformationSet, SupportedConvention, WorldCount};
 
+/// A Fix must actually repair the recipient's interpretation, not just match
+/// a repair obligation seen by the giver. Here 4s instead promises a false r4.
+/// <https://hanabi.github.io/level-3/#the-fix-clue>
+#[test]
+fn a_fix_candidate_must_pass_recipient_safety_validation() {
+    let replay =
+        HanabiLiveReplay::from_json(include_str!("fixtures/self-play-p4v0s22.json")).unwrap();
+    let state = replay.state_at_turn(22).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let information = InformationSet::new(&view).unwrap();
+    let analysis =
+        SupportedConvention::HGroup(HGroupProfile::Max).analyze(information.deductions());
+    let bad_fix = hanabi_core::Action::Clue {
+        target: hanabi_core::PlayerId::new(0),
+        clue: hanabi_core::Clue::Rank(hanabi_core::Rank::Four),
+    };
+    assert!(
+        analysis
+            .actions
+            .iter()
+            .all(|candidate| candidate.action != bad_fix),
+        "{analysis:#?}"
+    );
+}
+
+/// A connection's blind play cannot become a new Priority signal merely
+/// because the history reducer has advanced the connection after that play.
+/// <https://hanabi.github.io/level-25/#the-priority-prompt--the-priority-finesse>
+#[test]
+fn completing_a_blind_play_does_not_retroactively_trigger_priority() {
+    let replay =
+        HanabiLiveReplay::from_json(include_str!("fixtures/self-play-p4v0s16-priority.json"))
+            .unwrap();
+    let state = replay.state_at_turn(4).unwrap();
+    let view = state.view_for(hanabi_core::PlayerId::new(1)).unwrap();
+    let information = InformationSet::new(&view).unwrap();
+    let analysis =
+        SupportedConvention::HGroup(HGroupProfile::Max).analyze(information.deductions());
+    let hanabi_search::ConventionInferences::HGroup(inferred) = analysis.inferences else {
+        unreachable!();
+    };
+    assert!(
+        !inferred.signals.iter().any(|signal| {
+            signal.turn == 3 && signal.kind == hanabi_search::HGroupMoveKind::Priority
+        }),
+        "{inferred:#?}"
+    );
+}
+
+/// Recorded p4v0s6 turn 47, not an optimal-move oracle. Bob's unclued chop
+/// is actually g5, but a 5 clue can still be a Save from his perspective.
+/// <https://hanabi.github.io/beginner/5-save/>
+/// <https://hanabi.github.io/beginner/clue-interpretation/#clue-interpretation-algorithm>
+#[test]
+fn playable_five_on_chop_remains_admissible_as_a_five_save() {
+    let replay =
+        HanabiLiveReplay::from_json(include_str!("fixtures/self-play-p4v0s6.json")).unwrap();
+    // Red on turn 37 moves both unclued cards to its right, including an
+    // actual g1. A different observer must not dismiss the move merely
+    // because another chop-moved card is visibly the duplicate y4.
+    let after_chop_move = replay.state_at_turn(37).unwrap();
+    for observer in [0, 1, 2, 3] {
+        let view = after_chop_move
+            .view_for(hanabi_core::PlayerId::new(observer))
+            .unwrap();
+        let information = InformationSet::new(&view).unwrap();
+        let analysis =
+            SupportedConvention::HGroup(HGroupProfile::Max).analyze(information.deductions());
+        let hanabi_search::ConventionInferences::HGroup(inferred) = analysis.inferences else {
+            unreachable!();
+        };
+        for card in [18, 26] {
+            assert!(
+                inferred
+                    .chop_moved
+                    .contains(&hanabi_core::CardId::new(card)),
+                "observer {observer}, card {card}"
+            );
+        }
+    }
+    let state = replay.state_at_turn(46).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let information = InformationSet::new(&view).unwrap();
+    let analysis =
+        SupportedConvention::HGroup(HGroupProfile::Max).analyze(information.deductions());
+    let save = hanabi_core::Action::Clue {
+        target: hanabi_core::PlayerId::new(1),
+        clue: hanabi_core::Clue::Rank(hanabi_core::Rank::Five),
+    };
+    assert!(
+        analysis
+            .actions
+            .iter()
+            .any(|candidate| candidate.action == save),
+        "{analysis:#?}"
+    );
+}
+
 #[test]
 fn donald_completes_the_opening_layer_instead_of_fixing_a_projected_branch() {
     let replay =
@@ -317,6 +415,7 @@ fn transfer_and_clarity_do_not_invent_duplicate_cards() {
         (include_str!("fixtures/self-play-p4v0s24.json"), 51),
         (include_str!("fixtures/self-play-p4v0s37.json"), 53),
         (include_str!("fixtures/self-play-p4v0s56.json"), 40),
+        (include_str!("fixtures/self-play-p4v0s18.json"), 37),
     ] {
         let replay = HanabiLiveReplay::from_json(json).unwrap();
         let state = replay.state_at_turn(turn).unwrap();

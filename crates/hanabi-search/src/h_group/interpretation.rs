@@ -350,6 +350,15 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             continue;
         }
         if repairs_required_fix || repairs_focus_inversion {
+            // A requested repair is not proof that this particular clue
+            // repairs the recipient's note. Apply the same safety check as
+            // the explicit RequiredFix path above before making it mandatory.
+            // https://hanabi.github.io/level-3/#the-fix-clue
+            if prospective_clue_has_unsafe_connection(
+                view, profile, target, focus, clue, &touched, false,
+            ) {
+                continue;
+            }
             // A Fix repairs an existing false or ambiguous promise. Once the
             // repair has been identified, it must not flow through filters
             // for creating a brand-new Play Clue: successor fill-in,
@@ -2142,10 +2151,27 @@ pub(super) fn save_clue_score(
     layouts: &[Vec<CardId>],
     gotten: &CardSet,
 ) -> Option<u16> {
-    if is_playable_now(view, identity)
-        && !matches!((clue, identity.rank), (Clue::Rank(Rank::Two), Rank::Two))
-    {
-        // Play Clue interpretation takes precedence for a playable focus. If
+    let rank_save_can_be_unplayable = match (clue, identity.rank) {
+        (Clue::Rank(Rank::Two), Rank::Two) => true,
+        (Clue::Rank(Rank::Five), Rank::Five) => target_hand
+            .iter()
+            .find(|card| card.id == focus)
+            .is_some_and(|card| {
+                hanabi_core::Suit::ALL.into_iter().any(|suit| {
+                    let possible = Card::new(suit, Rank::Five);
+                    card.clues.allows(possible)
+                        && !card_is_trash(view, possible)
+                        && !is_playable_now(view, possible)
+                })
+            }),
+        _ => false,
+    };
+    if is_playable_now(view, identity) && !rank_save_can_be_unplayable {
+        // Number-2 and number-5 chop clues retain Save possibilities even
+        // when the giver sees a playable identity. The recipient does not
+        // know that identity and must retain the unplayable Save alternatives.
+        // https://hanabi.github.io/beginner/clue-interpretation/#clue-interpretation-algorithm
+        // For other clues, Play interpretation takes precedence. If
         // that interpretation is unsafe (for example, because it creates a
         // false Prompt), the same clue cannot be rescued by calling it a Save.
         return None;

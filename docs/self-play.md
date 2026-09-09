@@ -45,6 +45,9 @@ position.
 
 ## Configuration and measurements
 
+See the [September 8 investigation](self-play-2026-09-08.md) for the latest
+partial-run measurements, fixes, and outstanding convention question.
+
 ```sh
 # Choose concurrency (does not change per-move budgets).
 HANABI_SELF_PLAY_WORKERS=8 scripts/check-self-play.sh
