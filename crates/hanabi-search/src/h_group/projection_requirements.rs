@@ -15,6 +15,7 @@ pub enum ProjectionRequirementKind {
     NoUnobservedConnector { identity: Card, signal_turn: u32 },
     /// The Charm's threshold must survive a hidden external connector.
     BlindPlayThreshold {
+        giver: PlayerId,
         focus: CardId,
         minimum: usize,
         clue_turn: u32,
@@ -86,6 +87,7 @@ pub(super) fn compile(view: &PlayerView, notes: &HGroupInferences) -> Vec<Projec
                     action: Action::Play(card.id),
                     evidence_turn: signal.turn,
                     kind: ProjectionRequirementKind::BlindPlayThreshold {
+                        giver: clue.giver,
                         focus: clue.focus,
                         minimum: 3,
                         clue_turn: signal.turn,
@@ -147,6 +149,7 @@ fn assess_kind(view: &PlayerView, requirement: &ProjectionRequirement) -> Depend
             }
         }
         ProjectionRequirementKind::BlindPlayThreshold {
+            giver,
             focus,
             minimum,
             clue_turn,
@@ -163,7 +166,7 @@ fn assess_kind(view: &PlayerView, requirement: &ProjectionRequirement) -> Depend
                 .map(|card| card.id)
                 .collect();
             for (owner, hand) in view.hands.iter().enumerate() {
-                if owner == requirement.actor.index() {
+                if owner == requirement.actor.index() || owner == giver.index() {
                     continue;
                 }
                 for (slot, card) in hand
@@ -181,6 +184,7 @@ fn assess_kind(view: &PlayerView, requirement: &ProjectionRequirement) -> Depend
                         possible.hands[owner][slot].identity = Some(identity);
                         if super::recognition::four_charm_blind_plays(
                             &possible,
+                            giver,
                             requirement.actor,
                             focus,
                             heights,

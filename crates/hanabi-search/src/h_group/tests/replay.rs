@@ -56,7 +56,7 @@ fn demonstrated_yellow_layer_is_shared_across_observer_projections() {
 /// not evidence that Bob lacks a visible external b3 connector. This tests
 /// projection uncertainty, not the optimality of an invented continuation.
 #[test]
-fn fifth_opening_charm_projection_preserves_hidden_connector_uncertainty() {
+fn fifth_opening_charm_projection_excludes_the_clue_givers_hand() {
     let state = expert_replay_p4v0s1().state_at_turn(0).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let d = LogicalDeductions::new(view.clone()).unwrap();
@@ -75,20 +75,15 @@ fn fifth_opening_charm_projection_preserves_hidden_connector_uncertainty() {
     );
     let outcome =
         super::super::symbolic_line::project_h_group_line(&view, HGroupProfile::Max, action, 32);
-    assert_eq!(
-        outcome.actions, 1,
-        "do not credit the conditional blind play"
-    );
-    assert_eq!(outcome.score_gain, 0);
-    assert_eq!(
-        outcome.stop_reason,
-        crate::SymbolicStopReason::UnknownInterpretation
-    );
+    // The giver cannot intend a connection through their own hidden cards.
+    // The Charm's b1 is therefore a supported play, not an unknown branch.
+    assert!(outcome.actions >= 2);
+    assert!(outcome.score_gain >= 1);
     let mut after = state.clone();
     after.apply(action).unwrap();
     let bob = LogicalDeductions::new(after.view_for(PlayerId::new(1)).unwrap()).unwrap();
     assert!(
-        !infer_h_group(&bob, HGroupProfile::Max)
+        infer_h_group(&bob, HGroupProfile::Max)
             .signals
             .iter()
             .any(|s| s.kind == HGroupMoveKind::Charm)
@@ -150,6 +145,7 @@ fn third_replay_four_charm_counts_blind_plays_in_the_reactors_hand() {
         assert_eq!(
             super::super::recognition::four_charm_blind_plays(
                 &view,
+                PlayerId::new(3),
                 PlayerId::new(0),
                 Card::new(Suit::Blue, Rank::Four),
                 std::array::from_fn(|suit| u8::try_from(view.play_stacks[suit].len()).unwrap()),

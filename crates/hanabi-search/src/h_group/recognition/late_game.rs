@@ -629,6 +629,7 @@ pub(in crate::h_group) fn apply_charm_effects(
                 let actor = next_player(*giver, hands.len());
                 if four_charm_blind_plays(
                     view,
+                    *giver,
                     actor,
                     focus_identity,
                     stack_heights,
@@ -706,6 +707,7 @@ pub(in crate::h_group) fn apply_charm_effects(
                 || prior.stack_heights[suit.index()] != 0
                 || four_charm_blind_plays(
                     view,
+                    prior.giver,
                     *player,
                     focus_identity,
                     prior.stack_heights,

@@ -65,6 +65,7 @@ fn same_turn_signal(signals: &ConventionJournal, turn: u32, kind: HGroupMoveKind
 /// Source: <https://hanabi.github.io/level-23/#the-4-charm>
 pub(super) fn four_charm_blind_plays(
     view: &PlayerView,
+    giver: PlayerId,
     actor: PlayerId,
     focus_identity: Card,
     stack_heights: [u8; 5],
@@ -81,7 +82,10 @@ pub(super) fn four_charm_blind_plays(
                         || IdentitySet::from_mask(card.clues.identity_mask())
                             == IdentitySet::singleton(needed))
             }) && !view.hands.iter().enumerate().any(|(player, hand)| {
-                if player == actor.index() {
+                // The giver cannot build the clue's connection through
+                // identities hidden in their own hand. Another observer's
+                // ability to see those cards does not change this.
+                if player == actor.index() || player == giver.index() {
                     return false;
                 }
                 // A visible face alone is not a connector: it must be a

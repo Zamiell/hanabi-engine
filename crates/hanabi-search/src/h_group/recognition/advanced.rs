@@ -571,6 +571,7 @@ pub(in crate::h_group) fn apply_out_of_order_effects(
         let actor = next_player(*giver, hands.len());
         if four_charm_blind_plays(
             view,
+            *giver,
             actor,
             focus_identity,
             stack_heights,

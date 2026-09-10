@@ -341,7 +341,7 @@ mod tests {
     }
 
     #[test]
-    fn excluded_connector_identities_do_not_create_a_charm_branch() {
+    fn clue_givers_blank_hand_does_not_create_a_charm_branch() {
         let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
             "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
         ))
@@ -350,7 +350,7 @@ mod tests {
         let view = state.view_for(state.current_player()).unwrap();
         let target = PlayerId::new(2);
         let clue = Clue::Rank(hanabi_core::Rank::Four);
-        let mut public = ProspectiveTransition::clue_by(
+        let public = ProspectiveTransition::clue_by(
             &view,
             view.current_player,
             target,
@@ -362,18 +362,8 @@ mod tests {
             .unwrap();
         let inferred = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
         let action = Action::Play(CardId::new(4));
-        assert!(has_unresolved_requirement(&public, &inferred, action));
-        // Algorithmic domain boundary, not a proposed game continuation:
-        // ruling out blue on every blank rules out the external blue connector.
-        for card in public
-            .hands
-            .iter_mut()
-            .flatten()
-            .filter(|card| card.identity.is_none())
-        {
-            card.clues
-                .add_negative_clue(Clue::Suit(hanabi_core::Suit::Blue));
-        }
+        // September 10 clarification: the giver cannot supply an unknown
+        // connector. No invented negative clue facts are needed to rule it out.
         assert!(!has_unresolved_requirement(&public, &inferred, action));
     }
 

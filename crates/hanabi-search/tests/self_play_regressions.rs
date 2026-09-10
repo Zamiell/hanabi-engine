@@ -3,6 +3,43 @@
 use hanabi_protocol::HanabiLiveReplay;
 use hanabi_search::{HGroupProfile, InformationSet, SupportedConvention, WorldCount};
 
+/// User-reviewed p4v0s28 turn 1 (September 10): Alice's own b1/y1 layer
+/// cannot connect her clue to Donald's y4, even though Bob can see it.
+/// <https://hanabi.github.io/level-23/#the-4-charm>
+#[test]
+fn four_charm_ignores_connectors_in_the_clue_givers_hand() {
+    let replay = HanabiLiveReplay::from_json(
+        r#"{"seed":"p4v0s28","players":["Alice","Bob","Cathy","Donald"],"actions":[{"type":3,"target":3,"value":4}]}"#,
+    ).unwrap();
+    let state = replay.state_at_turn(1).unwrap();
+    let bob = hanabi_core::PlayerId::new(1);
+    let fourth_position = hanabi_core::CardId::new(4);
+    for observer in [hanabi_core::PlayerId::new(0), bob] {
+        let view = state.view_for(observer).unwrap();
+        let information = InformationSet::new(&view).unwrap();
+        let analysis =
+            SupportedConvention::HGroup(HGroupProfile::Max).analyze(information.deductions());
+        let hanabi_search::ConventionInferences::HGroup(ref inferred) = analysis.inferences else {
+            unreachable!();
+        };
+        assert!(
+            inferred.signals.iter().any(|signal| {
+                signal.turn == 0
+                    && signal.kind == hanabi_search::HGroupMoveKind::Charm
+                    && signal.target == Some(bob)
+                    && signal.cards.contains(&fourth_position)
+            }),
+            "observer {observer:?}: {inferred:#?}"
+        );
+        if observer == bob {
+            assert_eq!(
+                analysis.preferred_action,
+                Some(hanabi_core::Action::Play(fourth_position))
+            );
+        }
+    }
+}
+
 /// A Fix must actually repair the recipient's interpretation, not just match
 /// a repair obligation seen by the giver. Here 4s instead promises a false r4.
 /// <https://hanabi.github.io/level-3/#the-fix-clue>

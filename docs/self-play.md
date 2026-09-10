@@ -45,8 +45,10 @@ position.
 
 ## Configuration and measurements
 
-See the [September 8 investigation](self-play-2026-09-08.md) for the latest
-partial-run measurements, fixes, and outstanding convention question.
+See the [September 8 investigation](self-play-2026-09-08.md) for partial-run
+measurements and the
+[September 10 correction](charm-giver-exclusion-2026-09-10.md) for the Charm fix
+and next strategic disagreement.
 
 ```sh
 # Choose concurrency (does not change per-move budgets).

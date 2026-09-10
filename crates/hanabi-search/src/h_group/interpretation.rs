@@ -1626,6 +1626,7 @@ pub(super) fn advanced_clue_candidates(
                             && view.play_stacks[identity.suit.index()].is_empty()
                             && super::recognition::four_charm_blind_plays(
                                 view,
+                                view.current_player,
                                 charm_actor,
                                 identity,
                                 std::array::from_fn(|suit| {
