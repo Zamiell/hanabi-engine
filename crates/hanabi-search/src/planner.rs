@@ -202,6 +202,7 @@ pub struct ProjectedPositionValue {
     pub exposed_critical_chops: u8,
     pub blocked_clued_cards: u8,
     pub secured_future_plays: u8,
+    pub secured_card_quality: crate::SecuredCardQuality,
     pub protected_bottom_deck_risks: u8,
     pub visible_successors: u8,
     pub finesse_opportunities: u8,
@@ -257,6 +258,12 @@ impl ProjectedPositionValue {
             && self.blocked_clued_cards <= other.blocked_clued_cards
             && self.score.saturating_add(self.secured_future_plays)
                 >= other.score.saturating_add(other.secured_future_plays)
+            // Rank/distance preferences compare equal amounts of present
+            // and future progress. They must not forbid converting a secured
+            // card into a stack point or obtaining additional future plays.
+            && (self.score != other.score
+                || self.secured_future_plays != other.secured_future_plays
+                || self.secured_card_quality.no_worse_than(other.secured_card_quality))
             && self.protected_bottom_deck_risks >= other.protected_bottom_deck_risks
             && self.visible_successors >= other.visible_successors
             && self.save_pressure <= other.save_pressure

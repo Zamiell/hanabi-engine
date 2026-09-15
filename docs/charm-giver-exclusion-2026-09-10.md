@@ -23,6 +23,11 @@ passing baseline, and the later error is still outstanding.
 
 ## Next strategic disagreement
 
+**Resolved September 15:** the user confirmed the 3 Bluff is preferable because
+the protected 3s are more valuable and accessible than the protected 4s. See
+[future-card quality](future-card-quality.md) for the implementation. The table
+and reasoning below document the pre-fix disagreement.
+
 [p4v0s1, turn 1](https://hanab.live/shared-replay-json/415ifirpxqufunsxcwgc-tbokayavlbjdgwqvekus-pdfanhhmkrpml,03tdeh-sbxckceeeisbkdegfjep-edgcelevwbereseyocwa-eueofaefobfmew1a1den-fbeze2xae7fqfxf3f4f5-f0lceGodeIeFecetfEe1-,0#1):
 fixture 3s to Donald; engine 4s to Cathy. The fixture remains unchanged.
 

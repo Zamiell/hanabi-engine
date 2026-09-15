@@ -5,6 +5,8 @@ mod control;
 pub use control::{AnalysisControl, AnalysisStopped, CancellationToken};
 mod baseline;
 mod convention;
+mod future_card_quality;
+pub use future_card_quality::SecuredCardQuality;
 mod h_group;
 mod information_set;
 mod planner;

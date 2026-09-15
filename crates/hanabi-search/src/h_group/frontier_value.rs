@@ -123,6 +123,7 @@ pub(super) fn evaluate(
         }
     }
     value.secured_future_plays = narrow(secured.len());
+    value.secured_card_quality = secured_card_quality(frontier, secured);
     let mut protected = secured;
     for suit in Suit::ALL {
         for rank in source.play_stacks[suit.index()].len()..frontier.play_stacks[suit.index()].len()
@@ -167,6 +168,39 @@ pub(super) fn evaluate(
         value.save_pressure > 0,
     );
     Some(value)
+}
+
+/// Missing prerequisites are neither already played, secured, nor visible.
+/// This measures remaining access, not the number of turns until a play.
+/// User-reviewed p4v0s1 opening comparison, September 15, 2026.
+fn secured_card_quality(frontier: &PlayerView, secured: IdentitySet) -> crate::SecuredCardQuality {
+    crate::SecuredCardQuality::from_cards(secured.iter().map(|identity| {
+        let missing_predecessors = ((frontier.play_stacks[identity.suit.index()].len() + 1)
+            ..usize::from(identity.rank.number()))
+            .filter(|rank| {
+                let predecessor = Card::new(identity.suit, Rank::ALL[*rank - 1]);
+                !secured.contains(predecessor)
+                    && !frontier
+                        .hands
+                        .iter()
+                        .flatten()
+                        .any(|card| card.identity == Some(predecessor))
+            })
+            .count();
+        let visible_successor = identity.rank != Rank::Five
+            && frontier.hands.iter().flatten().any(|card| {
+                card.identity
+                    == Some(Card::new(
+                        identity.suit,
+                        Rank::ALL[identity.rank.index() + 1],
+                    ))
+            });
+        crate::future_card_quality::FutureCardQuality {
+            rank: identity.rank,
+            missing_predecessors: narrow(missing_predecessors),
+            visible_successor,
+        }
+    }))
 }
 
 /// Check an explicit conditional branch immediately after a stack advances.
@@ -391,6 +425,64 @@ fn consecutive_save_pressure(tokens: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewed_opening_distinguishes_the_saved_threes_and_fours() {
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let root = replay.state_at_turn(0).unwrap();
+        let bluff = replay.state_at_turn(2).unwrap();
+        let mut charm = root.clone();
+        charm
+            .apply(Action::Clue {
+                target: PlayerId::new(2),
+                clue: Clue::Rank(Rank::Four),
+            })
+            .unwrap();
+        charm
+            .apply(Action::Play(hanabi_core::CardId::new(4)))
+            .unwrap();
+        let identities = |a, b| IdentitySet::singleton(a).union(IdentitySet::singleton(b));
+        let threes = secured_card_quality(
+            &bluff.view_for(PlayerId::new(0)).unwrap(),
+            identities(
+                Card::new(Suit::Purple, Rank::Three),
+                Card::new(Suit::Red, Rank::Three),
+            ),
+        );
+        let fours = secured_card_quality(
+            &charm.view_for(PlayerId::new(0)).unwrap(),
+            identities(
+                Card::new(Suit::Blue, Rank::Four),
+                Card::new(Suit::Green, Rank::Four),
+            ),
+        );
+        let quality = |rank, missing_predecessors, visible_successor| {
+            crate::future_card_quality::FutureCardQuality {
+                rank,
+                missing_predecessors,
+                visible_successor,
+            }
+        };
+        assert_eq!(
+            threes,
+            crate::SecuredCardQuality::from_cards([
+                quality(Rank::Three, 1, true),
+                quality(Rank::Three, 2, false),
+            ])
+        );
+        assert_eq!(
+            fours,
+            crate::SecuredCardQuality::from_cards([
+                quality(Rank::Four, 1, false),
+                quality(Rank::Four, 3, false),
+            ])
+        );
+        assert!(threes.no_worse_than(fours));
+        assert!(!fours.no_worse_than(threes));
+    }
     use hanabi_core::Clue;
 
     #[test]
