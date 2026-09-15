@@ -58,12 +58,13 @@ fn same_turn_signal(signals: &ConventionJournal, turn: u32, kind: HGroupMoveKind
     signals.has_at_turn(turn, kind)
 }
 
-/// Counts only the blind steps needed to connect a 4 Play Clue. Previously
+/// Counts unassigned ranks in a prospective Finesse. Previously
 /// clued exact connectors are Prompts and therefore do not count toward the
-/// three-blind-play threshold for a 4 Charm. Visible connections in other
+/// thresholds for a 4 Charm or 5 Color Ejection. Visible connections in other
 /// hands also do not require blind plays in the reacting player's hand.
 /// Source: <https://hanabi.github.io/level-23/#the-4-charm>
-pub(super) fn four_charm_blind_plays(
+/// Source: <https://hanabi.github.io/level-16/#the-5-color-ejection-5ce>
+pub(super) fn unassigned_finesse_ranks(
     view: &PlayerView,
     giver: PlayerId,
     actor: PlayerId,

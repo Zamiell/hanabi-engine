@@ -87,6 +87,10 @@ pub(super) enum ConventionEffect {
         active: bool,
     },
     ClaimIdentity(HGroupSignal),
+    SupersedeProvisionalFocus {
+        card: CardId,
+        turn: u32,
+    },
 }
 
 #[derive(Clone, Debug, Default)]
@@ -116,7 +120,15 @@ impl EffectBatch {
             }),
             _ => {}
         }
-        if signal.identity.is_some() {
+        // Double Bluff card lists describe actions, not cards sharing one
+        // identity. Explicitly retract the provisional focus even though
+        // this behavioral signal intentionally has no identity claim.
+        if signal.kind == HGroupMoveKind::DoubleBluff && signal.cards.len() == 3 {
+            effects.push(ConventionEffect::SupersedeProvisionalFocus {
+                card: signal.cards[2],
+                turn: signal.turn,
+            });
+        } else if signal.identity.is_some() {
             effects.push(ConventionEffect::ClaimIdentity(signal.clone()));
         }
         effects.push(ConventionEffect::RecordSignal(signal));
@@ -183,6 +195,9 @@ impl ConventionReducer {
                 }
                 ConventionEffect::ClaimIdentity(signal) => {
                     journal.facts.apply_identity_effect(&signal);
+                }
+                ConventionEffect::SupersedeProvisionalFocus { card, turn } => {
+                    journal.facts.supersede_provisional_focus(card, turn);
                 }
                 ConventionEffect::RecordSignal(signal) => {
                     let duplicate =

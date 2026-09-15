@@ -182,7 +182,7 @@ fn assess_kind(view: &PlayerView, requirement: &ProjectionRequirement) -> Depend
                     }) {
                         let mut possible = view.clone();
                         possible.hands[owner][slot].identity = Some(identity);
-                        if super::recognition::four_charm_blind_plays(
+                        if super::recognition::unassigned_finesse_ranks(
                             &possible,
                             giver,
                             requirement.actor,

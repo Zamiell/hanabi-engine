@@ -21,6 +21,8 @@ pub(super) struct NamedLineEvidence {
     pub(super) secured_actions: usize,
     pub(super) connection_steps: usize,
     pub(super) playable_cards: Option<Vec<CardId>>,
+    /// Compulsory Bluff plays, unlike alternative slots in a Finesse chain.
+    pub(super) blind_play_cards: Vec<CardId>,
 }
 
 pub(super) fn compile(
@@ -32,6 +34,19 @@ pub(super) fn compile(
         |(secured_actions, connection_steps, playable_cards)| NamedLineEvidence {
             secured_actions,
             connection_steps,
+            blind_play_cards: if matches!(
+                kind,
+                Some(HGroupMoveKind::Bluff | HGroupMoveKind::DoubleBluff)
+            ) {
+                playable_cards
+                    .iter()
+                    .flatten()
+                    .copied()
+                    .take(connection_steps)
+                    .collect()
+            } else {
+                Vec::new()
+            },
             playable_cards,
         },
     );
@@ -137,8 +152,8 @@ pub(super) fn compile_named_line_metrics(
             .filter(|signal| signal.turn == source.turn)
         {
             match signal.kind {
-                HGroupMoveKind::Bluff => {
-                    if canonical_kind != Some(HGroupMoveKind::Bluff) {
+                HGroupMoveKind::Bluff | HGroupMoveKind::DoubleBluff => {
+                    if canonical_kind != Some(signal.kind) {
                         continue;
                     }
                     let blind_plays = signal.cards.len().saturating_sub(1);
@@ -197,6 +212,19 @@ pub(super) fn compile_named_line_metrics(
                 | HGroupMoveKind::Ejection
                 | HGroupMoveKind::OutOfPositionEjection
                 | HGroupMoveKind::StackedEjection => {
+                    // A different observer's provisional Ejection cannot
+                    // replace the admitted line (for example a Double Bluff).
+                    if canonical_kind.is_some_and(|kind| {
+                        !matches!(
+                            kind,
+                            HGroupMoveKind::FiveColorEjection
+                                | HGroupMoveKind::Ejection
+                                | HGroupMoveKind::OutOfPositionEjection
+                                | HGroupMoveKind::StackedEjection
+                        )
+                    }) {
+                        continue;
+                    }
                     // Focus-only identity annotations are not action signals.
                     // The full signal contains one ejected card followed by
                     // touched cards; those touches are not additional plays.

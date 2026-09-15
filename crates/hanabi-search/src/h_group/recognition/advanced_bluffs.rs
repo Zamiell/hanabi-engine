@@ -347,9 +347,12 @@ pub(in crate::h_group) fn apply_double_bluff_effects(
 ) {
     // Sources: https://hanabi.github.io/level-15/#the-double-bluff
     // https://hanabi.github.io/level-15/#the-hard-double-bluff
-    // https://hanabi.github.io/level-15/#the-pestilent-double-bluff-pdb
     let entry = context.entry;
     let hands = context.after.hands;
+    if matches!(entry.event, ObservedEvent::Played { .. }) {
+        apply_demonstrated_double_bluff(context, view, effects);
+        return;
+    }
     let ObservedEvent::Clued {
         giver,
         target,
@@ -364,14 +367,29 @@ pub(in crate::h_group) fn apply_double_bluff_effects(
         return;
     };
     let distance = usize::from(identity.rank.number())
-        .saturating_sub(view.play_stacks[identity.suit.index()].len() + 1);
+        .saturating_sub(usize::from(context.after.stack_heights[identity.suit.index()]) + 1);
     if distance < 2 {
         return;
     }
     let first = next_player(*giver, hands.len());
     let second = next_player(first, hands.len());
-    if next_player(second, hands.len()) != *target
-        || !same_turn_signal(effects.signals, entry.turn, HGroupMoveKind::Bluff)
+    if next_player(second, hands.len()) != *target {
+        return;
+    }
+    let interpretation = effects
+        .clues
+        .iter()
+        .rev()
+        .find(|clue| clue.turn == entry.turn);
+    let first_blind_plays = interpretation.and_then(|clue| clue.blind_plays_for(first, identity));
+    // The first reactor must actually read a Play/Finesse, not a Save or a
+    // 5 Color Ejection. A Double Bluff need not already be an ordinary Bluff:
+    // its defining case is precisely a non-ordinary Bluff target.
+    if bluff_target_kind_at(context.after.stack_heights, *clue, identity).is_some()
+        || first_blind_plays.is_none_or(|count| count == 0)
+        || (matches!(clue, Clue::Suit(_))
+            && identity.rank == Rank::Five
+            && first_blind_plays.is_some_and(|count| count >= 2))
     {
         return;
     }
@@ -382,19 +400,21 @@ pub(in crate::h_group) fn apply_double_bluff_effects(
         });
     let second_play = finesse_position_id(&hands[second.index()], effects.explicitly_clued, 0)
         .filter(|card| {
-            identity_of(view, *card)
-                .is_none_or(|identity| is_playable_at(context.after.stack_heights, identity))
+            let mut after_first = context.after.stack_heights;
+            if let Some(played) = first_play.and_then(|first| identity_of(view, first)) {
+                after_first[played.suit.index()] = played.rank.number();
+            }
+            identity_of(view, *card).is_none_or(|identity| is_playable_at(after_first, identity))
         });
     if let (Some(first_play), Some(second_play)) = (first_play, second_play) {
         effects.forced_playable.insert(first_play);
-        effects.forced_playable.insert(second_play);
+        // The second player learns that their blind play is required only
+        // when the first play demonstrates this clue on the following turn.
         let first_identity = identity_of(view, first_play);
         let second_identity = identity_of(view, second_play);
         let hard = first_identity
             .is_some_and(|first_identity| first_identity.suit == identity.suit)
             && second_identity.is_some_and(|second_identity| second_identity.suit == identity.suit);
-        let pestilent =
-            bluff_target_kind_at(context.after.stack_heights, *clue, identity).is_some();
         let cards = vec![first_play, second_play, touched[touched.len() - 1]];
         push_signal(
             effects.signals,
@@ -403,7 +423,7 @@ pub(in crate::h_group) fn apply_double_bluff_effects(
             Some(*target),
             HGroupMoveKind::DoubleBluff,
             cards.clone(),
-            Some(identity),
+            None,
         );
         if hard {
             push_signal(
@@ -413,21 +433,110 @@ pub(in crate::h_group) fn apply_double_bluff_effects(
                 Some(*target),
                 HGroupMoveKind::HardDoubleBluff,
                 cards.clone(),
-                Some(identity),
-            );
-        }
-        if pestilent {
-            push_signal(
-                effects.signals,
-                entry,
-                *giver,
-                Some(*target),
-                HGroupMoveKind::PestilentDoubleBluff,
-                cards,
-                Some(identity),
+                None,
             );
         }
     }
+}
+
+/// Two immediate first-position plays resolve the Bluff; no third blind play
+/// remains owed. Reconstruct the public evidence, not the simulator's future
+/// identities. The second reactor can see the non-ordinary target after the
+/// first play even when the recipient cannot yet distinguish it from a Bluff.
+/// <https://hanabi.github.io/level-15/#the-double-bluff>
+fn apply_demonstrated_double_bluff(
+    context: &HGroupTurnContext<'_>,
+    view: &PlayerView,
+    effects: &mut HGroupRuleEffects<'_>,
+) {
+    let ObservedEvent::Played {
+        player,
+        card,
+        identity,
+        successful: true,
+    } = context.entry.event
+    else {
+        return;
+    };
+    if context.before.older_play_obligations.contains(&card)
+        || was_clued_before(view, context.entry.turn, card)
+    {
+        return;
+    }
+    let Some(clue) = effects.clues.iter().rev().find(|clue| {
+        let offset = context.entry.turn.saturating_sub(clue.turn);
+        (offset == 1 && player == next_player(clue.giver, view.hands.len()))
+            || (offset == 2
+                && player
+                    == next_player(next_player(clue.giver, view.hands.len()), view.hands.len()))
+    }) else {
+        return;
+    };
+    let first = next_player(clue.giver, view.hands.len());
+    let second = next_player(first, view.hands.len());
+    if next_player(second, view.hands.len()) != clue.target
+        || !clue.save_identities.is_empty()
+        || finesse_position_id(
+            &context.before.hands[player.index()],
+            effects.explicitly_clued,
+            0,
+        ) != Some(card)
+    {
+        return;
+    }
+    let offset = context.entry.turn - clue.turn;
+    let cards = if offset == 1 {
+        let Some(focus_identity) = identity_of(view, clue.focus) else {
+            return;
+        };
+        if is_trash_at(clue.stack_heights, focus_identity)
+            || bluff_target_kind_at(clue.stack_heights, clue.clue, focus_identity).is_some()
+            || bluff_play_connects(clue.clue, identity)
+        {
+            return;
+        }
+        let Some(next_card) = finesse_position_id(
+            &context.after.hands[second.index()],
+            effects.explicitly_clued,
+            0,
+        ) else {
+            return;
+        };
+        effects.forced_playable.insert(next_card);
+        vec![card, next_card, clue.focus]
+    } else {
+        let Some(first_card) = effects.signals.iter().find_map(|signal| {
+            // Reuse the first play's demonstrated causal link. Two unrelated
+            // plays are not evidence of a Double Bluff.
+            (signal.turn == clue.turn + 1
+                && matches!(
+                    signal.kind,
+                    HGroupMoveKind::Bluff | HGroupMoveKind::DoubleBluff
+                )
+                && signal.cards.len() >= 2
+                && signal.cards.last() == Some(&clue.focus))
+            .then(|| signal.cards[0])
+        }) else {
+            return;
+        };
+        vec![first_card, card, clue.focus]
+    };
+    effects.pending.cancel_where(
+        context.entry.turn,
+        ConnectionTransitionReason::FocusInvalidated,
+        |connection| connection.focus == clue.focus,
+    );
+    effects.already_playing.remove(&clue.focus);
+    effects.forced_playable.remove(&clue.focus);
+    push_signal(
+        effects.signals,
+        context.entry,
+        clue.giver,
+        Some(clue.target),
+        HGroupMoveKind::DoubleBluff,
+        cards,
+        None,
+    );
 }
 
 #[allow(clippy::too_many_lines)]

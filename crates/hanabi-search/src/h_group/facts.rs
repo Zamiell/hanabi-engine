@@ -90,7 +90,11 @@ impl ConventionFacts {
             _ => {}
         }
 
-        self.apply_identity_effect(signal);
+        if signal.kind == HGroupMoveKind::DoubleBluff && signal.cards.len() == 3 {
+            self.supersede_provisional_focus(signal.cards[2], signal.turn);
+        } else {
+            self.apply_identity_effect(signal);
+        }
     }
 
     pub(super) fn set_fixed(&mut self, cards: &[CardId], fixed: bool) {
@@ -111,6 +115,18 @@ impl ConventionFacts {
                 self.active_priority.remove(card);
             }
         }
+    }
+
+    pub(super) fn supersede_provisional_focus(&mut self, focus: CardId, turn: u32) {
+        self.identity_claims.retain(|claim| {
+            !(claim.turn <= turn
+                && claim.cards.contains(&focus)
+                && matches!(
+                    claim.source,
+                    HGroupMoveKind::PlayClue | HGroupMoveKind::Context
+                ))
+        });
+        self.rebuild_known_identity(focus);
     }
 
     pub(super) fn apply_identity_effect(&mut self, signal: &HGroupSignal) {

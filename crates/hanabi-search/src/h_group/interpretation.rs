@@ -1388,30 +1388,14 @@ pub(super) fn advanced_clue_candidates(
                 .all(|card| replay.cards.explicitly_clued.contains(card))
             && ((fills_in && (duplicate_touch || stops_bad_existing_play))
                 || no_information_one_fix);
+        // The reactor, not the giver, counts their own assigned blind steps.
+        // Use the same owner projection as execution rather than counting
+        // missing ranks across the team a second time here.
+        // https://hanabi.github.io/level-16/#the-5-color-ejection-5ce
         let five_ejection = matches!(clue, Clue::Suit(_))
-            && clue_focus
-                .and_then(|focus| identity_of(view, focus).map(|identity| (focus, identity)))
-                .is_some_and(|(focus, identity)| {
-                    if identity.rank != Rank::Five || replay.cards.explicitly_clued.contains(&focus)
-                    {
-                        return false;
-                    }
-                    let height = view.play_stacks[identity.suit.index()].len();
-                    let blind_plays = ((height + 1)..usize::from(identity.rank.number()))
-                        .filter(|needed_rank| {
-                            let needed = Card::new(identity.suit, Rank::ALL[*needed_rank - 1]);
-                            !view.hands.iter().flatten().any(|card| {
-                                gotten.contains(&card.id)
-                                    && (card.identity == Some(needed)
-                                        || convention_cards.iter().any(|note| {
-                                            note.card == card.id
-                                                && note.identities == IdentitySet::singleton(needed)
-                                        }))
-                            })
-                        })
-                        .count();
-                    blind_plays >= 2
-                });
+            && super::prospective::compiled_prospective_clue(view, profile, target, clue, &touched)
+                .and_then(|compiled| compiled.signal_kinds(ejection_actor))
+                .is_some_and(|kinds| kinds.contains(&HGroupMoveKind::FiveColorEjection));
         let ejection_playable = finesse_position(
             &view.hands[ejection_actor.index()],
             &replay.cards.explicitly_clued,
@@ -1638,7 +1622,7 @@ pub(super) fn advanced_clue_candidates(
                     && identity_of(view, focus).is_some_and(|identity| {
                         identity.rank == Rank::Four
                             && view.play_stacks[identity.suit.index()].is_empty()
-                            && super::recognition::four_charm_blind_plays(
+                            && super::recognition::unassigned_finesse_ranks(
                                 view,
                                 view.current_player,
                                 charm_actor,
@@ -1744,7 +1728,15 @@ pub(super) fn advanced_clue_candidates(
             && super::prospective::compiled_prospective_clue(view, profile, target, clue, &touched)
                 .and_then(|compiled| compiled.signal_kinds(view.observer))
                 .is_some_and(|kinds| kinds.contains(&HGroupMoveKind::DistributionClue));
-        let classification = if unnecessary_ignition {
+        let double_bluff = rule_enabled(profile, HGroupRuleId::DoubleBluffs)
+            && super::prospective::compiled_prospective_clue(view, profile, target, clue, &touched)
+                .and_then(|compiled| {
+                    compiled.signal_kinds(next_player(view.current_player, view.hands.len()))
+                })
+                .is_some_and(|kinds| kinds.contains(&HGroupMoveKind::DoubleBluff));
+        let classification = if double_bluff {
+            Some((HGroupMoveKind::DoubleBluff, 336))
+        } else if unnecessary_ignition {
             Some((HGroupMoveKind::UnnecessaryIgnition, 360))
         } else if rule_enabled(profile, HGroupRuleId::Ignition)
             && (replay_ignition || poke_ignition || trash_ignition)

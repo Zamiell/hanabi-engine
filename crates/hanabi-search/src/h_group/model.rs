@@ -142,6 +142,31 @@ pub struct HGroupClueInterpretation {
     pub(super) unresolved_visible_prefix: Vec<ClueConnectionStep>,
 }
 
+impl HGroupClueInterpretation {
+    /// Count only this player's blind plays in a complete interpretation.
+    /// Prompts and other players' Finesse steps do not make a 5 Color Ejection.
+    /// A missing interpretation is unknown, not proof of two blind plays.
+    /// <https://hanabi.github.io/level-16/#the-5-color-ejection-5ce>
+    pub(super) fn blind_plays_for(&self, actor: PlayerId, identity: Card) -> Option<usize> {
+        self.hypotheses
+            .iter()
+            .filter(|hypothesis| hypothesis.focus_identity == identity)
+            .map(|hypothesis| {
+                hypothesis
+                    .connection_steps
+                    .iter()
+                    .filter(|step| {
+                        step.actor == actor && step.kind == HGroupConnectionKind::Finesse
+                    })
+                    // A step's cards are ordered possible positions for
+                    // one promised identity, not a requirement to play them
+                    // all. Only another connecting rank adds a blind play.
+                    .count()
+            })
+            .min()
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct ClueConnectionStep {
     pub(super) actor: PlayerId,

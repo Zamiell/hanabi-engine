@@ -1,5 +1,129 @@
 use super::*;
 
+/// Human-reviewed p4v0s1 turn 14: purple to Alice initiates the two
+/// immediate blind plays (Cathy's g1, Donald's r1), not a 5 Color Ejection.
+/// <https://hanabi.github.io/level-15/#the-double-bluff>
+#[test]
+fn fifth_replay_purple_double_bluff_is_admitted() {
+    let fixture = expert_replay_p4v0s1();
+    let state = fixture.state_at_turn(13).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let deductions = LogicalDeductions::new(view.clone()).unwrap();
+    let action = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Suit(Suit::Purple),
+    };
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    for turn in 14..=16 {
+        let after = fixture.state_at_turn(turn).unwrap();
+        for player in 0..4 {
+            let d = LogicalDeductions::new(after.view_for(PlayerId::new(player)).unwrap()).unwrap();
+            let inferred = infer_h_group(&d, HGroupProfile::Max);
+            if turn == 14 && player == 2 {
+                assert!(
+                    inferred.playable_now.contains(&CardId::new(20)),
+                    "{inferred:#?}"
+                );
+                assert!(
+                    !inferred
+                        .signals
+                        .iter()
+                        .any(|s| s.turn == 13 && s.kind == HGroupMoveKind::FiveColorEjection)
+                );
+            }
+            if turn == 15 && player == 3 {
+                assert!(
+                    inferred.playable_now.contains(&CardId::new(21)),
+                    "{inferred:#?}"
+                );
+            }
+            if turn == 16 && player == 0 {
+                assert_eq!(
+                    inferred
+                        .cards
+                        .iter()
+                        .find(|note| note.card == CardId::new(22))
+                        .unwrap()
+                        .identities,
+                    IdentitySet::singleton(Card::new(Suit::Purple, Rank::Five)),
+                    "{inferred:#?}"
+                );
+            }
+        }
+    }
+    let candidate = candidates
+        .iter()
+        .find(|candidate| candidate.action == action)
+        .expect("the Double Bluff is admitted");
+    let outcome =
+        super::super::strategic_value::scheduled_clue_outcome(&view, HGroupProfile::Max, candidate)
+            .unwrap();
+    assert_eq!(outcome.convention_action_count, Some(3));
+    assert_eq!(outcome.convention_connection_steps, Some(2));
+    let (line, evidence) = super::super::symbolic_line::project_h_group_projection(
+        &view,
+        HGroupProfile::Max,
+        action,
+        32,
+        &crate::AnalysisControl::default(),
+    )
+    .unwrap();
+    assert!(line.actions >= 3);
+    assert!(line.score_gain >= 2);
+    assert_eq!(line.strikes, 0);
+    assert_eq!(
+        evidence
+            .steps
+            .iter()
+            .take(3)
+            .map(|step| step.projected.action)
+            .collect::<Vec<_>>(),
+        vec![
+            action,
+            Action::Play(CardId::new(20)),
+            Action::Play(CardId::new(21))
+        ]
+    );
+}
+
+/// Same reviewed demonstration, retaining the information hidden from each
+/// source observer rather than exporting Alice's perfect-information note.
+#[test]
+fn fifth_replay_double_bluff_keeps_observer_relative_focus_domains() {
+    let state = expert_replay_p4v0s1().state_at_turn(16).unwrap();
+    for (player, ranks) in [
+        (0, vec![Rank::Five]),
+        (1, vec![Rank::Four, Rank::Five]),
+        (2, vec![Rank::Five]),
+        (3, vec![Rank::Three, Rank::Four, Rank::Five]),
+    ] {
+        let source = state.view_for(PlayerId::new(player)).unwrap();
+        let (d, r) = PerspectiveProjector::new(&source, HGroupProfile::Max)
+            .project(PlayerId::new(0), PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        let inferred = infer_h_group_from_replay(&d, r.clone(), HGroupProfile::Max);
+        let expected = ranks.into_iter().fold(IdentitySet::default(), |set, rank| {
+            set.union(IdentitySet::singleton(Card::new(Suit::Purple, rank)))
+        });
+        assert_eq!(
+            inferred
+                .cards
+                .iter()
+                .find(|note| note.card == CardId::new(22))
+                .unwrap()
+                .identities,
+            expected,
+            "source={player}; {inferred:#?}"
+        );
+        assert!(
+            !r.pending_connections
+                .iter()
+                .any(|connection| connection.focus == CardId::new(22)),
+            "no third blind play is owed"
+        );
+    }
+}
+
 #[test]
 fn demonstrated_yellow_layer_is_shared_across_observer_projections() {
     let fixture = HanabiLiveReplay::from_json(include_str!(
@@ -143,7 +267,7 @@ fn third_replay_four_charm_counts_blind_plays_in_the_reactors_hand() {
             .map(|card| card.id)
             .collect();
         assert_eq!(
-            super::super::recognition::four_charm_blind_plays(
+            super::super::recognition::unassigned_finesse_ranks(
                 &view,
                 PlayerId::new(3),
                 PlayerId::new(0),
@@ -1358,16 +1482,18 @@ fn fifth_replay_move_eleven_rejects_an_unconnected_yellow_four() {
 }
 
 #[test]
-fn fifth_replay_move_eleven_uses_permission_to_discard() {
+fn fifth_replay_move_eleven_permits_discarding() {
     let fixture = expert_replay_p4v0s1();
     let state = fixture.state_at_turn(10).expect("fixture prefix is legal");
     let view = state
         .view_for(state.current_player())
         .expect("Cathy has a view");
     let deductions = LogicalDeductions::new(view).expect("logical view");
-    assert_eq!(
-        select_h_group_action(&deductions, HGroupProfile::Max),
-        Some(Action::Discard(CardId::new(9))),
+    // PTD is permission, not a requirement to outrank every newly implemented
+    // clue in the greedy rollout policy. The full replay checks move selection.
+    assert!(
+        ordered_h_group_actions(&deductions, HGroupProfile::Max)
+            .contains(&Action::Discard(CardId::new(9))),
         "Cathy may discard instead of giving the otherwise-mandatory 5 Stall to Bob",
     );
 }

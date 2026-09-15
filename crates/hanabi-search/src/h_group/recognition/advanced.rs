@@ -3,8 +3,8 @@ use super::{
     ConnectionTransitionReason, ConventionJournal, HGroupClueInterpretation, HGroupClueKind,
     HGroupConnectionKind, HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, IdentitySet,
     ObservedEvent, ObservedHistoryEntry, PlayerView, PromiseId, Rank, RequiredFix, chop,
-    finesse_position_id, five_pulled_card, four_charm_blind_plays, identity_of, is_playable_at,
-    is_trash_at, next_player, protected_cards, push_signal, same_turn_signal, was_clued_before,
+    finesse_position_id, five_pulled_card, identity_of, is_playable_at, is_trash_at, next_player,
+    protected_cards, push_signal, same_turn_signal, unassigned_finesse_ranks, was_clued_before,
 };
 use crate::h_group::model::FixObligations;
 
@@ -569,7 +569,7 @@ pub(in crate::h_group) fn apply_out_of_order_effects(
             return false;
         }
         let actor = next_player(*giver, hands.len());
-        if four_charm_blind_plays(
+        if unassigned_finesse_ranks(
             view,
             *giver,
             actor,

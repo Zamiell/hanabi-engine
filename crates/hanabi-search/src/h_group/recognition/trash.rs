@@ -370,24 +370,32 @@ pub(in crate::h_group) fn apply_ejection_discharge_effects(
     let focus_identity =
         interpretation.and_then(|interpretation| identity_of(view, interpretation.focus));
     let ejection_actor = next_player(*giver, hands.len());
-    let blind_plays = interpretation.map_or(0, |interpretation| {
-        let Some(identity) = focus_identity else {
-            return 0;
-        };
-        let previously_gotten = interpretation
-            .previously_gotten
-            .iter()
-            .copied()
-            .collect::<CardSet>();
-        ((stack_heights[identity.suit.index()] + 1)..identity.rank.number())
-            .filter(|rank| {
-                let needed = Card::new(identity.suit, Rank::ALL[usize::from(*rank - 1)]);
-                !hands.iter().flatten().copied().any(|card| {
-                    previously_gotten.contains(&card) && identity_of(view, card) == Some(needed)
-                })
+    let blind_plays = interpretation
+        .filter(|_| view.observer == ejection_actor)
+        .zip(focus_identity)
+        .and_then(|(interpretation, identity)| {
+            interpretation.blind_plays_for(ejection_actor, identity)
+        })
+        .or_else(|| {
+            // An impossible full Finesse (for example, more missing ranks
+            // than free hand slots) can still be a valid Ejection. In that
+            // case count ranks not provided by visible external connections.
+            // Other observers must likewise not count their own hypothetical
+            // hidden cards as connections visible to the reacting player.
+            // Never replace the reactor's complete assigned line with this bound.
+            focus_identity.map(|identity| {
+                super::unassigned_finesse_ranks(
+                    view,
+                    *giver,
+                    ejection_actor,
+                    identity,
+                    stack_heights,
+                    explicitly_clued,
+                    entry.turn,
+                )
             })
-            .count()
-    });
+        })
+        .unwrap_or(0);
     let five_ejection = matches!(clue, Clue::Suit(_))
         && interpretation.is_some_and(|interpretation| {
             !was_clued_before(view, entry.turn, interpretation.focus)

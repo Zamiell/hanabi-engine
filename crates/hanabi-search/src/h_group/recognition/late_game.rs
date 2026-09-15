@@ -3,8 +3,8 @@ use super::{
     HGroupClueInterpretation, HGroupClueKind, HGroupConnectionKind, HGroupMoveKind,
     HGroupRuleEffects, HGroupTurnContext, IdentitySet, ObservedEvent, ObservedHistoryEntry,
     PlayerId, PlayerView, Rank, card_is_trash, chop, finesse_position_id, focus,
-    four_charm_blind_plays, has_higher_basic_priority, identity_of, is_playable_at, is_trash_at,
-    next_player, protected_cards, push_signal, same_turn_signal, was_clued_before,
+    has_higher_basic_priority, identity_of, is_playable_at, is_trash_at, next_player,
+    protected_cards, push_signal, same_turn_signal, unassigned_finesse_ranks, was_clued_before,
 };
 use crate::h_group::interpretation_resolution::supersedes;
 use crate::h_group::{FixObligations, ProvenancedCardSet};
@@ -627,7 +627,7 @@ pub(in crate::h_group) fn apply_charm_effects(
             }
             if let (Some(interpretation), Some(focus_identity)) = (interpretation, charm_focus) {
                 let actor = next_player(*giver, hands.len());
-                if four_charm_blind_plays(
+                if unassigned_finesse_ranks(
                     view,
                     *giver,
                     actor,
@@ -705,7 +705,7 @@ pub(in crate::h_group) fn apply_charm_effects(
                 finesse_position_id(&hands_before[player.index()], &gotten, 3) == Some(*card);
             if !demonstrated_fourth_position
                 || prior.stack_heights[suit.index()] != 0
-                || four_charm_blind_plays(
+                || unassigned_finesse_ranks(
                     view,
                     prior.giver,
                     *player,

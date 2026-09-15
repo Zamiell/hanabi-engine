@@ -317,6 +317,74 @@ impl<'a> ConventionKnowledgeCompiler<'a> {
         }
     }
 
+    /// Two immediate blind plays discharge the apparent Finesse. Reopen the
+    /// provisional direct/single-Bluff note before ordinary owner-relative
+    /// Good Touch closure. Do not copy the visible focus's actual identity:
+    /// observers can retain different superpositions after the demonstration.
+    /// <https://hanabi.github.io/level-15/#the-double-bluff>
+    fn apply_resolved_double_bluffs(&mut self) {
+        for clue in &self.replay.clues {
+            let demonstrated = self
+                .replay
+                .signals
+                .of_kind(HGroupMoveKind::DoubleBluff)
+                .any(|signal| {
+                    signal.turn == clue.turn + 2
+                        && signal.cards.len() == 3
+                        && signal.cards.last() == Some(&clue.focus)
+                });
+            if !demonstrated
+                || self
+                    .replay
+                    .clues
+                    .iter()
+                    .any(|later| later.turn > clue.turn + 2 && later.touched.contains(&clue.focus))
+            {
+                continue;
+            }
+            let Some(logical) = self.deductions.possible_identities(clue.focus) else {
+                continue;
+            };
+            let identities = IdentitySet::from_mask(
+                logical
+                    .iter()
+                    .filter(|identity| {
+                        clue.clue.matches(*identity)
+                            && identity.rank.number()
+                                > clue.stack_heights[identity.suit.index()] + 1
+                    })
+                    .fold(0, |mask, identity| mask | (1 << identity.index())),
+            );
+            let view = self.deductions.view();
+            let mut discarded = [0; 25];
+            for (_, identity) in &view.discard_pile {
+                discarded[identity.index()] += 1;
+            }
+            let identities = snapshot_good_touch_identities(
+                clue.focus,
+                identities,
+                view,
+                &self.replay.hands,
+                &self.replay.cards.explicitly_clued,
+                std::array::from_fn(|suit| {
+                    u8::try_from(view.play_stacks[suit].len()).expect("standard stack")
+                }),
+                discarded,
+            );
+            if !identities.is_empty() {
+                self.knowledge.update(
+                    clue.focus,
+                    KnowledgeSource::Reinterpretation(clue.turn + 2),
+                    |note| {
+                        note.identities = identities;
+                        note.promised_identity = None;
+                        note.identity_status = HGroupIdentityStatus::Settled;
+                    },
+                );
+            }
+        }
+    }
+
     /// <https://hanabi.github.io/level-16/#the-5-color-ejection-5ce>
     fn apply_resolved_ejections(&mut self) {
         for card in self.knowledge.cards.clone() {
@@ -1109,6 +1177,7 @@ fn compile_convention_card_inferences(
         }
     }
 
+    compiler.apply_resolved_double_bluffs();
     compiler.apply_established_good_touch();
     compiler.apply_promised_good_touch();
     compiler.apply_exact_reinterpretations();

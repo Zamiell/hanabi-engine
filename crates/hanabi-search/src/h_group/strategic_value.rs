@@ -1026,6 +1026,23 @@ fn clue_line_value(
     giver_public_actions.retain(consistent);
     value.public_actions.retain(consistent);
     value.owner_actions.retain(consistent);
+    // A canonical blind-play line commits to playing these slots, not to
+    // their provisional imagined identities. For example, p2 imagined on a
+    // visibly green 1 still produces a green-1 play in a Double Bluff. Count
+    // the compiled behavioral consequence instead of losing both actions
+    // when the provisional Finesse promises are filtered above.
+    if let Some(line) = &evidence.named {
+        for card in &line.blind_play_cards {
+            if let Some((identity, owner)) = identity_of(source, *card)
+                .filter(|identity| is_eventually_useful(source, *identity))
+                .zip(card_owner(source, *card))
+            {
+                let commitment = ActionCommitment::exact(*card, owner, identity);
+                giver_public_actions.push(commitment);
+                value.public_actions.push(commitment);
+            }
+        }
+    }
     giver_public_actions
         .sort_unstable_by_key(|commitment| (commitment.card.index(), commitment.owner.index()));
     giver_public_actions.dedup();
