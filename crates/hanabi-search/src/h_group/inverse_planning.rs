@@ -17,6 +17,8 @@
 //! <https://hanabi.github.io/level-3/#tempo>
 
 use std::cell::{Cell, RefCell};
+use std::rc::Rc;
+use std::sync::Arc;
 
 use hanabi_core::{Action, Card, CardId, ClueFacts, ObservedEvent, PlayerView};
 
@@ -48,6 +50,8 @@ thread_local! {
     static ACTIVE: Cell<bool> = const { Cell::new(false) };
     static CACHE: RefCell<Vec<CacheEntry>> = const { RefCell::new(Vec::new()) };
     static WITNESS_CACHE: RefCell<Vec<WitnessCacheEntry>> = const { RefCell::new(Vec::new()) };
+    #[cfg(test)]
+    static BYPASS_PROJECTION_CACHE: Cell<bool> = const { Cell::new(false) };
 }
 
 pub(super) fn is_active() -> bool {
@@ -120,22 +124,22 @@ struct WitnessCacheEntry {
     view: PlayerView,
     profile: HGroupProfile,
     chosen: Action,
-    witness: Option<SubstitutionWitness>,
+    witness: Option<Arc<SubstitutionWitness>>,
 }
 
 /// Evidence belongs to the time the observer can establish it, which may be
 /// later than the observed choice (for example after a hidden card is revealed).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct StrategicDeduction {
     pub(super) inferred_turn: u32,
     pub(super) observed_turn: u32,
     pub(super) card: CardId,
     pub(super) excluded: IdentitySet,
     pub(super) checked_assignments: usize,
-    pub(super) witnesses: Vec<SubstitutionWitness>,
+    pub(super) witnesses: Vec<Arc<SubstitutionWitness>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct SubstitutionWitness {
     pub(super) chosen: Action,
     pub(super) alternative: Action,
@@ -375,7 +379,7 @@ fn prove_exclusion(
     if !before.hands[deductions.view().observer.index()].contains(&focal) {
         return None;
     }
-    let mut worlds = Vec::<(PlayerView, Option<SubstitutionWitness>)>::new();
+    let mut worlds = Vec::<(PlayerView, Option<Arc<SubstitutionWitness>>)>::new();
     let mut checked_assignments = 0;
     let mut inconclusive = false;
     let visit = deductions.visit_hand_assignments(limits.assignments, |assignment| {
@@ -447,6 +451,53 @@ fn project(
     .ok()
 }
 
+type SharedProjection = Rc<(SymbolicLineOutcome, ProjectionEvidence)>;
+
+/// Scoped to one immutable historical view and profile. Cache the requested
+/// horizon, not the number of actions reached: uncertainty and a turn limit
+/// produce different evidence even when the action sequences are identical.
+struct ProjectionCache<'a> {
+    view: &'a PlayerView,
+    profile: HGroupProfile,
+    entries: Vec<(Action, u8, Option<SharedProjection>)>,
+}
+
+impl ProjectionCache<'_> {
+    fn get(&mut self, action: Action, limit: u8) -> Option<SharedProjection> {
+        #[cfg(test)]
+        if BYPASS_PROJECTION_CACHE.get() {
+            return project(self.view, self.profile, action, limit).map(Rc::new);
+        }
+        if let Some((_, _, result)) = self
+            .entries
+            .iter()
+            .find(|(a, l, _)| *a == action && *l == limit)
+        {
+            return result.clone();
+        }
+        let result = project(self.view, self.profile, action, limit).map(Rc::new);
+        self.entries.push((action, limit, result.clone()));
+        result
+    }
+}
+
+fn incompatible_action_prefixes(
+    baseline: &ProjectionEvidence,
+    alternate: &ProjectionEvidence,
+    common: u8,
+) -> bool {
+    #[cfg(test)]
+    if BYPASS_PROJECTION_CACHE.get() {
+        return false;
+    }
+    // The horizon only stops the deterministic projector; it never influences
+    // action selection. Different completed suffix steps therefore cannot
+    // become equal by projecting those same prefixes again at a shorter limit.
+    // This is only an early rejection. Equal prefixes still need the original
+    // common-frontier projections (including their assumptions and resources).
+    baseline.steps[1..usize::from(common)] != alternate.steps[1..usize::from(common)]
+}
+
 /// Later observations can yield the exact same historical giver query. Reuse
 /// its lower-order certificate, not an inference made in a different present
 /// view. Present-day hand coverage is always enumerated again independently.
@@ -454,7 +505,7 @@ fn cached_substitution_witness(
     view: &PlayerView,
     profile: HGroupProfile,
     chosen: Action,
-) -> Option<SubstitutionWitness> {
+) -> Option<Arc<SubstitutionWitness>> {
     if let Some(result) = WITNESS_CACHE.with_borrow(|cache| {
         cache
             .iter()
@@ -463,7 +514,7 @@ fn cached_substitution_witness(
     }) {
         return result;
     }
-    let result = substitution_witness(view, profile, chosen);
+    let result = substitution_witness(view, profile, chosen).map(Arc::new);
     WITNESS_CACHE.with_borrow_mut(|cache| {
         if cache.len() == WITNESS_CACHE_LIMIT {
             cache.remove(0);
@@ -495,7 +546,15 @@ fn substitution_witness(
     if original.preference.policy_tier() != crate::ConventionPolicyTier::Admitted {
         return None;
     }
-    let baseline = project(view, profile, chosen, LINE_LIMIT)?;
+    // A certificate often compares several alternatives at the same frontier.
+    // Reuse only identical (action, requested horizon) queries: a line stopped
+    // by uncertainty is NOT equivalent to one stopped at an action limit.
+    let mut projections = ProjectionCache {
+        view,
+        profile,
+        entries: Vec::new(),
+    };
+    let baseline = projections.get(chosen, LINE_LIMIT)?;
     for candidate in &analysis.actions {
         if candidate.action == chosen
             || !matches!(candidate.action, Action::Clue { .. })
@@ -503,7 +562,7 @@ fn substitution_witness(
         {
             continue;
         }
-        let Some(alternate) = project(view, profile, candidate.action, LINE_LIMIT) else {
+        let Some(alternate) = projections.get(candidate.action, LINE_LIMIT) else {
             continue;
         };
         let common = baseline.0.actions.min(alternate.0.actions);
@@ -511,12 +570,17 @@ fn substitution_witness(
         if common < 2 {
             continue;
         }
-        let Some((a, a_line)) = project(view, profile, candidate.action, common) else {
+        if incompatible_action_prefixes(&baseline.1, &alternate.1, common) {
+            continue;
+        }
+        let Some(alternate_common) = projections.get(candidate.action, common) else {
             continue;
         };
-        let Some((b, b_line)) = project(view, profile, chosen, common) else {
+        let Some(baseline_common) = projections.get(chosen, common) else {
             continue;
         };
+        let (a, a_line) = alternate_common.as_ref();
+        let (b, b_line) = baseline_common.as_ref();
         if a.actions != common
             || b.actions != common
             || a.strikes != 0
@@ -543,8 +607,8 @@ fn substitution_witness(
             return Some(SubstitutionWitness {
                 chosen,
                 alternative: candidate.action,
-                chosen_line: b_line,
-                alternative_line: a_line,
+                chosen_line: b_line.clone(),
+                alternative_line: a_line.clone(),
                 chosen_value: b_value,
                 alternative_value: a_value,
             });
@@ -568,6 +632,30 @@ mod tests {
             .unwrap()
             .view_for(PlayerId::new(0))
             .unwrap()
+    }
+
+    /// An expensive differential check, not a second strategic authority. Both
+    /// runs enumerate the full reviewed hand space with cold certificate caches.
+    #[test]
+    #[ignore = "full cached/uncached inverse-proof comparison; run for cache changes"]
+    fn projection_cache_preserves_complete_reviewed_proof() {
+        let deductions = LogicalDeductions::new(reviewed_position()).unwrap();
+        let run = |bypass| {
+            CACHE.with_borrow_mut(Vec::clear);
+            WITNESS_CACHE.with_borrow_mut(Vec::clear);
+            BYPASS_PROJECTION_CACHE.set(bypass);
+            let started = std::time::Instant::now();
+            let replay = super::super::replay_h_group(&deductions, HGroupProfile::Max);
+            eprintln!("projection cache bypass={bypass}: {:?}", started.elapsed());
+            BYPASS_PROJECTION_CACHE.set(false);
+            assert!(!replay.strategic_deductions.is_empty());
+            (
+                convention_card_inferences(&deductions, &replay),
+                replay.knowledge.effects().to_vec(),
+                replay.strategic_deductions,
+            )
+        };
+        assert_eq!(run(true), run(false));
     }
 
     #[test]

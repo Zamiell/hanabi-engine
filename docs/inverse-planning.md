@@ -99,6 +99,16 @@ giver queries across later observations; complete present-hand coverage must
 still be checked again. No certificate is reused merely because two positions
 have the same focal card or preferred clue.
 
+Within one historical query, identical action/horizon projections share their
+immutable evidence. The requested horizon is part of the key; reaching an
+unknown card after four actions is not interchangeable with requesting a
+four-action limit. Already different action prefixes cannot satisfy the
+same-suffix certificate, so those alternatives need not be projected again at
+the shorter common frontier. Equal prefixes still undergo the complete
+common-frontier comparison. Witnesses are immutable shared values when replay
+states or cache entries are cloned; sharing changes neither their contents nor
+their validation.
+
 ## Reviewed example and safeguards
 
 The motivating position is `game-p4v0s2.json`, Alice's ambiguous yellow/green 4.

@@ -28,7 +28,7 @@ pub(crate) fn project_h_group_projection(
     limit: u8,
     control: &crate::AnalysisControl,
 ) -> Result<(SymbolicLineOutcome, super::ProjectionEvidence), crate::AnalysisStopped> {
-    let plan = project_h_group_plan_with_control(source, profile, root, limit, control)?;
+    let plan = project_h_group_plan_with_control::<true>(source, profile, root, limit, control)?;
     Ok((plan.summarize(), plan.into_evidence()))
 }
 
@@ -39,7 +39,7 @@ fn project_h_group_plan(
     root: Action,
     limit: u8,
 ) -> ConditionalPlan {
-    project_h_group_plan_with_control(
+    project_h_group_plan_with_control::<true>(
         source,
         profile,
         root,
@@ -49,7 +49,7 @@ fn project_h_group_plan(
     .expect("unlimited analysis completes")
 }
 
-fn project_h_group_plan_with_control(
+fn project_h_group_plan_with_control<const REUSE_SELECTED: bool>(
     source: &PlayerView,
     profile: HGroupProfile,
     root: Action,
@@ -59,6 +59,10 @@ fn project_h_group_plan_with_control(
     let mut plan = ConditionalPlan::new(source.clue_tokens);
     let mut public = source.clone();
     let mut action = Some(root);
+    // The final part of each iteration already compiles the next actor's
+    // perspective to select their action. Keep that exact immutable result for
+    // execution; the public state does not change between selection and use.
+    let mut selected_perspective = None;
 
     while let Some(current) = action {
         control.checkpoint()?;
@@ -71,9 +75,10 @@ fn project_h_group_plan_with_control(
             break;
         }
         let actor = public.current_player;
-        let Some(projected) = PerspectiveProjector::new(&public, profile)
-            .project_with_evidence(actor, PerspectiveDepth::NestedRecipients)
-        else {
+        let Some(projected) = selected_perspective.take().or_else(|| {
+            PerspectiveProjector::new(&public, profile)
+                .project_with_evidence(actor, PerspectiveDepth::NestedRecipients)
+        }) else {
             plan.stop_at(PlanFrontier::ProjectionUnavailable);
             break;
         };
@@ -138,6 +143,9 @@ fn project_h_group_plan_with_control(
         };
         plan.record_assumptions(&projected.assumptions);
         action = select_h_group_action(&projected.deductions, profile);
+        if REUSE_SELECTED {
+            selected_perspective = Some(projected);
+        }
     }
     let value = super::frontier_value::evaluate(source, &public, profile, root);
     control.checkpoint()?;
@@ -383,6 +391,42 @@ mod tests {
         let plan = project_h_group_plan(&view, HGroupProfile::Max, root, 32);
         assert!(plan.len() > 1, "must advance beyond the root clue");
         assert!(plan.len() <= 32);
+    }
+
+    #[test]
+    fn reusing_selected_perspectives_preserves_complete_projection_evidence() {
+        // A reviewed replay branch, used only to compare implementations, not
+        // to assert that the Save is strategically preferred.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s2.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(7).unwrap();
+        let view = state.view_for(state.current_player()).unwrap();
+        let root = Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(hanabi_core::Rank::Two),
+        };
+        for limit in [0, 1, 2, 16] {
+            let control = crate::AnalysisControl::default();
+            let original = project_h_group_plan_with_control::<false>(
+                &view,
+                HGroupProfile::Max,
+                root,
+                limit,
+                &control,
+            )
+            .unwrap();
+            let reused = project_h_group_plan_with_control::<true>(
+                &view,
+                HGroupProfile::Max,
+                root,
+                limit,
+                &control,
+            )
+            .unwrap();
+            assert_eq!(original, reused, "projection horizon {limit}");
+        }
     }
 
     #[test]

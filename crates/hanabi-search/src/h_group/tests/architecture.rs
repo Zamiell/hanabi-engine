@@ -46,7 +46,7 @@ fn every_semantic_move_links_to_its_documented_rule() {
 }
 
 #[test]
-fn every_expert_replay_prefix_satisfies_h_group_state_invariants() {
+fn every_expert_replay_prefix_satisfies_state_and_knowledge_invariants() {
     for (fixture_name, fixture) in expert_replays() {
         for turn in 0..=u32::try_from(fixture.actions.len()).expect("replay fits in u32") {
             let state = fixture.state_at_turn(turn).expect("turn exists");
@@ -71,60 +71,61 @@ fn every_expert_replay_prefix_satisfies_h_group_state_invariants() {
                     ConventionFacts::from_signals(&replay.signals),
                     "incremental signal-derived facts differ from a complete signal reduction in {fixture_name} at turn {turn} for {observer:?}"
                 );
+                canonical_knowledge_program_is_stable(
+                    fixture_name,
+                    turn,
+                    observer,
+                    &deductions,
+                    &replay,
+                );
+                owner_projection_cannot_resurrect_a_rejected_identity(
+                    fixture_name,
+                    turn,
+                    observer,
+                    &replay,
+                );
             }
         }
     }
 }
 
-#[test]
-fn canonical_knowledge_program_is_stable_for_every_expert_prefix() {
-    for (fixture_name, fixture) in expert_replays() {
-        for turn in 0..=u32::try_from(fixture.actions.len()).expect("replay fits in u32") {
-            let state = fixture.state_at_turn(turn).expect("turn exists");
-            for observer in 0..state.num_players() {
-                let observer = PlayerId::new(observer);
-                let deductions =
-                    LogicalDeductions::new(state.view_for(observer).expect("observer exists"))
-                        .expect("valid deductions");
-                let replay = replay_h_group_inner(
-                    &deductions,
-                    HGroupProfile::Max,
-                    PerspectiveDepth::ObserverOnly,
-                    false,
-                );
-                let rebuilt = build_convention_knowledge(&deductions, &replay);
-                assert_eq!(
-                    rebuilt.effects(),
-                    replay.knowledge.effects(),
-                    "incremental knowledge changed after rebuilding {fixture_name} at turn {turn} for {observer:?}"
-                );
-                assert_eq!(
-                    rebuilt.project(&deductions),
-                    convention_card_inferences(&deductions, &replay),
-                    "pure owner projection diverged in {fixture_name} at turn {turn} for {observer:?}"
-                );
-                for transition in &replay.transitions {
-                    assert!(
-                        transition
-                            .delta
-                            .knowledge_changes
-                            .iter()
-                            .all(|effect| effect.source().turn() == transition.turn)
-                    );
-                }
-                for card in &deductions.view().hands[observer.index()] {
-                    assert_eq!(
-                        replay.knowledge.effects_for(card.id).collect::<Vec<_>>(),
-                        replay
-                            .knowledge
-                            .effects()
-                            .iter()
-                            .filter(|effect| effect.card() == card.id)
-                            .collect::<Vec<_>>()
-                    );
-                }
-            }
-        }
+fn canonical_knowledge_program_is_stable(
+    fixture_name: &str,
+    turn: u32,
+    observer: PlayerId,
+    deductions: &LogicalDeductions,
+    replay: &HGroupState,
+) {
+    let rebuilt = build_convention_knowledge(deductions, replay);
+    assert_eq!(
+        rebuilt.effects(),
+        replay.knowledge.effects(),
+        "incremental knowledge changed after rebuilding {fixture_name} at turn {turn} for {observer:?}"
+    );
+    assert_eq!(
+        rebuilt.project(deductions),
+        convention_card_inferences(deductions, replay),
+        "pure owner projection diverged in {fixture_name} at turn {turn} for {observer:?}"
+    );
+    for transition in &replay.transitions {
+        assert!(
+            transition
+                .delta
+                .knowledge_changes
+                .iter()
+                .all(|effect| effect.source().turn() == transition.turn)
+        );
+    }
+    for card in &deductions.view().hands[observer.index()] {
+        assert_eq!(
+            replay.knowledge.effects_for(card.id).collect::<Vec<_>>(),
+            replay
+                .knowledge
+                .effects()
+                .iter()
+                .filter(|effect| effect.card() == card.id)
+                .collect::<Vec<_>>()
+        );
     }
 }
 
@@ -151,47 +152,33 @@ fn demonstrated_relational_claims_leave_a_nonempty_exact_belief() {
     );
 }
 
-#[test]
-fn owner_projection_cannot_resurrect_an_identity_rejected_by_canonical_focus() {
-    for (fixture_name, fixture) in expert_replays() {
-        for turn in 0..=u32::try_from(fixture.actions.len()).expect("replay fits in u32") {
-            let state = fixture.state_at_turn(turn).expect("turn exists");
-            for observer_index in 0..state.num_players() {
-                let observer = PlayerId::new(observer_index);
-                let deductions =
-                    LogicalDeductions::new(state.view_for(observer).expect("observer exists"))
-                        .expect("valid deductions");
-                let replay = replay_h_group_inner(
-                    &deductions,
-                    HGroupProfile::Max,
-                    PerspectiveDepth::ObserverOnly,
-                    false,
-                );
-                for effect in replay.knowledge.effects() {
-                    let CardKnowledgeEffect::RestrictDomain {
-                        card,
-                        allowed,
-                        source:
-                            KnowledgeSource::Clue(clue_turn) | KnowledgeSource::CurrentFocus(clue_turn),
-                    } = effect
-                    else {
-                        continue;
-                    };
-                    let Some(clue) = replay
-                        .clues
-                        .iter()
-                        .rev()
-                        .find(|clue| clue.turn == *clue_turn && clue.focus == *card)
-                    else {
-                        continue;
-                    };
-                    assert!(
-                        allowed.without(clue.focus_identities).is_empty(),
-                        "owner projection resurrected identities rejected by canonical focus in {fixture_name}, turn {turn}, observer {observer:?}: clue={clue:?}, effect={effect:?}"
-                    );
-                }
-            }
-        }
+fn owner_projection_cannot_resurrect_a_rejected_identity(
+    fixture_name: &str,
+    turn: u32,
+    observer: PlayerId,
+    replay: &HGroupState,
+) {
+    for effect in replay.knowledge.effects() {
+        let CardKnowledgeEffect::RestrictDomain {
+            card,
+            allowed,
+            source: KnowledgeSource::Clue(clue_turn) | KnowledgeSource::CurrentFocus(clue_turn),
+        } = effect
+        else {
+            continue;
+        };
+        let Some(clue) = replay
+            .clues
+            .iter()
+            .rev()
+            .find(|clue| clue.turn == *clue_turn && clue.focus == *card)
+        else {
+            continue;
+        };
+        assert!(
+            allowed.without(clue.focus_identities).is_empty(),
+            "owner projection resurrected identities rejected by canonical focus in {fixture_name}, turn {turn}, observer {observer:?}: clue={clue:?}, effect={effect:?}"
+        );
     }
 }
 

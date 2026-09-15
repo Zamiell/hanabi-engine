@@ -7,6 +7,15 @@ check_started_seconds=$SECONDS
 repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repository_root"
 
+# Full validations compete for the same CPU and build cache. Do not silently
+# queue or overlap another full run, which also invalidates timing comparisons.
+mkdir -p target
+exec 9>target/check.lock
+if ! flock --nonblock 9; then
+  echo 'Another check.sh run is already active in this repository.' >&2
+  exit 1
+fi
+
 check_file_ownership() {
   local expected_owner
   local expected_group

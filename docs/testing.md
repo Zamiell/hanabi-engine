@@ -7,6 +7,32 @@ convention interpretation was correct.
 
 ## Retained coverage
 
+The all-prefix architecture test compiles each fixture/turn/observer once and
+runs state validation, independent knowledge rebuilding, causal-effect checks,
+and focus-domain checks against that same immutable result. These are separate
+assertions, not three independent repetitions of the expensive inference pass.
+The independent knowledge rebuild remains intentional and must not be cached
+away: it verifies the compiler result.
+
+Run full validations sequentially. `check.sh` rejects another simultaneous
+`check.sh` invocation using a repository-local lock. Avoid running standalone
+benchmarks or other Cargo test suites concurrently with it; the lock does not
+govern arbitrary Cargo invocations.
+
+For changes to inverse-planning projection reuse, additionally run the
+cold-cache differential certificate check:
+
+```bash
+cargo test -p hanabi-search --lib projection_cache_preserves_complete_reviewed_proof -- --ignored --nocapture
+```
+
+It compares all inferred card domains, knowledge effects, assignment counts, and
+full per-world witnesses with reuse disabled/enabled, rather than merely
+checking the selected move. This deliberately expensive diagnostic is separate
+from the ordinary suite; the reviewed inverse-planning regression still runs
+normally. Perspective selection/execution reuse also has an ordinary
+differential test covering several projection horizons.
+
 | Category                        | Evidence and permitted assertions                                                                                                                                                         |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Reviewed expert replays         | `game-p4v0s415`: approved actions through move 36; `game-p4v0s9`, `game-p4v0s2`, `game-p4v0s3`, and `game-p4v0s1`: full action parity. All retain focused, reviewed interpretation tests. |

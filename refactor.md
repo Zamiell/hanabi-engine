@@ -29,6 +29,37 @@ Commit hashes refer to this repository's Git history.
 - Caches are scoped to one immutable position or exact solve. They may reuse a
   pure semantic result, but may not become a second mutable convention state.
 
+## 2026-09-15: reuse inference work without weakening its proof
+
+### Why
+
+The quantified inverse-planning implementation made the three all-prefix
+architecture checks repeat expensive inference. Projection also reconstructed
+the same selected actor perspective before execution, and cloned full historical
+proof witnesses through replay copies. These are reuse opportunities, not
+reasons to relax the quantified proof introduced below.
+
+### Changes
+
+- Run all three architecture assertion groups on one compiled state per
+  fixture/turn/observer; retain the independent knowledge rebuild and every
+  existing assertion.
+- Carry the selected actor's immutable perspective into symbolic execution.
+- Share immutable witnesses and exact action/horizon projection results within
+  historical queries. Reject already-incompatible action prefixes before
+  recomputing their shorter common frontiers.
+- Add differential comparisons of complete projection evidence and reviewed
+  inverse proofs, not just move equality.
+- Reject overlapping full `check.sh` runs with a repository-local lock.
+
+### Preserve
+
+No hand assignments, historical choices, horizons, proof requirements, or
+existing test assertions are removed. A cache may reuse an exact query, never a
+merely similar position. The independent knowledge reconstruction is a test
+oracle and must not be replaced by the result it is checking. Measurements and
+limitations are recorded in `docs/inference-performance-2026-09-15.md`.
+
 ## 2026-09-15: bounded, provenance-bearing inverse planning
 
 ### Why
