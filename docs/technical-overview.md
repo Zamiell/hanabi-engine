@@ -219,10 +219,14 @@ H-Group uses shared internal boundaries to keep these answers consistent:
   connections so strategic comparisons operate on semantics before scores.
   Teamwork compares public action coverage and protection; Clarity compares
   owner-relative promised actions and the identity superpositions on every clued
-  card. Bottom-deck-risk protection is credited to the clue that provides it,
-  not charged as a deficit to unrelated clues while ordinary discards escape the
-  comparison. This strategic credit is separate from semantic strength and
-  cannot grant permission to interrupt a promised play.
+  card. Clue efficiency counts cards obtained, separately from already-clued
+  successors that become playable automatically. Immediate bottom-deck-risk
+  credit excludes hands occupied by an existing playable obligation; merely
+  touching a card is not evidence that it would otherwise be discarded. Later
+  risks belong to projected continuations. This strategic credit is separate
+  from semantic strength and cannot grant permission to interrupt a promised
+  play. Early-Save waiting penalties do not apply when the clue gives the
+  recipient a newly playable touched card.
 - `LineOutcome` causality comes from transition deltas, not by mining the
   explanation signal journal or diffing unrelated observer reconstructions.
 - candidate primary-meaning checks, signal inspection, hazard checks, and

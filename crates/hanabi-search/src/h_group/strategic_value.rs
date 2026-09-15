@@ -9,7 +9,7 @@ use super::{
 
 const TEAM_ACTION_COVERAGE_PENALTY: u16 = 80;
 const TEAM_ACTION_COUNT_PENALTY: u16 = 100;
-const NAMED_LINE_ACTION_DEFICIT_PENALTY: u16 = 80;
+const CLUE_EFFICIENCY_DEFICIT_PENALTY: u16 = 80;
 const TEAM_MULTI_CARD_PROTECTION_BONUS: u16 = 80;
 const TEAM_ACTION_DELAY_PENALTY: u16 = 2;
 const TEAM_OCCUPIED_TARGET_PENALTY: u16 = 20;
@@ -103,9 +103,15 @@ pub(super) fn apply_strategic_clue_values(
         })
         .min()
         .unwrap_or(source.hands.len());
-    let best_named_line_action_count = values
+    let best_connection_action_count = values
         .iter()
         .filter_map(|value| value.as_ref()?.convention_action_count)
+        .max();
+    let best_observed_efficiency = values
+        .iter()
+        .flatten()
+        .filter(|value| value.convention_action_count.is_some())
+        .map(|value| value.clue_efficiency)
         .max();
     let current_stack_heights = std::array::from_fn(|suit| {
         u8::try_from(source.play_stacks[suit].len())
@@ -146,9 +152,9 @@ pub(super) fn apply_strategic_clue_values(
     let bottom_deck_risk_values = values
         .iter()
         .map(|value| {
-            value
-                .as_ref()
-                .map_or(0, |value| bottom_deck_risk_protection(source, value))
+            value.as_ref().map_or(0, |value| {
+                bottom_deck_risk_protection(source, &baselines, value)
+            })
         })
         .collect::<Vec<_>>();
     let has_unoccupied_immediate_target = candidates.iter().any(|candidate| {
@@ -213,15 +219,21 @@ pub(super) fn apply_strategic_clue_values(
             // Source: https://hanabi.github.io/beginner/other-general-strategy/#give-play-clues-over-save-clues
             candidate.value.penalize_teamwork(PLAY_OVER_SAVE_PENALTY);
         }
-        if let (Some(best), Some(actual)) =
-            (best_named_line_action_count, value.convention_action_count)
-        {
-            // Compare named convention lines by the actions they actually
-            // secure, not by an apparent connection's raw depth. This remains
-            // observer-relative and applies to opening clues as well.
+        if let Some(best) = best_connection_action_count {
+            // Connection metrics can include unresolved blind layers. A
+            // direct clue has no corresponding layer forecast, so compare
+            // its observed gains with the same observed gains on other
+            // lines, not with the length of their alternative-slot lists.
+            let (best, actual) = value.convention_action_count.map_or_else(
+                || (best_observed_efficiency.unwrap_or(0), value.clue_efficiency),
+                |actual| (best, actual),
+            );
+            // Compare cards obtained per clue separately from the downstream
+            // plays that those cards make available. This remains observer-
+            // relative and does not award a bonus for a convention's name.
             candidate
                 .value
-                .penalize_teamwork(NAMED_LINE_ACTION_DEFICIT_PENALTY.saturating_mul(
+                .penalize_teamwork(CLUE_EFFICIENCY_DEFICIT_PENALTY.saturating_mul(
                     u16::try_from(best.saturating_sub(actual)).unwrap_or(u16::MAX),
                 ));
         }
@@ -398,10 +410,29 @@ pub(super) fn apply_strategic_clue_values(
 /// not mitigate a hidden-copy ordering risk.
 /// Protection comes from the compiled causal outcome, including indirect
 /// connections, not just physical touches in the clue recipient's hand.
-fn bottom_deck_risk_protection(source: &PlayerView, value: &LineOutcome) -> usize {
+fn bottom_deck_risk_protection(
+    source: &PlayerView,
+    baselines: &[ProjectedLineState],
+    value: &LineOutcome,
+) -> usize {
+    let heights = std::array::from_fn(|suit| {
+        u8::try_from(source.play_stacks[suit].len()).expect("standard stack")
+    });
     value
         .protected_cards
         .iter()
+        .filter(|card| {
+            let Some(owner) = card_owner(source, **card) else {
+                return false;
+            };
+            let baseline = &baselines[owner.index()];
+            // Protection is not automatically prevention of a loss. Credit
+            // only an unoccupied hand's loss exposure here. An already
+            // available play leaves time to arrange the clue later; do not
+            // charge other productive lines for declining an Early Save.
+            // https://hanabi.github.io/beginner/other-general-strategy/#give-play-clues-over-save-clues
+            scheduled_play_continuation_value(source, baseline, owner, heights).is_none()
+        })
         .filter_map(|card| identity_of(source, *card))
         .filter(|identity| {
             is_eventually_useful(source, *identity)
@@ -1086,6 +1117,50 @@ fn clue_line_value(
             })
         }));
     value.action_coverage = giver_public_actions.len();
+    // Efficiency counts cards obtained by this clue, not already-clued
+    // successors that become playable automatically. Those successors keep
+    // their separate tempo/endpoint value. A red-2 Finesse through red 1 is
+    // a 2-for-1 even when it also releases an already-clued red 3.
+    let mut directly_secured = giver_public_actions
+        .iter()
+        .filter(|commitment| {
+            touched.contains(&commitment.card)
+                || commitment.identities.iter().any(connects_to_clue_focus)
+                || !baselines.iter().any(|baseline| {
+                    baseline
+                        .owner_clued_superpositions
+                        .iter()
+                        .any(|(card, identities)| {
+                            *card == commitment.card
+                                && (identities.len() == 1
+                                    || !value.clued_superpositions.iter().any(|after| {
+                                        after.card == commitment.card
+                                            && after.owner == commitment.owner
+                                            && after.identities.len() == 1
+                                    }))
+                        })
+                })
+        })
+        .map(|commitment| commitment.card)
+        .collect::<Vec<_>>();
+    directly_secured.extend(touched.iter().copied().filter(|card| {
+        !super::was_clued_before(source, source.turn, *card)
+            && !baselines.iter().any(|baseline| {
+                baseline.owner_promises.iter().any(|(old, _)| old == card)
+                    || baseline.playable_now.contains(card)
+            })
+            && identity_of(source, *card)
+                .is_some_and(|identity| is_eventually_useful(source, identity))
+    }));
+    directly_secured.extend(value.protected_cards.iter().copied());
+    directly_secured.sort_unstable();
+    directly_secured.dedup();
+    value.clue_efficiency = directly_secured.len();
+    if value.clue_efficiency == 0 && !giver_public_actions.is_empty() {
+        // A productive fill-in can obtain a previously saved card. Do not
+        // count its already-clued higher successors as additional cards.
+        value.clue_efficiency = 1;
+    }
     if let Some(line) = &evidence.named {
         let action_count = line.secured_actions;
         let connection_steps = line.connection_steps;
@@ -1094,12 +1169,14 @@ fn clue_line_value(
             // older scheduled predecessors or every alternative blind slot.
             // Cap by the named line's size so unrelated downstream benefits
             // do not become extra steps in that convention line.
+            // A compiled cross-suit line has explicit connector evidence;
+            // do not reconstruct it with the ordinary same-suit fallback.
             let mut secured = value
                 .public_actions
                 .iter()
                 .map(|action| action.card)
+                .chain(value.protected_cards.iter().copied())
                 .collect::<Vec<_>>();
-            secured.extend(value.protected_cards.iter().copied());
             secured.sort_unstable();
             secured.dedup();
             secured.len().min(action_count)
@@ -1190,6 +1267,7 @@ mod tests {
         assert_eq!(cards[0], vec![CardId::new(8), CardId::new(17)]);
         assert_eq!(cards[1], vec![CardId::new(17)]);
         assert_eq!(outcomes[0].convention_action_count, Some(2));
+        assert_eq!(outcomes[0].clue_efficiency, 2);
         let deductions = LogicalDeductions::new(source).unwrap();
         let candidates = super::super::h_group_clue_candidates(&deductions, HGroupProfile::Max);
         assert_eq!(
@@ -1237,8 +1315,8 @@ mod tests {
         assert_eq!(outcomes[0].protected_cards, vec![CardId::new(8)]);
         assert_eq!(outcomes[0].protected_cards, outcomes[1].protected_cards);
         assert_eq!(
-            bottom_deck_risk_protection(&source, &outcomes[0]),
-            bottom_deck_risk_protection(&source, &outcomes[1])
+            bottom_deck_risk_protection(&source, &baselines, &outcomes[0]),
+            bottom_deck_risk_protection(&source, &baselines, &outcomes[1])
         );
         assert!(outcomes[0].strictly_improves_owner_knowledge(&outcomes[1]));
         assert!(!outcomes[1].strictly_improves_owner_knowledge(&outcomes[0]));
@@ -1335,7 +1413,11 @@ mod tests {
             candidates[bluff].move_kind(),
         )
         .unwrap();
-        assert_eq!(bottom_deck_risk_protection(&source, &outcome), 2);
+        assert_eq!(outcome.protected_cards.len(), 2);
+        assert_eq!(
+            bottom_deck_risk_protection(&source, &baselines, &outcome),
+            2
+        );
         // Algorithm-only counterfactual: without a draw, removing an older
         // card does not replace the first finesse position.
         source.deck_size = 0;
@@ -1455,7 +1537,7 @@ mod tests {
             assert!(!outcome.protected_cards.contains(&CardId::new(14)));
             assert!(!outcome.protected_cards.contains(&CardId::new(15)));
             assert_eq!(
-                bottom_deck_risk_protection(&source, &outcome),
+                bottom_deck_risk_protection(&source, &baselines, &outcome),
                 1,
                 "{action:?}: {:?}",
                 outcome
@@ -1465,5 +1547,39 @@ mod tests {
                     .collect::<Vec<_>>()
             );
         }
+    }
+
+    #[test]
+    fn reviewed_double_bluff_alternative_does_not_rescue_a_safe_red_two() {
+        // Human-reviewed p4v0s1 turn 14: Cathy plays, rather than discards;
+        // Alice or Bob has time to arrange the red-2 clue afterwards.
+        let replay = HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(13).unwrap();
+        let source = state.view_for(state.current_player()).unwrap();
+        let team = compiled_baseline_team(&source, HGroupProfile::Max);
+        let baselines = (0..4)
+            .map(|player| {
+                projected_line_state(&source, &team.projection(PlayerId::new(player)).unwrap())
+            })
+            .collect::<Vec<_>>();
+        let outcome = clue_line_value(
+            &source,
+            HGroupProfile::Max,
+            Action::Clue {
+                target: PlayerId::new(2),
+                clue: Clue::Suit(Suit::Red),
+            },
+            &baselines,
+            Some(HGroupMoveKind::PlayClue),
+        )
+        .unwrap();
+        assert!(outcome.protected_cards.contains(&CardId::new(18)));
+        assert_eq!(
+            bottom_deck_risk_protection(&source, &baselines, &outcome),
+            0
+        );
     }
 }

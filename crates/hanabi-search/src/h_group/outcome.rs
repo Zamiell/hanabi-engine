@@ -73,6 +73,10 @@ pub(super) struct LineOutcome {
     /// Other observer projections remain useful for owner knowledge, but must
     /// not inflate Teamwork coverage with mutually incompatible readings.
     pub(super) action_coverage: usize,
+    /// Cards obtained per clue, excluding automatic already-clued successors.
+    /// This is distinct from scheduled play coverage: a Save can obtain a
+    /// card without scheduling a play, and a clue can unlock older promises.
+    pub(super) clue_efficiency: usize,
     /// Total cards secured by the canonical named convention line.
     pub(super) convention_action_count: Option<usize>,
     /// Blind-play steps established by the canonical named interpretation.

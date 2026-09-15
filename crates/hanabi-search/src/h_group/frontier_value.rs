@@ -379,6 +379,16 @@ fn add_root_opportunities(
             .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
             .map(|card| card.id)
             .collect::<Vec<_>>();
+        let after = super::compiled_prospective_clue(source, profile, target, clue, &touched)?
+            .projection(target)?;
+        if touched.iter().any(|card| {
+            after.inferred.playable_now.contains(card) && !owner.playable_now.contains(card)
+        }) {
+            // A Save-shaped clue can also obtain an immediate play. It is
+            // not a passive Early Save merely because Save has interpretation
+            // precedence. Waiting sacrifices real progress in this case.
+            return Some(());
+        }
         let next_chop = source.hands[target.index()]
             .iter()
             .find(|card| !touched.contains(&card.id) && !owner.gotten().contains(&card.id));

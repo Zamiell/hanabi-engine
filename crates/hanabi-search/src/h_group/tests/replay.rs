@@ -60,6 +60,26 @@ fn fifth_replay_purple_double_bluff_is_admitted() {
             .unwrap();
     assert_eq!(outcome.convention_action_count, Some(3));
     assert_eq!(outcome.convention_connection_steps, Some(2));
+    // Human-reviewed comparison: r2 is not facing a discard deadline;
+    // Cathy already has a play and Alice/Bob can arrange red afterwards.
+    // The automatic release of Donald's clued r3 is not a third card
+    // obtained by the red clue.
+    let red = candidates
+        .iter()
+        .find(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(2),
+                    clue: Clue::Suit(Suit::Red),
+                }
+        })
+        .unwrap();
+    let red_outcome =
+        super::super::strategic_value::scheduled_clue_outcome(&view, HGroupProfile::Max, red)
+            .unwrap();
+    assert_eq!(red_outcome.clue_efficiency, 2);
+    assert_eq!(outcome.clue_efficiency, 3);
+    assert!(candidate.value.total() > red.value.total());
     let (line, evidence) = super::super::symbolic_line::project_h_group_projection(
         &view,
         HGroupProfile::Max,
@@ -1499,7 +1519,7 @@ fn fifth_replay_move_eleven_permits_discarding() {
 }
 
 #[test]
-fn fifth_replay_move_eighteen_plays_the_five_instead_of_duplicating_purple_four() {
+fn fifth_replay_move_eighteen_gets_red_two_instead_of_duplicating_purple_four() {
     let fixture = expert_replay_p4v0s1();
     let state = fixture.state_at_turn(17).expect("fixture prefix is legal");
     let view = state
@@ -1520,8 +1540,27 @@ fn fifth_replay_move_eighteen_plays_the_five_instead_of_duplicating_purple_four(
     );
     assert_eq!(
         select_h_group_action(&deductions, HGroupProfile::Max),
-        Some(Action::Play(CardId::new(17))),
-        "the known blue 5 plays and refunds a clue",
+        Some(Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::Two)
+        }),
+        "the revised human-reviewed line obtains Cathy's red 2",
+    );
+    let analysis = crate::analyze_position(
+        deductions.view(),
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig {
+            objective: "perfect-score".parse().unwrap(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        analysis.planner.best_action,
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::Two),
+        }
     );
 }
 
