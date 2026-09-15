@@ -29,6 +29,38 @@ Commit hashes refer to this repository's Git history.
 - Caches are scoped to one immutable position or exact solve. They may reuse a
   pure semantic result, but may not become a second mutable convention state.
 
+## 2026-09-15: bounded, provenance-bearing inverse planning
+
+### Why
+
+The removed declined-longer-clue rule could infer an exact identity from one
+partially specified counterfactual and a chain-length comparison. Reintroducing
+that shortcut would undo the information-boundary and typed-knowledge work
+recorded below. A teammate's choice must be assessed in their historical view,
+including all compatible arrangements of the observer's other hidden cards.
+
+### Changes
+
+- Separate lower-order convention reconstruction from strategic inference;
+  counterfactual proofs cannot recursively assume strategic conclusions.
+- Reuse the historical perspective builder and canonical line projector.
+- Quantify complete hand assignments and retain per-view substitution witnesses;
+  incomparable, failed, or incomplete proofs do not narrow an identity.
+- Record deductions through typed owner-knowledge effects, not mutable side
+  notes.
+- Reuse the planner's non-speculative resource order instead of inventing
+  another scalar priority. Correct shared handling of known hidden connectors,
+  Early Save urgency, and immediately refundable transfer tokens exposed by
+  these checks.
+
+### Preserve
+
+The contract in [inverse planning](docs/inverse-planning.md) is deliberately
+narrower than arbitrary strategic optimality. Do not replace quantified evidence
+with a preferred clue label, longer chain, higher heuristic score, or fixture
+identifier. Reuse immutable results only with their complete perspective,
+profile, baseline interpretation, and reasoning stage.
+
 ## 2026-09-08: completing the repository audit
 
 ### Why

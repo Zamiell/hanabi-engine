@@ -247,7 +247,12 @@ card, and identity. The original legal `PlayerView` is never modified.
   ordinary and empathy readings cannot be merged card-by-card.
 - Declining a longer clue line does not establish an exact card identity. The
   former inverse-planning deduction was removed: comparing chain lengths alone
-  does not prove that an alternative was preferable or unavailable.
+  does not prove that an alternative was preferable or unavailable. Its
+  replacement is a separate, lower-order-model-based stage that checks complete
+  compatible hands and records resource-neutral substitution witnesses. Failed
+  or incomplete checks leave the domain unchanged. See
+  [inverse planning](inverse-planning.md) for the proof contract and
+  limitations.
 - `recognition.rs` is now only the level-gated registry surface and shared
   imports. Cohesive modules own Basic moves, Tempo and emergency discards, Chop
   Moves, Bluffs, advanced connections, special discards, Trash moves, late-game

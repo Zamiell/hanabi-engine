@@ -358,6 +358,7 @@ impl ConventionCardState {
 /// Canonical observer-relative convention state produced by the history reducer.
 #[derive(Clone, Debug)]
 pub(super) struct HGroupState {
+    pub(super) strategic_deductions: Vec<super::inverse_planning::StrategicDeduction>,
     pub(super) hands: Vec<Vec<CardId>>,
     pub(super) cards: ConventionCardState,
     pub(super) clues: Vec<HGroupClueInterpretation>,
@@ -555,6 +556,13 @@ impl HGroupState {
     }
 
     fn validate_knowledge(&self) -> Result<(), String> {
+        if self
+            .strategic_deductions
+            .iter()
+            .any(|deduction| !deduction.is_valid())
+        {
+            return Err("invalid strategic substitution certificate".to_owned());
+        }
         if self.knowledge.effects().iter().any(|effect| {
             !self
                 .hands

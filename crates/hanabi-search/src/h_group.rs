@@ -48,6 +48,7 @@ mod identity;
 mod information_value;
 mod interpretation;
 mod interpretation_resolution;
+mod inverse_planning;
 mod knowledge_effects;
 mod ledger;
 mod line_state;
@@ -860,6 +861,7 @@ struct ReplayMemoKey {
     profile: HGroupProfile,
     perspective_depth: PerspectiveDepth,
     allow_blind_reverse_empathy: bool,
+    counterfactual: bool,
 }
 
 thread_local! {
@@ -906,6 +908,7 @@ fn replay_h_group_inner(
             profile,
             perspective_depth,
             allow_blind_reverse_empathy,
+            counterfactual: inverse_planning::is_active(),
         };
         if let Some(replay) = H_GROUP_REPLAY_MEMO.with(|memo| {
             memo.borrow()
@@ -914,12 +917,15 @@ fn replay_h_group_inner(
         }) {
             return replay;
         }
-        let replay = replay_h_group_inner_uncached(
-            deductions,
-            profile,
-            perspective_depth,
-            allow_blind_reverse_empathy,
-        );
+        let mut replay = inverse_planning::baseline(|| {
+            replay_h_group_inner_uncached(
+                deductions,
+                profile,
+                perspective_depth,
+                allow_blind_reverse_empathy,
+            )
+        });
+        inverse_planning::enrich(deductions, &mut replay, profile);
         H_GROUP_REPLAY_MEMO.with(|memo| {
             memo.borrow_mut()
                 .as_mut()

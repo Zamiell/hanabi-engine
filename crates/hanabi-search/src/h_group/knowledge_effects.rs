@@ -18,6 +18,7 @@ pub(super) enum KnowledgeSource {
     ImplicitSave(u32),
     CurrentFocus(u32),
     ReplayClosure(u32),
+    StrategicChoice(u32),
 }
 
 impl KnowledgeSource {
@@ -29,6 +30,7 @@ impl KnowledgeSource {
             | Self::ForcedPlay(turn)
             | Self::ImplicitSave(turn)
             | Self::CurrentFocus(turn)
+            | Self::StrategicChoice(turn)
             | Self::ReplayClosure(turn) => turn,
         }
     }

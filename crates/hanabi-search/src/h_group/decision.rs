@@ -1401,9 +1401,43 @@ fn gentlemans_discard_candidate(
                 let player = (view.observer.index() + distance) % view.hands.len();
                 finesse_position(&view.hands[player], gotten, 0)
                     .is_some_and(|card| card.identity == Some(identity))
+                    && !transfer_delays_next_five(view, profile, candidate, identity, distance)
             })
             .then_some((candidate, identity))
     })
+}
+
+/// A transfer's token is not a compensating benefit when playing the card
+/// instead lets the very next player finish the suit and refund that token.
+/// No intervening player can need the token; transferring to a later seat
+/// postpones both plays. This is a scheduling check, not a rank-based bonus.
+/// <https://hanabi.github.io/level-10/#the-gentlemans-discard-gd>
+fn transfer_delays_next_five(
+    view: &PlayerView,
+    profile: HGroupProfile,
+    card: CardId,
+    identity: Card,
+    recipient_distance: usize,
+) -> bool {
+    if recipient_distance <= 1 || identity.rank != Rank::Four {
+        return false;
+    }
+    let next = next_player(view.observer, view.hands.len());
+    let five = Card::new(identity.suit, Rank::Five);
+    if !view.hands[next.index()]
+        .iter()
+        .any(|held| held.identity == Some(five) && was_clued_before(view, view.turn, held.id))
+    {
+        return false;
+    }
+    let after = ProspectiveTransition::successful_play(view, view.observer, card, identity);
+    let Some((deductions, _)) = PerspectiveProjector::new(&after, profile)
+        .project(next, PerspectiveDepth::NestedRecipients)
+    else {
+        return false;
+    };
+    matches!(select_h_group_action(&deductions, profile), Some(Action::Play(due))
+        if identity_of(view, due) == Some(five))
 }
 
 fn convention_known_trash_discard(

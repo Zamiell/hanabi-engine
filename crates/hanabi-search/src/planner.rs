@@ -242,7 +242,7 @@ impl ProjectedPositionValue {
         (left == right).then_some(self.conditional_successors > other.conditional_successors)
     }
 
-    fn dominates(self, other: Self) -> bool {
+    pub(crate) fn dominates(self, other: Self) -> bool {
         let (self_value, other) = (
             self.without_speculative_finesse(),
             other.without_speculative_finesse(),

@@ -47,20 +47,25 @@ fn critical(view: &PlayerView, identity: Card) -> bool {
 /// Feasibility, not a promise: all predecessors are played or visible.
 /// In particular, an ambiguous saved 2 is not a long-term hand burden when
 /// every remaining 1 is visible and can be obtained by the team.
-fn can_play_soon(view: &PlayerView, domain: IdentitySet) -> bool {
+fn can_play_soon(view: &PlayerView, domain: IdentitySet, secured: IdentitySet) -> bool {
     !domain.is_empty()
         && domain.iter().all(|identity| {
             !is_eventually_useful(view, identity)
                 || ((view.play_stacks[identity.suit.index()].len() + 1)
                     ..usize::from(identity.rank.number()))
                     .all(|rank| {
-                        view.hands.iter().flatten().any(|card| {
-                            card.identity == Some(Card::new(identity.suit, Rank::ALL[rank - 1]))
-                        })
+                        let predecessor = Card::new(identity.suit, Rank::ALL[rank - 1]);
+                        secured.contains(predecessor)
+                            || view
+                                .hands
+                                .iter()
+                                .flatten()
+                                .any(|card| card.identity == Some(predecessor))
                     })
         })
 }
 
+#[allow(clippy::too_many_lines)]
 pub(super) fn evaluate(
     source: &PlayerView,
     frontier: &PlayerView,
@@ -73,6 +78,7 @@ pub(super) fn evaluate(
         ..ProjectedPositionValue::default()
     };
     let mut secured = IdentitySet::default();
+    let mut clued_domains = Vec::new();
     let mut mandatory_clues = 0_u8;
     for player in 0..frontier.hands.len() {
         let actor = PlayerId::new(narrow(player));
@@ -115,13 +121,21 @@ pub(super) fn evaluate(
             {
                 secured = secured.union(IdentitySet::singleton(identity));
             }
-            if was_clued_before(frontier, frontier.turn, card.card)
-                && !can_play_soon(frontier, card.identities)
-            {
-                value.blocked_clued_cards = value.blocked_clued_cards.saturating_add(1);
+            if was_clued_before(frontier, frontier.turn, card.card) {
+                clued_domains.push(card.identities);
             }
         }
     }
+    // A known connector in the root observer's own hand has no physical face
+    // in this view, but its established promise is still available. Gather
+    // every secured identity before judging any hand, avoiding seat-order
+    // dependence and a false blockage for delayed plays through that card.
+    value.blocked_clued_cards = narrow(
+        clued_domains
+            .into_iter()
+            .filter(|domain| !can_play_soon(frontier, *domain, secured))
+            .count(),
+    );
     value.secured_future_plays = narrow(secured.len());
     value.secured_card_quality = secured_card_quality(frontier, secured);
     let mut protected = secured;
@@ -651,7 +665,8 @@ mod tests {
         assert!(can_play_soon(
             &view,
             IdentitySet::singleton(Card::new(Suit::Yellow, Rank::Two))
-                .union(IdentitySet::singleton(Card::new(Suit::Blue, Rank::Two)))
+                .union(IdentitySet::singleton(Card::new(Suit::Blue, Rank::Two))),
+            IdentitySet::default()
         ));
         // Algorithmic boundary: there is no extra-touch draw opportunity
         // once the deck is empty, even with the same visible cards.
@@ -669,6 +684,27 @@ mod tests {
         )
         .unwrap();
         assert_eq!(opportunities.foregone_touch_opportunities, 0);
+    }
+
+    #[test]
+    fn promised_connector_in_own_hand_is_not_a_missing_predecessor() {
+        let mut replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s2.json"
+        ))
+        .unwrap();
+        // Put the other y3 back in the deck to isolate the known, hidden
+        // connector. This changes no clue touch or action in this prefix.
+        replay.deck.swap(25, 39);
+        let view = replay
+            .state_at_turn(33)
+            .unwrap()
+            .view_for(PlayerId::new(2))
+            .unwrap();
+        let y4 = IdentitySet::singleton(Card::new(Suit::Yellow, Rank::Four));
+        let y3 = IdentitySet::singleton(Card::new(Suit::Yellow, Rank::Three));
+        assert!(!can_play_soon(&view, y4, IdentitySet::default()));
+        assert!(can_play_soon(&view, y4, y3));
+        assert!(view.hands[2].iter().all(|card| card.identity.is_none()));
     }
 
     #[test]

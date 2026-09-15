@@ -229,10 +229,14 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
         .collect::<CardSet>();
     baseline_playing.extend(active_connection_cards.iter().copied());
     let mut giver_has_playable_now = false;
+    let mut players_with_current_play = PlayerSet::default();
     for player in 0..view.hands.len() {
         let observer =
             PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
         if let Some(cards) = subjective_playable_cards(view, profile, observer) {
+            if !cards.is_empty() {
+                players_with_current_play.insert(observer);
+            }
             if observer == view.current_player && !cards.is_empty() {
                 giver_has_playable_now = true;
             }
@@ -762,7 +766,9 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                     ClueValue::new(score),
                     CluePurpose::Save,
                     ClueSchedule::new(
-                        focus_identity.rank == Rank::Five || is_critical(view, focus_identity),
+                        !players_with_current_play.contains(&target)
+                            && (focus_identity.rank == Rank::Five
+                                || is_critical(view, focus_identity)),
                         false,
                     ),
                     0,
@@ -773,12 +779,19 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
 
     let immediately_endangered_targets = candidates
         .iter()
-        .filter(|candidate| candidate.is_save() && candidate.target() == next_player)
+        .filter(|candidate| {
+            candidate.is_save()
+                && candidate.target() == next_player
+                && !players_with_current_play.contains(&next_player)
+        })
         .map(|candidate| candidate.target())
         .collect::<PlayerSet>();
     for candidate in &mut candidates {
         if immediately_endangered_targets.contains(&candidate.target()) {
-            // Only the next player's chop is time-sensitive on this turn.
+            // Only an unoccupied next player's chop is time-sensitive.
+            // A player with a current play can retain their chop; an available
+            // Save is not itself evidence of an imminent discard deadline.
+            // https://hanabi.github.io/beginner/other-general-strategy/#give-play-clues-over-save-clues
             // This raises the clue's value when the actor is free, but
             // `urgent_save` separately controls whether it may preempt an
             // already-promised play.
@@ -1504,6 +1517,7 @@ pub(super) fn advanced_clue_candidates(
                         &replay.pending_connections,
                         &replay.cards.facts,
                         &replay.cards.chop_moved,
+                        convention_cards,
                     )
                     .is_some()
                         && !prospective_clue_has_unsafe_connection(
@@ -2295,6 +2309,7 @@ pub(super) fn play_clue_score(
             pending_connections,
             convention_facts,
             chop_moved,
+            convention_cards,
         )?
     };
     Some(
@@ -2428,6 +2443,7 @@ pub(super) fn delayed_connection_score(
     pending_connections: &ConnectionManager,
     convention_facts: &ConventionFacts,
     chop_moved: &CardSet,
+    convention_cards: &[HGroupCardInference],
 ) -> Option<u16> {
     let stack_height = view.play_stacks[focus_identity.suit.index()].len();
     if usize::from(focus_identity.rank.number()) <= stack_height + 1
@@ -2613,10 +2629,22 @@ pub(super) fn delayed_connection_score(
 
     for needed_rank in (first_unqueued_rank + 1)..usize::from(focus_identity.rank.number()) {
         let needed = Card::new(focus_identity.suit, Rank::ALL[needed_rank - 1]);
-        let already_queued =
-            pending_connections.identity_is_queued(needed)
+        let already_queued = pending_connections.identity_is_queued(needed)
                 || view.hands.iter().flatten().any(|card| {
                     already_playing.contains(&card.id) && card.identity == Some(needed)
+                })
+                // A giver can count an existing exact, clued promise in their
+                // own hand. This is not permission to use the hidden face of
+                // an unclued giver card as a new Prompt or Finesse. The normal
+                // recipient compiler validates when this delayed card plays.
+                // https://hanabi.github.io/beginner/delayed-play-clues
+                || view.hands[view.observer.index()].iter().any(|card| {
+                    explicitly_clued.contains(&card.id)
+                        && convention_cards.iter().any(|note| {
+                            note.card == card.id
+                                && note.identity_status == super::HGroupIdentityStatus::Settled
+                                && note.identities == IdentitySet::singleton(needed)
+                        })
                 });
         if already_queued {
             // A later connector can already be convention-bound even when an

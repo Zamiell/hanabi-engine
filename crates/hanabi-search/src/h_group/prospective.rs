@@ -1472,6 +1472,23 @@ fn subjective_h_group_replay_before_action(
     facts: &[ClueFacts],
     deck_size: usize,
 ) -> Option<(LogicalDeductions, HGroupState)> {
+    let view = subjective_view_before_action(source, observer, history, hands, facts, deck_size);
+    let deductions = LogicalDeductions::new(view).ok()?;
+    let replay = replay_h_group_inner(&deductions, profile, PerspectiveDepth::ObserverOnly, false);
+    Some((deductions, replay))
+}
+
+/// Reconstructs a past legal observation without importing later actions or
+/// the modeled player's hidden faces. The caller may supply a conditional
+/// source hand, but that hand is hidden again if it belongs to `observer`.
+pub(super) fn subjective_view_before_action(
+    source: &PlayerView,
+    observer: PlayerId,
+    history: &[ObservedHistoryEntry],
+    hands: &[Vec<CardId>],
+    facts: &[ClueFacts],
+    deck_size: usize,
+) -> PlayerView {
     let observed_hands = hands
         .iter()
         .enumerate()
@@ -1538,7 +1555,7 @@ fn subjective_h_group_replay_before_action(
             ObservedEvent::Drew { .. } => {}
         }
     }
-    let view = PlayerView {
+    PlayerView {
         observer,
         current_player: observer,
         turn: history
@@ -1553,8 +1570,5 @@ fn subjective_h_group_replay_before_action(
         final_turns_remaining: None,
         status: GameStatus::InProgress,
         history: projected_history,
-    };
-    let deductions = LogicalDeductions::new(view).ok()?;
-    let replay = replay_h_group_inner(&deductions, profile, PerspectiveDepth::ObserverOnly, false);
-    Some((deductions, replay))
+    }
 }

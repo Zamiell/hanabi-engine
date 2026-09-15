@@ -430,6 +430,7 @@ impl ReplayReducer {
         } = self;
         let (signals, convention_facts) = signals.into_parts();
         let mut state = HGroupState {
+            strategic_deductions: Vec::new(),
             hands,
             cards: ConventionCardState {
                 explicitly_clued,

@@ -1173,6 +1173,7 @@ fn fifth_replay_move_seventeen_admits_purple_reverse_finesse() {
         &replay.pending_connections,
         &replay.cards.facts,
         &replay.cards.chop_moved,
+        &convention_card_inferences(&deductions, &replay),
     );
     let primary =
         prospective_clue_primary_interpretation(&view, HGroupProfile::Max, target, clue, &touched);
@@ -2464,7 +2465,30 @@ fn third_replay_declined_rank_four_resolves_alices_card_as_yellow_four() {
         .view_for(state.current_player())
         .expect("current player has a view");
     let deductions = LogicalDeductions::new(view).expect("logical view");
+    let baseline_domain = || {
+        super::super::inverse_planning::baseline(|| {
+            let ordinary = replay_h_group(&deductions, HGroupProfile::Max);
+            assert!(ordinary.strategic_deductions.is_empty());
+            convention_card_inferences(&deductions, &ordinary)
+                .into_iter()
+                .find(|note| note.card == CardId::new(2))
+                .unwrap()
+                .identities
+        })
+    };
+    let ordinary_domain = baseline_domain();
+    assert!(ordinary_domain.contains(Card::new(Suit::Green, Rank::Four)));
     let replay = replay_h_group(&deductions, HGroupProfile::Max);
+    assert!(
+        replay
+            .strategic_deductions
+            .iter()
+            .any(|proof| proof.card == CardId::new(2)
+                && proof.checked_assignments > 1
+                && proof.witnesses.len() > 1
+                && proof.is_valid()),
+        "the exact note must have joint-hand evidence, not a one-world shortcut"
+    );
     let inferred = infer_h_group_from_replay(&deductions, replay.clone(), HGroupProfile::Max);
     let yellow_four = Card::new(Suit::Yellow, Rank::Four);
     let card = inferred
@@ -2476,9 +2500,122 @@ fn third_replay_declined_rank_four_resolves_alices_card_as_yellow_four() {
     assert_eq!(card.identities, IdentitySet::singleton(yellow_four));
     assert!(inferred.playable_now.contains(&CardId::new(2)));
     assert_eq!(
+        baseline_domain(),
+        ordinary_domain,
+        "strategic conclusions must not contaminate lower-order counterfactual queries"
+    );
+    assert_eq!(
         select_h_group_action(&deductions, HGroupProfile::Max),
         Some(Action::Play(CardId::new(2))),
     );
+}
+
+#[test]
+fn third_replay_counterfactual_yellow_line_is_not_interrupted_by_an_early_save() {
+    // Human-reviewed alternative to Donald's red clue on Hanab Live turn 36.
+    // This is a counterfactual branch, not a change to the expert replay.
+    let mut fixture = expert_replay_p4v0s2();
+    fixture.deck.swap(2, 39);
+    let state = fixture.state_at_turn(35).expect("legal reviewed prefix");
+    let view = state
+        .view_for(PlayerId::new(3))
+        .expect("Donald's legal view");
+    let root = Action::Clue {
+        target: PlayerId::new(1),
+        clue: Clue::Suit(Suit::Yellow),
+    };
+    let (outcome, evidence) = super::super::symbolic_line::project_h_group_projection(
+        &view,
+        HGroupProfile::Max,
+        root,
+        4,
+        &crate::AnalysisControl::default(),
+    )
+    .expect("unlimited analysis");
+    let actions = evidence
+        .steps
+        .iter()
+        .map(|step| step.projected.action)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        actions,
+        vec![
+            root,
+            Action::Clue {
+                target: PlayerId::new(2),
+                clue: Clue::Suit(Suit::Yellow)
+            },
+            Action::Play(CardId::new(28)),
+            Action::Play(CardId::new(38)),
+        ],
+        "{evidence:#?}",
+    );
+    assert_eq!(outcome.score_gain, 2);
+    assert_eq!(outcome.strikes, 0);
+    assert_eq!(outcome.clues_spent, 2);
+    assert_eq!(outcome.clues_gained, 1);
+}
+
+#[test]
+fn third_replay_counterfactual_finesse_checks_the_rest_of_alices_hand() {
+    // p4v0s2, turn 36: changing the focal card alone is insufficient. A
+    // different newest card in Alice's hand changes yellow to Bob's reading.
+    super::super::inverse_planning::baseline(|| {
+        let mut fixture = expert_replay_p4v0s2();
+        fixture.deck.swap(2, 39);
+        let interpretation = |fixture: &HanabiLiveReplay| {
+            let state = fixture.state_at_turn(35).unwrap();
+            let view = state.view_for(PlayerId::new(3)).unwrap();
+            super::super::prospective_clue_primary_interpretation(
+                &view,
+                HGroupProfile::Max,
+                PlayerId::new(1),
+                Clue::Suit(Suit::Yellow),
+                &[CardId::new(28)],
+            )
+            .unwrap()
+            .focus_identities
+        };
+        let ordinary = interpretation(&fixture);
+        fixture.deck.swap(36, 39);
+        let interfering = interpretation(&fixture);
+        assert_eq!(
+            ordinary,
+            IdentitySet::singleton(Card::new(Suit::Yellow, Rank::Four))
+        );
+        assert!(interfering.contains(Card::new(Suit::Yellow, Rank::Five)));
+        assert_ne!(ordinary, interfering);
+    });
+}
+
+#[test]
+fn third_replay_gentlemans_discard_does_not_delay_an_immediate_five_refund() {
+    // Counterfactual p4v0s2 turn 36: Bob can transfer y4 to Alice's newest
+    // card, but playing it lets Cathy finish yellow immediately. The token
+    // from the transfer is not a benefit over that already-funded sequence.
+    super::super::inverse_planning::baseline(|| {
+        let mut fixture = expert_replay_p4v0s2();
+        fixture.deck.swap(2, 39);
+        fixture.deck.swap(36, 39);
+        let mut state = fixture.state_at_turn(35).unwrap();
+        state
+            .apply(Action::Clue {
+                target: PlayerId::new(1),
+                clue: Clue::Rank(Rank::Four),
+            })
+            .unwrap();
+        state
+            .apply(Action::Clue {
+                target: PlayerId::new(2),
+                clue: Clue::Suit(Suit::Yellow),
+            })
+            .unwrap();
+        let d = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+        assert_eq!(
+            select_h_group_action(&d, HGroupProfile::Max),
+            Some(Action::Play(CardId::new(28)))
+        );
+    });
 }
 
 #[test]

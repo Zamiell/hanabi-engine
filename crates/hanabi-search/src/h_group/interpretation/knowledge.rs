@@ -1119,6 +1119,18 @@ fn compile_convention_card_inferences(
     compiler.apply_current_focus();
     compiler.apply_forced_plays();
     compiler.apply_implicit_saves();
+    for deduction in &replay.strategic_deductions {
+        compiler.knowledge.update(
+            deduction.card,
+            KnowledgeSource::StrategicChoice(deduction.inferred_turn),
+            |note| {
+                let narrowed = note.identities.without(deduction.excluded);
+                if !narrowed.is_empty() {
+                    note.identities = narrowed;
+                }
+            },
+        );
+    }
     compiler.finish()
 }
 
