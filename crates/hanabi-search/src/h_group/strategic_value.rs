@@ -185,6 +185,9 @@ pub(super) fn apply_strategic_clue_values(
         ));
         let action_coverage = value.action_coverage;
         candidate.set_compiled_line(value);
+        candidate.set_expiring_multi_card_opportunity(expiring_multi_card_opportunity(
+            source, profile, *candidate, value, &baselines,
+        ));
         if opportunity_losses[index] {
             candidate
                 .value
@@ -449,6 +452,40 @@ fn bottom_deck_risk_protection(
             identities.union(IdentitySet::singleton(identity))
         })
         .len()
+}
+
+/// A positional 2-for-1 expires when the next player's already-available
+/// play draws a blank over its blind-play anchor. Count newly obtained cards,
+/// not automatic plays, and require a real scheduled draw rather than assuming
+/// every advanced clue is urgent. Reviewed in p4v0s1, turn 22.
+/// <https://hanabi.github.io/level-11/#the-bluff>
+fn expiring_multi_card_opportunity(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    candidate: CompiledClueAction,
+    outcome: &LineOutcome,
+    baselines: &[ProjectedLineState],
+) -> Option<CardId> {
+    if source.deck_size == 0 || outcome.clue_efficiency < 2 {
+        return None;
+    }
+    let Action::Clue { target, clue } = candidate.action else {
+        return None;
+    };
+    let touched = source.hands[target.index()]
+        .iter()
+        .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
+        .map(|card| card.id)
+        .collect::<Vec<_>>();
+    let evidence = compiled_prospective_clue(source, profile, target, clue, &touched)?
+        .line_evidence(source, candidate.move_kind())?;
+    let reactor = super::next_player(source.current_player, source.hands.len());
+    let anchor = evidence.positional_anchor?;
+    (card_owner(source, anchor) == Some(reactor)
+        && identity_of(source, anchor).is_some_and(|identity| is_playable_now(source, identity))
+        && !baselines[reactor.index()].playable_now.is_empty()
+        && !baselines[reactor.index()].playable_now.contains(&anchor))
+    .then_some(anchor)
 }
 
 /// Compare two concrete orders: a direct play followed by a positional

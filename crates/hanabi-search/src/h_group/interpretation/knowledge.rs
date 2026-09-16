@@ -134,6 +134,11 @@ impl<'a> ConventionKnowledgeCompiler<'a> {
                             | HGroupMoveKind::ClandestineFinesse
                             | HGroupMoveKind::QueuedFinesse
                             | HGroupMoveKind::AmbiguousFinesse
+                            // A resolved Bluff has a demonstrated physical
+                            // identity too. Excluding it here left older
+                            // touched cards as possible duplicates (p4v0s1
+                            // turn 23: Cathy's {r2,g2} after playing g2).
+                            | HGroupMoveKind::Bluff
                     )
             })
         {

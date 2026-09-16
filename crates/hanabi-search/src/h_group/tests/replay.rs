@@ -29,6 +29,17 @@ fn fifth_replay_bluff_interrupts_an_ordinary_clued_play() {
         .find(|c| c.action == action)
         .expect("rank 4 is admitted even though Cathy has a clued play");
     assert_eq!(candidate.move_kind(), Some(HGroupMoveKind::Bluff));
+    assert!(candidate.expiring_multi_card_opportunity());
+    let inferred = infer_h_group(&d, HGroupProfile::Max);
+    assert!(super::super::decision::can_park_surplus_five(
+        d.view(),
+        &inferred
+    ));
+    let mut unfunded = d.view().clone();
+    unfunded.clue_tokens = 0;
+    assert!(!super::super::decision::can_park_surplus_five(
+        &unfunded, &inferred
+    ));
     let convention = analyze_h_group_convention(&d, HGroupProfile::Max);
     assert!(
         convention.forced.is_none(),
@@ -40,6 +51,10 @@ fn fifth_replay_bluff_interrupts_an_ordinary_clued_play() {
         crate::PlannerConfig::default(),
     )
     .unwrap();
+    assert_eq!(
+        analysis.planner.best_action, action,
+        "the reviewed 2-for-1 expires after Cathy's draw; b5 and its unneeded refund can wait"
+    );
     for expected in [action, Action::Play(CardId::new(17))] {
         let root = analysis
             .planner
@@ -85,6 +100,25 @@ fn fifth_replay_bluff_interrupts_an_ordinary_clued_play() {
             .identities,
         IdentitySet::singleton(Card::new(Suit::Yellow, Rank::Four))
     );
+}
+
+#[test]
+fn fifth_replay_demonstrated_bluff_eliminates_older_good_touch_duplicates() {
+    // p4v0s1 turn 24, after the reviewed g2 Bluff: Cathy's saved 2
+    // cannot duplicate it. This is Good Touch, not physical card counting.
+    let resolved = expert_replay_p4v0s1().state_at_turn(23).unwrap();
+    let cathy = LogicalDeductions::new(resolved.view_for(PlayerId::new(2)).unwrap()).unwrap();
+    let inferred = infer_h_group(&cathy, HGroupProfile::Max);
+    assert_eq!(
+        inferred
+            .cards
+            .iter()
+            .find(|note| note.card == CardId::new(18))
+            .unwrap()
+            .identities,
+        IdentitySet::singleton(Card::new(Suit::Red, Rank::Two))
+    );
+    assert!(inferred.playable_now.contains(&CardId::new(18)));
 }
 
 #[test]

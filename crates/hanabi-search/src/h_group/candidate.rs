@@ -1,4 +1,4 @@
-use hanabi_core::{Action, PlayerId};
+use hanabi_core::{Action, CardId, PlayerId};
 
 use super::HGroupMoveKind;
 
@@ -32,6 +32,7 @@ pub(super) struct ClueSchedule {
     urgent_save: bool,
     immediate_play: bool,
     preserves_visible_continuation: bool,
+    expiring_multi_card_anchor: Option<CardId>,
 }
 
 impl ClueSchedule {
@@ -40,6 +41,7 @@ impl ClueSchedule {
             urgent_save,
             immediate_play,
             preserves_visible_continuation: false,
+            expiring_multi_card_anchor: None,
         }
     }
 }
@@ -321,6 +323,14 @@ impl CompiledClueAction {
 
     pub(super) const fn set_preserves_visible_continuation(&mut self, preserves: bool) {
         self.semantics.schedule.preserves_visible_continuation = preserves;
+    }
+
+    pub(super) const fn expiring_multi_card_opportunity(self) -> bool {
+        self.semantics.schedule.expiring_multi_card_anchor.is_some()
+    }
+
+    pub(super) const fn set_expiring_multi_card_opportunity(&mut self, anchor: Option<CardId>) {
+        self.semantics.schedule.expiring_multi_card_anchor = anchor;
     }
 }
 

@@ -1829,7 +1829,9 @@ fn adjust_clue_priority(
         clue_priority.min(500)
     } else if !inferred.playable_now.is_empty()
         && clue_candidate.is_some_and(|candidate| {
-            candidate_can_preempt_current_play(candidate, inferred, &analysis.replay)
+            (candidate_can_preempt_current_play(candidate, inferred, &analysis.replay)
+                || (candidate.expiring_multi_card_opportunity()
+                    && can_park_surplus_five(deductions.view(), inferred)))
                 && (!completed_connection_focus_is_due(inferred)
                     || candidate_is_lie_component_finesse(deductions.view(), profile, candidate))
         })
@@ -1874,6 +1876,40 @@ fn adjust_clue_priority(
     } else {
         clue_priority
     }
+}
+
+/// A token-refunding play can wait for an expiring efficient clue when the
+/// existing token supply already covers that clue and visible urgent needs.
+/// This is scheduling, not a change to level 25's order among actual plays.
+/// No hidden identity or future draw is used to declare a refund unnecessary.
+/// <https://hanabi.github.io/level-25/#the-priority-prompt--the-priority-finesse>
+pub(super) fn can_park_surplus_five(source: &PlayerView, inferred: &HGroupInferences) -> bool {
+    let critical_saves = inferred
+        .chops
+        .iter()
+        .flatten()
+        .filter(|card| {
+            super::identity_of(source, **card)
+                .is_some_and(|identity| super::is_critical(source, identity))
+        })
+        .count();
+    let reserve = super::ResourceSchedule::reserve(
+        u8::try_from(critical_saves).unwrap_or(u8::MAX),
+        u8::try_from(inferred.must_clue.len()).unwrap_or(u8::MAX),
+        false,
+    );
+    source.clue_tokens >= reserve
+        && !inferred.playable_now.is_empty()
+        && inferred.playable_now.iter().all(|playable| {
+            inferred.cards.iter().any(|card| {
+                card.card == *playable
+                    && !card.identities.is_empty()
+                    && card
+                        .identities
+                        .iter()
+                        .all(|identity| identity.rank == Rank::Five)
+            })
+        })
 }
 
 /// Prefer swapping an interchangeable clue and discard when only the current
