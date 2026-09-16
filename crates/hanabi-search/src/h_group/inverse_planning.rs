@@ -182,6 +182,8 @@ pub(super) fn deduce(
     replay: &HGroupState,
     profile: HGroupProfile,
 ) -> Vec<StrategicDeduction> {
+    #[cfg(test)]
+    let _profile = crate::test_profile::span("inverse_planning");
     let view = deductions.view();
     if is_active()
         || !rule_enabled(profile, HGroupRuleId::BasicStrategy)

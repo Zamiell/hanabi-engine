@@ -46,6 +46,8 @@ pub fn analyze_position_with_control(
     config: PlannerConfig,
     control: &AnalysisControl,
 ) -> Result<PositionAnalysis, AnalyzePositionError> {
+    #[cfg(test)]
+    let _profile = crate::test_profile::span("analyze_position");
     control
         .checkpoint()
         .map_err(AnalyzePositionError::Stopped)?;

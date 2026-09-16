@@ -1157,6 +1157,11 @@ fn assert_expert_replay_matches_engine(seed: &str, replay: &HanabiLiveReplay) {
         review.continuation
     );
     for turn in 0..u32::try_from(through).expect("replay fits in u32") {
+        let profiling = std::env::var_os("HANABI_PROFILE_REPLAY").is_some();
+        let started = std::time::Instant::now();
+        if profiling {
+            crate::test_profile::start();
+        }
         let state = replay.state_at_turn(turn).expect("fixture prefix is legal");
         let actor = state.current_player();
         let view = state.view_for(actor).expect("current player has a view");
@@ -1175,6 +1180,9 @@ fn assert_expert_replay_matches_engine(seed: &str, replay: &HanabiLiveReplay) {
             )
         });
         let expected = replay_action_at_turn(replay, turn);
+        if profiling {
+            crate::test_profile::finish(seed, turn + 1, started.elapsed());
+        }
         if analysis.planner.best_action == expected {
             continue;
         }

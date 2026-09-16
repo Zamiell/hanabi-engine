@@ -300,6 +300,8 @@ impl SupportedConvention {
     /// consumed by deterministic planning and diagnostics.
     #[must_use]
     pub fn analyze(self, deductions: &LogicalDeductions) -> ConventionAnalysis {
+        #[cfg(test)]
+        let _profile = crate::test_profile::span("convention_analyze");
         match self {
             Self::None => ConventionAnalysis {
                 inferences: ConventionInferences::None,

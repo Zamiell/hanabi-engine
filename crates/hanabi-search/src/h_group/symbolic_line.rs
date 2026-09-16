@@ -122,6 +122,8 @@ fn project_h_group_plan_with_control<const REUSE_SELECTED: bool>(
     limit: u8,
     control: &crate::AnalysisControl,
 ) -> Result<ConditionalPlan, crate::AnalysisStopped> {
+    #[cfg(test)]
+    let _profile = crate::test_profile::span("symbolic_projection");
     let mut plan = ConditionalPlan::new(source.clue_tokens);
     let mut public = source.clone();
     let mut action = Some(root);

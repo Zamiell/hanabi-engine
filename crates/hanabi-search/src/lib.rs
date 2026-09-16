@@ -10,6 +10,8 @@ pub use future_card_quality::SecuredCardQuality;
 mod h_group;
 mod information_set;
 mod planner;
+#[cfg(test)]
+mod test_profile;
 
 pub use analysis::{
     AnalyzePositionError, PositionAnalysis, analyze_position, analyze_position_with_control,

@@ -26,6 +26,21 @@ prerequisites still stop the run immediately. Use focused tests while editing,
 then one full validation at task completion; do not repeat completed checks just
 because an unrelated regression remains failing.
 
+For per-turn, nested stage timings of an expert action-parity test:
+
+```bash
+HANABI_PROFILE_REPLAY=1 cargo test --locked -p hanabi-search --lib \
+  h_group::tests::replay::third_expert_replay_matches_engine -- --exact --nocapture
+```
+
+`REPLAY_PROFILE` lines are tab-separated: seed, one-based turn, stage, calls,
+inclusive seconds, exclusive seconds (preceded by the marker). Inclusive times
+overlap; exclusive times subtract nested instrumented scopes. The `total` row is
+a separate wall-clock measurement, not an additional stage to sum. Compile
+before measuring if comparing execution times. Instrumentation is test-only,
+disabled unless requested, and does not alter planner limits or assertions. See
+[the replay profile report](replay-profile.md) for the measured bottleneck.
+
 For changes to inverse-planning projection reuse, additionally run the
 cold-cache differential certificate check:
 

@@ -500,6 +500,8 @@ pub(crate) fn plan_move_with_control(
     control: &crate::AnalysisControl,
 ) -> Result<PlannerResult, PlannerError> {
     control.checkpoint().map_err(PlannerError::Stopped)?;
+    #[cfg(test)]
+    let _profile = crate::test_profile::span("planner");
     let objective = config.objective;
     let deductions = information_set.deductions();
     let candidates = planning_candidates(analysis);
@@ -612,6 +614,8 @@ fn run_exact_search(
     evaluations: &mut [PlannerActionEvaluation],
     control: &crate::AnalysisControl,
 ) -> Result<(Option<usize>, u64, ExactSearchStatus), PlannerError> {
+    #[cfg(test)]
+    let _profile = crate::test_profile::span("exact_search");
     let worlds = information
         .collect_worlds_after_count(
             &analysis.belief_constraints,
