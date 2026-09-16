@@ -1840,7 +1840,11 @@ pub(super) fn advanced_clue_candidates(
                     || rule_enabled(profile, HGroupRuleId::IntermediateBluffs))
         }) {
             let useful_cards = newly_touched.len().saturating_add(1);
-            Some((
+            // A Bluff also promises its newly touched collateral cards.
+            // Recognizing the blind play cannot waive Good Touch for those
+            // cards or fall through to a different, lower-priority meaning.
+            // https://hanabi.github.io/beginner/good-touch-principle/
+            respects_good_touch.then_some((
                 HGroupMoveKind::Bluff,
                 330 + 2 * u16::try_from(useful_cards).unwrap_or(u16::MAX),
             ))

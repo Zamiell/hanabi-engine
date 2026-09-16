@@ -1228,6 +1228,79 @@ fn first_expert_replay_reviewed_prefix_matches_engine() {
 }
 
 #[test]
+fn first_replay_resolved_three_bluff_does_not_create_hesitation_play() {
+    // Branch from reviewed p4v0s415 turn 30. A disconnected g4 establishes
+    // a 3 Bluff; Donald can discard while his saved 3 remains unplayable.
+    // This asserts interpretation, not that the alternative is optimal.
+    // https://hanabi.github.io/level-13/#the-3-bluff
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    let mut state = fixture.state_at_turn(29).unwrap();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(3),
+            clue: Clue::Rank(Rank::Three),
+        },
+        Action::Play(CardId::new(32)),
+        Action::Discard(CardId::new(21)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    assert!(
+        inferred
+            .signals
+            .iter()
+            .any(|signal| { signal.turn == 30 && signal.kind == HGroupMoveKind::Bluff })
+    );
+    assert!(
+        !inferred.signals.iter().any(|signal| {
+            signal.turn == 31 && signal.kind == HGroupMoveKind::HesitationBlindPlay
+        }),
+        "a resolved Bluff does not imply a missing p2: {inferred:#?}"
+    );
+}
+
+#[test]
+fn first_replay_move_thirty_bluff_must_not_touch_played_purple_one() {
+    // User-reviewed p4v0s415 turn 30: purple would newly touch Donald's
+    // p3 #33 AND p1 #26, although p1 #19 already played on turn 21.
+    // https://hanabi.github.io/beginner/good-touch-principle/
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    let state = fixture.state_at_turn(29).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    assert_eq!(view.play_stacks[Suit::Purple.index()].len(), 1);
+    assert_eq!(
+        identity_of(&view, CardId::new(26)),
+        Some(Card::new(Suit::Purple, Rank::One))
+    );
+    let deductions = LogicalDeductions::new(view).unwrap();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    let clue = |clue| Action::Clue {
+        target: PlayerId::new(3),
+        clue,
+    };
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| candidate.action != clue(Clue::Suit(Suit::Purple))),
+        "a Bluff cannot waive Good Touch for its collateral p1: {candidates:#?}"
+    );
+    assert!(
+        candidates
+            .iter()
+            .any(|candidate| candidate.action == clue(Clue::Rank(Rank::Three))),
+        "the clean rank-3 alternative must remain available"
+    );
+}
+
+#[test]
 fn first_replay_move_eight_keeps_a_loaded_clue_in_superposition() {
     let fixture = reviewed_rank_three_branch_p4v0s415();
     let state = fixture.state_at_turn(7).expect("fixture prefix is legal");

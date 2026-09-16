@@ -797,6 +797,19 @@ pub(in crate::h_group) fn apply_charm_effects(
             let Some(delayed) = delayed else {
                 return;
             };
+            if signals.iter().any(|signal| {
+                signal.turn > delayed.turn
+                    && signal.turn < entry.turn
+                    && signal.kind == HGroupMoveKind::Bluff
+                    && signal.cards.contains(&delayed.focus)
+            }) {
+                // A demonstrated Bluff can leave an unplayable 3 in hand.
+                // Discarding then is not hesitation over a Play Clue and
+                // cannot promise a missing connector in the next hand.
+                // https://hanabi.github.io/level-13/#the-3-bluff
+                // https://hanabi.github.io/level-23/#the-hesitation-blind-play
+                return;
+            }
             if pending
                 .iter()
                 .any(|connection| connection.focus == delayed.focus && connection.actor == *player)
