@@ -7,6 +7,7 @@ const MAX_TEST_CONTINUATION_TURNS: usize = 512;
 
 mod architecture;
 mod replay;
+mod replay_memo;
 mod snapshots;
 
 // Convention expectations come from reviewed replay positions. The support

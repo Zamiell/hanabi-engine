@@ -48,6 +48,7 @@ pub fn analyze_position_with_control(
 ) -> Result<PositionAnalysis, AnalyzePositionError> {
     #[cfg(test)]
     let _profile = crate::test_profile::span("analyze_position");
+    let _memo = crate::h_group::begin_analysis_replay_memo();
     control
         .checkpoint()
         .map_err(AnalyzePositionError::Stopped)?;

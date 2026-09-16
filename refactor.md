@@ -5,6 +5,40 @@ an individual convention regression. Entries describe the problem, the boundary
 introduced to solve it, and the property that future changes should preserve.
 Commit hashes refer to this repository's Git history.
 
+## 2026-09-16: bounded request-scoped history memoization
+
+Profiling p4v0s2 found 94% of runtime under history reduction. An exact-key
+audit then observed at least 458,049 repeated misses across reduction scopes.
+The August 31 recursive-prefix memo remains useful, but its lifetime ended
+between perspective reconstruction, next-action selection, and root candidates.
+
+- Extend the existing memo through one complete `analyze_position` or planner
+  request, capped at 1,024 entries. Overflow discards cache entries, never
+  search work or convention alternatives. Calls outside a request retain the
+  original recursive scope.
+- Keep the full observation, profile, perspective depth, empathy mode, and
+  inverse-planning stage in the key. Do not turn this into a cross-turn cache.
+- Use nested RAII ownership so inner analyses cannot clear the outer request's
+  memo; cancellation, errors, and unwinding still clear it.
+- Retain cloned immutable reduction results and test full analyses, knowledge
+  effects, and inverse-proof witnesses against recursive-only execution.
+
+Same-binary isolated p4v0s2 measurements: 237.75 to 102.62 seconds; peak RSS
+1,508,888 to 92,544 KiB with profiling enabled. All 47 moves still agree. The
+large inverse-proof turn is slower under the cap, but aggregate time and memory
+are substantially lower. See `docs/replay-profile.md` for the tradeoff and
+reproduction details.
+
+The full 47-position differential passed with identical analyses, knowledge
+effects, and inverse-proof witnesses. Full validation then fell from 288.23 to
+146.60 seconds, with four added safety tests and the same nine existing
+failures.
+
+This intentionally revises the August 31 requirement that memo lifetime end with
+one recursive reduction: it may now span a single bounded analysis request with
+complete semantic keys, but must never leak across requests. Existing
+selection/execution reuse and certificate caches are preserved, not replaced.
+
 ## 2026-09-16: aligned projection checkpoints and comparison precedence
 
 Different unknown-card stopping points previously disabled endpoint comparison

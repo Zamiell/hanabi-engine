@@ -41,6 +41,28 @@ before measuring if comparing execution times. Instrumentation is test-only,
 disabled unless requested, and does not alter planner limits or assertions. See
 [the replay profile report](replay-profile.md) for the measured bottleneck.
 
+`HANABI_REPLAY_MEMO=recursive` selects the previous recursive-only cache scope
+in test binaries, for before/after measurements. It has no effect on production
+builds. With profiling enabled, `REPLAY_MEMO` rows report hits, misses, repeated
+exact-key misses, untracked misses, peak entries, and capacity flushes. The
+diagnostic exact-key tracker retains at most 8,192 keys per turn; nonzero
+untracked counts mean repeated-miss counts are lower bounds, not exhaustive.
+
+When changing replay memoization, also run the full-output differential check:
+
+```bash
+cargo test --locked -p hanabi-search --lib \
+  h_group::tests::replay_memo::request_memo_preserves_full_replay_analyses \
+  -- --exact --ignored --nocapture
+```
+
+This deliberately expensive check runs all 47 positions of p4v0s2 with the old
+and new cache scopes, clearing inverse-planning certificate caches before each
+pass. It compares complete `PositionAnalysis` values, knowledge effects, and
+strategic deductions including their per-world witnesses. Lightweight ordinary
+tests cover representative positions, key isolation, eviction, nesting,
+cancellation, and unwinding. None replace the existing replay assertions.
+
 For changes to inverse-planning projection reuse, additionally run the
 cold-cache differential certificate check:
 

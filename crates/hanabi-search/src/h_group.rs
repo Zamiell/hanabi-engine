@@ -856,7 +856,7 @@ fn replay_h_group(deductions: &LogicalDeductions, profile: HGroupProfile) -> HGr
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct ReplayMemoKey {
+pub(crate) struct ReplayMemoKey {
     view: PlayerView,
     profile: HGroupProfile,
     perspective_depth: PerspectiveDepth,
@@ -865,18 +865,61 @@ struct ReplayMemoKey {
 }
 
 thread_local! {
-    static H_GROUP_REPLAY_MEMO: RefCell<Option<HashMap<ReplayMemoKey, HGroupState>>> =
+    static H_GROUP_REPLAY_MEMO: RefCell<Option<ReplayMemo>> =
         const { RefCell::new(None) };
 }
 
-struct ReplayMemoGuard;
+#[cfg(test)]
+thread_local! {
+    static BYPASS_REQUEST_REPLAY_MEMO: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+struct ReplayMemo {
+    entries: HashMap<ReplayMemoKey, HGroupState>,
+    limit: usize,
+}
+
+/// Entry bound, not a search budget: reaching it drops cached values only.
+const REQUEST_REPLAY_MEMO_LIMIT: usize = 1_024;
+
+#[must_use = "hold the guard until the analysis completes"]
+pub(crate) struct ReplayMemoGuard(bool);
 
 impl Drop for ReplayMemoGuard {
     fn drop(&mut self) {
-        H_GROUP_REPLAY_MEMO.with(|memo| {
-            memo.replace(None);
-        });
+        if self.0 {
+            H_GROUP_REPLAY_MEMO.with(|memo| {
+                memo.replace(None);
+            });
+        }
     }
+}
+
+fn begin_replay_memo(limit: usize) -> ReplayMemoGuard {
+    let owns_scope = H_GROUP_REPLAY_MEMO.with_borrow_mut(|memo| {
+        if memo.is_some() {
+            return false;
+        }
+        *memo = Some(ReplayMemo {
+            entries: HashMap::new(),
+            limit,
+        });
+        true
+    });
+    ReplayMemoGuard(owns_scope)
+}
+
+/// Share exact immutable reductions through one analysis, including all
+/// hypothetical perspectives. Never keep entries between requests. The key
+/// includes the lower-order/inverse-planning stage as well as the full view.
+pub(crate) fn begin_analysis_replay_memo() -> ReplayMemoGuard {
+    #[cfg(test)]
+    if BYPASS_REQUEST_REPLAY_MEMO.get()
+        || std::env::var_os("HANABI_REPLAY_MEMO").is_some_and(|mode| mode == "recursive")
+    {
+        return ReplayMemoGuard(false);
+    }
+    begin_replay_memo(REQUEST_REPLAY_MEMO_LIMIT)
 }
 
 /// Shares immutable prefix reductions across one recursive replay. Historical
@@ -884,14 +927,7 @@ impl Drop for ReplayMemoGuard {
 /// this scope, a length-N replay recursively rebuilds the same length-0..N
 /// histories for every later discard.
 fn with_replay_memo<T>(operation: impl FnOnce() -> T) -> T {
-    let already_active = H_GROUP_REPLAY_MEMO.with(|memo| memo.borrow().is_some());
-    if already_active {
-        return operation();
-    }
-    H_GROUP_REPLAY_MEMO.with(|memo| {
-        memo.replace(Some(HashMap::new()));
-    });
-    let _guard = ReplayMemoGuard;
+    let _guard = begin_replay_memo(usize::MAX);
     operation()
 }
 
@@ -912,11 +948,14 @@ fn replay_h_group_inner(
             allow_blind_reverse_empathy,
             counterfactual: inverse_planning::is_active(),
         };
-        if let Some(replay) = H_GROUP_REPLAY_MEMO.with(|memo| {
+        let cached = H_GROUP_REPLAY_MEMO.with(|memo| {
             memo.borrow()
                 .as_ref()
-                .and_then(|memo| memo.get(&key).cloned())
-        }) {
+                .and_then(|memo| memo.entries.get(&key).cloned())
+        });
+        #[cfg(test)]
+        crate::test_profile::replay_lookup(&key, cached.is_some());
+        if let Some(replay) = cached {
             return replay;
         }
         let mut replay = inverse_planning::baseline(|| {
@@ -929,10 +968,16 @@ fn replay_h_group_inner(
         });
         inverse_planning::enrich(deductions, &mut replay, profile);
         H_GROUP_REPLAY_MEMO.with(|memo| {
-            memo.borrow_mut()
-                .as_mut()
-                .expect("replay memo scope is active")
-                .insert(key, replay.clone());
+            let mut borrow = memo.borrow_mut();
+            let memo = borrow.as_mut().expect("replay memo scope is active");
+            if memo.entries.len() >= memo.limit {
+                memo.entries.clear();
+                #[cfg(test)]
+                crate::test_profile::replay_flush();
+            }
+            memo.entries.insert(key, replay.clone());
+            #[cfg(test)]
+            crate::test_profile::replay_peak(memo.entries.len());
         });
         replay
     })

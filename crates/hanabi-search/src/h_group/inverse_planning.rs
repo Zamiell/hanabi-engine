@@ -58,6 +58,12 @@ pub(super) fn is_active() -> bool {
     ACTIVE.get()
 }
 
+#[cfg(test)]
+pub(super) fn clear_test_caches() {
+    CACHE.with_borrow_mut(Vec::clear);
+    WITNESS_CACHE.with_borrow_mut(Vec::clear);
+}
+
 struct Guard(bool);
 impl Drop for Guard {
     fn drop(&mut self) {

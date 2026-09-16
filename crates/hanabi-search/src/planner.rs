@@ -473,6 +473,7 @@ pub fn plan_move(
     config: PlannerConfig,
 ) -> Result<PlannerResult, PlannerError> {
     let deductions = information_set.deductions();
+    let _memo = crate::h_group::begin_analysis_replay_memo();
     let analysis = convention.analyze(deductions);
     plan_move_with_analysis(information_set, convention, &analysis, config)
 }
@@ -500,6 +501,7 @@ pub(crate) fn plan_move_with_control(
     control: &crate::AnalysisControl,
 ) -> Result<PlannerResult, PlannerError> {
     control.checkpoint().map_err(PlannerError::Stopped)?;
+    let _memo = crate::h_group::begin_analysis_replay_memo();
     #[cfg(test)]
     let _profile = crate::test_profile::span("planner");
     let objective = config.objective;

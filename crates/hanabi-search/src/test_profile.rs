@@ -3,7 +3,7 @@
 
 use std::{
     cell::RefCell,
-    collections::BTreeMap,
+    collections::{BTreeMap, HashSet},
     time::{Duration, Instant},
 };
 
@@ -18,6 +18,47 @@ struct Row {
 struct Profile {
     children: Vec<Duration>,
     rows: BTreeMap<&'static str, Row>,
+    replay_misses: HashSet<crate::h_group::ReplayMemoKey>,
+    hits: u64,
+    misses: u64,
+    repeated_misses: u64,
+    untracked_misses: u64,
+    peak_entries: usize,
+    flushes: u64,
+}
+
+pub(crate) fn replay_lookup(key: &crate::h_group::ReplayMemoKey, hit: bool) {
+    PROFILE.with_borrow_mut(|profile| {
+        let Some(profile) = profile else { return };
+        if hit {
+            profile.hits += 1;
+        } else {
+            profile.misses += 1;
+            if profile.replay_misses.contains(key) {
+                profile.repeated_misses += 1;
+            } else if profile.replay_misses.len() < 8_192 {
+                profile.replay_misses.insert(key.clone());
+            } else {
+                profile.untracked_misses += 1;
+            }
+        }
+    });
+}
+
+pub(crate) fn replay_peak(entries: usize) {
+    PROFILE.with_borrow_mut(|profile| {
+        if let Some(profile) = profile {
+            profile.peak_entries = profile.peak_entries.max(entries);
+        }
+    });
+}
+
+pub(crate) fn replay_flush() {
+    PROFILE.with_borrow_mut(|profile| {
+        if let Some(profile) = profile {
+            profile.flushes += 1;
+        }
+    });
 }
 
 thread_local! {
@@ -66,6 +107,15 @@ pub(crate) fn finish(seed: &str, turn: u32, elapsed: Duration) {
         .with_borrow_mut(Option::take)
         .expect("active profiling session");
     assert!(profile.children.is_empty());
+    eprintln!(
+        "REPLAY_MEMO\t{seed}\t{turn}\thits={}\tmisses={}\trepeated_misses={}\tuntracked_misses={}\tpeak_entries={}\tflushes={}",
+        profile.hits,
+        profile.misses,
+        profile.repeated_misses,
+        profile.untracked_misses,
+        profile.peak_entries,
+        profile.flushes
+    );
     eprintln!(
         "REPLAY_PROFILE\t{seed}\t{turn}\ttotal\t1\t{:.6}\t{:.6}",
         elapsed.as_secs_f64(),

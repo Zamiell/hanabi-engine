@@ -65,7 +65,64 @@ Require enabled/disabled differential comparisons of complete inference and
 projection evidence, not just selected moves, and measure peak memory as well as
 time. If most reductions are genuinely distinct, profile the history reducer
 internals next rather than adding a larger ineffective cache. No such cache
-change is included in this profiling task.
+change was included in the initial profiling task. The follow-up experiment
+below implements and measures request-scoped reuse.
+
+## Follow-up: bounded request-scoped reuse
+
+Both measurements used the same precompiled test binary, isolated processes, the
+same full 47-move test, default planner limits, and profiling enabled. The
+before run selected `HANABI_REPLAY_MEMO=recursive`; the after run used the
+default bounded request scope. `/usr/bin/time` excluded compilation and measured
+process peak RSS. These are single-run measurements, not confidence intervals.
+
+| Metric                                           | Recursive scope | Request scope |
+| ------------------------------------------------ | --------------: | ------------: |
+| Wall seconds                                     |          237.75 |        102.62 |
+| Peak RSS, KiB (including profiler)               |       1,508,888 |        92,544 |
+| Memo hits                                        |         347,566 |       604,230 |
+| Memo misses                                      |         585,152 |       160,832 |
+| Repeated exact-key misses (lower bound)          |         458,049 |        34,244 |
+| Untracked misses after diagnostic tracker filled |          54,957 |        54,442 |
+| Peak live memo entries                           |          46,022 |         1,024 |
+| Capacity flushes                                 |               0 |           138 |
+
+The whole replay is **2.32x faster (56.8% less wall time)** with approximately
+**93.9% lower peak RSS**. This is engine computation reuse, not skipped tests.
+The request memo holds at most 1,024 completed reductions; reaching the bound
+clears cached entries and recomputes as necessary. It does not truncate search,
+world enumeration, or projections. Recursive-only standalone reductions retain
+their existing behavior when outside an analysis request.
+
+There is a tradeoff: turn 37 increased from 58.320 to 67.680 seconds because the
+bounded cache evicts results the old inverse-planning reduction retained. The
+other 46 turns together fell from approximately 179.43 to 34.94 seconds. The
+1,024-entry cap is a measured working bound, not a claim of optimal cache
+tuning.
+
+The full observation, convention profile, perspective depth, empathy flag, and
+inverse-planning stage remain in each key. Results are cloned on return rather
+than shared as mutable state. The request guard is nested and exception-safe;
+entries are discarded at request completion, error, cancellation, or unwind.
+Inspection of the other thread-local caches found prospective analyses and
+inverse certificates are input-keyed memoization, not additional convention
+meaning inputs. The inverse-planning activity guard is included in the key.
+
+The full cold-cache differential test passed for every one of the 47 positions:
+complete analyses (including inferences, candidates, comparisons and projection
+evidence), knowledge effects, and strategic deductions with their witnesses were
+equal. Its unprofiled passes took 233.862 seconds with recursive scopes and
+96.018 seconds with request scopes. That test additionally extracts the
+knowledge/proof output, so it is a separate workload from the table above.
+
+Full `check.sh` subsequently completed in **146.60 seconds**, versus the prior
+288.23-second run. Rust test execution fell from 252.790 to 108.117 seconds. The
+new suite has four additional ordinary cache tests: 354 passed and the same nine
+test names failed; all other validation stages passed. The separately run full
+differential test also passed. These full-suite wall times include build and
+lint overhead, unlike the isolated engine measurements above. Whole-suite peak
+RSS remains about 1.4 GiB because other tests directly exercise standalone
+recursive reductions; the 90.4 MiB result applies to the isolated replay only.
 
 ## Validation handoff
 
