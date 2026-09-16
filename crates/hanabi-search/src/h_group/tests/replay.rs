@@ -1,5 +1,106 @@
 use super::*;
 
+/// Human-reviewed p4v0s1 turn 22: Cathy's available clued r2 does not
+/// prevent a rank-4 Bluff on her newest g2, saving Alice's y4.
+/// <https://hanabi.github.io/level-11/#the-bluff>
+#[test]
+fn fifth_replay_bluff_interrupts_an_ordinary_clued_play() {
+    let fixture = expert_replay_p4v0s1();
+    let state = fixture.state_at_turn(21).unwrap();
+    let d = LogicalDeductions::new(state.view_for(state.current_player()).unwrap()).unwrap();
+    let action = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Rank(Rank::Four),
+    };
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    let replay = replay_h_group(&d, HGroupProfile::Max);
+    // Donald's already-promised p3 is a truthful connector, not a reason
+    // to Bluff a second copy out of Cathy.
+    assert!(super::super::bluff::bluff_connector_is_promised(
+        d.view(),
+        &replay.hands,
+        &replay.cards.already_playing,
+        &replay.pending_connections,
+        Card::new(Suit::Purple, Rank::Three),
+        None,
+    ));
+    let candidate = candidates
+        .iter()
+        .find(|c| c.action == action)
+        .expect("rank 4 is admitted even though Cathy has a clued play");
+    assert_eq!(candidate.move_kind(), Some(HGroupMoveKind::Bluff));
+    let convention = analyze_h_group_convention(&d, HGroupProfile::Max);
+    assert!(
+        convention.forced.is_none(),
+        "an ordinary b5 play is not mandatory"
+    );
+    let analysis = crate::analyze_position(
+        d.view(),
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    for expected in [action, Action::Play(CardId::new(17))] {
+        let root = analysis
+            .planner
+            .root_actions
+            .iter()
+            .find(|root| root.action == expected)
+            .expect("both the Bluff and the ordinary play must reach root search");
+        assert!(!root.projection.steps.is_empty());
+    }
+    let (line, evidence) = super::super::symbolic_line::project_h_group_projection(
+        d.view(),
+        HGroupProfile::Max,
+        action,
+        32,
+        &crate::AnalysisControl::default(),
+    )
+    .unwrap();
+    assert_eq!(line.strikes, 0);
+    assert_eq!(
+        evidence
+            .steps
+            .iter()
+            .take(2)
+            .map(|step| step.projected.action)
+            .collect::<Vec<_>>(),
+        vec![action, Action::Play(CardId::new(25))]
+    );
+    let after = fixture.state_at_turn(22).unwrap();
+    let cathy = LogicalDeductions::new(after.view_for(PlayerId::new(2)).unwrap()).unwrap();
+    assert_eq!(
+        select_h_group_action(&cathy, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(25)))
+    );
+    let resolved = fixture.state_at_turn(23).unwrap();
+    let alice = LogicalDeductions::new(resolved.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let inferred = infer_h_group(&alice, HGroupProfile::Max);
+    assert_eq!(
+        inferred
+            .cards
+            .iter()
+            .find(|note| note.card == CardId::new(2))
+            .unwrap()
+            .identities,
+        IdentitySet::singleton(Card::new(Suit::Yellow, Rank::Four))
+    );
+}
+
+#[test]
+fn reviewed_pending_finesse_still_blocks_a_queued_bluff() {
+    // p4v0s415 turn 3: Donald owes the blind play for Alice's yellow card.
+    let fixture = reviewed_rank_three_branch_p4v0s415();
+    let state = fixture.state_at_turn(2).unwrap();
+    let d = LogicalDeductions::new(state.view_for(PlayerId::new(3)).unwrap()).unwrap();
+    let replay = replay_h_group(&d, HGroupProfile::Max);
+    assert!(super::super::bluff::bluff_is_queued(
+        &replay.pending_connections,
+        PlayerId::new(3),
+        None,
+    ));
+}
+
 /// Human-reviewed p4v0s1 turn 14: purple to Alice initiates the two
 /// immediate blind plays (Cathy's g1, Donald's r1), not a 5 Color Ejection.
 /// <https://hanabi.github.io/level-15/#the-double-bluff>

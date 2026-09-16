@@ -1,6 +1,48 @@
 //! Shared Bluff semantics used by candidate generation and history replay.
 
-use super::{Card, Clue, PlayerId, Rank};
+use super::{
+    Card, CardId, CardSet, Clue, ConnectionManager, HGroupConnectionKind, PlayerId, PlayerView,
+    Rank, identity_of,
+};
+
+/// A connector that is already due makes the clue a truthful continuation,
+/// not a reason for the next player to invent another blind connector.
+/// <https://hanabi.github.io/level-11/#bobs-truth-principle-part-1>
+pub(super) fn bluff_connector_is_promised(
+    view: &PlayerView,
+    hands: &[Vec<CardId>],
+    already_playing: &CardSet,
+    pending: &ConnectionManager,
+    connector: Card,
+    current_focus: Option<CardId>,
+) -> bool {
+    hands
+        .iter()
+        .flatten()
+        .any(|card| already_playing.contains(card) && identity_of(view, *card) == Some(connector))
+        || pending.iter().any(|connection| {
+            Some(connection.focus) != current_focus
+                && connection.expected == connector
+                && pending.is_active(connection)
+        })
+}
+
+/// A Bluff cannot wait behind an older Finesse, but an ordinary clued play
+/// does not prevent the next player from immediately demonstrating a Bluff.
+/// During clue replay, exclude connections established by this very clue.
+/// <https://hanabi.github.io/level-11/#queued-bluffs-illegal>
+pub(super) fn bluff_is_queued(
+    pending: &ConnectionManager,
+    actor: PlayerId,
+    current_focus: Option<CardId>,
+) -> bool {
+    pending.iter().any(|connection| {
+        connection.actor == actor
+            && connection.kind == HGroupConnectionKind::Finesse
+            && Some(connection.focus) != current_focus
+            && pending.is_active(connection)
+    })
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum BluffTargetKind {

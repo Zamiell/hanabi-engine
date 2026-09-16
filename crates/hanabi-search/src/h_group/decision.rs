@@ -930,8 +930,9 @@ fn analyze_h_group_actions_from_analysis(
         &analyzed,
         &constraints,
     );
-    // A predictable convention response is a hard semantic conclusion, not a
-    // second recommendation that may conflict with heuristic ranking.
+    // Keep the fast continuation policy consistent with its prediction.
+    // Root search separately distinguishes a policy prediction from a hard
+    // convention requirement in analyze_h_group_convention.
     let preferred = predictable.or(ranked_preferred);
 
     debug_assert!(analyzed.iter().all(|analysis| match analysis.kind {
@@ -995,7 +996,23 @@ pub(crate) fn analyze_h_group_convention(
         })
         .collect();
     let preferred = select_h_group_action_from_analysis(deductions, profile, &analysis);
-    let forced = h_group_predictable_action_from_analysis(deductions, profile, &analysis);
+    // A rollout-policy prediction is not a hard restriction on root search.
+    // An ordinary known play may be deferred for a productive clue; only
+    // actual convention requirements (or a single admitted action) can
+    // prevent the planner from comparing the alternatives.
+    let forced = actions.predictable.filter(|action| {
+        actions.actions.len() == 1
+            || matches!(action, Action::Play(card) if
+            analysis.inferences.completed_connection_focuses.contains(card)
+                || analysis.inferences.cards.iter().any(|note| {
+                    note.card == *card
+                        && note.play_obligation == Some(HGroupPlayObligation::Forced)
+                }))
+            || actions.actions.iter().any(|candidate| {
+                candidate.action == *action
+                    && candidate.preference.policy_tier() == ConventionPolicyTier::Required
+            })
+    });
     let belief_constraints =
         ConventionConstraintGraph::from_replay(deductions, &analysis.replay, &analysis.inferences)
             .into_belief_constraints();
@@ -2044,15 +2061,7 @@ pub(crate) fn h_group_predictable_action(
     profile: HGroupProfile,
 ) -> Option<Action> {
     let analysis = build_h_group_analysis(deductions, profile);
-    h_group_predictable_action_from_analysis(deductions, profile, &analysis)
-}
-
-fn h_group_predictable_action_from_analysis(
-    deductions: &LogicalDeductions,
-    profile: HGroupProfile,
-    analysis: &HGroupAnalysis,
-) -> Option<Action> {
-    analyze_h_group_actions_from_analysis(deductions, profile, analysis).predictable
+    analyze_h_group_actions_from_analysis(deductions, profile, &analysis).predictable
 }
 
 fn paused_priority_play(

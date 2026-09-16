@@ -132,11 +132,14 @@ worlds by the acting player's complete `PlayerView` and selects one action per
 observation group. This avoids strategy fusion: a player cannot act on their own
 identity or a future draw before it becomes observable.
 
-Convention-forced continuations collapse to one action. For `perfect-score`,
-exact values compare perfect worlds first, then total official score, fewer
-strikeouts, and reachable score ceiling. `expected-score` compares total score
-first. If the node ceiling is reached, partial exact results are discarded and
-the symbolic result is used.
+Convention-forced continuations collapse to one action. An ordinary known play
+predicted by the rollout policy is not a forced root action: the planner still
+projects admitted clue alternatives. In particular, holding an ordinary clued
+play does not forbid reacting to a Bluff; an unresolved Finesse obligation does.
+For `perfect-score`, exact values compare perfect worlds first, then total
+official score, fewer strikeouts, and reachable score ceiling. `expected-score`
+compares total score first. If the node ceiling is reached, partial exact
+results are discarded and the symbolic result is used.
 
 Planning details report the `symbolic` or `exact` phase, bounded world count,
 exact node count (including abandoned work), `exactStatus`, structured root

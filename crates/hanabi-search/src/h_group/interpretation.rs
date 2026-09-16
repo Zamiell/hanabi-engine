@@ -1571,14 +1571,19 @@ pub(super) fn advanced_clue_candidates(
                 if !bluff_target_order_is_legal(clue, actor, target) {
                     return None;
                 }
-                let actor_is_loaded = replay.pending_connections.iter().any(|connection| {
-                    connection.actor == actor && replay.pending_connections.is_active(connection)
-                }) || replay.hands[actor.index()].iter().any(|card| {
-                    (gotten.contains(card) || replay.cards.forced_playable.contains(card))
-                        && identity_of(view, *card)
-                            .is_some_and(|identity| is_playable_now(view, identity))
-                });
-                if actor_is_loaded {
+                if super::bluff::bluff_is_queued(&replay.pending_connections, actor, None) {
+                    return None;
+                }
+                let height = view.play_stacks[focus.suit.index()].len();
+                let connector = Card::new(focus.suit, *Rank::ALL.get(height)?);
+                if super::bluff::bluff_connector_is_promised(
+                    view,
+                    &replay.hands,
+                    &replay.cards.already_playing,
+                    &replay.pending_connections,
+                    connector,
+                    None,
+                ) {
                     return None;
                 }
                 let kind = if bluff_focus_is_one_away(view, focus, gotten) {

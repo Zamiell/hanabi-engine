@@ -47,6 +47,17 @@ pub(in crate::h_group) fn apply_bluff_effects(
     if is_playable_at(stack_heights, focus_identity) || !(focus_is_one_away || hard_three_self) {
         return;
     }
+    let expected_connector = Card::new(focus_identity.suit, Rank::ALL[usize::from(height)]);
+    if super::super::bluff::bluff_connector_is_promised(
+        view,
+        hands,
+        already_playing,
+        pending,
+        expected_connector,
+        Some(focus),
+    ) {
+        return;
+    }
     if actor == *target {
         if !matches!(clue, Clue::Rank(_)) {
             return;
@@ -55,19 +66,6 @@ pub(in crate::h_group) fn apply_bluff_effects(
         else {
             return;
         };
-        let expected_connector = Card::new(focus_identity.suit, Rank::ALL[usize::from(height)]);
-        let connector_is_already_promised = hands.iter().flatten().any(|card| {
-            already_playing.contains(card) && identity_of(view, *card) == Some(expected_connector)
-        }) || pending.iter().any(|connection| {
-            pending.is_active(connection) && connection.expected == expected_connector
-        });
-        if connector_is_already_promised {
-            // A Self-Bluff supplies a missing connector. If that connector is
-            // already convention-bound, the focus simply follows the queued
-            // play; blind-playing another card would duplicate the line.
-            // Source: https://hanabi.github.io/level-11/#the-self-bluff
-            return;
-        }
         if hands.iter().enumerate().any(|(player, hand)| {
             player != actor.index()
                 && hand
@@ -103,14 +101,7 @@ pub(in crate::h_group) fn apply_bluff_effects(
         );
         return;
     }
-    let actor_is_loaded = pending.iter().any(|connection| {
-        connection.actor == actor && connection.focus != focus && pending.is_active(connection)
-    }) || hands[actor.index()].iter().any(|card| {
-        explicitly_clued.contains(card)
-            && identity_of(view, *card)
-                .is_some_and(|identity| is_playable_at(stack_heights, identity))
-    });
-    if actor_is_loaded {
+    if super::super::bluff::bluff_is_queued(pending, actor, Some(focus)) {
         return;
     }
     let Some((bluff_card, bluff_identity)) = hands[actor.index()]
