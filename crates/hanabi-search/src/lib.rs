@@ -37,6 +37,6 @@ pub use information_set::{
 pub use planner::{
     CandidateComparison, ComparisonReason, EndpointComparison, ExactActionValue, ExactSearchStatus,
     ParsePlanningObjectiveError, PlannerActionEvaluation, PlannerConfig, PlannerError,
-    PlannerPhase, PlannerResult, PlanningObjective, ProjectedPositionValue, SymbolicLineOutcome,
-    SymbolicStopReason, plan_move,
+    PlannerPhase, PlannerResult, PlanningObjective, ProjectedPositionValue, RotationCheckpoint,
+    SymbolicLineOutcome, SymbolicStopReason, plan_move,
 };

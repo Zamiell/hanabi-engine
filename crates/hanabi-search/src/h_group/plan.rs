@@ -165,6 +165,7 @@ pub struct PerspectiveAssumption {
 pub(super) struct ConditionalPlan {
     evidence: ProjectionEvidence,
     position_value: Option<crate::ProjectedPositionValue>,
+    first_rotation: Option<crate::RotationCheckpoint>,
 }
 
 impl ConditionalPlan {
@@ -211,6 +212,14 @@ impl ConditionalPlan {
     pub(super) fn assess(&mut self, value: Option<crate::ProjectedPositionValue>) {
         self.position_value = value;
     }
+    pub(super) fn record_rotation(&mut self, value: Option<crate::ProjectedPositionValue>) {
+        let summary = self.summarize();
+        self.first_rotation = value.map(|value| crate::RotationCheckpoint {
+            actions: summary.actions,
+            discards: summary.discards,
+            value,
+        });
+    }
     pub(super) fn push(
         &mut self,
         turn: u32,
@@ -245,6 +254,7 @@ impl ConditionalPlan {
     pub(super) fn summarize(&self) -> SymbolicLineOutcome {
         let mut outcome = SymbolicLineOutcome {
             position_value: self.position_value,
+            first_rotation: self.first_rotation,
             actions: u8::try_from(self.evidence.steps.len()).unwrap_or(u8::MAX),
             stop_reason: match self.evidence.frontier {
                 PlanFrontier::Terminal => SymbolicStopReason::Terminal,

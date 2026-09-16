@@ -1083,7 +1083,11 @@ pub(super) fn advanced_clue_candidates(
     let actor_locked = replay.hands[view.observer.index()]
         .iter()
         .all(|card| gotten.contains(card) || replay.cards.chop_moved.contains(card));
-    let stalling = replay.early_game || actor_locked || view.clue_tokens == MAX_CLUE_TOKENS;
+    let endgame_stalling = view.deck_size <= view.hands.len();
+    let stalling = replay.early_game
+        || actor_locked
+        || view.clue_tokens == MAX_CLUE_TOKENS
+        || endgame_stalling;
     let promptable = replay.promptable();
     let previously_fixed = replay.cards.facts.fixed_cards();
     let mut candidates = Vec::new();
@@ -1295,7 +1299,9 @@ pub(super) fn advanced_clue_candidates(
                         interpretation
                             .save_identities
                             .iter()
-                            .filter(|identity| identity.rank == Rank::Two)
+                            .filter(|identity| {
+                                identity.rank == Rank::Two && is_eventually_useful(view, *identity)
+                            })
                             .fold(0, |mask, identity| mask | (1 << identity.index())),
                     );
                     (!twos.is_empty() && !layout.contains(&interpretation.focus)).then_some(twos)
@@ -1586,7 +1592,7 @@ pub(super) fn advanced_clue_candidates(
                 ) {
                     return None;
                 }
-                let kind = if bluff_focus_is_one_away(view, focus, gotten) {
+                let kind = if bluff_focus_is_one_away(view, focus, gotten, convention_cards) {
                     BluffTargetKind::Ordinary
                 } else if clue == Clue::Rank(Rank::Three)
                     && focus.rank == Rank::Three
@@ -1902,14 +1908,17 @@ pub(super) fn advanced_clue_candidates(
             Some((HGroupMoveKind::SaveClue, 50))
         } else if rule_enabled(profile, HGroupRuleId::Stalling)
             && newly_touched.is_empty()
-            && (actor_locked || view.clue_tokens == MAX_CLUE_TOKENS)
+            && (actor_locked || view.clue_tokens == MAX_CLUE_TOKENS || endgame_stalling)
         {
             if super::prospective::fill_in_narrows_superposition(
                 view, profile, target, clue, &touched,
             ) {
                 Some((HGroupMoveKind::FillInClue, 40))
             } else {
-                Some((HGroupMoveKind::Burn, 20))
+                // Level 8 recommends re-cluing already playable cards when
+                // Burning. This is clearer than re-cluing a delayed promise.
+                // https://hanabi.github.io/level-8/#burning-end-game-stalling
+                Some((HGroupMoveKind::Burn, if playable > 0 { 25 } else { 20 }))
             }
         } else {
             None
@@ -2099,17 +2108,24 @@ pub(super) fn advanced_clue_candidates(
     candidates
 }
 
-pub(super) fn bluff_focus_is_one_away(view: &PlayerView, focus: Card, gotten: &CardSet) -> bool {
+pub(super) fn bluff_focus_is_one_away(
+    view: &PlayerView,
+    focus: Card,
+    gotten: &CardSet,
+    convention_cards: &[HGroupCardInference],
+) -> bool {
     let height = view.play_stacks[focus.suit.index()].len();
-    let rank = usize::from(focus.rank.number());
-    rank > height + 1
-        && ((height + 2)..rank).all(|needed_rank| {
-            let needed = Card::new(focus.suit, Rank::ALL[needed_rank - 1]);
-            view.hands
-                .iter()
-                .flatten()
-                .any(|card| gotten.contains(&card.id) && card.identity == Some(needed))
+    super::bluff::bluff_through_clued_cards(height, focus, |needed| {
+        view.hands.iter().flatten().any(|card| {
+            gotten.contains(&card.id)
+                && (card.identity == Some(needed)
+                    || (card.identity.is_none()
+                        && convention_cards.iter().any(|note| {
+                            note.card == card.id
+                                && note.identities == IdentitySet::singleton(needed)
+                        })))
         })
+    })
 }
 
 pub(super) fn out_of_order_connections_accounted(

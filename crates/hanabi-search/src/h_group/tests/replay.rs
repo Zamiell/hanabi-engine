@@ -1,5 +1,119 @@
 use super::*;
 
+#[test]
+fn fifth_replay_burn_preserves_the_final_playing_clock() {
+    // p4v0s1 turn 48: y5, g4 and g5 are known; all needed cards are held.
+    // https://hanabi.github.io/level-8/#burning-end-game-stalling
+    let state = expert_replay_p4v0s1().state_at_turn(47).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    assert!(
+        matches!(analysis.planner.best_action, Action::Clue { .. }),
+        "{:#?}",
+        analysis.planner
+    );
+    let selected = analysis
+        .planner
+        .root_actions
+        .iter()
+        .find(|candidate| candidate.action == analysis.planner.best_action)
+        .unwrap();
+    assert!(
+        selected.immediately_playable_touched > 0,
+        "Level 8 prefers re-cluing an already playable card over a delayed promise"
+    );
+}
+
+#[test]
+fn fifth_replay_clues_the_last_missing_connector_before_surplus_discard() {
+    // Reviewed p4v0s1 turn 46: g3/g4 are visible; Bob knows his own g5.
+    // Seven tokens already fund the remaining clues. No draw is required.
+    let state = expert_replay_p4v0s1().state_at_turn(45).unwrap();
+    let source = state.view_for(state.current_player()).unwrap();
+    let analysis = crate::analyze_position(
+        &source,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        analysis.planner.best_action,
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::Three)
+        }
+    );
+}
+
+#[test]
+fn fifth_replay_bluffs_through_the_givers_known_green_four() {
+    // p4v0s1 turn 35: green to Bob goes through Cathy's already-known g4.
+    // https://hanabi.github.io/level-11/#bluffs-through-already-clued-cards
+    let state = expert_replay_p4v0s1().state_at_turn(34).unwrap();
+    let d = LogicalDeductions::new(state.view_for(state.current_player()).unwrap()).unwrap();
+    let green = Action::Clue {
+        target: PlayerId::new(1),
+        clue: Clue::Suit(Suit::Green),
+    };
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    let own = infer_h_group(&d, HGroupProfile::Max);
+    assert!(super::super::interpretation::bluff_focus_is_one_away(
+        d.view(),
+        Card::new(Suit::Green, Rank::Five),
+        &own.gotten(),
+        &own.cards
+    ));
+    assert!(
+        candidates.iter().any(|c| c.action == green),
+        "cards={:?} gotten={:?} candidates={candidates:#?}",
+        infer_h_group(&d, HGroupProfile::Max).cards,
+        infer_h_group(&d, HGroupProfile::Max).gotten()
+    );
+    let (line, evidence) = super::super::symbolic_line::project_h_group_projection(
+        d.view(),
+        HGroupProfile::Max,
+        green,
+        4,
+        &crate::AnalysisControl::default(),
+    )
+    .unwrap();
+    let after = expert_replay_p4v0s1().state_at_turn(36).unwrap();
+    let bob = LogicalDeductions::new(after.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    let bob = infer_h_group(&bob, HGroupProfile::Max);
+    assert_eq!(
+        bob.cards
+            .iter()
+            .find(|card| card.card == CardId::new(19))
+            .unwrap()
+            .identities,
+        IdentitySet::singleton(Card::new(Suit::Green, Rank::Five))
+    );
+    assert!(!bob.playable_now.contains(&CardId::new(19)));
+    assert_eq!(
+        crate::analyze_position(
+            d.view(),
+            crate::SupportedConvention::HGroup(HGroupProfile::Max),
+            crate::PlannerConfig::default()
+        )
+        .unwrap()
+        .planner
+        .best_action,
+        green,
+        "the same r5 play additionally protects Bob's critical g5"
+    );
+    assert_eq!(line.strikes, 0, "{evidence:#?}");
+    assert_eq!(
+        evidence.steps.get(1).map(|step| step.projected.action),
+        Some(Action::Play(CardId::new(33))),
+        "{evidence:#?}"
+    );
+}
+
 /// Human-reviewed p4v0s1 turn 22: Cathy's available clued r2 does not
 /// prevent a rank-4 Bluff on her newest g2, saving Alice's y4.
 /// <https://hanabi.github.io/level-11/#the-bluff>
@@ -745,7 +859,9 @@ fn possible_positional_discard_does_not_make_a_five_save() {
         Action::Clue {
             target: PlayerId::new(0),
             clue: Clue::Rank(Rank::Five),
-        }
+        },
+        "{:#?}",
+        analysis.planner
     );
     state
         .apply(Action::Clue {

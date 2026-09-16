@@ -192,6 +192,16 @@ pub struct SymbolicLineOutcome {
     pub stop_reason: SymbolicStopReason,
     /// Resource and opportunity assessment at the known projection frontier.
     pub position_value: Option<ProjectedPositionValue>,
+    /// A shared elapsed-time comparison, even when full lines stop at
+    /// different unknown identities later. This does not truncate search.
+    pub first_rotation: Option<RotationCheckpoint>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RotationCheckpoint {
+    pub actions: u8,
+    pub discards: u8,
+    pub value: ProjectedPositionValue,
 }
 
 /// Observable resources and conditional opportunities, not a sampled world.
@@ -213,10 +223,77 @@ pub struct ProjectedPositionValue {
     pub clue_demand: u8,
     pub save_pressure: u8,
     pub foregone_touch_opportunities: u8,
+    /// Visible, unpromised playable identities currently on finesse position.
+    /// Opportunities, not secured points or assumptions about blank draws.
+    pub playable_finesse_opportunities: u8,
 }
 
 impl ProjectedPositionValue {
+    fn funded_completion_reserve(self, rotation: u8) -> Option<u8> {
+        if rotation == 0
+            || self.score.saturating_add(self.secured_future_plays) != 25
+            || self.blocked_clued_cards != 0
+            || self.exposed_critical_chops != 0
+        {
+            return None;
+        }
+        // Even waiting a complete rotation between each secured play needs
+        // at most this many Burns. Do not reward discards for surplus tokens
+        // after this conservative reserve has already been funded.
+        Some(
+            self.clue_demand
+                .max(self.secured_future_plays.saturating_mul(rotation - 1)),
+        )
+    }
+    /// At equal immediate resources, protecting an additional endangered
+    /// future play is progress even if that newly saved card cannot play yet.
+    /// Do not waive existing congestion: only the additional secured cards
+    /// may account for the increase in blocked cards.
+    fn protection_development_preference(self, other: Self) -> bool {
+        self.score == other.score
+            && self.clues >= other.clues
+            && self.secured_future_plays > other.secured_future_plays
+            && self.protected_bottom_deck_risks > other.protected_bottom_deck_risks
+            && self.exposed_critical_chops < other.exposed_critical_chops
+            && self
+                .blocked_clued_cards
+                .saturating_sub(other.blocked_clued_cards)
+                <= self.secured_future_plays - other.secured_future_plays
+            && self.visible_successors >= other.visible_successors
+            && self.save_pressure <= other.save_pressure
+            && self.foregone_touch_opportunities <= other.foregone_touch_opportunities
+    }
+    /// Heuristic access comparison at a common turn, not a proof of score.
+    /// A ready positional card can be obtained efficiently; surplus tokens
+    /// need not beat that opportunity or an already secured future play.
+    pub(crate) fn development_preference(
+        self,
+        other: Self,
+        discards: u8,
+        other_discards: u8,
+    ) -> bool {
+        let demand = self.clue_demand.max(other.clue_demand);
+        let accessible = |value: Self| {
+            value
+                .secured_future_plays
+                .saturating_add(value.playable_finesse_opportunities)
+        };
+        self.score == other.score
+            && accessible(self) >= accessible(other)
+            && self.exposed_critical_chops <= other.exposed_critical_chops
+            && self.blocked_clued_cards <= other.blocked_clued_cards
+            && self.save_pressure <= other.save_pressure
+            && self.foregone_touch_opportunities <= other.foregone_touch_opportunities
+            && self.clues.min(demand) >= other.clues.min(demand)
+            && self.playable_finesse_opportunities >= other.playable_finesse_opportunities
+            && (accessible(self) > accessible(other)
+                || self.clues.min(demand) > other.clues.min(demand)
+                || self.playable_finesse_opportunities > other.playable_finesse_opportunities
+                || (self.secured_future_plays >= other.secured_future_plays
+                    && discards < other_discards))
+    }
     fn without_speculative_finesse(mut self) -> Self {
+        self.playable_finesse_opportunities = 0;
         self.finesse_opportunities = 0;
         self.conditional_successors = 0;
         self.clue_demand = 0;
@@ -335,6 +412,8 @@ pub enum ExactSearchStatus {
 /// The strongest applicable dimension in a symbolic comparison.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ComparisonReason {
+    RotationDevelopment,
+    ProtectedDevelopment,
     PolicyTier,
     TerminalProgress,
     KnownStrikes,
@@ -821,13 +900,28 @@ fn compare_symbolic_candidates(
 ) -> (Option<usize>, Vec<CandidateComparison>) {
     let count = evaluations.len();
     let mut reaches = vec![vec![false; count]; count];
+    let mut evidence_reaches = reaches.clone();
     let mut comparisons = Vec::new();
     for left in 0..count {
         reaches[left][left] = true;
+        evidence_reaches[left][left] = true;
         for right in left + 1..count {
             let a = &evaluations[left];
             let b = &evaluations[right];
             let endpoint = compare_endpoints(a, b);
+            match endpoint {
+                EndpointComparison::PreferLeft(
+                    ComparisonReason::RotationDevelopment | ComparisonReason::ProtectedDevelopment,
+                ) => {
+                    evidence_reaches[left][right] = true;
+                }
+                EndpointComparison::PreferRight(
+                    ComparisonReason::RotationDevelopment | ComparisonReason::ProtectedDevelopment,
+                ) => {
+                    evidence_reaches[right][left] = true;
+                }
+                _ => {}
+            }
             let (ordering, reason) = match endpoint {
                 EndpointComparison::PreferLeft(reason) => (Ordering::Greater, reason),
                 EndpointComparison::PreferRight(reason) => (Ordering::Less, reason),
@@ -853,6 +947,8 @@ fn compare_symbolic_candidates(
         for from in 0..count {
             for to in 0..count {
                 reaches[from][to] |= reaches[from][via] && reaches[via][to];
+                evidence_reaches[from][to] |=
+                    evidence_reaches[from][via] && evidence_reaches[via][to];
             }
         }
     }
@@ -863,11 +959,26 @@ fn compare_symbolic_candidates(
             edge += 1;
         }
     }
-    let selected = (0..count)
+    // Start with the policy's ordering, then improve it using direct line
+    // comparisons. A weak fallback edge must not form a cycle that restores
+    // a candidate explicitly beaten by its projected alternative. If the
+    // evidence itself cycles, retain its SCC and use the stable fallback.
+    let fallback = |left: &usize, right: &usize| {
+        symbolic_fallback_comparison(&evaluations[*left], &evaluations[*right], preferred).0
+    };
+    let baseline = (0..count)
         .filter(|index| reaches[*index].iter().all(|reachable| *reachable))
-        .max_by(|left, right| {
-            symbolic_fallback_comparison(&evaluations[*left], &evaluations[*right], preferred).0
-        });
+        .max_by(fallback);
+    let selected = baseline.and_then(|seed| {
+        (0..count)
+            .filter(|index| evidence_reaches[*index][seed])
+            .filter(|index| {
+                (0..count).all(|other| {
+                    !evidence_reaches[other][*index] || evidence_reaches[*index][other]
+                })
+            })
+            .max_by(fallback)
+    });
     (selected, comparisons)
 }
 
@@ -878,18 +989,73 @@ fn compare_endpoints(
     if left.preference.policy_tier() != right.preference.policy_tier()
         || left.preference.advances_terminal_plan() != right.preference.advances_terminal_plan()
         || left.symbolic_line.strikes != right.symbolic_line.strikes
-        || left.symbolic_line.actions != right.symbolic_line.actions
+    {
+        return EndpointComparison::Incomparable;
+    }
+    // This development comparison schedules a held play versus spending
+    // the turn on a clue. Clue-versus-clue comparisons retain their causal
+    // efficiency/Clarity ordering: positional access alone must not replace
+    // a 2-for-1 clue with a speculative 1-for-1.
+    let schedules_play_and_clue = matches!(
+        (left.action, right.action),
+        (Action::Play(_), Action::Clue { .. }) | (Action::Clue { .. }, Action::Play(_))
+    );
+    if let Some((a, b)) = left
+        .symbolic_line
+        .first_rotation
+        .zip(right.symbolic_line.first_rotation)
+    {
+        if schedules_play_and_clue && a.actions == b.actions {
+            let prefer_left = a
+                .value
+                .development_preference(b.value, a.discards, b.discards);
+            let prefer_right = b
+                .value
+                .development_preference(a.value, b.discards, a.discards);
+            if prefer_left && !prefer_right {
+                return EndpointComparison::PreferLeft(ComparisonReason::RotationDevelopment);
+            }
+            if prefer_right && !prefer_left {
+                return EndpointComparison::PreferRight(ComparisonReason::RotationDevelopment);
+            }
+        }
+    }
+    if left.symbolic_line.actions != right.symbolic_line.actions
         || left.symbolic_line.stop_reason != right.symbolic_line.stop_reason
     {
         return EndpointComparison::Incomparable;
     }
-    let Some((a, b)) = left
+    let Some((mut a, mut b)) = left
         .symbolic_line
         .position_value
         .zip(right.symbolic_line.position_value)
     else {
         return EndpointComparison::Incomparable;
     };
+    if let Some((left_rotation, right_rotation)) = left
+        .symbolic_line
+        .first_rotation
+        .zip(right.symbolic_line.first_rotation)
+    {
+        if left_rotation.actions == right_rotation.actions && a.score == b.score {
+            if let Some((left_reserve, right_reserve)) = a
+                .funded_completion_reserve(left_rotation.actions)
+                .zip(b.funded_completion_reserve(right_rotation.actions))
+            {
+                let reserve = left_reserve.max(right_reserve);
+                if a.clues >= reserve && b.clues >= reserve {
+                    a.clues = reserve;
+                    b.clues = reserve;
+                }
+            }
+        }
+    }
+    if a.protection_development_preference(b) {
+        return EndpointComparison::PreferLeft(ComparisonReason::ProtectedDevelopment);
+    }
+    if b.protection_development_preference(a) {
+        return EndpointComparison::PreferRight(ComparisonReason::ProtectedDevelopment);
+    }
     if let Some(prefers_left) = a.conditional_continuation_preference(b) {
         return if prefers_left {
             EndpointComparison::PreferLeft(ComparisonReason::ConditionalOpportunity)
@@ -1430,6 +1596,73 @@ impl std::error::Error for PlannerError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn completed_plan_token_reserve_requires_all_points_and_unblocked_plays() {
+        let mut value = ProjectedPositionValue {
+            score: 23,
+            secured_future_plays: 2,
+            clue_demand: 1,
+            ..ProjectedPositionValue::default()
+        };
+        assert_eq!(value.funded_completion_reserve(4), Some(6));
+        value.score -= 1;
+        assert_eq!(value.funded_completion_reserve(4), None);
+        value.score += 1;
+        value.blocked_clued_cards = 1;
+        assert_eq!(value.funded_completion_reserve(4), None);
+    }
+
+    #[test]
+    fn additional_protection_cannot_hide_preexisting_congestion_or_token_cost() {
+        let exposed = ProjectedPositionValue {
+            score: 19,
+            clues: 4,
+            exposed_critical_chops: 1,
+            blocked_clued_cards: 3,
+            secured_future_plays: 3,
+            protected_bottom_deck_risks: 3,
+            ..ProjectedPositionValue::default()
+        };
+        let mut protected = ProjectedPositionValue {
+            exposed_critical_chops: 0,
+            blocked_clued_cards: 4,
+            secured_future_plays: 4,
+            protected_bottom_deck_risks: 4,
+            ..exposed
+        };
+        assert!(protected.protection_development_preference(exposed));
+        protected.blocked_clued_cards += 1;
+        assert!(!protected.protection_development_preference(exposed));
+        protected.blocked_clued_cards -= 1;
+        protected.clues -= 1;
+        assert!(!protected.protection_development_preference(exposed));
+    }
+
+    #[test]
+    fn rotation_development_preserves_resources_and_separates_opportunity_from_proof() {
+        let efficient = ProjectedPositionValue {
+            score: 10,
+            secured_future_plays: 4,
+            clues: 1,
+            clue_demand: 1,
+            ..ProjectedPositionValue::default()
+        };
+        let mut extra_discard = efficient;
+        extra_discard.clues = 2;
+        assert!(efficient.development_preference(extra_discard, 1, 2));
+        extra_discard.clue_demand = 2;
+        assert!(!efficient.development_preference(extra_discard, 1, 2));
+        let mut opportunity = efficient;
+        opportunity.playable_finesse_opportunities = 1;
+        assert!(
+            !opportunity.dominates(efficient),
+            "an option is not a secured point"
+        );
+        assert!(!efficient.dominates(opportunity));
+        opportunity.score -= 1;
+        assert!(!opportunity.development_preference(efficient, 1, 2));
+    }
 
     #[test]
     fn conditional_opportunities_cannot_spend_needed_tokens_or_known_progress() {

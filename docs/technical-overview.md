@@ -111,15 +111,30 @@ and do not assign a particular card, estimate a probability, or assert that a
 specific future Finesse/Bluff/Ignition exists. These fields are exposed in the
 live diagnostic JSON under `symbolicLine.positionValue`.
 
-A possible future finesse is only a tiebreaker: it can distinguish equal root
-priorities with otherwise equal frontier assessments, horizons, and stopping
-reasons. It cannot establish resource dominance, outweigh known clue efficiency,
-or protect a resource-inferior line from elimination.
+A speculative future finesse remains a tiebreaker, not secured progress. The
+planner separately records visible, currently playable, unpromised identities
+already on finesse position. These are accessible development opportunities, not
+guaranteed plays; neither category establishes strict resource dominance.
 
 Among remaining choices, fewer projected strikes precede root heuristics. Other
-trajectory metrics break remaining ties. Unequal projection horizons are not
-treated as complete-game comparisons. No actual hidden hand or deck order is
+trajectory metrics break remaining ties. Each line also retains a checkpoint
+after one table rotation, exposed as `symbolicLine.firstRotation`. Lines that
+eventually stop at different horizons can therefore be compared at the same
+elapsed turn without shortening either projection. For play-versus-clue
+scheduling, the development heuristic compares known progress, ready positional
+access, clue reserves, and exposure; it favors fewer discards when progress and
+required funding are preserved. Surplus tokens do not automatically outweigh
+development. This is a strategic preference, not an exhaustive proof of
+optimality. Clue-versus-clue comparisons retain their causal efficiency and
+Clarity ordering. At equal progress and tokens, additional protection of an
+endangered card can outweigh that newly secured card's waiting slot, but not
+unrelated hand congestion. These scheduling edges take precedence over cycles
+introduced by weaker policy fallbacks. No actual hidden hand or deck order is
 used to fill a projection's unknown cards.
+
+When every remaining rank is visible or exactly known in the observer's hand,
+funded final-plan clues take precedence over surplus known-trash discards. This
+includes unclued connectors, not just final 5s; only 5s earn token refunds.
 
 Before attempting an exact endgame, the planner counts worlds only up to
 `--exact-world-limit` (4096 by default) and performs a conservative complexity

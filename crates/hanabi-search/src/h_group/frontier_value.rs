@@ -78,6 +78,7 @@ pub(super) fn evaluate(
         ..ProjectedPositionValue::default()
     };
     let mut secured = IdentitySet::default();
+    let mut positional = IdentitySet::default();
     let mut clued_domains = Vec::new();
     let mut mandatory_clues = 0_u8;
     for player in 0..frontier.hands.len() {
@@ -85,6 +86,13 @@ pub(super) fn evaluate(
         let (d, replay) = PerspectiveProjector::new(frontier, profile)
             .project(actor, PerspectiveDepth::NestedRecipients)?;
         let inferred = infer_h_group_from_replay(&d, replay, profile);
+        if let Some(identity) =
+            super::finesse_position(&frontier.hands[player], &inferred.gotten(), 0)
+                .and_then(|card| card.identity)
+                .filter(|identity| is_playable_now(frontier, *identity))
+        {
+            positional = positional.union(IdentitySet::singleton(identity));
+        }
         if inferred.must_clue.contains(&actor) {
             mandatory_clues = mandatory_clues.saturating_add(1);
         }
@@ -137,6 +145,12 @@ pub(super) fn evaluate(
             .count(),
     );
     value.secured_future_plays = narrow(secured.len());
+    value.playable_finesse_opportunities = narrow(
+        positional
+            .iter()
+            .filter(|identity| !secured.contains(*identity))
+            .count(),
+    );
     value.secured_card_quality = secured_card_quality(frontier, secured);
     let mut protected = secured;
     for suit in Suit::ALL {

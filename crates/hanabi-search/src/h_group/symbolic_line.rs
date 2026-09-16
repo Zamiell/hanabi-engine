@@ -8,6 +8,72 @@ use super::{
     infer_h_group_from_replay, is_playable_now, select_h_group_action,
 };
 
+#[test]
+fn reviewed_turn_thirty_compares_equal_elapsed_time() {
+    let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+        "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .unwrap();
+    let state = replay.state_at_turn(29).unwrap();
+    let source = state.view_for(state.current_player()).unwrap();
+    let roots = [
+        Action::Play(CardId::new(17)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(hanabi_core::Rank::Four),
+        },
+    ];
+    let mut values = Vec::new();
+    for root in roots {
+        let mut public = source.clone();
+        for step in 0..4 {
+            let (d, r) = PerspectiveProjector::new(&public, HGroupProfile::Max)
+                .project(public.current_player, PerspectiveDepth::NestedRecipients)
+                .unwrap();
+            let inferred = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+            let action = if step == 0 {
+                root
+            } else if matches!(root, Action::Play(_)) && step >= 2 {
+                Action::Discard(CardId::new(if step == 2 { 12 } else { 30 }))
+            } else {
+                select_h_group_action(&d, HGroupProfile::Max).unwrap()
+            };
+            public = apply_symbolic_action(&public, &d, &inferred, public.current_player, action)
+                .unwrap()
+                .0;
+        }
+        values.push(
+            super::frontier_value::evaluate(&source, &public, HGroupProfile::Max, root).unwrap(),
+        );
+    }
+    // User-reviewed counterfactuals, p4v0s1 turn 30: b5 / Save / discard /
+    // discard versus 4s / r4 / Save / discard. No hidden draws are supplied.
+    assert_eq!(values[0].score, values[1].score);
+    assert!(values[1].playable_finesse_opportunities > values[0].playable_finesse_opportunities);
+    assert!(values[1].development_preference(values[0], 1, 2));
+    assert!(!values[0].development_preference(values[1], 2, 1));
+    let analysis = crate::analyze_position(
+        &source,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        analysis.planner.best_action, roots[1],
+        "{:#?}",
+        analysis.planner
+    );
+    for root in roots {
+        let result = analysis
+            .planner
+            .root_actions
+            .iter()
+            .find(|candidate| candidate.action == root)
+            .unwrap();
+        assert_eq!(result.symbolic_line.first_rotation.unwrap().actions, 4);
+    }
+}
+
 /// Projects the convention policy's actions while leaving unknown draws blank.
 /// Strategic choices continue under that policy; unresolved identities stop
 /// the line rather than being filled using the actual hidden hand or deck.
@@ -130,6 +196,11 @@ fn project_h_group_plan_with_control<const REUSE_SELECTED: bool>(
             consequences,
         );
         public = after;
+        if plan.len() == source.hands.len() {
+            plan.record_rotation(super::frontier_value::evaluate(
+                source, &public, profile, root,
+            ));
+        }
         if public.status != hanabi_core::GameStatus::InProgress {
             plan.stop_at(PlanFrontier::Terminal);
             break;
@@ -147,10 +218,26 @@ fn project_h_group_plan_with_control<const REUSE_SELECTED: bool>(
             selected_perspective = Some(projected);
         }
     }
-    let value = super::frontier_value::evaluate(source, &public, profile, root);
+    let value = final_assessment(source, &public, profile, root, &plan);
     control.checkpoint()?;
     plan.assess(value);
     Ok(plan)
+}
+
+fn final_assessment(
+    source: &PlayerView,
+    public: &PlayerView,
+    profile: HGroupProfile,
+    root: Action,
+    plan: &ConditionalPlan,
+) -> Option<crate::ProjectedPositionValue> {
+    if plan.len() == source.hands.len() {
+        plan.summarize()
+            .first_rotation
+            .map(|checkpoint| checkpoint.value)
+    } else {
+        super::frontier_value::evaluate(source, public, profile, root)
+    }
 }
 
 #[cfg(test)]

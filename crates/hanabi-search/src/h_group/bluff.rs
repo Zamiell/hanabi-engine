@@ -50,6 +50,23 @@ pub(super) enum BluffTargetKind {
     Three,
 }
 
+/// The missing first connector may be bluffed through already-clued higher
+/// connectors. Availability must come from the caller's dated perspective.
+/// <https://hanabi.github.io/level-11/#bluffs-through-already-clued-cards>
+pub(super) fn bluff_through_clued_cards(
+    height: usize,
+    focus: Card,
+    available: impl Fn(Card) -> bool,
+) -> bool {
+    let rank = usize::from(focus.rank.number());
+    rank > height + 1
+        // The missing low connector must really be missing. An existing
+        // clued connector makes this a truthful chain, not another Bluff.
+        && (rank == height + 2 || !available(Card::new(focus.suit, Rank::ALL[height])))
+        && ((height + 2)..rank)
+            .all(|needed| available(Card::new(focus.suit, Rank::ALL[needed - 1])))
+}
+
 /// Classifies targets using only clue-time public stacks.
 ///
 /// Ordinary Bluffs target a card one rank beyond playable. Level 13 also lets

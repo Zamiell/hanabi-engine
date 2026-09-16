@@ -5,6 +5,50 @@ an individual convention regression. Entries describe the problem, the boundary
 introduced to solve it, and the property that future changes should preserve.
 Commit hashes refer to this repository's Git history.
 
+## 2026-09-16: aligned projection checkpoints and comparison precedence
+
+Different unknown-card stopping points previously disabled endpoint comparison
+entirely. In the reviewed p4v0s1 turn 30, this restored a static b5 preference
+even though a common four-action window exposed the benefit of playing r4.
+
+- Preserve a first-rotation assessment alongside the full symbolic line; do not
+  replace full projection with a short fixed-depth search.
+- Distinguish currently playable, unpromised finesse-position opportunities from
+  guaranteed future plays and from speculative future positioning.
+- Compare development at matched elapsed time, preserving required token funding
+  and avoiding automatic rewards for surplus refunds or extra discards.
+- Keep matched-turn scheduling reachability separate from fallback reachability.
+  Improve the fallback choice along those evidence edges; only cycles within
+  those edges may require a fallback. A cycle introduced by weak policy scores
+  must not resurrect a directly inferior candidate.
+- Share the "Bluffs Through Already-Clued Cards" target test across admission,
+  ordinary Bluff resolution, and Double Bluff exclusion. Known own-hand
+  connectors count without consulting simulator identities; a successful Bluff
+  must not leave a stale direct-play focus or demand a second blind play.
+- Require supporting identity claims to predate the clue, and require its low
+  connector to remain missing. A clue cannot supply its own prerequisites or
+  reinterpret a truthful, already-clued connection as an additional Bluff.
+- At equal elapsed time and immediate resources, retain the benefit of securing
+  an additional endangered future play. Its own waiting slot does not negate
+  that protection; unrelated extra congestion and token costs still matter.
+- Extend final-plan progress beyond 5 clues when every remaining rank is
+  accounted for. Include exactly known own-hand cards, and count token refunds
+  only for actual 5s. Do not prefer manufacturing surplus tokens to cluing the
+  last missing connector.
+- Align endgame Burn admission with history recognition. A conservative
+  known-card schedule checks token funding and the last-draw countdown before
+  preferring a Burn to a surplus discard; Burning an already playable card
+  follows the Level-8 recommendation.
+- When both endpoints secure every remaining point, stop preferring an extra
+  token once both lines can fund a full rotation of waiting per remaining play.
+  This prevents newly supported Burns from losing merely because a discard
+  manufactures an eighth token instead of retaining seven.
+
+This extends the existing observer-relative projection/evidence boundaries. It
+does not introduce sampled hidden cards, duplicate convention recognition, or
+turn-number-specific scoring. Development remains a heuristic, distinct from
+strict resource dominance and exact endgame proofs.
+
 ## Design guardrails
 
 - Public history is the only input to convention interpretation. Simulator truth

@@ -38,7 +38,18 @@ pub(in crate::h_group) fn apply_bluff_effects(
         return;
     };
     let height = stack_heights[focus_identity.suit.index()];
-    let focus_is_one_away = focus_identity.rank.number() == height + 2;
+    let focus_is_one_away = super::super::bluff::bluff_through_clued_cards(
+        usize::from(height),
+        focus_identity,
+        |needed| {
+            hands.iter().flatten().any(|card| {
+                explicitly_clued.contains(card)
+                    && identity_of(view, *card)
+                        .or_else(|| signals.facts().known_identity_before(*card, entry.turn))
+                        == Some(needed)
+            })
+        },
+    );
     let actor = next_player(*giver, hands.len());
     let hard_three_self = actor == *target
         && *clue == Clue::Rank(Rank::Three)
@@ -200,7 +211,19 @@ pub(in crate::h_group) fn apply_resolved_bluff_effects(
     let legal_bluff_target = IdentitySet::all().iter().any(|candidate| {
         clue.clue.matches(candidate)
             && facts[clue.focus.index()].allows(candidate)
-            && bluff_target_kind_at(stack_heights, clue.clue, candidate).is_some()
+            && (bluff_target_kind_at(stack_heights, clue.clue, candidate).is_some()
+                || super::super::bluff::bluff_through_clued_cards(
+                    usize::from(clue.stack_heights[candidate.suit.index()]),
+                    candidate,
+                    |needed| {
+                        before.hands.iter().flatten().any(|prior| {
+                            was_clued_before(view, clue.turn, *prior)
+                                && identity_of(view, *prior).or_else(|| {
+                                    signals.facts().known_identity_before(*prior, clue.turn)
+                                }) == Some(needed)
+                        })
+                    },
+                ))
     });
     if connects || !legal_bluff_target {
         return;

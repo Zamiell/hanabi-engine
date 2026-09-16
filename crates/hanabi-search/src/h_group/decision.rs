@@ -29,7 +29,8 @@ pub(crate) struct HGroupAnalysis {
 
 #[derive(Clone, Debug)]
 struct EndgameCompletionPlan {
-    unresolved_fives: CardSet,
+    unresolved_cards: CardSet,
+    known_plays: Vec<(PlayerId, Card)>,
 }
 
 pub(super) fn build_h_group_analysis(
@@ -1493,12 +1494,9 @@ fn convention_known_trash_discard(
         .map(|card| card.id)
 }
 
-/// Returns the remaining visible 5s whose owners do not yet know to play.
-///
-/// Stacks below 4 are accepted only when every intervening card is visible and
-/// already committed by its owner's convention state. A missing connector in
-/// the deck or in the observer's hidden hand leaves the completion plan
-/// unresolved and disables progress dominance.
+/// Remaining cards whose owners still need a clue to complete the stacks.
+/// Every required identity must be visible or exactly known in the observer's
+/// own hand. A missing connector disables this completion preference.
 fn endgame_completion_plan<'analysis>(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
@@ -1509,7 +1507,8 @@ fn endgame_completion_plan<'analysis>(
         .get_or_init(|| {
             let view = deductions.view();
             let team = TeamConventionSnapshot::new(view.clone(), profile);
-            let mut unresolved_fives = CardSet::default();
+            let mut unresolved_cards = CardSet::default();
+            let mut known_plays = Vec::new();
             for suit in Suit::ALL {
                 let height = view.play_stacks[suit.index()].len();
                 if height == Rank::ALL.len() {
@@ -1521,10 +1520,17 @@ fn endgame_completion_plan<'analysis>(
                         .hands
                         .iter()
                         .enumerate()
-                        .filter(|(owner, _)| *owner != view.observer.index())
                         .flat_map(|(owner, hand)| {
                             hand.iter()
-                                .filter(move |card| card.identity == Some(identity))
+                                .filter(move |card| {
+                                    card.identity == Some(identity)
+                                        || (owner == view.observer.index()
+                                            && analysis.inferences.cards.iter().any(|note| {
+                                                note.card == card.id
+                                                    && note.identities
+                                                        == IdentitySet::singleton(identity)
+                                            }))
+                                })
                                 .map(move |card| (owner, card.id))
                         })
                         .collect::<Vec<_>>();
@@ -1539,7 +1545,9 @@ fn endgame_completion_plan<'analysis>(
                         let owns_commitment = projection.inferred.playable_now.contains(card)
                             || projection.inferred.cards.iter().any(|note| {
                                 note.card == *card
-                                    && (note.finessed || note.play_obligation.is_some())
+                                    && (note.finessed
+                                        || note.play_obligation.is_some()
+                                        || note.identities == IdentitySet::singleton(identity))
                             })
                             || projection.inferred.signals.iter().any(|signal| {
                                 signal.target == Some(owner)
@@ -1566,25 +1574,100 @@ fn endgame_completion_plan<'analysis>(
                                     )
                                     && clue.play_identities.contains(identity)
                             });
-                        owns_commitment.then_some(*card)
+                        owns_commitment.then_some(owner)
                     });
-                    if rank == Rank::Five {
-                        if committed.is_none() {
-                            // There is only one copy of every 5.
-                            unresolved_fives.insert(visible_copies[0].1);
-                        }
-                    } else if committed.is_none() {
-                        return None;
+                    if let Some(owner) = committed {
+                        known_plays.push((owner, identity));
+                    } else {
+                        unresolved_cards.insert(visible_copies[0].1);
                     }
                 }
             }
-            Some(EndgameCompletionPlan { unresolved_fives })
+            Some(EndgameCompletionPlan {
+                unresolved_cards,
+                known_plays,
+            })
         })
         .as_ref()
 }
 
 /// A known-trash discard is dominated when it only creates a surplus token
 /// while leaving an inevitable final Play Clue for the next teammate to give.
+/// A safe Burn can also preserve the drawing clock for already-known plays.
+/// <https://hanabi.github.io/level-8/#burning-end-game-stalling>
+fn completion_without_discard(view: &PlayerView, cards: &[(PlayerId, Card)]) -> bool {
+    if view.clue_tokens == 0 || cards.is_empty() {
+        return false;
+    }
+    let mut remaining = cards.to_vec();
+    let mut heights = view.play_stacks.each_ref().map(Vec::len);
+    let mut tokens = view.clue_tokens - 1; // The proposed Burn happens first.
+    let mut deck = view.deck_size;
+    let mut final_turns = view
+        .final_turns_remaining
+        .map(|turns| turns.saturating_sub(1));
+    let mut actor = next_player(view.current_player, view.hands.len());
+    // This is a sufficient schedule, not an exhaustive solver. No identity is
+    // assigned to draws; every card used here was known before the Burn.
+    for _ in 0..=(cards.len() * view.hands.len()) {
+        if final_turns == Some(0) {
+            return false;
+        }
+        let play = remaining.iter().position(|(owner, identity)| {
+            *owner == actor
+                && usize::from(identity.rank.number()) == heights[identity.suit.index()] + 1
+        });
+        let was_final = final_turns.is_some();
+        if let Some(index) = play {
+            let (_, identity) = remaining.remove(index);
+            heights[identity.suit.index()] += 1;
+            if remaining.is_empty() {
+                return true;
+            }
+            if identity.rank == Rank::Five {
+                tokens = (tokens + 1).min(MAX_CLUE_TOKENS);
+            }
+            if deck > 0 {
+                deck -= 1;
+                if deck == 0 {
+                    final_turns = Some(u8::try_from(view.hands.len()).expect("player count"));
+                }
+            }
+        } else if tokens > 0 {
+            tokens -= 1;
+        } else {
+            return false;
+        }
+        if was_final {
+            final_turns = final_turns.map(|turns| turns.saturating_sub(1));
+        }
+        actor = next_player(actor, view.hands.len());
+    }
+    false
+}
+
+fn burn_progress(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+    analysis: &HGroupAnalysis,
+    candidate: &CompiledClueAction,
+) -> Option<TerminalPlanProgress> {
+    let view = deductions.view();
+    let plan = endgame_completion_plan(deductions, profile, analysis)?;
+    if view.deck_size > view.hands.len()
+        || !analysis.inferences.playable_now.is_empty()
+        || !plan.unresolved_cards.is_empty()
+        || !completion_without_discard(view, &plan.known_plays)
+    {
+        return None;
+    }
+    let (_, score) = scored_discard_candidate(view, &analysis.inferences, profile)?;
+    Some(TerminalPlanProgress::new(
+        i32::from(score),
+        i32::from(candidate.score()),
+    ))
+}
+
 fn endgame_progress(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
@@ -1592,6 +1675,9 @@ fn endgame_progress(
     candidate: &CompiledClueAction,
 ) -> Option<TerminalPlanProgress> {
     let view = deductions.view();
+    if candidate.move_kind() == Some(HGroupMoveKind::Burn) {
+        return burn_progress(deductions, profile, analysis, candidate);
+    }
     let is_multi_action_ignition = matches!(
         candidate.move_kind(),
         Some(
@@ -1610,7 +1696,17 @@ fn endgame_progress(
         return None;
     }
     let plan = endgame_completion_plan(deductions, profile, analysis)?;
-    if plan.unresolved_fives.is_empty() || view.clue_tokens == 0 {
+    if plan.unresolved_cards.is_empty() || view.clue_tokens == 0 {
+        return None;
+    }
+    // The aggregate Ignition count only certifies independent final 5s;
+    // lower-rank dependencies require a move-by-move schedule instead.
+    if is_multi_action_ignition
+        && plan
+            .unresolved_cards
+            .iter()
+            .any(|card| identity_of(view, *card).is_none_or(|identity| identity.rank != Rank::Five))
+    {
         return None;
     }
     let Action::Clue { target, clue } = candidate.action else {
@@ -1618,9 +1714,9 @@ fn endgame_progress(
     };
     let advances_plan = (is_multi_action_ignition
         && candidate.action_coverage()
-            >= u8::try_from(plan.unresolved_fives.len()).unwrap_or(u8::MAX))
+            >= u8::try_from(plan.unresolved_cards.len()).unwrap_or(u8::MAX))
         || view.hands[target.index()].iter().any(|card| {
-            plan.unresolved_fives.contains(&card.id)
+            plan.unresolved_cards.contains(&card.id)
                 && card.identity.is_some_and(|identity| clue.matches(identity))
         });
     if !advances_plan {
@@ -1629,18 +1725,32 @@ fn endgame_progress(
     // Fund the sequence, not every remaining clue up front. One clue can
     // secure multiple 5s, and each completed 5 refunds a token before the
     // remaining one-for-one clues are needed. Never count an unseen 5.
-    let secured_fives = if is_multi_action_ignition {
-        plan.unresolved_fives.len()
+    let secured_cards = if is_multi_action_ignition {
+        plan.unresolved_cards.len()
     } else {
         view.hands[target.index()]
             .iter()
             .filter(|card| {
-                plan.unresolved_fives.contains(&card.id)
+                plan.unresolved_cards.contains(&card.id)
                     && card.identity.is_some_and(|identity| clue.matches(identity))
             })
             .count()
     };
-    let remaining_clues = plan.unresolved_fives.len().saturating_sub(secured_fives);
+    let secured_fives = plan
+        .unresolved_cards
+        .iter()
+        .filter(|card| {
+            identity_of(view, **card).is_some_and(|identity| {
+                identity.rank == Rank::Five
+                    && (is_multi_action_ignition
+                        || (view.hands[target.index()]
+                            .iter()
+                            .any(|held| held.id == **card)
+                            && clue.matches(identity)))
+            })
+        })
+        .count();
+    let remaining_clues = plan.unresolved_cards.len().saturating_sub(secured_cards);
     if !super::ResourceSchedule::funds_final_fives(view.clue_tokens, secured_fives, remaining_clues)
     {
         return None;

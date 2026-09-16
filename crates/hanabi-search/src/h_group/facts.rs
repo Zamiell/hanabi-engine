@@ -259,6 +259,21 @@ impl ConventionFacts {
         self.known_identities[card.index()]
     }
 
+    /// A currently retained claim that predates the clue being interpreted.
+    /// Inferences created by that clue cannot justify its own prerequisites.
+    pub(super) fn known_identity_before(&self, card: CardId, turn: u32) -> Option<Card> {
+        let mut identity = None;
+        let mut conflict = false;
+        for claim in self.identity_claims.iter().filter(|claim| {
+            claim.turn < turn
+                && claim.relation == IdentityClaimRelation::Each
+                && claim.cards.contains(&card)
+        }) {
+            merge_identity(&mut identity, &mut conflict, claim.identity);
+        }
+        identity
+    }
+
     pub(super) const fn excluded_identities(&self, card: CardId) -> IdentitySet {
         self.excluded_identities[card.index()]
     }
@@ -324,6 +339,19 @@ mod tests {
     use hanabi_core::{PlayerId, Rank, Suit};
 
     use super::*;
+
+    #[test]
+    fn clue_prerequisites_exclude_same_turn_identity_claims() {
+        let card = CardId::new(10);
+        let identity = Card::new(Suit::Green, Rank::Four);
+        let facts = ConventionFacts::from_signals(&[signal(
+            HGroupMoveKind::PlayClue,
+            card,
+            Some(identity),
+        )]);
+        assert_eq!(facts.known_identity_before(card, 1), None);
+        assert_eq!(facts.known_identity_before(card, 2), Some(identity));
+    }
 
     fn signal(kind: HGroupMoveKind, card: CardId, identity: Option<Card>) -> HGroupSignal {
         HGroupSignal {

@@ -386,6 +386,21 @@ pub(in crate::h_group) fn apply_double_bluff_effects(
     // 5 Color Ejection. A Double Bluff need not already be an ordinary Bluff:
     // its defining case is precisely a non-ordinary Bluff target.
     if bluff_target_kind_at(context.after.stack_heights, *clue, identity).is_some()
+        || super::super::bluff::bluff_through_clued_cards(
+            usize::from(context.after.stack_heights[identity.suit.index()]),
+            identity,
+            |needed| {
+                hands.iter().flatten().any(|card| {
+                    effects.explicitly_clued.contains(card)
+                        && identity_of(view, *card).or_else(|| {
+                            effects
+                                .signals
+                                .facts()
+                                .known_identity_before(*card, entry.turn)
+                        }) == Some(needed)
+                })
+            },
+        )
         || first_blind_plays.is_none_or(|count| count == 0)
         || (matches!(clue, Clue::Suit(_))
             && identity.rank == Rank::Five
@@ -486,11 +501,24 @@ fn apply_demonstrated_double_bluff(
     }
     let offset = context.entry.turn - clue.turn;
     let cards = if offset == 1 {
+        let facts = effects.signals.facts();
         let Some(focus_identity) = identity_of(view, clue.focus) else {
             return;
         };
         if is_trash_at(clue.stack_heights, focus_identity)
             || bluff_target_kind_at(clue.stack_heights, clue.clue, focus_identity).is_some()
+            || super::super::bluff::bluff_through_clued_cards(
+                usize::from(clue.stack_heights[focus_identity.suit.index()]),
+                focus_identity,
+                |needed| {
+                    context.before.hands.iter().flatten().any(|candidate| {
+                        was_clued_before(view, clue.turn, *candidate)
+                            && identity_of(view, *candidate)
+                                .or_else(|| facts.known_identity_before(*candidate, clue.turn))
+                                == Some(needed)
+                    })
+                },
+            )
             || bluff_play_connects(clue.clue, identity)
         {
             return;

@@ -835,6 +835,20 @@ fn compile_convention_card_inferences(
                                     *identity,
                                 )
                                 .is_some()
+                                    || crate::h_group::bluff::bluff_through_clued_cards(
+                                        usize::from(clue.stack_heights[identity.suit.index()]),
+                                        *identity,
+                                        |needed| {
+                                            clue.previously_gotten.iter().any(|prior| {
+                                                identity_of(view, *prior).or_else(|| {
+                                                    replay
+                                                        .cards
+                                                        .facts
+                                                        .known_identity_before(*prior, clue.turn)
+                                                }) == Some(needed)
+                                            })
+                                        },
+                                    )
                             })
                             .fold(0, |mask, identity| mask | (1 << identity.index())),
                     );

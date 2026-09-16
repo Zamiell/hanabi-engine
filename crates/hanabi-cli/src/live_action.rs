@@ -300,6 +300,11 @@ fn planner_details_json(
                 "cluesGained": evaluation.symbolic_line.clues_gained,
                 "strikes": evaluation.symbolic_line.strikes,
                 "positionValue": evaluation.symbolic_line.position_value.map(position_value_json),
+                "firstRotation": evaluation.symbolic_line.first_rotation.map(|checkpoint| json!({
+                    "actions": checkpoint.actions,
+                    "discards": checkpoint.discards,
+                    "positionValue": position_value_json(checkpoint.value),
+                })),
                 "identityBranch": matches!(
                     evaluation.symbolic_line.stop_reason,
                     hanabi_search::SymbolicStopReason::UnknownIdentity
@@ -346,6 +351,7 @@ fn position_value_json(value: hanabi_search::ProjectedPositionValue) -> Value {
         "clueDemand": value.clue_demand,
         "savePressure": value.save_pressure,
         "foregoneTouchOpportunities": value.foregone_touch_opportunities,
+        "playableFinesseOpportunities": value.playable_finesse_opportunities,
     })
 }
 
