@@ -3,6 +3,22 @@
 set -euo pipefail # Exit on errors and undefined variables.
 
 check_started_seconds=$SECONDS
+check_failed=0
+
+# Complete the full suite even when a stage fails. Re-running the omitted tail
+# manually delays feedback and makes full-validation timings misleading.
+run_check() {
+  local label="$1"
+  shift
+  local started=$SECONDS
+  local status=0
+  "$@" || status=$?
+  printf 'CHECK TIMING: %s: %ds (exit %d)\n' \
+    "$label" "$((SECONDS - started))" "$status"
+  if (( status != 0 )); then
+    check_failed=1
+  fi
+}
 
 repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repository_root"
@@ -42,20 +58,20 @@ check_file_ownership() {
 }
 
 echo 'Checking repository file ownership...'
-check_file_ownership
+run_check 'Initial ownership' check_file_ownership
 
 if ! command -v npm &> /dev/null; then
   echo 'npm is required to run this script.' >&2
-  return 1
+  exit 1
 fi
 
 if [[ ! -x node_modules/.bin/prettier ]]; then
   echo 'Prettier was not found. Run "npm ci" in the repository root.' >&2
-  return 1
+  exit 1
 fi
 
 echo 'Checking repository formatting with Prettier...'
-npm run format:check
+run_check 'Prettier' npm run format:check
 
 if [[ -d "$HOME/.cargo/bin" ]]; then
   export PATH="$HOME/.cargo/bin:$PATH"
@@ -95,35 +111,35 @@ EOF
 fi
 
 echo 'Checking Rust formatting...'
-cargo fmt --all -- --check
+run_check 'Rust formatting' cargo fmt --all -- --check
 
 echo 'Building all Rust targets...'
-cargo build --workspace --all-targets --all-features --locked
+run_check 'Rust build' cargo build --workspace --all-targets --all-features --locked
 
 echo 'Running Clippy...'
-cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+run_check 'Clippy' cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
-echo 'Running fast Rust tests with fail-fast scheduling...'
-cargo nextest run \
+echo 'Running all ordinary Rust tests...'
+run_check 'Rust tests' cargo nextest run \
   --workspace \
   --all-targets \
   --all-features \
   --locked \
-  --fail-fast
+  --no-fail-fast
 
 # Nextest deliberately does not run rustdoc tests.
 echo 'Running Rust documentation tests...'
-cargo test --workspace --all-features --doc --locked
+run_check 'Rust documentation tests' cargo test --workspace --all-features --doc --locked
 
 echo 'Checking Rust documentation...'
-RUSTDOCFLAGS='-D warnings' \
+run_check 'Rust documentation' env RUSTDOCFLAGS='-D warnings' \
   cargo doc --workspace --all-features --no-deps --locked
 
 echo 'Type-checking Python...'
-.venv/bin/ty check
+run_check 'Python types' .venv/bin/ty check
 
 echo 'Compiling Python sources...'
-.venv/bin/python -m py_compile \
+run_check 'Python compilation' .venv/bin/python -m py_compile \
   scripts/hanabi_live_bot.py \
   scripts/hanabi_live_engine.py \
   scripts/hanabi_live_game.py \
@@ -131,20 +147,25 @@ echo 'Compiling Python sources...'
   scripts/tests/test_hanabi_live_bot.py
 
 echo 'Running Python tests...'
-.venv/bin/python -W error::ResourceWarning -m unittest discover -s scripts/tests -v
+run_check 'Python tests' .venv/bin/python -W error::ResourceWarning -m unittest discover -s scripts/tests -v
 
 echo 'Checking the Hanabi Live bot CLI...'
-.venv/bin/python scripts/hanabi_live_bot.py --help >/dev/null
+run_check 'Bot CLI' bash -c '.venv/bin/python scripts/hanabi_live_bot.py --help >/dev/null'
 
 echo 'Checking workspace-wide dead public code...'
-cargo +1.97.1 hawk check \
+run_check 'Dead public code' cargo +1.97.1 hawk check \
   --manifest-path Cargo.toml \
   --only dead-public \
   -D warnings
 
 echo 'Rechecking repository file ownership...'
-check_file_ownership
+run_check 'Final ownership' check_file_ownership
 
 check_elapsed_seconds=$((SECONDS - check_started_seconds))
+if (( check_failed != 0 )); then
+  printf 'Checks failed; full suite completed in %dm %ds.\n' \
+    "$((check_elapsed_seconds / 60))" "$((check_elapsed_seconds % 60))"
+  exit 1
+fi
 printf 'All checks passed in %dm %ds.\n' \
   "$((check_elapsed_seconds / 60))" "$((check_elapsed_seconds % 60))"

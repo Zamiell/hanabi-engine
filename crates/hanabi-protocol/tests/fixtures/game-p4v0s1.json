@@ -52,7 +52,7 @@
     { "type": 0, "target": 27 },
     { "type": 2, "target": 2, "value": 2 },
     { "type": 0, "target": 10 },
-    { "type": 1, "target": 26 },
+    { "type": 2, "target": 1, "value": 2 },
     { "type": 1, "target": 36 },
     { "type": 0, "target": 19 }
   ],

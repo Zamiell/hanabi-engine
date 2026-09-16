@@ -19,6 +19,13 @@ Run full validations sequentially. `check.sh` rejects another simultaneous
 benchmarks or other Cargo test suites concurrently with it; the lock does not
 govern arbitrary Cargo invocations.
 
+`check.sh` runs all ordinary tests without fail-fast and continues to the other
+validation stages after failures. It reports each stage's elapsed seconds and a
+total on success or failure, and exits nonzero if any stage failed. Missing
+prerequisites still stop the run immediately. Use focused tests while editing,
+then one full validation at task completion; do not repeat completed checks just
+because an unrelated regression remains failing.
+
 For changes to inverse-planning projection reuse, additionally run the
 cold-cache differential certificate check:
 

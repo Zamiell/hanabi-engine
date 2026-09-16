@@ -20,9 +20,10 @@ If the full suite cannot be run, report which checks were skipped and why.
 Do not overlap full validation runs or CPU-heavy benchmarks. For performance
 comparisons, use the same precompiled workload and configuration, run before and
 after sequentially, and distinguish reduced test setup from engine speed.
-Preserve assertions and reasoning coverage. If a known failure stops a fail-fast
-run, finish the tests it did not reach rather than rerunning checks that have
-already completed on the same code.
+Preserve assertions and reasoning coverage. `check.sh` completes all stages even
+when tests fail and reports stage/total timings; do not manually repeat its
+completed stages. Use focused checks during editing and one full run after the
+final changes, rather than a full run after every intermediate edit.
 
 ## Test provenance
 
