@@ -1,8 +1,8 @@
 [
   {
     "seed": "p4v0s415",
-    "reviewedThrough": 36,
-    "continuation": "engine-generated",
+    "reviewedThrough": null,
+    "continuation": "human-reviewed",
     "profile": "max",
     "objective": "perfect-score",
     "checks": ["legality", "reviewed-action-parity"]
