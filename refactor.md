@@ -49,6 +49,19 @@ does not introduce sampled hidden cards, duplicate convention recognition, or
 turn-number-specific scoring. Development remains a heuristic, distinct from
 strict resource dominance and exact endgame proofs.
 
+## 2026-09-16: fully clued endgame clarification
+
+The reviewed p4v0s1 turn 48 establishes that, once every remaining play has an
+accounted-for positively clued copy, an extra touch is not a new play promise.
+Candidate admission and the history reducer now share a coverage check. The
+reducer retains literal clue information but records only a Burn, preventing
+later rule recognizers from inventing a Save, Finesse, or other instruction.
+Hidden identities remain unknown; an ambiguous card cannot cover several ranks.
+The usual preference for re-cluing an already playable card remains a choice
+between Burns, not a restriction on which physical clues are admitted. Harmless
+collateral touches do not negate that preference. The ordinary color-over-rank
+information tiebreaker is not applied to these pure Burns.
+
 ## Design guardrails
 
 - Public history is the only input to convention interpretation. Simulator truth

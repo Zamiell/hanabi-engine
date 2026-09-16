@@ -2,6 +2,31 @@ use hanabi_core::{Card, CardId, Clue, ClueFacts, Rank};
 
 use super::{HGroupClueInterpretation, HGroupClueKind, HGroupSaveKind, IdentitySet};
 
+/// Once every remaining identity has a positively clued, accounted-for copy,
+/// clues only spend time. New collateral touches do not create play promises.
+/// <https://hanabi.github.io/level-8/#burning-end-game-stalling>
+/// Reviewed in p4v0s1 turn 48. Ambiguous cards cannot cover multiple ranks.
+pub(super) fn fully_clued_endgame(
+    stacks: [u8; 5],
+    deck: usize,
+    players: usize,
+    cards: impl Iterator<Item = (bool, IdentitySet)>,
+) -> bool {
+    if deck > players {
+        return false;
+    }
+    let covered = cards
+        .filter(|(positive, identities)| *positive && identities.len() == 1)
+        .fold(IdentitySet::from_mask(0), |all, (_, identities)| {
+            all.union(identities)
+        });
+    hanabi_core::Suit::ALL.into_iter().all(|suit| {
+        Rank::ALL.into_iter().all(|rank| {
+            rank.number() <= stacks[suit.index()] || covered.contains(Card::new(suit, rank))
+        })
+    })
+}
+
 pub(super) fn strictly_narrows(before: IdentitySet, after: IdentitySet) -> bool {
     !after.is_empty() && after != before && after.intersection(before) == after
 }

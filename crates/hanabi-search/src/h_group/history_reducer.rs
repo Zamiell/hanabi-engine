@@ -486,6 +486,99 @@ impl ReplayReducer {
             unreachable!("event dispatcher selects its handler")
         };
 
+        if rule_enabled(profile, HGroupRuleId::Stalling)
+            && self.required_fixes.iter().next().is_none()
+            && super::primary::fully_clued_endgame(
+                self.stack_heights,
+                self.historical_deck_size,
+                self.hands.len(),
+                self.hands.iter().flatten().map(|card| {
+                    let identities = historical.identity(*card).map_or_else(
+                        || IdentitySet::from_mask(self.facts[card.index()].identity_mask()),
+                        IdentitySet::singleton,
+                    );
+                    let identities = if historical.identity(*card).is_none() {
+                        IdentitySet::from_mask(
+                            identities
+                                .iter()
+                                .filter(|identity| {
+                                    historical.has_unseen_copy(*identity, &self.hands)
+                                })
+                                .fold(0, |mask, identity| mask | (1 << identity.index())),
+                        )
+                    } else {
+                        identities
+                    };
+                    let identities = if self.explicitly_clued.contains(card)
+                        && historical.identity(*card).is_none()
+                        && identities.len() != 1
+                    {
+                        subjective_action_context_before(
+                            SubjectiveReplayRequest {
+                                source: view,
+                                profile,
+                                observer: view.observer,
+                                history: &view.history[..frame.entry_index],
+                                hands: &self.hands,
+                                facts: &self.facts,
+                                deck_size: self.historical_deck_size,
+                            },
+                            *card,
+                        )
+                        .and_then(|context| context.known_identity)
+                        .map_or(identities, IdentitySet::singleton)
+                    } else {
+                        identities
+                    };
+                    (self.explicitly_clued.contains(card), identities)
+                }),
+            )
+        {
+            // Preserve literal information, but do not manufacture a new
+            // convention promise after the team's remaining plays are clued.
+            let previously_gotten = self.explicitly_clued.iter().copied().collect::<Vec<_>>();
+            if let Some(focus) = touched.first().copied() {
+                self.clues.push(HGroupClueInterpretation {
+                    turn: entry.turn,
+                    giver: *giver,
+                    target: *target,
+                    clue: *clue,
+                    touched: touched.clone(),
+                    stack_heights: self.stack_heights,
+                    focus,
+                    focus_was_chop: false,
+                    kind: HGroupClueKind::Unrecognized,
+                    focus_identities: IdentitySet::default(),
+                    play_identities: IdentitySet::default(),
+                    save_identities: IdentitySet::default(),
+                    new_non_focus: Vec::new(),
+                    non_focus_identities: Vec::new(),
+                    non_focus_trash_identities: Vec::new(),
+                    previously_gotten,
+                    hypotheses: Vec::new(),
+                    unresolved_visible_prefix: Vec::new(),
+                });
+            }
+            for card in touched {
+                self.facts[card.index()].add_positive_clue(*clue);
+                self.explicitly_clued.insert(*card);
+            }
+            for card in untouched {
+                self.facts[card.index()].add_negative_clue(*clue);
+            }
+            self.historical_clue_tokens = self.historical_clue_tokens.saturating_sub(1);
+            push_signal(
+                &mut self.signals,
+                entry,
+                *giver,
+                Some(*target),
+                HGroupMoveKind::Burn,
+                touched.clone(),
+                None,
+            );
+            return;
+        }
+
         for card in touched {
             self.declined_direct_plays.remove(card);
             self.declined_direct_play_turns

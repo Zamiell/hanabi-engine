@@ -756,6 +756,11 @@ fn compile_convention_card_inferences(
     let knowledge = &mut compiler.knowledge;
 
     for clue in &replay.clues {
+        if replay.signals.has_at_turn(clue.turn, HGroupMoveKind::Burn) {
+            // Literal information is already in deductions. A Burn must not
+            // replace the previous promise or claim a newly touched identity.
+            continue;
+        }
         let previously_known = knowledge
             .cards
             .iter()

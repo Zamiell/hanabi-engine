@@ -76,6 +76,59 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
     if view.clue_tokens == 0 {
         return Vec::new();
     }
+    let stacks = view
+        .play_stacks
+        .each_ref()
+        .map(|stack| u8::try_from(stack.len()).expect("five ranks"));
+    let endgame_cards = (view.deck_size <= view.hands.len())
+        .then(|| super::convention_card_inferences(deductions, replay));
+    if rule_enabled(profile, HGroupRuleId::Stalling)
+        && replay.required_fixes.iter().next().is_none()
+        && super::primary::fully_clued_endgame(
+            stacks,
+            view.deck_size,
+            view.hands.len(),
+            view.hands.iter().flatten().map(|card| {
+                let identities = card.identity.map_or_else(
+                    || {
+                        endgame_cards
+                            .as_ref()
+                            .and_then(|cards| cards.iter().find(|note| note.card == card.id))
+                            .map_or_else(IdentitySet::all, |note| note.identities)
+                    },
+                    IdentitySet::singleton,
+                );
+                (replay.cards.explicitly_clued.contains(&card.id), identities)
+            }),
+        )
+    {
+        return view
+            .legal_actions()
+            .into_iter()
+            .filter_map(|action| {
+                let Action::Clue { target, clue } = action else {
+                    return None;
+                };
+                let playable = view.hands[target.index()].iter().any(|card| {
+                    replay.cards.explicitly_clued.contains(&card.id)
+                        && card.identity.is_some_and(|identity| {
+                            clue.matches(identity) && is_playable_now(view, identity)
+                        })
+                });
+                Some(CompiledClueAction::new(
+                    action,
+                    Some(HGroupMoveKind::Burn),
+                    // No information is being communicated, so the ordinary
+                    // color-vs-rank information tiebreaker does not apply.
+                    // Harmless collateral touches do not undo a re-clue.
+                    ClueValue::new(if playable { 25 } else { 20 }),
+                    CluePurpose::Advanced,
+                    ClueSchedule::new(false, false),
+                    0,
+                ))
+            })
+            .collect();
+    }
     if let Some(required) = replay
         .required_fixes
         .iter()

@@ -30,6 +30,59 @@ fn fifth_replay_burn_preserves_the_final_playing_clock() {
 }
 
 #[test]
+fn fifth_replay_fully_clued_endgame_clues_are_all_burns() {
+    // Human-reviewed p4v0s1 turn 48: even a new collateral touch cannot
+    // communicate another needed play after every remaining play is clued.
+    let state = expert_replay_p4v0s1().state_at_turn(47).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let clues = view
+        .legal_actions()
+        .into_iter()
+        .filter(|a| matches!(a, Action::Clue { .. }))
+        .count();
+    let d = LogicalDeductions::new(view).unwrap();
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    assert_eq!(candidates.len(), clues);
+    assert!(
+        candidates
+            .iter()
+            .all(|candidate| candidate.move_kind() == Some(HGroupMoveKind::Burn))
+    );
+    for candidate in candidates {
+        let mut after = state.clone();
+        after.apply(candidate.action).unwrap();
+        for observer in 0..4 {
+            let d =
+                LogicalDeductions::new(after.view_for(PlayerId::new(observer)).unwrap()).unwrap();
+            let inferred = infer_h_group(&d, HGroupProfile::Max);
+            assert!(
+                inferred
+                    .signals
+                    .iter()
+                    .any(|signal| signal.turn == 47 && signal.kind == HGroupMoveKind::Burn),
+                "observer {observer}, {:?}: cards {:?}; current signals {:?}",
+                candidate.action,
+                inferred.cards,
+                inferred
+                    .signals
+                    .iter()
+                    .filter(|signal| signal.turn == 47)
+                    .collect::<Vec<_>>()
+            );
+            assert!(
+                !inferred
+                    .signals
+                    .iter()
+                    .any(|signal| signal.turn == 47 && signal.kind != HGroupMoveKind::Burn),
+                "{:?}: {:?}",
+                candidate.action,
+                inferred.signals
+            );
+        }
+    }
+}
+
+#[test]
 fn fifth_replay_clues_the_last_missing_connector_before_surplus_discard() {
     // Reviewed p4v0s1 turn 46: g3/g4 are visible; Bob knows his own g5.
     // Seven tokens already fund the remaining clues. No draw is required.
@@ -646,7 +699,9 @@ fn fully_accounted_endgame_does_not_chop_move_alices_trash() {
         if candidate.action == action {
             assert_eq!(
                 candidate.move_kind(),
-                Some(HGroupMoveKind::Stall),
+                // Fully accounted-for endgames use the precise Burn meaning,
+                // rather than an unspecified Stall (reviewed p4v0s1 turn 48).
+                Some(HGroupMoveKind::Burn),
                 "{candidate:#?}"
             );
             assert!(

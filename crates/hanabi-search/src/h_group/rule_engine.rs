@@ -61,6 +61,18 @@ pub(super) fn apply_post_event_rules(
     let profile = execution.profile;
     debug_assert!(registry_is_valid());
     let mut proposals = Vec::new();
+    // The reducer has already classified a fully clued terminal position.
+    // No later recognizer may reinterpret its Burn as a new play/save signal.
+    if effects
+        .signals
+        .has_at_turn(context.entry.turn, super::HGroupMoveKind::Burn)
+    {
+        return ConventionTransitionResult {
+            turn: context.entry.turn,
+            proposals,
+            delta: ConventionTransitionDelta::default(),
+        };
+    }
     for spec in POST_EVENT_RULES {
         if rule_enabled(profile, spec.id) {
             let before = RuleStateFingerprint::capture(effects);
