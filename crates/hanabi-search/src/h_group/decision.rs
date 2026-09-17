@@ -2038,6 +2038,11 @@ fn adjust_clue_priority(
                     || candidate_is_lie_component_finesse(deductions.view(), profile, candidate))
         })
     {
+        if clue_candidate.is_some_and(|candidate| {
+            play_preserves_clue_for_free_teammate(deductions, profile, analysis, candidate)
+        }) {
+            return clue_priority.min(KNOWN_PLAY_PRIORITY - 1);
+        }
         // A semantically strong setup clue can occupy several teammates while
         // the giver's exact play remains safely parked. Treating every known
         // play as forced made this multi-play line disappear from planning.
@@ -2078,6 +2083,82 @@ fn adjust_clue_priority(
     } else {
         clue_priority
     }
+}
+
+/// Divide work before parking a known play for a setup clue. Moving the clue
+/// one seat later is safe only when its recipient-relative consequences are
+/// preserved and the next player has neither an obligation nor a better clue.
+/// This checks a symbolic successful play; the new draw stays unknown.
+/// <https://hanabi.github.io/beginner/other-general-strategy/#check-team-chops>
+fn play_preserves_clue_for_free_teammate(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+    analysis: &HGroupAnalysis,
+    candidate: &CompiledClueAction,
+) -> bool {
+    let source = deductions.view();
+    let next = next_player(source.observer, source.hands.len());
+    if candidate.purpose() != CluePurpose::Play
+        || candidate.target() == next
+        || hard_clue_obligation(source, &analysis.replay, candidate)
+    {
+        return false;
+    }
+    let Some(outcome) = super::strategic_value::scheduled_clue_outcome(source, profile, candidate)
+    else {
+        return false;
+    };
+    if outcome.public_actions.is_empty()
+        || outcome
+            .public_actions
+            .iter()
+            .any(|action| action.owner == next)
+    {
+        return false;
+    }
+    analysis.inferences.cards.iter().any(|card| {
+        if !analysis.inferences.playable_now.contains(&card.card) || card.identities.len() != 1 {
+            return false;
+        }
+        let identity = card.identities.iter().next().expect("singleton identity");
+        if !is_playable_now(source, identity) {
+            return false;
+        }
+        let after =
+            ProspectiveTransition::successful_play(source, source.observer, card.card, identity);
+        let Some((future_deductions, future_replay)) = PerspectiveProjector::new(&after, profile)
+            .project(next, PerspectiveDepth::NestedRecipients)
+        else {
+            return false;
+        };
+        let future_inferred =
+            infer_h_group_from_replay(&future_deductions, future_replay.clone(), profile);
+        if !super::ActionWindow::from_inferences(future_deductions.view(), &future_inferred)
+            .is_free()
+        {
+            return false;
+        }
+        let future =
+            h_group_clue_candidates_from_replay(&future_deductions, profile, &future_replay);
+        let Some(same) = future.iter().find(|later| later.action == candidate.action) else {
+            return false;
+        };
+        if future.iter().any(|other| {
+            hard_clue_obligation(future_deductions.view(), &future_replay, other)
+                || other.action_coverage() > same.action_coverage()
+        }) {
+            return false;
+        }
+        let Some(later) =
+            super::strategic_value::scheduled_clue_outcome(future_deductions.view(), profile, same)
+        else {
+            return false;
+        };
+        later.public_actions == outcome.public_actions
+            && later.owner_actions == outcome.owner_actions
+            && later.protected_cards == outcome.protected_cards
+            && later.new_connections == outcome.new_connections
+    })
 }
 
 /// A token-refunding play can wait for an expiring efficient clue when the

@@ -1,6 +1,18 @@
 use super::*;
 
 #[test]
+fn fourth_replay_leaves_the_shared_green_clue_to_unoccupied_alice() {
+    // Reviewed p4v0s3 turn 16: Donald can play/transfer p2; Alice has no
+    // play and can give the same green clue to Bob without losing the line.
+    let state = expert_replay_p4v0s3().state_at_turn(15).unwrap();
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(3)).unwrap()).unwrap();
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Discard(CardId::new(12))),
+    );
+}
+
+#[test]
 fn fourth_replay_chop_moved_duplicate_does_not_discard_the_purple_connector() {
     // Human-reviewed alternative at p4v0s3 turn 11: 4s to Bob makes Donald's
     // p3 exact. Alice's visible p3 is only Chop Moved, not arranged to play.
@@ -1080,8 +1092,9 @@ fn assert_expert_replay_matches_engine(seed: &str, replay: &HanabiLiveReplay) {
         assert_eq!(
             analysis.planner.best_action,
             expected,
-            "{review}\nengine disagrees at move {}; planner candidates: {:#?}; convention candidates: {clue_candidates:#?}; rejected clues: {rejected:#?}; inferences: {inferences:#?}",
+            "{review}\nengine disagrees at move {}; planner comparisons: {:#?}; planner candidates: {:#?}; convention candidates: {clue_candidates:#?}; rejected clues: {rejected:#?}; inferences: {inferences:#?}",
             turn + 1,
+            analysis.planner.comparisons,
             analysis.planner.root_actions,
         );
     }
