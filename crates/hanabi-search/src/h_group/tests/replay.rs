@@ -867,6 +867,41 @@ fn first_expert_replay_reviewed_prefix_matches_engine() {
 }
 
 #[test]
+fn first_replay_turn_thirty_one_bluff_keeps_secured_duplicate_playable() {
+    // Reviewed p4v0s415 turn 31: Cathy blind-plays g4 although Alice's
+    // other g4 is already secured. Both p2s are visible in Bob's hand.
+    // https://hanabi.github.io/level-13/#the-3-bluff
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    let state = fixture.state_at_turn(30).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let deductions = LogicalDeductions::new(view.clone()).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    let newest = inferred
+        .cards
+        .iter()
+        .find(|card| card.card == CardId::new(32))
+        .unwrap();
+    assert!(
+        newest
+            .identities
+            .contains(Card::new(Suit::Green, Rank::Four)),
+        "{newest:#?}"
+    );
+    assert_eq!(newest.promised_identity, None, "no unseen p2 exists");
+    assert_eq!(newest.play_obligation, Some(HGroupPlayObligation::Forced));
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .expect("the owner's hand must admit a consistent world");
+    assert_eq!(analysis.planner.best_action, Action::Play(CardId::new(32)));
+}
+
+#[test]
 fn first_replay_resolved_three_bluff_does_not_create_hesitation_play() {
     // Branch from reviewed p4v0s415 turn 30. A disconnected g4 establishes
     // a 3 Bluff; Donald can discard while his saved 3 remains unplayable.

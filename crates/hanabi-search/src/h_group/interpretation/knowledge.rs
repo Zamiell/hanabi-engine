@@ -593,10 +593,20 @@ impl<'a> ConventionKnowledgeCompiler<'a> {
                 continue;
             };
             let claims = IdentityClaims::new(view, self.replay);
+            let bluff_play = self.replay.signals.iter().any(|signal| {
+                signal.kind == HGroupMoveKind::Bluff
+                    && signal.target == Some(view.observer)
+                    && signal.cards.first() == Some(forced)
+            });
             let playable = IdentitySet::from_mask(
                 identities_at_distance(card.identities, view, 0)
                     .iter()
-                    .filter(|identity| !claims.identity_claimed_elsewhere(card.card, *identity))
+                    // A Bluff can spend another copy of a secured playable
+                    // card. Its blind card was not newly touched by a clue.
+                    // https://hanabi.github.io/level-13/#the-3-bluff
+                    .filter(|identity| {
+                        bluff_play || !claims.identity_claimed_elsewhere(card.card, *identity)
+                    })
                     .fold(0, |mask, identity| mask | (1 << identity.index())),
             );
             let turn = self

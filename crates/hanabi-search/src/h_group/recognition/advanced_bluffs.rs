@@ -258,11 +258,35 @@ pub(in crate::h_group) fn apply_intermediate_bluff_effects(
         && interpretation.focus_identities.iter().all(|identity| {
             bluff_target_kind_at(stack_heights, *clue, identity) == Some(BluffTargetKind::Three)
         });
-    if effects
+    let impossible_new_connections = effects
         .pending
         .iter()
-        .any(|connection| connection.actor == actor && effects.pending.is_active(connection))
-    {
+        .filter(|connection| {
+            connection.actor == actor
+                && actor == view.observer
+                && connection.focus == focus
+                && effects
+                    .pending
+                    .provenance(connection.promise)
+                    .is_some_and(|origin| origin.created_turn == entry.turn)
+                && !context
+                    .historical
+                    .has_unseen_copy(connection.expected, hands)
+        })
+        .map(|connection| connection.promise)
+        .collect::<Vec<_>>();
+    let ruled_out_finesse_bluff = !complete_double_finesse
+        && !impossible_new_connections.is_empty()
+        && !interpretation.focus_identities.is_empty()
+        && interpretation
+            .focus_identities
+            .iter()
+            .all(|identity| bluff_target_kind_at(stack_heights, *clue, identity).is_some());
+    if effects.pending.iter().any(|connection| {
+        connection.actor == actor
+            && effects.pending.is_active(connection)
+            && !impossible_new_connections.contains(&connection.promise)
+    }) {
         // A loaded player must perform the play already promised to them.
         // The same guard is used by the ordinary Bluff rule; omitting it here
         // made a direct clue to a later player look like an Intermediate Bluff.
@@ -306,9 +330,18 @@ pub(in crate::h_group) fn apply_intermediate_bluff_effects(
                     && identity_of(view, card) == Some(connecting)
             })
     });
-    if !(special_three || critical_color || hard || good_touch) {
+    if !(special_three || critical_color || hard || good_touch || ruled_out_finesse_bluff) {
         return;
     }
+    // An impossible same-clue Finesse is not an older play obligation.
+    // With every connecting copy visible, the reactor can establish the
+    // available Bluff without pretending to hold that connecting identity.
+    // https://hanabi.github.io/level-13/#the-3-bluff
+    effects.pending.cancel_where(
+        entry.turn,
+        ConnectionTransitionReason::Superseded,
+        |connection| impossible_new_connections.contains(&connection.promise),
+    );
     effects.forced_playable.insert(bluff_card);
     push_signal(
         effects.signals,
