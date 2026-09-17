@@ -282,9 +282,10 @@ impl<'a> ConventionKnowledgeCompiler<'a> {
         }
     }
 
-    /// A Finesse with a Lie Component gives its original focus a persistent
-    /// exact promise. The connection lifecycle may finish before the focus is
-    /// due, so this knowledge cannot live only on the pending connection.
+    /// Extended Finesse recognition gives its original focus a persistent
+    /// exact promise, including when its chain needs no Lie Component. The
+    /// connection may finish before the focus is due, so the promise cannot
+    /// live only on the pending connection.
     ///
     /// <https://hanabi.github.io/extras/special-finesses/#finesses-with-a-lie-component>
     fn apply_lie_component_focus_claims(&mut self) {
@@ -295,7 +296,13 @@ impl<'a> ConventionKnowledgeCompiler<'a> {
             .identity_claims()
             .iter()
             .filter(|claim| {
-                claim.source == HGroupMoveKind::LieComponentFinesse
+                (claim.source == HGroupMoveKind::LieComponentFinesse
+                    || (claim.source == HGroupMoveKind::PlayClue
+                        && self.replay.clues.iter().any(|clue| {
+                            clue.turn == claim.turn
+                                && clue.kind == crate::HGroupClueKind::Unrecognized
+                                && claim.cards == [clue.focus]
+                        })))
                     && claim.relation == IdentityClaimRelation::Each
             })
         {

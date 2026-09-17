@@ -1,6 +1,46 @@
 use super::*;
 
 #[test]
+fn fourth_replay_rank_four_recipient_does_not_stomp_the_red_one() {
+    // Reviewed alternative at p4v0s3 turn 24: Donald's 4s promises Alice
+    // r4 through Cathy's r1. Alice must not spend another clue naming r1.
+    let state = expert_replay_p4v0s3().state_at_turn(23).unwrap();
+    let source = state.view_for(PlayerId::new(3)).unwrap();
+    let source = ProspectiveTransition::clue_by(
+        &source,
+        PlayerId::new(3),
+        PlayerId::new(0),
+        Clue::Rank(Rank::Four),
+        &[CardId::new(3), CardId::new(22)],
+    );
+    let (d, replay) = PerspectiveProjector::new(&source, HGroupProfile::Max)
+        .project(PlayerId::new(0), PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    let inferred = infer_h_group(&d, HGroupProfile::Max);
+    assert_eq!(
+        inferred
+            .cards
+            .iter()
+            .find(|note| note.card == CardId::new(3))
+            .unwrap()
+            .identities,
+        IdentitySet::singleton(Card::new(Suit::Red, Rank::Four)),
+        "{inferred:#?}"
+    );
+    assert!(
+        !candidates.iter().any(|candidate| candidate.action
+            == Action::Clue {
+                target: PlayerId::new(2),
+                clue: Clue::Rank(Rank::One),
+            }),
+        "candidates: {candidates:#?}; pending: {:#?}; clues: {:#?}",
+        replay.pending_connections,
+        replay.clues
+    );
+}
+
+#[test]
 fn fourth_replay_two_save_does_not_invent_a_prompt_on_a_chop_moved_card() {
     let state = expert_replay_p4v0s3().state_at_turn(21).unwrap();
     let view = state.view_for(PlayerId::new(1)).unwrap();

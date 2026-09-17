@@ -9,11 +9,12 @@ use crate::h_group::EffectSource;
 use crate::h_group::interpretation_resolution::is_ignition;
 
 #[derive(Clone, Debug)]
-struct LieComponentPlan {
+struct ExtendedFinessePlan {
     focus: CardId,
     focus_identity: Card,
     connections: Vec<ConnectionObligation>,
     required_fix: Option<RequiredFix>,
+    needs_fix: bool,
 }
 
 fn cyclic_distance(from: PlayerId, to: PlayerId, player_count: usize) -> usize {
@@ -46,12 +47,13 @@ fn fix_clue_for_blockers(
         })
 }
 
-/// Finds the lowest-precedence Max line in which one future Fix removes a
-/// false layer while the original Finesse remains live.
+/// Searches the lowest-precedence Max connection space, allowing one future
+/// Fix to remove a false layer. A complete chain requiring no Fix remains an
+/// ordinary Play Clue, rather than being discarded or mislabeled as a Lie.
 ///
 /// Source: <https://hanabi.github.io/extras/special-finesses/#finesses-with-a-lie-component>
 #[allow(clippy::too_many_lines)]
-fn lie_component_plan(
+fn extended_finesse_plan(
     context: &HGroupTurnContext<'_>,
     view: &PlayerView,
     effects: &HGroupRuleEffects<'_>,
@@ -59,7 +61,7 @@ fn lie_component_plan(
     target: PlayerId,
     clue: Clue,
     touched: &[CardId],
-) -> Option<LieComponentPlan> {
+) -> Option<ExtendedFinessePlan> {
     let has_higher_precedence_meaning = effects.signals.iter().any(|signal| {
         signal.turn == context.entry.turn
             && !matches!(signal.kind, HGroupMoveKind::Context | HGroupMoveKind::Extra)
@@ -79,6 +81,9 @@ fn lie_component_plan(
     gotten.extend(effects.already_playing.iter().copied());
     let layout = &hands[target.index()];
     let focus = focus(layout, touched, chop(layout, &gotten), &gotten)?;
+    // The newly touched cards determine focus, but cannot also be blind
+    // connectors below that focus (e.g. a newly rank-clued 4 cannot be r2).
+    gotten.extend(touched.iter().copied());
     let focus_identities = context.historical.identity(focus).map_or_else(
         || IdentitySet::from_mask(context.after.facts[focus.index()].identity_mask()),
         IdentitySet::singleton,
@@ -258,12 +263,13 @@ fn lie_component_plan(
             simulated[expected.suit.index()] = expected.rank.number();
             previous_actor = actor;
         }
-        if !failed && used_fix && !connections.is_empty() {
-            return Some(LieComponentPlan {
+        if !failed && !connections.is_empty() {
+            return Some(ExtendedFinessePlan {
                 focus,
                 focus_identity,
                 connections,
                 required_fix,
+                needs_fix: used_fix,
             });
         }
     }
@@ -431,7 +437,7 @@ pub(in crate::h_group) fn apply_extra_effects(
                 apply_lie_component_fix(context, effects, *giver, *target, *clue, touched);
             if !repaired_lie {
                 if let Some(plan) =
-                    lie_component_plan(context, view, effects, *giver, *target, *clue, touched)
+                    extended_finesse_plan(context, view, effects, *giver, *target, *clue, touched)
                 {
                     if let Some(required) = plan.required_fix {
                         effects.required_fixes.insert_unconditional(required);
@@ -450,7 +456,11 @@ pub(in crate::h_group) fn apply_extra_effects(
                         entry,
                         *giver,
                         Some(*target),
-                        HGroupMoveKind::LieComponentFinesse,
+                        if plan.needs_fix {
+                            HGroupMoveKind::LieComponentFinesse
+                        } else {
+                            HGroupMoveKind::PlayClue
+                        },
                         vec![plan.focus],
                         Some(plan.focus_identity),
                     );
