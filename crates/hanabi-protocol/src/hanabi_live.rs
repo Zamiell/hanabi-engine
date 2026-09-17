@@ -25,20 +25,19 @@ impl<'de> Deserialize<'de> for HanabiLiveReplay {
             options: Option<HanabiLiveOptions>,
         }
         let wire = WireReplay::deserialize(deserializer)?;
-        let players = match wire.players {
-            Some(players) => players,
-            None => {
-                let seed = wire.seed.as_deref().ok_or_else(|| {
-                    serde::de::Error::custom("replay requires players when no seed is provided")
-                })?;
-                let count =
-                    crate::seed::player_count_from_seed(seed).map_err(serde::de::Error::custom)?;
-                // Hanab Live's DEFAULT_PLAYER_NAMES; explicit names are preserved.
-                ["Alice", "Bob", "Cathy", "Donald", "Emily"][..count]
-                    .iter()
-                    .map(|name| (*name).to_owned())
-                    .collect()
-            }
+        let players = if let Some(players) = wire.players {
+            players
+        } else {
+            let seed = wire.seed.as_deref().ok_or_else(|| {
+                serde::de::Error::custom("replay requires players when no seed is provided")
+            })?;
+            let count =
+                crate::seed::player_count_from_seed(seed).map_err(serde::de::Error::custom)?;
+            // Hanab Live's DEFAULT_PLAYER_NAMES; explicit names are preserved.
+            ["Alice", "Bob", "Cathy", "Donald", "Emily"][..count]
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect()
         };
         // Explicit decks remain authoritative, including custom/edited deals
         // whose original seed is still present as descriptive metadata.
