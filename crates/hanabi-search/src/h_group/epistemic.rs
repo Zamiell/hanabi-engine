@@ -49,7 +49,7 @@ pub(super) fn owner_knowledge_read_model(
     inferred: &HGroupInferences,
 ) -> Vec<OwnerCardKnowledge> {
     let view = deductions.view();
-    let gotten = inferred.gotten();
+    let gotten = inferred.clued_or_promised();
     view.hands[view.observer.index()]
         .iter()
         .filter_map(|observed| {

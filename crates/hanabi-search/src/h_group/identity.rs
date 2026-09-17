@@ -79,10 +79,13 @@ pub(super) fn is_eventually_useful(view: &PlayerView, identity: Card) -> bool {
         })
 }
 
+/// Duplicate accounting requires clued or promised copies, not merely protected
+/// ones. A Chop-Moved copy still needs information before its owner can play it.
+/// <https://hanabi.github.io/beginner/good-touch-principle>
 pub(super) fn is_convention_trash(
     view: &PlayerView,
     identity: Card,
-    gotten: &CardSet,
+    clued_or_promised: &CardSet,
     own_notes: &[HGroupCardInference],
 ) -> bool {
     if !is_eventually_useful(view, identity) {
@@ -91,7 +94,7 @@ pub(super) fn is_convention_trash(
     view.hands
         .iter()
         .flatten()
-        .filter(|card| gotten.contains(&card.id))
+        .filter(|card| clued_or_promised.contains(&card.id))
         .filter(|card| {
             card.identity == Some(identity)
                 || (card.identity.is_none()

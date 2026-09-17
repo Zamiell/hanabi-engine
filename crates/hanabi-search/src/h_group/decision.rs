@@ -739,7 +739,7 @@ fn required_first_five_stall_actions(
     profile: HGroupProfile,
     clues: &[CompiledClueAction],
 ) -> Option<Vec<Action>> {
-    let gotten = inferred.gotten();
+    let gotten = inferred.clued_or_promised();
     let permission_to_discard_target = permission_to_discard_target(view, replay, profile);
     let actor_has_known_safe_discard = !inferred.discard_now.is_empty()
         || replay.hands[view.observer.index()].iter().any(|card| {
@@ -1463,7 +1463,7 @@ fn convention_known_trash_discard(
     view: &PlayerView,
     inferred: &HGroupInferences,
 ) -> Option<CardId> {
-    let gotten = inferred.gotten();
+    let gotten = inferred.clued_or_promised();
     // Hands are stored oldest first; leftmost means newest first.
     // https://hanabi.github.io/level-14/#known-trash-discard-order
     // Required discharge discards are handled before this ordinary fallback.

@@ -330,14 +330,21 @@ impl HGroupInferences {
             .filter_map(|inference| inference.saved.then_some(inference.card))
     }
 
-    /// Cards protected from ordinary chop by any recognized clue or movement.
-    pub(super) fn gotten(&self) -> CardSet {
+    /// Cards with a clue or active invisible clue, excluding mere chop movement.
+    /// Protection alone does not arrange a duplicate's eventual play.
+    pub(super) fn clued_or_promised(&self) -> CardSet {
         self.clues
             .iter()
             .flat_map(|clue| core::iter::once(clue.focus).chain(clue.new_non_focus.iter().copied()))
             .chain(self.invisibly_clued.iter().copied())
-            .chain(self.chop_moved.iter().copied())
             .collect()
+    }
+
+    /// Cards protected from ordinary chop by any recognized clue or movement.
+    pub(super) fn gotten(&self) -> CardSet {
+        let mut cards = self.clued_or_promised();
+        cards.extend(self.chop_moved.iter().copied());
+        cards
     }
 }
 

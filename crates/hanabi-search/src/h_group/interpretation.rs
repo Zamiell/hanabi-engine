@@ -1915,6 +1915,7 @@ pub(super) fn advanced_clue_candidates(
             let protects_useful_chop = chop(layout, gotten)
                 .and_then(|card| identity_of(view, card))
                 .is_some_and(|identity| is_eventually_useful(view, identity));
+            let clued_or_promised = replay.promptable();
             let actor_has_known_trash = replay.hands[view.observer.index()].iter().any(|card| {
                 convention_cards
                     .iter()
@@ -1922,7 +1923,12 @@ pub(super) fn advanced_clue_candidates(
                     .is_some_and(|note| {
                         !note.identities.is_empty()
                             && note.identities.iter().all(|identity| {
-                                is_convention_trash(view, identity, gotten, convention_cards)
+                                is_convention_trash(
+                                    view,
+                                    identity,
+                                    &clued_or_promised,
+                                    convention_cards,
+                                )
                             })
                     })
             });

@@ -1,6 +1,34 @@
 use super::*;
 
 #[test]
+fn fourth_replay_chop_moved_duplicate_does_not_discard_the_purple_connector() {
+    // Human-reviewed alternative at p4v0s3 turn 11: 4s to Bob makes Donald's
+    // p3 exact. Alice's visible p3 is only Chop Moved, not arranged to play.
+    let mut state = expert_replay_p4v0s3().state_at_turn(10).unwrap();
+    state
+        .apply(Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Four),
+        })
+        .unwrap();
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(3)).unwrap()).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    assert!(inferred.chop_moved.contains(&CardId::new(0)));
+    assert!(!inferred.clued_or_promised().contains(&CardId::new(0)));
+    assert!(inferred.clued_or_promised().contains(&CardId::new(14)));
+    assert!(!is_convention_trash(
+        deductions.view(),
+        Card::new(Suit::Purple, Rank::Three),
+        &inferred.clued_or_promised(),
+        &inferred.cards,
+    ));
+    assert_ne!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Discard(CardId::new(14)))
+    );
+}
+
+#[test]
 fn fourth_replay_turn_seventeen_admits_the_reviewed_green_connection() {
     // Human-reviewed p4v0s3 turn 17: Cathy's promised g2 plays after Bob's
     // next turn, then her g3 connects Bob's g4. Do not require another g2

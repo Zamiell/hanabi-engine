@@ -397,7 +397,7 @@ fn move_43_prefers_the_final_play_clue_with_known_trash_collateral() {
             .all(|identity| is_convention_trash(
                 deductions.view(),
                 identity,
-                &inferred.gotten(),
+                &inferred.clued_or_promised(),
                 &inferred.cards,
             )),
         "every remaining identity in NoMercy's hand is nevertheless trash"
@@ -449,7 +449,7 @@ fn move_43_prefers_the_final_play_clue_with_known_trash_collateral() {
         is_convention_trash(
             james_deductions.view(),
             identity,
-            &james_inferred.gotten(),
+            &james_inferred.clued_or_promised(),
             &james_inferred.cards,
         )
     }));
