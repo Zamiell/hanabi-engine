@@ -1985,6 +1985,14 @@ mod tests {
 
     #[test]
     fn every_reviewed_root_is_projected_despite_unequal_priorities() {
+        fn check_branches(evidence: &crate::ProjectionEvidence) {
+            for branch in &evidence.clue_branches {
+                assert!(branch.continuation.steps.starts_with(&evidence.steps));
+                assert!(branch.continuation.resources.unfunded_turn.is_none());
+                check_branches(&branch.continuation);
+            }
+        }
+
         // p4v0s2 turn 8 reproduces the old unique-best projection bypass.
         // This asserts planner mechanics, not that the Save is optimal.
         let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
@@ -2017,11 +2025,28 @@ mod tests {
             assert_eq!(reordered[index.unwrap()].action, selected_action);
         }
         for root in &result.root_actions {
-            assert_eq!(
-                root.projection.steps.len(),
-                usize::from(root.symbolic_line.actions)
-            );
+            // Branching evidence stores the pre-branch prefix at its root.
+            // The summary may additionally include actions common to every
+            // child; it must not count a branch-specific continuation.
+            let common_steps = if let Some(first) = root.projection.clue_branches.first() {
+                first
+                    .continuation
+                    .steps
+                    .iter()
+                    .enumerate()
+                    .take_while(|(index, step)| {
+                        root.projection
+                            .clue_branches
+                            .iter()
+                            .all(|branch| branch.continuation.steps.get(*index) == Some(*step))
+                    })
+                    .count()
+            } else {
+                root.projection.steps.len()
+            };
+            assert_eq!(common_steps, usize::from(root.symbolic_line.actions));
             assert!(root.projection.resources.unfunded_turn.is_none());
+            check_branches(&root.projection);
         }
         let mut incomparable = result.root_actions[0].clone();
         incomparable.symbolic_line.actions = incomparable.symbolic_line.actions.saturating_add(1);

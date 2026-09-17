@@ -227,10 +227,15 @@ card, and identity. The original legal `PlayerView` is never modified.
 - Unknown clue touches branch over feasible touched-card subsets, without
   assigning identities to blank cards. A card-copy matching check rejects
   impossible subsets. `clueBranches` retains each conditional continuation; only
-  action prefixes common to every branch enter the aggregate summary. Divergent
-  endpoint values remain separate rather than being averaged without
-  probabilities. Projection allows 16 branch outcomes; lookahead leaves allow
-  four. Exhausting that budget reports a limit, not a successful completion.
+  branches whose focus has a known identity execute the selected clue. If an
+  unseen draw becomes the focus, the branch stops before the clue at an
+  interpretation boundary: the giver would see that draw and might choose a
+  different action. A physically possible touch set alone cannot justify that
+  choice or the resulting blind plays. Only action prefixes common to every
+  branch enter the aggregate summary. Divergent endpoint values remain separate
+  rather than being averaged without probabilities. Projection allows 16 branch
+  outcomes; lookahead leaves allow four. Exhausting that budget reports a limit,
+  not a successful completion.
 - Hypothetical teammates use the root's candidate admission and endpoint
   comparator with one level of strategic lookahead. Those candidate forecasts
   use the convention policy as their leaf evaluator, with a 32-action bound;

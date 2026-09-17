@@ -90,7 +90,7 @@ use constraints::{ConventionConstraints, ConventionRequirementKind};
 pub(crate) use decision::analyze_h_group_convention;
 pub use decision::infer_h_group;
 #[cfg(test)]
-use decision::{h_group_predictable_action, ordered_h_group_actions};
+use decision::ordered_h_group_actions;
 use decision::{infer_h_group_from_replay, preferred_due_play_card, select_h_group_action};
 use effects::{ConventionJournal, ConventionReducer, EffectBatch, SignalHistory};
 use epistemic::{EpistemicState, owner_knowledge_read_model};
@@ -2115,20 +2115,17 @@ fn extend_queued_finesse_with_playable_layers(
 /// the otherwise-unaccounted connector in a Reverse Finesse.
 ///
 /// This empathy inference is actionable only for the player whose turn it is.
-/// A direct clue just received by that player takes precedence; speculative
-/// projections must not reinterpret an older clue as a competing blind play.
+/// Receiving another clue does not erase an earlier connection. In particular,
+/// a delayed clue can occupy this player's future while they fulfill a Reverse
+/// Finesse now. Ordinary active connections retain precedence in `replay_h_group`;
+/// Fixes and cancellations are handled by the connection lifecycle.
+/// <https://hanabi.github.io/level-2/#the-reverse-finesse>
 fn blind_reverse_finesse_is_eligible(
     view: &PlayerView,
     giver: PlayerId,
     allow_blind_reverse_empathy: bool,
 ) -> bool {
-    allow_blind_reverse_empathy
-        && giver != view.observer
-        && view.observer == view.current_player
-        && !matches!(
-            view.history.last().map(|entry| &entry.event),
-            Some(ObservedEvent::Clued { target, .. }) if *target == view.observer
-        )
+    allow_blind_reverse_empathy && giver != view.observer && view.observer == view.current_player
 }
 
 /// In an Ambiguous Reverse Finesse, a visible player who clues instead of
@@ -2273,39 +2270,6 @@ fn pending_card_allows_identity(
                 && connection.expected != identity
                 && !is_playable_at(stack_heights, identity)
         })
-}
-
-fn identity_is_queued_before_target(
-    view: &PlayerView,
-    giver: PlayerId,
-    target: PlayerId,
-    already_playing: &CardSet,
-    pending: &ConnectionManager,
-    identity: Card,
-) -> bool {
-    let player_count = view.hands.len();
-    let target_distance = (target.index() + player_count - giver.index()) % player_count;
-    let acts_before_target = |player: PlayerId| {
-        let distance = (player.index() + player_count - giver.index()) % player_count;
-        distance != 0 && distance <= target_distance
-    };
-    let owner = |card: CardId| {
-        view.hands
-            .iter()
-            .position(|hand| hand.iter().any(|candidate| candidate.id == card))
-            .map(|player| {
-                PlayerId::new(
-                    u8::try_from(player).expect("standard Hanabi has at most five players"),
-                )
-            })
-    };
-    pending.iter().any(|connection| {
-        (connection.expected == identity && acts_before_target(connection.actor))
-            || (connection.focus_identity == identity
-                && owner(connection.focus).is_some_and(acts_before_target))
-    }) || already_playing.iter().any(|card| {
-        identity_of(view, *card) == Some(identity) && owner(*card).is_some_and(acts_before_target)
-    })
 }
 
 fn replay_identity_is_queued(view: &PlayerView, replay: &HGroupState, identity: Card) -> bool {

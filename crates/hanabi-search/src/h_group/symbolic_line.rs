@@ -235,6 +235,30 @@ fn continue_plan<const REUSE_SELECTED: bool>(
                     *branch_budget -= outcomes.len();
                     let prefix = plan.clone();
                     for touched in outcomes {
+                        let layout = public.hands[target.index()]
+                            .iter()
+                            .map(|card| card.id)
+                            .collect::<Vec<_>>();
+                        let focus = super::focus(
+                            &layout,
+                            &touched,
+                            actor_inferences.chops[target.index()],
+                            &actor_inferences.gotten(),
+                        );
+                        if focus.is_some_and(|card| {
+                            symbolic_identity(&public, &actor_deductions, &actor_inferences, card)
+                                .is_none()
+                        }) {
+                            // Candidate selection used visible/known cards. An
+                            // unseen draw becoming focus changes the giver's
+                            // decision, not merely the clue's collateral touch.
+                            // Do not execute that different clue meaning and
+                            // blame its invented blind plays on this root.
+                            let mut unresolved = prefix.clone();
+                            unresolved.stop_at(PlanFrontier::InterpretationBranch);
+                            plan.add_clue_branch(public.turn, touched, unresolved);
+                            continue;
+                        }
                         let after =
                             ProspectiveTransition::clue_by(&public, actor, target, clue, &touched);
                         let mut branch = prefix.clone();
@@ -784,6 +808,27 @@ mod tests {
                 4,
             );
             if suit == hanabi_core::Suit::Green {
+                let mut counterfactual = replay.state_at_turn(9).unwrap();
+                counterfactual
+                    .apply(Action::Clue {
+                        target: PlayerId::new(2),
+                        clue: Clue::Suit(hanabi_core::Suit::Green),
+                    })
+                    .unwrap();
+                counterfactual
+                    .apply(Action::Clue {
+                        target: PlayerId::new(3),
+                        clue: Clue::Suit(hanabi_core::Suit::Purple),
+                    })
+                    .unwrap();
+                let d = LogicalDeductions::new(counterfactual.view_for(PlayerId::new(3)).unwrap())
+                    .unwrap();
+                assert_eq!(
+                    super::super::infer_h_group(&d, HGroupProfile::Max)
+                        .connection
+                        .map(|connection| connection.card),
+                    Some(CardId::new(19))
+                );
                 assert_eq!(
                     plan.into_evidence().steps[1].projected.action,
                     Action::Clue {
@@ -793,6 +838,26 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn reviewed_purple_projection_does_not_invent_a_finesse_from_an_unseen_focus() {
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s3.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(9).unwrap();
+        let source = state.view_for(state.current_player()).unwrap();
+        let plan = project_h_group_plan(
+            &source,
+            HGroupProfile::Max,
+            Action::Clue {
+                target: PlayerId::new(3),
+                clue: Clue::Suit(hanabi_core::Suit::Purple),
+            },
+            12,
+        );
+        assert_eq!(plan.into_evidence().maximum_strikes(), 0);
     }
 
     #[test]

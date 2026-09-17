@@ -2293,15 +2293,6 @@ fn completed_connection_focus_is_due(inferred: &HGroupInferences) -> bool {
     !inferred.completed_connection_focuses.is_empty()
 }
 
-#[cfg(test)]
-pub(crate) fn h_group_predictable_action(
-    deductions: &LogicalDeductions,
-    profile: HGroupProfile,
-) -> Option<Action> {
-    let analysis = build_h_group_analysis(deductions, profile);
-    analyze_h_group_actions_from_analysis(deductions, profile, &analysis).predictable
-}
-
 fn paused_priority_play(
     view: &PlayerView,
     inferred: &HGroupInferences,

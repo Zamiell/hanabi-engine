@@ -22,14 +22,14 @@ use super::{
     ObservedCard, ObservedEvent, PlayerId, PlayerSet, PlayerView, Rank, RejectedConventionAction,
     RequiredFix, SemanticallyAdmittedCandidates, StackTimeline, bluff_play_connects,
     bluff_target_order_is_legal, card_is_trash, chop, convention_information_value,
-    finesse_position, five_chop_moved_card, five_pulled_card, focus,
-    identity_is_queued_before_target, identity_of, identity_set, infer_h_group_from_replay,
-    is_convention_trash, is_critical, is_eventually_useful, is_playable_at, is_playable_now,
-    next_player, ordered_playable_cards, pending_card_allows_identity, preferred_due_play_card,
-    projected_h_group_replay, prospective_clue_has_unsafe_connection,
-    prospective_clue_marks_focus_saved, prospective_clue_primary_interpretation,
-    prospective_clue_primary_kind, prospective_clue_signal_kinds, prospective_clue_view,
-    prospective_play_view, prospective_stacked_ejection_card, prospective_team_clue_signal_kinds,
+    finesse_position, five_chop_moved_card, five_pulled_card, focus, identity_of, identity_set,
+    infer_h_group_from_replay, is_convention_trash, is_critical, is_eventually_useful,
+    is_playable_at, is_playable_now, next_player, ordered_playable_cards,
+    pending_card_allows_identity, preferred_due_play_card, projected_h_group_replay,
+    prospective_clue_has_unsafe_connection, prospective_clue_marks_focus_saved,
+    prospective_clue_primary_interpretation, prospective_clue_primary_kind,
+    prospective_clue_signal_kinds, prospective_clue_view, prospective_play_view,
+    prospective_stacked_ejection_card, prospective_team_clue_signal_kinds,
     replay_identity_is_queued, rule_enabled, subjective_convention_cards,
     subjective_playable_cards, was_clued_before, with_prospective_analysis_cache,
 };
@@ -2543,17 +2543,30 @@ pub(super) fn delayed_connection_score(
     // Existing commitments remain part of the line even when the clue
     // touches several cards. Focus and collateral-touch validity are checked
     // separately; neither can erase an already-scheduled predecessor.
+    // A delayed/Reverse Finesse may take more than one rotation. Existing
+    // promises after the recipient's next turn still supply predecessors;
+    // the recipient compiler, not candidate discovery, schedules the wait.
+    // https://hanabi.github.io/level-2/#the-reverse-finesse
+    let already_queued = |needed| {
+        pending_connections.identity_is_queued(needed)
+            || view
+                .hands
+                .iter()
+                .flatten()
+                .any(|card| already_playing.contains(&card.id) && card.identity == Some(needed))
+            || view.hands[view.observer.index()].iter().any(|card| {
+                explicitly_clued.contains(&card.id)
+                    && convention_cards.iter().any(|note| {
+                        note.card == card.id
+                            && note.identity_status == super::HGroupIdentityStatus::Settled
+                            && note.identities == IdentitySet::singleton(needed)
+                    })
+            })
+    };
     let first_unqueued_rank =
         ((stack_height + 1)..usize::from(focus_identity.rank.number())).find(|needed_rank| {
             let needed = Card::new(focus_identity.suit, Rank::ALL[*needed_rank - 1]);
-            !identity_is_queued_before_target(
-                view,
-                view.current_player,
-                target,
-                already_playing,
-                pending_connections,
-                needed,
-            )
+            !already_queued(needed)
         });
     let Some(first_unqueued_rank) = first_unqueued_rank else {
         if explicitly_clued.contains(&focus) && !focus_was_fixed {
@@ -2703,24 +2716,7 @@ pub(super) fn delayed_connection_score(
 
     for needed_rank in (first_unqueued_rank + 1)..usize::from(focus_identity.rank.number()) {
         let needed = Card::new(focus_identity.suit, Rank::ALL[needed_rank - 1]);
-        let already_queued = pending_connections.identity_is_queued(needed)
-                || view.hands.iter().flatten().any(|card| {
-                    already_playing.contains(&card.id) && card.identity == Some(needed)
-                })
-                // A giver can count an existing exact, clued promise in their
-                // own hand. This is not permission to use the hidden face of
-                // an unclued giver card as a new Prompt or Finesse. The normal
-                // recipient compiler validates when this delayed card plays.
-                // https://hanabi.github.io/beginner/delayed-play-clues
-                || view.hands[view.observer.index()].iter().any(|card| {
-                    explicitly_clued.contains(&card.id)
-                        && convention_cards.iter().any(|note| {
-                            note.card == card.id
-                                && note.identity_status == super::HGroupIdentityStatus::Settled
-                                && note.identities == IdentitySet::singleton(needed)
-                        })
-                });
-        if already_queued {
+        if already_queued(needed) {
             // A later connector can already be convention-bound even when an
             // earlier connector is the first missing step. Do not demand a
             // second Prompt/Finesse for an identity the team will already
