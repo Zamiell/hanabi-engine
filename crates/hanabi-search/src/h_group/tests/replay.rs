@@ -28,6 +28,44 @@ fn first_replay_final_clue_does_not_override_an_available_play() {
         })
         .unwrap();
     assert!(!green.preference.advances_terminal_plan());
+    // Clarity: the extra GD token is surplus; p4 directly then the existing
+    // p5 promise completes just as soon without transferring a blind card.
+    // https://hanabi.github.io/level-6/#clarity-principle-part-1
+    assert_eq!(analysis.planner.best_action, Action::Play(CardId::new(34)));
+    let transfer = analysis
+        .planner
+        .root_actions
+        .iter()
+        .find(|candidate| candidate.action == Action::Discard(CardId::new(34)))
+        .unwrap();
+    let play = analysis
+        .planner
+        .root_actions
+        .iter()
+        .find(|candidate| candidate.action == Action::Play(CardId::new(34)))
+        .unwrap();
+    assert!(
+        play.preference > transfer.preference,
+        "retain the legal transfer, but prefer clarity"
+    );
+    // Resource-accounting counterfactual, not an assertion about optimal play:
+    // without tokens the same completion needs funding, so do not claim that
+    // the transfer token is surplus just because all needed cards are held.
+    let mut unfunded = state.view_for(PlayerId::new(0)).unwrap();
+    unfunded.clue_tokens = 0;
+    let d = LogicalDeductions::new(unfunded).unwrap();
+    let actions = analyze_h_group_convention(&d, HGroupProfile::Max);
+    let play = actions
+        .actions
+        .iter()
+        .find(|candidate| candidate.action == Action::Play(CardId::new(34)))
+        .unwrap();
+    let transfer = actions
+        .actions
+        .iter()
+        .find(|candidate| candidate.action == Action::Discard(CardId::new(34)))
+        .unwrap();
+    assert!(transfer.preference > play.preference);
 }
 
 #[test]

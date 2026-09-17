@@ -33,6 +33,8 @@ struct EndgameCompletionPlan {
     known_plays: Vec<(PlayerId, Card)>,
 }
 
+const KNOWN_PLAY_PRIORITY: i32 = 525;
+
 pub(super) fn build_h_group_analysis(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
@@ -1599,51 +1601,7 @@ fn completion_without_discard(view: &PlayerView, cards: &[(PlayerId, Card)]) -> 
     if view.clue_tokens == 0 || cards.is_empty() {
         return false;
     }
-    let mut remaining = cards.to_vec();
-    let mut heights = view.play_stacks.each_ref().map(Vec::len);
-    let mut tokens = view.clue_tokens - 1; // The proposed Burn happens first.
-    let mut deck = view.deck_size;
-    let mut final_turns = view
-        .final_turns_remaining
-        .map(|turns| turns.saturating_sub(1));
-    let mut actor = next_player(view.current_player, view.hands.len());
-    // This is a sufficient schedule, not an exhaustive solver. No identity is
-    // assigned to draws; every card used here was known before the Burn.
-    for _ in 0..=(cards.len() * view.hands.len()) {
-        if final_turns == Some(0) {
-            return false;
-        }
-        let play = remaining.iter().position(|(owner, identity)| {
-            *owner == actor
-                && usize::from(identity.rank.number()) == heights[identity.suit.index()] + 1
-        });
-        let was_final = final_turns.is_some();
-        if let Some(index) = play {
-            let (_, identity) = remaining.remove(index);
-            heights[identity.suit.index()] += 1;
-            if remaining.is_empty() {
-                return true;
-            }
-            if identity.rank == Rank::Five {
-                tokens = (tokens + 1).min(MAX_CLUE_TOKENS);
-            }
-            if deck > 0 {
-                deck -= 1;
-                if deck == 0 {
-                    final_turns = Some(u8::try_from(view.hands.len()).expect("player count"));
-                }
-            }
-        } else if tokens > 0 {
-            tokens -= 1;
-        } else {
-            return false;
-        }
-        if was_final {
-            final_turns = final_turns.map(|turns| turns.saturating_sub(1));
-        }
-        actor = next_player(actor, view.hands.len());
-    }
-    false
+    funded_completion_schedule(view, cards.to_vec(), Vec::new(), None)
 }
 
 fn burn_progress(
@@ -1666,6 +1624,131 @@ fn burn_progress(
         i32::from(score),
         i32::from(candidate.score()),
     ))
+}
+
+/// A sufficient (not exhaustive) final schedule with no transfer or speculative
+/// draws. Existing commitments play in stack order; unresolved cards require an
+/// admitted direct Play Clue, and idle turns after all clues are given burn a
+/// token. Charge every clue/burn and honor the final-round drawing clock.
+///
+/// This proves when a Gentleman's Discard's extra token has no remaining use,
+/// so Clarity prefers playing the known card directly. Failure to prove this
+/// leaves the transfer's ordinary value intact; it does not predict a loss.
+/// <https://hanabi.github.io/level-6/#clarity-principle-part-1>
+fn direct_play_completes_without_extra_token(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+    analysis: &HGroupAnalysis,
+    card: CardId,
+) -> bool {
+    let view = deductions.view();
+    if !analysis.inferences.playable_now.contains(&card) {
+        return false;
+    }
+    let Some(identity) = analysis.inferences.cards.iter().find_map(|note| {
+        (note.card == card && note.identities.len() == 1)
+            .then(|| note.identities.iter().next())
+            .flatten()
+    }) else {
+        return false;
+    };
+    let Some(plan) = endgame_completion_plan(deductions, profile, analysis) else {
+        return false;
+    };
+    let mut unannounced = Vec::new();
+    for unresolved in &plan.unresolved_cards {
+        let Some((owner, held)) = view.hands.iter().enumerate().find_map(|(owner, hand)| {
+            hand.iter()
+                .find(|held| held.id == *unresolved)
+                .map(|held| (owner, held))
+        }) else {
+            return false;
+        };
+        let Some(identity) = held.identity else {
+            return false;
+        };
+        // Reuse admission evidence, not the actual face alone, to establish
+        // that a simple clue can get this outstanding card played.
+        let can_clue = is_playable_now(view, identity) && analysis_clue_candidates(deductions, profile, analysis)
+            .iter()
+            .any(|candidate| {
+                candidate.purpose() == CluePurpose::Play
+                    && candidate.immediate_play()
+                    && matches!(candidate.action, Action::Clue { target, clue }
+                    if target.index() == owner && clue.matches(identity)
+                        && super::prospective_clue_primary_interpretation(
+                            view, profile, target, clue,
+                            &view.hands[owner].iter().filter(|held| held.identity.is_some_and(|card| clue.matches(card))).map(|held| held.id).collect::<Vec<_>>()
+                        ).is_some_and(|meaning| meaning.focus == *unresolved && meaning.play_identities.contains(identity)))
+            });
+        if !can_clue {
+            return false;
+        }
+        unannounced.push((
+            PlayerId::new(u8::try_from(owner).expect("player count")),
+            identity,
+        ));
+    }
+    funded_completion_schedule(view, plan.known_plays.clone(), unannounced, Some(identity))
+}
+
+/// Shared token/drawing-clock simulation for a direct play or an initial Burn.
+/// Unknown draws never contribute a card or a clue refund to this certificate.
+fn funded_completion_schedule(
+    view: &PlayerView,
+    mut plays: Vec<(PlayerId, Card)>,
+    mut unannounced: Vec<(PlayerId, Card)>,
+    initial_play: Option<Card>,
+) -> bool {
+    let mut heights = view.play_stacks.each_ref().map(Vec::len);
+    let mut tokens = view.clue_tokens;
+    let mut deck = view.deck_size;
+    let mut final_turns = view.final_turns_remaining;
+    let mut actor = view.current_player;
+    let bound = (plays.len() + unannounced.len()) * view.hands.len() + 1;
+    for step in 0..bound {
+        if final_turns == Some(0) {
+            return false;
+        }
+        let was_final = final_turns.is_some();
+        let play = plays.iter().position(|(owner, candidate)| {
+            *owner == actor
+                && usize::from(candidate.rank.number()) == heights[candidate.suit.index()] + 1
+                && (step != 0 || initial_play == Some(*candidate))
+        });
+        if let Some(index) = play {
+            let (_, played) = plays.remove(index);
+            heights[played.suit.index()] += 1;
+            if plays.is_empty() && unannounced.is_empty() {
+                return true;
+            }
+            if played.rank == Rank::Five {
+                tokens = (tokens + 1).min(MAX_CLUE_TOKENS);
+            }
+            if deck > 0 {
+                deck -= 1;
+                if deck == 0 {
+                    final_turns = Some(u8::try_from(view.hands.len()).expect("player count"));
+                }
+            }
+        } else {
+            if (step == 0 && initial_play.is_some()) || tokens == 0 {
+                return false;
+            }
+            if let Some(index) = unannounced.iter().position(|(owner, _)| *owner != actor) {
+                plays.push(unannounced.remove(index));
+            } else if !unannounced.is_empty() {
+                return false;
+            }
+            // Once all remaining plays are announced, an idle turn can burn.
+            tokens -= 1;
+        }
+        if was_final {
+            final_turns = final_turns.map(|turns| turns.saturating_sub(1));
+        }
+        actor = next_player(actor, view.hands.len());
+    }
+    false
 }
 
 fn endgame_progress(
@@ -1867,13 +1950,18 @@ fn raw_h_group_action_priority(
     {
         // A guaranteed play should beat a non-urgent save (score 400), while
         // an emergency save for the very next player (450+) still preempts it.
-        return 525;
+        return KNOWN_PLAY_PRIORITY;
     }
     if let Action::Discard(card) = action {
         if let Some((candidate, score)) =
             scored_discard_candidate(deductions.view(), inferred, profile)
         {
             if candidate == card {
+                if direct_play_completes_without_extra_token(deductions, profile, analysis, card) {
+                    // A valid transfer remains a candidate, but a surplus
+                    // token cannot outweigh the simpler funded completion.
+                    return KNOWN_PLAY_PRIORITY - 1;
+                }
                 if let Some(priority) =
                     early_game_clue_handoff_priority(deductions, profile, analysis, card)
                 {
