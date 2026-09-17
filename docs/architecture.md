@@ -220,10 +220,17 @@ card, and identity. The original legal `PlayerView` is never modified.
   outranks one with them regardless of heuristic priority; if every candidate
   has violations, selection remains explicitly degraded rather than pretending
   there is a safe line. These are model-relative safety findings, not proofs
-  over unmodeled hidden identities. Conditional alternatives name their
-  observer, hidden-card assumption, enabling step, concrete follow-up clue,
-  deadline, and independent funding. They never add guaranteed plays or merge
-  mutually exclusive identities into ordinary steps.
+  over unmodeled hidden identities. A separate bottom-deck-risk consequence
+  records a needed identity discarded without a known replacement, even when its
+  predecessors are not ready. These losses outrank protection/efficiency
+  bonuses. Unknown discards remain unresolved possible hazards, not executed
+  actions or guaranteed losses; strategic risks are compared only at a shared
+  horizon so longer forecasts are not punished merely for reaching uncertainty.
+  Live diagnostics expose both the lost identity and unresolved discard card.
+  Conditional alternatives name their observer, hidden-card assumption, enabling
+  step, concrete follow-up clue, deadline, and independent funding. They never
+  add guaranteed plays or merge mutually exclusive identities into ordinary
+  steps.
 - Unknown clue touches branch over feasible touched-card subsets, without
   assigning identities to blank cards. A card-copy matching check rejects
   impossible subsets. `clueBranches` retains each conditional continuation; only

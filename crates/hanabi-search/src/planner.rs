@@ -441,6 +441,7 @@ pub enum ExactSearchStatus {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ComparisonReason {
     SavePrinciple,
+    BottomDeckRisk,
     RotationDevelopment,
     ProtectedDevelopment,
     PolicyTier,
@@ -978,12 +979,16 @@ fn compare_symbolic_candidates(
             let endpoint = compare_endpoints(a, b);
             match endpoint {
                 EndpointComparison::PreferLeft(
-                    ComparisonReason::RotationDevelopment | ComparisonReason::ProtectedDevelopment,
+                    ComparisonReason::RotationDevelopment
+                    | ComparisonReason::ProtectedDevelopment
+                    | ComparisonReason::BottomDeckRisk,
                 ) => {
                     evidence_reaches[left][right] = true;
                 }
                 EndpointComparison::PreferRight(
-                    ComparisonReason::RotationDevelopment | ComparisonReason::ProtectedDevelopment,
+                    ComparisonReason::RotationDevelopment
+                    | ComparisonReason::ProtectedDevelopment
+                    | ComparisonReason::BottomDeckRisk,
                 ) => {
                     evidence_reaches[right][left] = true;
                 }
@@ -1071,6 +1076,13 @@ fn compare_endpoints(
         || left.projection.maximum_strikes() != right.projection.maximum_strikes()
     {
         return EndpointComparison::Incomparable;
+    }
+    match compare_bottom_deck_risks(left, right) {
+        Ordering::Less => return EndpointComparison::PreferLeft(ComparisonReason::BottomDeckRisk),
+        Ordering::Greater => {
+            return EndpointComparison::PreferRight(ComparisonReason::BottomDeckRisk);
+        }
+        Ordering::Equal => {}
     }
     // This development comparison schedules a held play versus spending
     // the turn on a clue. Clue-versus-clue comparisons retain their causal
@@ -1201,6 +1213,20 @@ fn compare_endpoints(
     }
 }
 
+fn compare_bottom_deck_risks(
+    left: &PlannerActionEvaluation,
+    right: &PlannerActionEvaluation,
+) -> Ordering {
+    let horizon = usize::from(
+        left.projection
+            .common_horizon()
+            .min(right.projection.common_horizon()),
+    );
+    left.projection
+        .bottom_deck_risks_at(horizon)
+        .cmp(&right.projection.bottom_deck_risks_at(horizon))
+}
+
 fn symbolic_fallback_comparison(
     left: &PlannerActionEvaluation,
     right: &PlannerActionEvaluation,
@@ -1234,6 +1260,10 @@ fn symbolic_fallback_comparison(
         (
             right.symbolic_line.strikes.cmp(&left.symbolic_line.strikes),
             ComparisonReason::KnownStrikes,
+        ),
+        (
+            compare_bottom_deck_risks(left, right).reverse(),
+            ComparisonReason::BottomDeckRisk,
         ),
         (
             left.preference
@@ -1725,6 +1755,58 @@ impl std::error::Error for PlannerError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewed_turn_eleven_self_bluff_avoids_the_blue_three_bottom_deck_risk() {
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s3.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(10).unwrap();
+        let view = state.view_for(state.current_player()).unwrap();
+        let information = InformationSet::new(&view).unwrap();
+        let result = plan_move(
+            &information,
+            SupportedConvention::HGroup(crate::HGroupProfile::Max),
+            PlannerConfig::default(),
+        )
+        .unwrap();
+        let three = Action::Clue {
+            target: hanabi_core::PlayerId::new(3),
+            clue: Clue::Rank(hanabi_core::Rank::Three),
+        };
+        let four = Action::Clue {
+            target: hanabi_core::PlayerId::new(1),
+            clue: Clue::Rank(hanabi_core::Rank::Four),
+        };
+        let find = |action| {
+            result
+                .root_actions
+                .iter()
+                .find(|root| root.action == action)
+                .unwrap()
+        };
+        assert_eq!(find(three).projection.maximum_bottom_deck_risks(), 0);
+        assert!(find(four).projection.maximum_bottom_deck_risks() > 0);
+        let unknown_discard = find(Action::Discard(hanabi_core::CardId::new(9)));
+        assert!(unknown_discard.projection.steps.is_empty());
+        assert_eq!(
+            unknown_discard.projection.unresolved_discard_risk,
+            Some(hanabi_core::CardId::new(9))
+        );
+        assert_eq!(
+            unknown_discard.projection.maximum_bottom_deck_risks(),
+            0,
+            "an unknown identity must not become a known loss"
+        );
+        assert!(matches!(
+            compare_endpoints(find(three), find(four)),
+            EndpointComparison::PreferLeft(
+                ComparisonReason::BottomDeckRisk | ComparisonReason::SavePrinciple
+            )
+        ));
+        assert_eq!(result.best_action, three, "{:#?}", result.comparisons);
+    }
 
     #[test]
     fn save_violation_cannot_be_outvoted_by_priority_or_a_trimmed_summary() {

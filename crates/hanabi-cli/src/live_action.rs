@@ -365,6 +365,9 @@ fn projected_step_json(table_id: u64, step: &hanabi_search::PlanStep) -> Value {
         "cluesSpent": step.consequences.clues_spent, "cluesGained": step.consequences.clues_gained,
         "discards": step.consequences.discards,
         "savePrincipleViolation": step.consequences.save_principle_violation.map(|reason| format!("{reason:?}")),
+        "bottomDeckRisk": step.consequences.bottom_deck_risk.map(|card| json!({
+            "suitIndex": card.suit.index(), "rank": card.rank.number(),
+        })),
     })
 }
 
@@ -379,6 +382,7 @@ fn projection_evidence_json(table_id: u64, evidence: &hanabi_search::ProjectionE
             "actions": checkpoint.actions, "discards": checkpoint.discards,
             "positionValue": position_value_json(checkpoint.value),
         })).collect::<Vec<_>>(),
+        "unresolvedDiscardRisk": evidence.unresolved_discard_risk.map(hanabi_core::CardId::index),
         "clueBranches": evidence.clue_branches.iter().map(|branch| json!({
             "turn": branch.turn + 1, "touched": branch.touched.iter().map(|card| card.index()).collect::<Vec<_>>(),
             "projection": projection_evidence_json(table_id, &branch.continuation),

@@ -226,6 +226,25 @@ fn continue_plan<const REUSE_SELECTED: bool>(
             current,
         ) else {
             let mut frontier = PlanFrontier::IdentityBranch;
+            if let Action::Discard(card) = current {
+                // An unexecuted unknown discard is not evidence of zero loss.
+                // Keep it as a possible hazard without inventing an identity,
+                // spending the turn, or crediting a token/draw.
+                if LogicalDeductions::new(public.clone())
+                    .ok()
+                    .and_then(|deductions| deductions.possible_identities(card))
+                    .is_some_and(|identities| {
+                        identities.iter().any(|identity| {
+                            super::is_eventually_useful(&public, identity)
+                                && !public.hands.iter().flatten().any(|other| {
+                                    other.id != card && other.identity == Some(identity)
+                                })
+                        })
+                    })
+                {
+                    plan.record_unresolved_discard_risk(card);
+                }
+            }
             if let Action::Clue { target, clue } = current {
                 let outcomes = clue_touch_outcomes(&public, target, clue);
                 if outcomes.len() > *branch_budget {
@@ -302,7 +321,10 @@ fn continue_plan<const REUSE_SELECTED: bool>(
             break;
         };
         if let Action::Discard(card) = current {
-            consequences.save_principle_violation = important_discard(&public, profile, card);
+            (
+                consequences.save_principle_violation,
+                consequences.bottom_deck_risk,
+            ) = important_discard(&public, profile, card);
         }
         if consequences.score_gain > 0 {
             if let Action::Play(card) = current {
@@ -392,16 +414,18 @@ fn important_discard(
     source: &PlayerView,
     profile: HGroupProfile,
     card: CardId,
-) -> Option<super::SavePrincipleViolation> {
+) -> (Option<super::SavePrincipleViolation>, Option<Card>) {
     use super::SavePrincipleViolation as Loss;
     let observed = identity_of(source, card);
     if observed.is_some_and(|identity| !super::is_eventually_useful(source, identity)) {
-        return None;
+        return (None, None);
     }
     if observed.is_some_and(|identity| super::is_critical(source, identity)) {
-        return Some(Loss::CriticalCard);
+        return (Some(Loss::CriticalCard), None);
     }
-    let deductions = LogicalDeductions::new(source.clone()).ok()?;
+    let Ok(deductions) = LogicalDeductions::new(source.clone()) else {
+        return (None, None);
+    };
     let inferred = super::infer_h_group(&deductions, profile);
     // A known replacement can support an intentional transfer. Merely having
     // an unknown slot which COULD contain another copy cannot justify a loss.
@@ -415,12 +439,14 @@ fn important_discard(
                 .and_then(|note| note.identities.iter().next())
         })
     };
-    let identity = known(card)?;
+    let Some(identity) = known(card) else {
+        return (None, None);
+    };
     if !super::is_eventually_useful(source, identity) {
-        return None;
+        return (None, None);
     }
     if super::is_critical(source, identity) {
-        return Some(Loss::CriticalCard);
+        return (Some(Loss::CriticalCard), None);
     }
     if source
         .hands
@@ -428,13 +454,13 @@ fn important_discard(
         .flatten()
         .any(|other| other.id != card && known(other.id) == Some(identity))
     {
-        return None;
+        return (None, None);
     }
     if identity.rank == hanabi_core::Rank::Two {
-        return Some(Loss::UniqueTwo);
+        return (Some(Loss::UniqueTwo), Some(identity));
     }
     if is_playable_now(source, identity) {
-        return Some(Loss::UniquePlayable);
+        return (Some(Loss::UniquePlayable), Some(identity));
     }
     let gotten = inferred.gotten();
     let gotten = &gotten;
@@ -453,11 +479,16 @@ fn important_discard(
         .collect::<Vec<_>>();
     // All intervening ranks must be clued/promised or on Finesse Position.
     // Mere visibility is only Phantom Playability and is not this invariant.
-    ((source.play_stacks[identity.suit.index()].len() + 1)..usize::from(identity.rank.number()))
+    let save_violation = ((source.play_stacks[identity.suit.index()].len() + 1)
+        ..usize::from(identity.rank.number()))
         .all(|rank| {
             connectors.contains(&Card::new(identity.suit, hanabi_core::Rank::ALL[rank - 1]))
         })
-        .then_some(Loss::UniqueDelayedPlayable)
+        .then_some(Loss::UniqueDelayedPlayable);
+    // Even a distant connector can be stranded at the bottom of the deck.
+    // Do not confuse absence of immediate Save urgency with a harmless loss.
+    // https://hanabi.github.io/level-25/#the-load-clue
+    (save_violation, Some(identity))
 }
 
 /// Partitions clue outcomes without assigning hidden card identities. The
@@ -707,6 +738,36 @@ mod tests {
     use super::*;
 
     #[test]
+    fn reviewed_turn_eleven_distinguishes_blue_three_risk_from_yellow_trash() {
+        // Human-reviewed p4v0s3 turn 11: 4s to Bob loses Donald's only
+        // visible b3; the 3s Self-Bluff instead leaves Bob to discard y1.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s3.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(10).unwrap();
+        let source = state.view_for(state.current_player()).unwrap();
+        assert_eq!(
+            important_discard(&source, HGroupProfile::Max, CardId::new(17)),
+            (
+                None,
+                Some(Card::new(hanabi_core::Suit::Blue, hanabi_core::Rank::Three))
+            )
+        );
+        assert_eq!(
+            important_discard(&source, HGroupProfile::Max, CardId::new(5)),
+            (None, None)
+        );
+        // Bob's p4 has a replacement in Cathy's hidden hand, but Cathy cannot
+        // use that simulator truth. Donald, who sees both copies, can.
+        let donald = state.view_for(PlayerId::new(3)).unwrap();
+        assert_eq!(
+            important_discard(&donald, HGroupProfile::Max, CardId::new(16)),
+            (None, None)
+        );
+    }
+
+    #[test]
     fn reviewed_turn_fourteen_rejects_losing_cathys_delayed_purple_four() {
         // p4v0s3 turn 14, human-reviewed: saving the 2s exposes Cathy's p4
         // to a discard. Bob can see p2/p3 already touched in Donald's hand.
@@ -717,14 +778,14 @@ mod tests {
         let state = replay.state_at_turn(13).unwrap();
         let source = state.view_for(state.current_player()).unwrap();
         assert_eq!(
-            important_discard(&source, HGroupProfile::Max, CardId::new(10)),
+            important_discard(&source, HGroupProfile::Max, CardId::new(10)).0,
             Some(super::super::SavePrincipleViolation::UniqueDelayedPlayable)
         );
         // The other p4 is in Bob's hidden hand, not evidence that the visible
         // p4 is disposable. Conversely, no loss may be invented for a blank.
         assert_eq!(
             important_discard(&source, HGroupProfile::Max, CardId::new(16)),
-            None
+            (None, None)
         );
         let rank_two = Action::Clue {
             target: PlayerId::new(2),

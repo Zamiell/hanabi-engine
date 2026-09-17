@@ -20,6 +20,9 @@ pub struct ProjectedConsequences {
     pub clues_gained: u8,
     pub strikes: u8,
     pub save_principle_violation: Option<SavePrincipleViolation>,
+    /// A still-needed identity discarded without a known replacement. This
+    /// records bottom-deck risk, not a guaranteed loss or an illegal action.
+    pub bottom_deck_risk: Option<Card>,
 }
 
 /// Important-card loss established in the projection's source perspective.
@@ -154,6 +157,9 @@ pub struct ProjectionEvidence {
     pub steps: Vec<PlanStep>,
     pub alternatives: Vec<ConditionalAlternative>,
     pub frontier: PlanFrontier,
+    /// The next selected discard could lose a needed identity, but its card
+    /// is unknown. It has not executed and is not a proven harmless discard.
+    pub unresolved_discard_risk: Option<CardId>,
     pub resources: ResourceSchedule,
     pub windows: Vec<super::ActionWindow>,
     /// Equal elapsed-turn evaluations; the full continuation is retained.
@@ -172,6 +178,41 @@ pub struct ClueTouchBranch {
 }
 
 impl ProjectionEvidence {
+    #[cfg(test)]
+    pub(crate) fn maximum_bottom_deck_risks(&self) -> usize {
+        let prefix = self
+            .steps
+            .iter()
+            .filter(|step| step.consequences.bottom_deck_risk.is_some())
+            .count();
+        self.clue_branches
+            .iter()
+            .map(|branch| branch.continuation.maximum_bottom_deck_risks())
+            .max()
+            .unwrap_or(0)
+            .max(prefix)
+    }
+
+    /// Compare strategic risks within a shared lookahead horizon. A longer
+    /// forecast reaching a loss is not evidence that a shorter, unfinished
+    /// forecast avoids it. Full tail evidence remains available to diagnostics;
+    /// immediate Save Principle violations are assessed independently.
+    pub(crate) fn bottom_deck_risks_at(&self, horizon: usize) -> usize {
+        let prefix = self
+            .steps
+            .iter()
+            .take(horizon)
+            .filter(|step| step.consequences.bottom_deck_risk.is_some())
+            .count()
+            + usize::from(self.unresolved_discard_risk.is_some() && self.steps.len() <= horizon);
+        self.clue_branches
+            .iter()
+            .map(|branch| branch.continuation.bottom_deck_risks_at(horizon))
+            .max()
+            .unwrap_or(0)
+            .max(prefix)
+    }
+
     /// Includes every modeled tail, even when summaries trim to a shared
     /// horizon. Conditional losses are hazards, not guaranteed outcomes.
     pub(crate) fn maximum_save_violations(&self) -> usize {
@@ -350,6 +391,10 @@ impl ConditionalPlan {
         self.evidence.frontier = frontier;
     }
 
+    pub(super) fn record_unresolved_discard_risk(&mut self, card: CardId) {
+        self.evidence.unresolved_discard_risk = Some(card);
+    }
+
     pub(super) fn summarize(&self) -> SymbolicLineOutcome {
         if !self.evidence.clue_branches.is_empty() {
             return self.summarize_branches();
@@ -437,6 +482,53 @@ mod tests {
     use hanabi_core::CardId;
 
     use super::*;
+
+    #[test]
+    fn unknown_discard_risk_is_not_a_loss_beyond_the_shared_horizon() {
+        let mut plan = ConditionalPlan::new(2);
+        plan.push(
+            0,
+            ProjectedAction {
+                actor: PlayerId::new(0),
+                action: Action::Discard(CardId::new(4)),
+            },
+            ProjectedConsequences {
+                bottom_deck_risk: Some(Card::new(
+                    hanabi_core::Suit::Blue,
+                    hanabi_core::Rank::Three,
+                )),
+                ..Default::default()
+            },
+        );
+        plan.record_unresolved_discard_risk(CardId::new(5));
+        let evidence = plan.into_evidence();
+        assert_eq!(evidence.maximum_bottom_deck_risks(), 1);
+        assert_eq!(
+            evidence.bottom_deck_risks_at(0),
+            0,
+            "tail risk is retained but not charged before the comparison horizon"
+        );
+        assert_eq!(
+            evidence.bottom_deck_risks_at(1),
+            2,
+            "unknown next discard is a possible hazard only when reached"
+        );
+        let mut prefix = ConditionalPlan::new(2);
+        prefix.add_clue_branch(
+            0,
+            vec![CardId::new(4)],
+            ConditionalPlan {
+                evidence,
+                ..Default::default()
+            },
+        );
+        prefix.add_clue_branch(0, vec![CardId::new(5)], ConditionalPlan::new(2));
+        assert_eq!(
+            prefix.into_evidence().bottom_deck_risks_at(1),
+            2,
+            "mutually exclusive branches use a maximum, not a sum"
+        );
+    }
 
     #[test]
     fn shared_checkpoints_retain_conditional_tail_risk() {
