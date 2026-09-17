@@ -6,7 +6,7 @@ mod cooked;
 
 use crate::hanabi_live::HanabiLiveCard;
 
-pub(crate) fn deck_from_seed(seed: &str, players: usize) -> Result<Vec<HanabiLiveCard>, String> {
+pub(crate) fn player_count_from_seed(seed: &str) -> Result<usize, String> {
     let (count, tail) = seed
         .strip_prefix('p')
         .and_then(|s| s.split_once('v'))
@@ -14,14 +14,21 @@ pub(crate) fn deck_from_seed(seed: &str, players: usize) -> Result<Vec<HanabiLiv
     let (variant, suffix) = tail
         .split_once('s')
         .ok_or("expected a canonical Hanabi Live seed such as p4v0s1")?;
-    if !matches!(count, "2" | "3" | "4" | "5") || count.parse::<usize>().ok() != Some(players) {
-        return Err("seed player count must match the replay's 2–5 players".to_owned());
+    if !matches!(count, "2" | "3" | "4" | "5") {
+        return Err("seed requires 2–5 players".to_owned());
     }
     if variant != "0" {
         return Err("seed generation only supports variant 0 (No Variant)".to_owned());
     }
     if suffix.is_empty() || !suffix.bytes().all(|b| b.is_ascii_digit()) {
         return Err("canonical seed suffix must be a nonempty decimal number".to_owned());
+    }
+    Ok(usize::from(count.as_bytes()[0] - b'0'))
+}
+
+pub(crate) fn deck_from_seed(seed: &str, players: usize) -> Result<Vec<HanabiLiveCard>, String> {
+    if player_count_from_seed(seed)? != players {
+        return Err("seed player count must match the replay's 2–5 players".to_owned());
     }
     let mut deck = hanabi_core::standard_deck()
         .into_iter()

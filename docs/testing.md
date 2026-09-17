@@ -1,5 +1,10 @@
 # Test provenance
 
+Seeded replay fixtures may omit `players`: the canonical seed supplies the
+player count and the loader uses Alice, Bob, Cathy, Donald, and Emily in order.
+Explicit names are preserved. Replays without a seed must supply `players`.
+Generated Hanab Live replay links are unchanged by omitting default names.
+
 Convention tests must not make an invented game authoritative merely because the
 engine once played it successfully. A legal replay is not necessarily a
 strategically valid replay, and a passing test is not evidence that its expected

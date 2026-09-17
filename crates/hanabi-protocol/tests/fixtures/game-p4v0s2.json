@@ -1,5 +1,4 @@
 {
-  "players": ["Alice", "Bob", "Cathy", "Donald"],
   "actions": [
     { "type": 2, "target": 1, "value": 2 },
     { "type": 3, "target": 3, "value": 2 },

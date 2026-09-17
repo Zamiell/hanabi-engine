@@ -18,13 +18,28 @@ impl<'de> Deserialize<'de> for HanabiLiveReplay {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         #[derive(Deserialize)]
         struct WireReplay {
-            players: Vec<String>,
+            players: Option<Vec<String>>,
             deck: Option<Vec<HanabiLiveCard>>,
             seed: Option<String>,
             actions: Vec<HanabiLiveAction>,
             options: Option<HanabiLiveOptions>,
         }
         let wire = WireReplay::deserialize(deserializer)?;
+        let players = match wire.players {
+            Some(players) => players,
+            None => {
+                let seed = wire.seed.as_deref().ok_or_else(|| {
+                    serde::de::Error::custom("replay requires players when no seed is provided")
+                })?;
+                let count =
+                    crate::seed::player_count_from_seed(seed).map_err(serde::de::Error::custom)?;
+                // Hanab Live's DEFAULT_PLAYER_NAMES; explicit names are preserved.
+                ["Alice", "Bob", "Cathy", "Donald", "Emily"][..count]
+                    .iter()
+                    .map(|name| (*name).to_owned())
+                    .collect()
+            }
+        };
         // Explicit decks remain authoritative, including custom/edited deals
         // whose original seed is still present as descriptive metadata.
         let deck = if let Some(deck) = wire.deck {
@@ -43,11 +58,10 @@ impl<'de> Deserialize<'de> for HanabiLiveReplay {
                 .seed
                 .as_deref()
                 .ok_or_else(|| serde::de::Error::custom("replay requires a deck or seed"))?;
-            crate::seed::deck_from_seed(seed, wire.players.len())
-                .map_err(serde::de::Error::custom)?
+            crate::seed::deck_from_seed(seed, players.len()).map_err(serde::de::Error::custom)?
         };
         Ok(Self {
-            players: wire.players,
+            players,
             deck,
             actions: wire.actions,
             options: wire.options,

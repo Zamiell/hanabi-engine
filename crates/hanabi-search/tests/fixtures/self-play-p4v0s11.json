@@ -1,6 +1,5 @@
 {
   "seed": "p4v0s11",
-  "players": ["Alice", "Bob", "Cathy", "Donald"],
   "actions": [
     {
       "target": 2,
