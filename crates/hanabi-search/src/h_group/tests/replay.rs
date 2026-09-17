@@ -1,6 +1,68 @@
 use super::*;
 
 #[test]
+fn first_replay_final_clue_does_not_override_an_available_play() {
+    // Human-reviewed p4v0s415 turn 45: Alice can advance p4 -> p5 herself.
+    // The final-clue-over-idle-discard preference must not override a play.
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    let state = fixture.state_at_turn(44).unwrap();
+    let analysis = crate::analyze_position(
+        &state.view_for(PlayerId::new(0)).unwrap(),
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    let green = analysis
+        .planner
+        .root_actions
+        .iter()
+        .find(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(2),
+                    clue: Clue::Suit(Suit::Green),
+                }
+        })
+        .unwrap();
+    assert!(!green.preference.advances_terminal_plan());
+}
+
+#[test]
+fn first_replay_playable_five_save_does_not_eject() {
+    // Human-reviewed p4v0s415 turn 34: both g5 and b5 play immediately;
+    // choosing rank over color therefore does not forgo a play (RCE premise).
+    // https://hanabi.github.io/extras/ejections/#the-rank-choice-ejection-with-a-number-2-or-a-number-5-rce
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    let before = fixture.state_at_turn(33).unwrap();
+    let d = LogicalDeductions::new(before.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    assert!(h_group_clue_candidates(&d, HGroupProfile::Max).iter().any(
+        |candidate| candidate.action
+            == Action::Clue {
+                target: PlayerId::new(0),
+                clue: Clue::Rank(Rank::Five)
+            }
+    ));
+    let state = fixture.state_at_turn(34).unwrap();
+    for observer in 0..4 {
+        let d = LogicalDeductions::new(state.view_for(PlayerId::new(observer)).unwrap()).unwrap();
+        let inferred = infer_h_group(&d, HGroupProfile::Max);
+        assert!(
+            !inferred
+                .signals
+                .iter()
+                .any(|s| s.turn == 33 && s.kind == HGroupMoveKind::RankChoiceEjection),
+            "observer {observer}"
+        );
+    }
+}
+
+#[test]
 fn fifth_replay_burn_preserves_the_final_playing_clock() {
     // p4v0s1 turn 48: y5, g4 and g5 are known; all needed cards are held.
     // https://hanabi.github.io/level-8/#burning-end-game-stalling
@@ -864,6 +926,42 @@ fn first_expert_replay_reviewed_prefix_matches_engine() {
     .expect("active replay is valid");
     replay.replay().expect("generated continuation is legal");
     assert_expert_replay_matches_engine("p4v0s415", &replay);
+}
+
+#[test]
+fn first_replay_three_bluff_does_not_chop_move_recipient_cards() {
+    // Human-reviewed p4v0s415 turn 30 is a 3 Bluff, not a Trash Chop Move.
+    // #18's historical rank-3 promise cannot account for p3 after #18 played b3.
+    // https://hanabi.github.io/level-13/#the-3-bluff
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    for turn in [30, 31, 39] {
+        let state = fixture.state_at_turn(turn).unwrap();
+        for observer in 0..4 {
+            let deductions =
+                LogicalDeductions::new(state.view_for(PlayerId::new(observer)).unwrap()).unwrap();
+            let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+            assert!(
+                !inferred.signals.iter().any(|signal| {
+                    signal.turn == 29
+                        && matches!(
+                            signal.kind,
+                            HGroupMoveKind::ChopMove | HGroupMoveKind::TrashChopMove
+                        )
+                }),
+                "turn {turn}, observer {observer}: {:#?}",
+                inferred.signals
+            );
+            assert!(
+                !inferred.signals.iter().any(|signal| {
+                    signal.turn == 30 && signal.kind == HGroupMoveKind::TimeTravelChopMove
+                }),
+                "the blind play secures p3; it is not a zero-value Time Travel Chop Move: turn {turn}, observer {observer}"
+            );
+        }
+    }
 }
 
 #[test]

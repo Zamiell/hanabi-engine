@@ -164,6 +164,11 @@ pub(crate) fn apply_chop_move_effects(
         effects.invisibly_clued,
         &super::CardSet::default(),
     );
+    // Protection journals retain historical cards. Only cards still held at
+    // this event can account for an unplayed identity: a departed card's old
+    // ambiguous promise must not narrow into another identity as stacks grow.
+    // Reviewed p4v0s415 turn 30: #18 has already played as b3, not a held p3.
+    gotten.retain(|card| context.before.hands.iter().any(|hand| hand.contains(card)));
     // Current touches cannot account for themselves; TCM identities must
     // already have been accounted for before positive clue facts are applied.
     for card in touched {

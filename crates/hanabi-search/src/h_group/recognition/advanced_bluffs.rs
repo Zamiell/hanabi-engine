@@ -721,12 +721,32 @@ pub(in crate::h_group) fn apply_duplication_effects(
                 return;
             };
 
-            let valuable_extra = origin.new_non_focus.iter().copied().any(|extra| {
-                context
-                    .historical
-                    .identity(extra)
-                    .is_some_and(|candidate| !is_trash_at(origin.stack_heights, candidate))
-            });
+            // For a blind play the clued focus is also an extra card: it is
+            // distinct from the duplicated card that just played. Level 17's
+            // Duplicitous Blind-Play explicitly values saving that focus.
+            // Only direct plays consume the focus itself. Reviewed p4v0s415
+            // turn 31: duplicated g4 still secures Donald's newly clued p3.
+            let newly_secured_focus = (direct.is_none()
+                && !origin.previously_gotten.contains(&origin.focus))
+            .then_some(origin.focus);
+            let valuable_extra = origin
+                .new_non_focus
+                .iter()
+                .copied()
+                .chain(newly_secured_focus)
+                .any(|extra| {
+                    context.historical.identity(extra).map_or_else(
+                        || {
+                            extra == origin.focus
+                                && origin
+                                    .play_identities
+                                    .union(origin.save_identities)
+                                    .iter()
+                                    .any(|candidate| !is_trash_at(origin.stack_heights, candidate))
+                        },
+                        |candidate| !is_trash_at(origin.stack_heights, candidate),
+                    )
+                });
             let filled_in = view
                 .history
                 .iter()

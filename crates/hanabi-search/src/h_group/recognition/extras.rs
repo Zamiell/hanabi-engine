@@ -982,6 +982,21 @@ pub(in crate::h_group) fn apply_extra_effects(
                         if !meaning.focus_was_chop {
                             return false;
                         }
+                        // RCE relies on choosing a Save that delays the play
+                        // instead of a color clue that gets it played now.
+                        // A rank Save whose whole surviving domain is already
+                        // playable loses no tempo and cannot signal an Ejection.
+                        // Reviewed p4v0s415 turn 34: Alice's 5 is g5 or b5;
+                        // both are playable, so Cathy must not eject her y1.
+                        // https://hanabi.github.io/extras/ejections/#the-rank-choice-ejection-with-a-number-2-or-a-number-5-rce
+                        let possibilities = meaning.play_identities.union(meaning.save_identities);
+                        if !possibilities.is_empty()
+                            && possibilities.iter().all(|identity| {
+                                is_playable_at(context.before.stack_heights, identity)
+                            })
+                        {
+                            return false;
+                        }
                         let Some(known) = context.historical.identity(meaning.focus) else {
                             return false;
                         };

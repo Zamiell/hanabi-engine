@@ -1692,6 +1692,11 @@ fn endgame_progress(
     if !((candidate.purpose() == CluePurpose::Play && candidate.immediate_play())
         || is_multi_action_ignition)
         || convention_known_trash_discard(view, &analysis.inferences).is_none()
+        // This override replaces an unnecessary token-generating discard,
+        // not an already available play that advances the same final plan.
+        // Reviewed p4v0s415 turn 45: playing p4 unlocks Alice's p5; the final
+        // g5 clue must not categorically outrank that productive action.
+        || !analysis.inferences.playable_now.is_empty()
     {
         return None;
     }
