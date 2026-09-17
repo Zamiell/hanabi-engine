@@ -526,7 +526,14 @@ pub(in crate::h_group) fn apply_phantom_effects(
     }
 
     let before_hand = &context.before.hands[player.index()];
-    let locked = !before_hand.is_empty() && before_hand.iter().all(|held| gotten.contains(held));
+    // A discard cannot make itself a Sacrifice by chop-moving the actor's
+    // last unprotected card during this same event. Locked-hand status is a
+    // precondition, not a consequence of interpreting the discard.
+    // https://hanabi.github.io/level-22/#the-sacrifice-discard
+    let locked = !before_hand.is_empty()
+        && before_hand
+            .iter()
+            .all(|held| context.before.protected.contains(held));
     let discarded_was_clued = effects.explicitly_clued.contains(card);
     let removed_before = view
         .history

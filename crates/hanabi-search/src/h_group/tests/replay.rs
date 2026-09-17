@@ -2926,6 +2926,67 @@ fn third_replay_gentlemans_discard_transfers_from_the_recipients_perspective() {
 }
 
 #[test]
+fn fourth_replay_gentlemans_discard_is_not_a_self_created_sacrifice() {
+    // Reviewed p4v0s3 turns 16–18: Donald transfers p2 to Bob's #18.
+    let fixture = expert_replay_p4v0s3();
+    for (turn, observer) in [(16, 0), (16, 1), (17, 1)] {
+        let state = fixture
+            .state_at_turn(turn)
+            .expect("reviewed prefix is legal");
+        let view = state
+            .view_for(PlayerId::new(observer))
+            .expect("player view");
+        let deductions = LogicalDeductions::new(view).expect("logical view");
+        let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+        if observer == 1 {
+            assert!(
+                inferred.cards.iter().any(|note| {
+                    note.card == CardId::new(18)
+                        && note.identities
+                            == IdentitySet::singleton(Card::new(Suit::Purple, Rank::Two))
+                }),
+                "Bob must receive the transfer: {inferred:#?}"
+            );
+            assert!(inferred.playable_now.contains(&CardId::new(18)));
+        }
+        assert!(inferred.signals.iter().any(|signal| {
+            signal.turn == 15
+                && signal.kind == HGroupMoveKind::GentlemansDiscard
+                && signal.target == Some(PlayerId::new(1))
+                && signal.cards.contains(&CardId::new(18))
+        }));
+        assert!(!inferred.signals.iter().any(|signal| {
+            signal.turn == 15 && signal.kind == HGroupMoveKind::SacrificeDiscard
+        }));
+    }
+}
+
+#[test]
+fn fourth_replay_projects_the_received_purple_two() {
+    let state = expert_replay_p4v0s3().state_at_turn(16).unwrap();
+    let source = state.view_for(PlayerId::new(0)).unwrap();
+    let source = ProspectiveTransition::clue_by(
+        &source,
+        PlayerId::new(0),
+        PlayerId::new(1),
+        Clue::Suit(Suit::Green),
+        &[CardId::new(7)],
+    );
+    let (deductions, replay) = PerspectiveProjector::new(&source, HGroupProfile::Max)
+        .project(PlayerId::new(1), PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    let inferred = infer_h_group_from_replay(&deductions, replay, HGroupProfile::Max);
+    assert!(
+        inferred.playable_now.contains(&CardId::new(18)),
+        "{inferred:#?}"
+    );
+    assert_eq!(
+        select_h_group_action(&deductions, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(18)))
+    );
+}
+
+#[test]
 fn third_replay_move_fourteen_applies_normal_priority_to_the_transferred_card() {
     let fixture = expert_replay_p4v0s2();
     let state = fixture.state_at_turn(13).expect("fixture prefix is legal");

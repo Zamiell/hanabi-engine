@@ -227,6 +227,11 @@ impl ReplayReducer {
                 clue_tokens: self.historical_clue_tokens,
                 deck_size: self.historical_deck_size,
                 early_game: self.early_game,
+                protected: protected_cards(
+                    &self.explicitly_clued,
+                    &self.invisibly_clued,
+                    &self.chop_moved,
+                ),
                 already_playing: self.already_playing.materialized().clone(),
                 forced_playable: self.forced_playable.materialized().clone(),
                 older_play_obligations,

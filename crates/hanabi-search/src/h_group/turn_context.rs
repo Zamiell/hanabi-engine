@@ -96,6 +96,8 @@ pub(super) struct HGroupTurnSnapshot {
     pub(super) clue_tokens: u8,
     pub(super) deck_size: usize,
     pub(super) early_game: bool,
+    /// Protection established before the event, excluding its own chop moves.
+    pub(super) protected: CardSet,
     /// Convention play commitments established strictly before this event.
     /// Rule recognizers compare this snapshot with their mutable post-event
     /// effects instead of reconstructing a subtly different baseline.
