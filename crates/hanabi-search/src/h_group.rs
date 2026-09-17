@@ -1690,6 +1690,33 @@ fn schedule_connection(
         // an earlier player blind-play a Finesse. Searching both connection
         // kinds in a single player loop incorrectly stopped at that earlier
         // Finesse and never reached an existing clued connector.
+        // A third-party ambiguous Prompt in our own hand does not override a visible
+        // Finesse before its owner has had a chance to demonstrate it.
+        // The clue recipient's hypothetical Self-Prompts remain alternatives
+        // in the focus-identity interpretation, not this external deferral.
+        // User-reviewed p4v0s3 turn 17; the fallback becomes active only on
+        // an unexcused decline, not on a prerequisite play.
+        // https://hanabi.github.io/level-5/#the-ambiguous-finesse
+        let visible_prompt_alternative = (0..search_len).find_map(|distance| {
+            let index = (actor_index + distance) % hands.len();
+            let actor = PlayerId::new(u8::try_from(index).expect("player index"));
+            if actor == giver || actor == target || actor == view.observer {
+                return None;
+            }
+            let card = hands[index].iter().rev().copied().find(|card| {
+                *card != focus
+                    && !promptable_before_clue.contains(card)
+                    && !invisibly_clued.contains(card)
+                    && !scheduled_cards.contains(card)
+            })?;
+            (identity_of(view, card) == Some(expected)
+                && !already_playing.contains(&card)
+                && !pending
+                    .iter()
+                    .any(|connection| connection.cards.contains(&card)))
+            .then_some((actor, card))
+        });
+        let mut deferred_prompt = None;
         for distance in 0..search_len {
             if found.is_some() {
                 break;
@@ -1747,9 +1774,26 @@ fn schedule_connection(
                 })
                 .collect::<Vec<_>>();
             if !prompt_cards.is_empty() {
+                if actor == view.observer
+                    && actor != target
+                    && visible_prompt_alternative.is_some()
+                    && prompt_cards.iter().all(|card| {
+                        facts[card.index()].identity_mask() != 1 << expected.index()
+                            && convention_facts.known_identity(*card) != Some(expected)
+                    })
+                {
+                    deferred_prompt = Some((actor, prompt_cards));
+                    continue;
+                }
                 found = Some((actor, prompt_cards, HGroupConnectionKind::Prompt));
                 actor_index = candidate_index;
                 break;
+            }
+        }
+        if found.is_none() && deferred_prompt.is_some() {
+            if let Some((actor, card)) = visible_prompt_alternative {
+                found = Some((actor, vec![card], HGroupConnectionKind::Finesse));
+                actor_index = actor.index();
             }
         }
         let mut unknown_observer_fallback = None;
@@ -2023,6 +2067,25 @@ fn schedule_connection(
                 step: offset,
             },
         );
+        if kind == HGroupConnectionKind::Finesse
+            && visible_prompt_alternative.is_some_and(|(visible, _)| visible == actor)
+        {
+            if let Some((actor, cards)) = deferred_prompt {
+                pending.defer_prompt(
+                    promise,
+                    ConnectionObligation {
+                        promise: PromiseId::UNASSIGNED,
+                        actor,
+                        cards,
+                        expected,
+                        focus_identity,
+                        kind: HGroupConnectionKind::Prompt,
+                        focus,
+                        step: offset,
+                    },
+                );
+            }
+        }
         if kind == HGroupConnectionKind::Finesse && promise != PromiseId::UNASSIGNED {
             invisibly_clued.extend_from(EffectSource::Promise(promise), connection_cards);
         }

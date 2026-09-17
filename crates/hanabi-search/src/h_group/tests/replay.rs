@@ -2987,6 +2987,27 @@ fn fourth_replay_projects_the_received_purple_two() {
 }
 
 #[test]
+fn fourth_replay_possible_prompt_waits_for_visible_finesse() {
+    // User-reviewed turn 17: Donald must let Cathy demonstrate g3; g2 is
+    // its prerequisite, not a decline of the visible Finesse.
+    for turn in [17, 19, 23] {
+        let state = expert_replay_p4v0s3().state_at_turn(turn).unwrap();
+        let d = LogicalDeductions::new(state.view_for(PlayerId::new(3)).unwrap()).unwrap();
+        let inferred = infer_h_group(&d, HGroupProfile::Max);
+        assert!(
+            !inferred.playable_now.contains(&CardId::new(17)),
+            "turn {turn}: {inferred:#?}"
+        );
+        if turn == 19 {
+            assert_eq!(
+                select_h_group_action(&d, HGroupProfile::Max),
+                Some(Action::Play(CardId::new(14)))
+            );
+        }
+    }
+}
+
+#[test]
 fn third_replay_move_fourteen_applies_normal_priority_to_the_transferred_card() {
     let fixture = expert_replay_p4v0s2();
     let state = fixture.state_at_turn(13).expect("fixture prefix is legal");

@@ -65,6 +65,7 @@ pub(super) enum ConnectionTransitionReason {
     IdentityRevealed,
     LayerExtended,
     PromptPrioritized,
+    VisibleFinesseDeclined,
 }
 
 /// Auditable lifecycle event for a connection. These records explain current
@@ -98,6 +99,7 @@ pub(super) struct ConnectionManager {
     transitions: Vec<ConnectionTransition>,
     provenance: Vec<PromiseProvenance>,
     next_promise: u32,
+    deferred_prompts: Vec<(PromiseId, ConnectionObligation)>,
 }
 
 /// Semantic relationship between a clue and an existing connection chain.
@@ -113,6 +115,52 @@ pub(super) enum ConnectionClueMatch {
 }
 
 impl ConnectionManager {
+    /// A possible own Prompt waits for the visible Finesse to be tried first.
+    /// <https://hanabi.github.io/level-5/#the-ambiguous-finesse>
+    pub(super) fn defer_prompt(&mut self, visible: PromiseId, fallback: ConnectionObligation) {
+        if visible != PromiseId::UNASSIGNED
+            && !self.deferred_prompts.iter().any(|(id, _)| *id == visible)
+        {
+            self.deferred_prompts.push((visible, fallback));
+        }
+    }
+
+    /// Only an actionable, unexcused decline transfers the obligation. Playing
+    /// a prerequisite or taking an urgent action is not a failed opportunity.
+    pub(super) fn resolve_deferred_prompts(
+        &mut self,
+        turn: u32,
+        actor: PlayerId,
+        declined: bool,
+        before_heights: [u8; 5],
+        after_heights: [u8; 5],
+    ) {
+        let deferred = core::mem::take(&mut self.deferred_prompts);
+        for (visible, fallback) in deferred {
+            if after_heights[fallback.expected.suit.index()] >= fallback.expected.rank.number() {
+                continue;
+            }
+            let Some(connection) = self.active.iter().find(|item| item.promise == visible) else {
+                continue;
+            };
+            if declined
+                && connection.actor == actor
+                && self.is_active(connection)
+                && before_heights[fallback.expected.suit.index()] + 1
+                    == fallback.expected.rank.number()
+            {
+                self.cancel_where(
+                    turn,
+                    ConnectionTransitionReason::VisibleFinesseDeclined,
+                    |item| item.promise == visible,
+                );
+                self.start(turn, fallback);
+            } else {
+                self.deferred_prompts.push((visible, fallback));
+            }
+        }
+    }
+
     pub(super) fn iter(&self) -> impl Iterator<Item = &ConnectionObligation> {
         self.active.iter()
     }
@@ -731,6 +779,64 @@ mod tests {
             focus: CardId::new(9),
             step: 0,
         }
+    }
+
+    #[test]
+    fn deferred_prompt_requires_an_actionable_decline() {
+        let mut manager = ConnectionManager::default();
+        let mut visible = obligation(vec![CardId::new(5)]);
+        visible.kind = HGroupConnectionKind::Finesse;
+        let promise = manager.start(3, visible);
+        let mut fallback = obligation(vec![CardId::new(7)]);
+        fallback.actor = PlayerId::new(2);
+        manager.defer_prompt(promise, fallback);
+        // A turn before the prerequisite plays is not an opportunity.
+        manager.resolve_deferred_prompts(4, PlayerId::new(1), true, [0; 5], [0; 5]);
+        assert_eq!(manager.active[0].actor, PlayerId::new(1));
+        // Nor is an excused turn, even after the prerequisite plays.
+        manager.resolve_deferred_prompts(
+            8,
+            PlayerId::new(1),
+            false,
+            [1, 0, 0, 0, 0],
+            [1, 0, 0, 0, 0],
+        );
+        assert_eq!(manager.active[0].actor, PlayerId::new(1));
+        manager.resolve_deferred_prompts(
+            12,
+            PlayerId::new(1),
+            true,
+            [1, 0, 0, 0, 0],
+            [1, 0, 0, 0, 0],
+        );
+        assert_eq!(manager.active.len(), 1);
+        assert_eq!(manager.active[0].actor, PlayerId::new(2));
+        assert_eq!(manager.active[0].kind, HGroupConnectionKind::Prompt);
+    }
+
+    #[test]
+    fn demonstrated_visible_finesse_drops_the_possible_prompt() {
+        let mut manager = ConnectionManager::default();
+        let promise = manager.start(3, obligation(vec![CardId::new(5)]));
+        let mut fallback = obligation(vec![CardId::new(7)]);
+        fallback.actor = PlayerId::new(2);
+        manager.defer_prompt(promise, fallback);
+        manager.advance_play(
+            4,
+            PlayerId::new(1),
+            CardId::new(5),
+            Card::new(Suit::Red, Rank::Two),
+            true,
+        );
+        manager.resolve_deferred_prompts(
+            4,
+            PlayerId::new(1),
+            false,
+            [1, 0, 0, 0, 0],
+            [2, 0, 0, 0, 0],
+        );
+        assert!(manager.deferred_prompts.is_empty());
+        assert!(manager.active.is_empty());
     }
 
     #[test]

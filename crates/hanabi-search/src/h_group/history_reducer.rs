@@ -302,6 +302,23 @@ impl ReplayReducer {
             };
             let execution = RuleExecutionContext::new(&context, view, profile);
             let mut transition = apply_post_event_rules(&execution, &mut effects);
+            let declined_actor = match entry.event {
+                ObservedEvent::Discarded { player, .. } => Some(player),
+                ObservedEvent::Clued { giver, .. }
+                    if !required_clue_deferral
+                        && !clue_permits_direct_play_deferral(&self.signals, entry.turn) =>
+                {
+                    Some(giver)
+                }
+                _ => None,
+            };
+            self.pending_connections.resolve_deferred_prompts(
+                entry.turn,
+                declined_actor.unwrap_or(view.observer),
+                declined_actor.is_some(),
+                context.before.stack_heights,
+                self.stack_heights,
+            );
             if action_is_settled {
                 if let Some(actor) = declined_with_clue {
                     let recognized_deferral =
