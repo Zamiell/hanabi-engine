@@ -304,6 +304,27 @@ impl ProjectedPositionValue {
         self
     }
 
+    /// Compare developed points at equal elapsed time, including held useful
+    /// cards. This is a strategic preference, not a guaranteed-score proof.
+    /// A surplus refund must not outweigh an additional developed card; only
+    /// new secured cards may account for additional hand congestion.
+    fn developed_points_preference(self, other: Self) -> bool {
+        let reserve = self.clue_demand.max(other.clue_demand);
+        self.score.saturating_add(self.secured_future_plays)
+            > other.score.saturating_add(other.secured_future_plays)
+            && self.clues >= reserve
+            && other.clues >= reserve
+            && self.exposed_critical_chops <= other.exposed_critical_chops
+            && self.save_pressure <= other.save_pressure
+            && self.foregone_touch_opportunities <= other.foregone_touch_opportunities
+            && self
+                .blocked_clued_cards
+                .saturating_sub(other.blocked_clued_cards)
+                <= self
+                    .secured_future_plays
+                    .saturating_sub(other.secured_future_plays)
+    }
+
     /// Unknown successors can break a genuine progress tie, but cannot buy
     /// away a token needed for a save, repair, or the follow-up clue itself.
     fn conditional_continuation_preference(self, other: Self) -> Option<bool> {
@@ -419,11 +440,13 @@ pub enum ExactSearchStatus {
 /// The strongest applicable dimension in a symbolic comparison.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ComparisonReason {
+    SavePrinciple,
     RotationDevelopment,
     ProtectedDevelopment,
     PolicyTier,
     TerminalProgress,
     KnownStrikes,
+    ConditionalStrikes,
     EndpointResources,
     ConditionalOpportunity,
     SpeculativeFinesse,
@@ -722,6 +745,37 @@ fn symbolic_result(
     })
 }
 
+/// One bounded strategic choice inside a forecast. Uses the same candidate
+/// admission and endpoint comparator as the root; its leaf policy does not
+/// recursively invoke this chooser.
+pub(crate) fn choose_projected_follow_up(
+    deductions: &LogicalDeductions,
+    profile: crate::HGroupProfile,
+    control: &crate::AnalysisControl,
+) -> Result<Option<Action>, crate::AnalysisStopped> {
+    let convention = SupportedConvention::HGroup(profile);
+    let analysis = convention.analyze(deductions);
+    let candidates = planning_candidates(&analysis);
+    if candidates.len() == 1 {
+        return Ok(Some(candidates[0].action));
+    }
+    let mut evaluations = Vec::with_capacity(candidates.len());
+    for candidate in candidates.iter().copied() {
+        control.checkpoint()?;
+        let mut evaluation = symbolic_evaluation(deductions, candidate);
+        (evaluation.symbolic_line, evaluation.projection) =
+            crate::h_group::symbolic_line::project_leaf_projection(
+                deductions.view(),
+                profile,
+                candidate.action,
+                control,
+            )?;
+        evaluations.push(evaluation);
+    }
+    let (best, _) = compare_symbolic_candidates(&evaluations, analysis.preferred_action);
+    Ok(best.map(|index| evaluations[index].action))
+}
+
 /// Applies convention-forced continuations identically at the root and at
 /// every exact observation group. Borrowing the normal action list avoids an
 /// allocation on the common path.
@@ -995,13 +1049,26 @@ fn compare_symbolic_candidates(
     (selected, comparisons)
 }
 
+#[allow(clippy::too_many_lines)]
 fn compare_endpoints(
     left: &PlannerActionEvaluation,
     right: &PlannerActionEvaluation,
 ) -> EndpointComparison {
+    match left
+        .projection
+        .maximum_save_violations()
+        .cmp(&right.projection.maximum_save_violations())
+    {
+        Ordering::Less => return EndpointComparison::PreferLeft(ComparisonReason::SavePrinciple),
+        Ordering::Greater => {
+            return EndpointComparison::PreferRight(ComparisonReason::SavePrinciple);
+        }
+        Ordering::Equal => {}
+    }
     if left.preference.policy_tier() != right.preference.policy_tier()
         || left.preference.advances_terminal_plan() != right.preference.advances_terminal_plan()
         || left.symbolic_line.strikes != right.symbolic_line.strikes
+        || left.projection.maximum_strikes() != right.projection.maximum_strikes()
     {
         return EndpointComparison::Incomparable;
     }
@@ -1030,6 +1097,41 @@ fn compare_endpoints(
             }
             if prefer_right && !prefer_left {
                 return EndpointComparison::PreferRight(ComparisonReason::RotationDevelopment);
+            }
+        }
+    }
+    if left.symbolic_line.actions != right.symbolic_line.actions
+        || !left.projection.clue_branches.is_empty()
+        || !right.projection.clue_branches.is_empty()
+    {
+        // Compare at the latest shared elapsed turn, retaining both tails.
+        // A later observed strike is checked above and cannot be trimmed away.
+        let horizon = left
+            .projection
+            .common_horizon()
+            .min(right.projection.common_horizon());
+        let left_values = left.projection.checkpoints_at(horizon);
+        let right_values = right.projection.checkpoints_at(horizon);
+        if !left_values.is_empty() && !right_values.is_empty() {
+            let every_pair =
+                |predicate: fn(ProjectedPositionValue, ProjectedPositionValue) -> bool| {
+                    left_values
+                        .iter()
+                        .all(|a| right_values.iter().all(|b| predicate(a.value, b.value)))
+                };
+            if schedules_play_and_clue
+                && every_pair(ProjectedPositionValue::developed_points_preference)
+            {
+                return EndpointComparison::PreferLeft(ComparisonReason::RotationDevelopment);
+            }
+            if schedules_play_and_clue && every_pair(|a, b| b.developed_points_preference(a)) {
+                return EndpointComparison::PreferRight(ComparisonReason::RotationDevelopment);
+            }
+            if every_pair(ProjectedPositionValue::dominates) {
+                return EndpointComparison::PreferLeft(ComparisonReason::EndpointResources);
+            }
+            if every_pair(|a, b| b.dominates(a)) {
+                return EndpointComparison::PreferRight(ComparisonReason::EndpointResources);
             }
         }
     }
@@ -1110,10 +1212,24 @@ fn symbolic_fallback_comparison(
         .zip(right.symbolic_line.position_value);
     let dimensions = [
         (
+            right
+                .projection
+                .maximum_save_violations()
+                .cmp(&left.projection.maximum_save_violations()),
+            ComparisonReason::SavePrinciple,
+        ),
+        (
             left.preference
                 .policy_tier()
                 .cmp(&right.preference.policy_tier()),
             ComparisonReason::PolicyTier,
+        ),
+        (
+            right
+                .projection
+                .maximum_strikes()
+                .cmp(&left.projection.maximum_strikes()),
+            ComparisonReason::ConditionalStrikes,
         ),
         (
             right.symbolic_line.strikes.cmp(&left.symbolic_line.strikes),
@@ -1609,6 +1725,49 @@ impl std::error::Error for PlannerError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn save_violation_cannot_be_outvoted_by_priority_or_a_trimmed_summary() {
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s3.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(13).unwrap();
+        let d = LogicalDeductions::new(state.view_for(state.current_player()).unwrap()).unwrap();
+        let safe = symbolic_evaluation(
+            &d,
+            ConventionAction {
+                action: Action::Clue {
+                    target: hanabi_core::PlayerId::new(2),
+                    clue: Clue::Suit(hanabi_core::Suit::Green),
+                },
+                preference: crate::ActionPreference::new(1, false),
+                reason: crate::ConventionActionReason::Fallback,
+            },
+        );
+        let mut unsafe_line = safe.clone();
+        unsafe_line.action = Action::Clue {
+            target: hanabi_core::PlayerId::new(2),
+            clue: Clue::Rank(hanabi_core::Rank::Two),
+        };
+        unsafe_line.preference = crate::ActionPreference::new(9999, false);
+        // Algorithm invariant: this tail lies beyond the aggregate summary.
+        unsafe_line.projection.steps.push(crate::PlanStep {
+            turn: 14,
+            projected: crate::ProjectedAction {
+                actor: hanabi_core::PlayerId::new(2),
+                action: Action::Discard(hanabi_core::CardId::new(10)),
+            },
+            depends_on: None,
+            consequences: crate::ProjectedConsequences {
+                save_principle_violation: Some(
+                    crate::SavePrincipleViolation::UniqueDelayedPlayable,
+                ),
+                ..Default::default()
+            },
+        });
+        assert_eq!(best_symbolic_index(&[safe, unsafe_line], None), Some(0));
+    }
 
     #[test]
     fn completed_plan_token_reserve_requires_all_points_and_unblocked_plays() {

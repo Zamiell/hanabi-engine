@@ -1006,8 +1006,7 @@ pub(crate) fn analyze_h_group_convention(
     let forced = actions.predictable.filter(|action| {
         actions.actions.len() == 1
             || matches!(action, Action::Play(card) if
-            analysis.inferences.completed_connection_focuses.contains(card)
-                || analysis.inferences.cards.iter().any(|note| {
+            analysis.inferences.cards.iter().any(|note| {
                     note.card == *card
                         && note.play_obligation == Some(HGroupPlayObligation::Forced)
                 }))

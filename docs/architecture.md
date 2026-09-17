@@ -211,11 +211,38 @@ card, and identity. The original legal `PlayerView` is never modified.
   `symbolic_line.rs` builds this `ConditionalPlan`; new draws remain blank and
   projection stops at an explicit frontier before the plan is summarized.
   `ProjectionEvidence` retains the actual steps, stopping frontier, actor
-  windows, and token ledger in the planner result and live diagnostics.
-  Conditional alternatives name their observer, hidden-card assumption, enabling
-  step, concrete follow-up clue, deadline, and independent funding. They never
-  add guaranteed plays or merge mutually exclusive identities into ordinary
-  steps.
+  windows, and token ledger in the planner result and live diagnostics. Discards
+  also retain typed Save Principle violations, assessed from the deciding
+  observer's information before the card leaves the hand. Critical cards, unique
+  2s, and unique immediately/delayed-playable cards are protected; an unknown
+  potential duplicate is not a replacement. Every modeled branch's loss remains
+  visible beyond common-horizon trimming. A line without these violations
+  outranks one with them regardless of heuristic priority; if every candidate
+  has violations, selection remains explicitly degraded rather than pretending
+  there is a safe line. These are model-relative safety findings, not proofs
+  over unmodeled hidden identities. Conditional alternatives name their
+  observer, hidden-card assumption, enabling step, concrete follow-up clue,
+  deadline, and independent funding. They never add guaranteed plays or merge
+  mutually exclusive identities into ordinary steps.
+- Unknown clue touches branch over feasible touched-card subsets, without
+  assigning identities to blank cards. A card-copy matching check rejects
+  impossible subsets. `clueBranches` retains each conditional continuation; only
+  action prefixes common to every branch enter the aggregate summary. Divergent
+  endpoint values remain separate rather than being averaged without
+  probabilities. Projection allows 16 branch outcomes; lookahead leaves allow
+  four. Exhausting that budget reports a limit, not a successful completion.
+- Hypothetical teammates use the root's candidate admission and endpoint
+  comparator with one level of strategic lookahead. Those candidate forecasts
+  use the convention policy as their leaf evaluator, with a 32-action bound;
+  they do not recursively launch unlimited planning. Completing a connection
+  makes its focus available, not automatically mandatory: explicit obligations
+  and required policy tiers still constrain the search.
+- Every projected turn has a resource checkpoint. Different-length lines can be
+  compared at a common elapsed turn without deleting their tails. Conditional
+  comparisons require agreement across all branch pairs; possible later strikes
+  remain a separate risk dimension. Developed-card comparisons against a play
+  can spend surplus tokens, but cannot waive save pressure or unrelated hand
+  congestion. This is an evaluation preference, not a score guarantee.
 - `projection_requirements.rs` compiles Priority/Charm uncertainty requirements
   alongside inference. The projector assesses these declared dependencies and
   records supported, conditional (with a witness when available), or

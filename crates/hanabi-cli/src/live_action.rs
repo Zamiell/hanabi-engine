@@ -364,6 +364,7 @@ fn projected_step_json(table_id: u64, step: &hanabi_search::PlanStep) -> Value {
         "scoreGain": step.consequences.score_gain, "strikes": step.consequences.strikes,
         "cluesSpent": step.consequences.clues_spent, "cluesGained": step.consequences.clues_gained,
         "discards": step.consequences.discards,
+        "savePrincipleViolation": step.consequences.save_principle_violation.map(|reason| format!("{reason:?}")),
     })
 }
 
@@ -374,6 +375,14 @@ fn condition_json(condition: hanabi_search::HiddenCardCondition) -> Value {
 
 fn projection_evidence_json(table_id: u64, evidence: &hanabi_search::ProjectionEvidence) -> Value {
     json!({
+        "checkpoints": evidence.checkpoints.iter().map(|checkpoint| json!({
+            "actions": checkpoint.actions, "discards": checkpoint.discards,
+            "positionValue": position_value_json(checkpoint.value),
+        })).collect::<Vec<_>>(),
+        "clueBranches": evidence.clue_branches.iter().map(|branch| json!({
+            "turn": branch.turn + 1, "touched": branch.touched.iter().map(|card| card.index()).collect::<Vec<_>>(),
+            "projection": projection_evidence_json(table_id, &branch.continuation),
+        })).collect::<Vec<_>>(),
         "assumptions": evidence.assumptions.iter().map(|assumption| json!({
             "turn": assumption.turn + 1,
             "sourceObserver": assumption.source_observer.index(),

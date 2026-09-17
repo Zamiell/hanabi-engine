@@ -503,7 +503,16 @@ fn incompatible_action_prefixes(
     // become equal by projecting those same prefixes again at a shorter limit.
     // This is only an early rejection. Equal prefixes still need the original
     // common-frontier projections (including their assumptions and resources).
-    baseline.steps[1..usize::from(common)] != alternate.steps[1..usize::from(common)]
+    let range = 1..usize::from(common);
+    match (
+        baseline.steps.get(range.clone()),
+        alternate.steps.get(range),
+    ) {
+        (Some(baseline), Some(alternate)) => baseline != alternate,
+        // A branching projection can summarize a longer common continuation
+        // than its unbranched prefix. This shortcut proves nothing about it.
+        _ => false,
+    }
 }
 
 /// Later observations can yield the exact same historical giver query. Reuse
@@ -591,8 +600,14 @@ fn substitution_witness(
         let (b, b_line) = baseline_common.as_ref();
         if a.actions != common
             || b.actions != common
+            // A substitution certificate currently proves one identical
+            // continuation, not equivalence between conditional branch trees.
+            || !a_line.clue_branches.is_empty()
+            || !b_line.clue_branches.is_empty()
             || a.strikes != 0
             || b.strikes != 0
+            || a_line.maximum_save_violations() != 0
+            || b_line.maximum_save_violations() != 0
             || a_line.steps[1..] != b_line.steps[1..]
             || a_line.assumptions != b_line.assumptions
             || a_line.resources.unfunded_turn.is_some()

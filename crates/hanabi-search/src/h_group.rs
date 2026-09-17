@@ -66,7 +66,7 @@ mod recognition;
 mod rule_engine;
 mod rules;
 mod strategic_value;
-mod symbolic_line;
+pub(crate) mod symbolic_line;
 mod transition;
 mod turn_context;
 
@@ -137,8 +137,9 @@ use outcome::{
 use perspective::{PerspectiveProjector, ProspectiveTransition};
 use plan::ConditionalPlan;
 pub use plan::{
-    ConditionalAlternative, HiddenCardCondition, PerspectiveAssumption, PlanFrontier, PlanStep,
-    ProjectedAction, ProjectedConsequences, ProjectionEvidence, ResourceSchedule, TokenTransition,
+    ClueTouchBranch, ConditionalAlternative, HiddenCardCondition, PerspectiveAssumption,
+    PlanFrontier, PlanStep, ProjectedAction, ProjectedConsequences, ProjectionEvidence,
+    ResourceSchedule, SavePrincipleViolation, TokenTransition,
 };
 use play_order::ordered_playable_cards;
 use primary::{ClueInterpretationPlan, PrimaryClueInputs};

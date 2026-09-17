@@ -122,11 +122,61 @@ fn project_h_group_plan_with_control<const REUSE_SELECTED: bool>(
     limit: u8,
     control: &crate::AnalysisControl,
 ) -> Result<ConditionalPlan, crate::AnalysisStopped> {
+    let mut branch_budget = 16;
+    continue_plan::<REUSE_SELECTED>(
+        source,
+        source.clone(),
+        profile,
+        Some(root),
+        root,
+        limit,
+        control,
+        ConditionalPlan::new(source.clue_tokens),
+        // Inverse-planning certificates deliberately use a lower-order
+        // convention policy. Asking that proof to run strategic forecasts
+        // again would multiply historical proof work and change its model.
+        !super::inverse_planning::is_active(),
+        &mut branch_budget,
+    )
+}
+
+pub(crate) fn project_leaf_projection(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    root: Action,
+    control: &crate::AnalysisControl,
+) -> Result<(SymbolicLineOutcome, super::ProjectionEvidence), crate::AnalysisStopped> {
+    let mut branch_budget = 4;
+    let plan = continue_plan::<true>(
+        source,
+        source.clone(),
+        profile,
+        Some(root),
+        root,
+        32,
+        control,
+        ConditionalPlan::new(source.clue_tokens),
+        false,
+        &mut branch_budget,
+    )?;
+    Ok((plan.summarize(), plan.into_evidence()))
+}
+
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+fn continue_plan<const REUSE_SELECTED: bool>(
+    source: &PlayerView,
+    mut public: PlayerView,
+    profile: HGroupProfile,
+    mut action: Option<Action>,
+    root: Action,
+    limit: u8,
+    control: &crate::AnalysisControl,
+    mut plan: ConditionalPlan,
+    strategic: bool,
+    branch_budget: &mut usize,
+) -> Result<ConditionalPlan, crate::AnalysisStopped> {
     #[cfg(test)]
     let _profile = crate::test_profile::span("symbolic_projection");
-    let mut plan = ConditionalPlan::new(source.clue_tokens);
-    let mut public = source.clone();
-    let mut action = Some(root);
     // The final part of each iteration already compiles the next actor's
     // perspective to select their action. Keep that exact immutable result for
     // execution; the public state does not change between selection and use.
@@ -168,19 +218,73 @@ fn project_h_group_plan_with_control<const REUSE_SELECTED: bool>(
             plan.stop_at(PlanFrontier::InterpretationBranch);
             break;
         }
-        let Some((after, consequences)) = apply_symbolic_action(
+        let Some((after, mut consequences)) = apply_symbolic_action(
             &public,
             &actor_deductions,
             &actor_inferences,
             actor,
             current,
         ) else {
-            plan.stop_at(PlanFrontier::IdentityBranch);
+            let mut frontier = PlanFrontier::IdentityBranch;
+            if let Action::Clue { target, clue } = current {
+                let outcomes = clue_touch_outcomes(&public, target, clue);
+                if outcomes.len() > *branch_budget {
+                    frontier = PlanFrontier::Limit;
+                }
+                if !outcomes.is_empty() && outcomes.len() <= *branch_budget {
+                    *branch_budget -= outcomes.len();
+                    let prefix = plan.clone();
+                    for touched in outcomes {
+                        let after =
+                            ProspectiveTransition::clue_by(&public, actor, target, clue, &touched);
+                        let mut branch = prefix.clone();
+                        branch.push(
+                            public.turn,
+                            ProjectedAction {
+                                actor,
+                                action: current,
+                            },
+                            ProjectedConsequences {
+                                clues_spent: 1,
+                                ..Default::default()
+                            },
+                        );
+                        branch.record_checkpoint(super::frontier_value::evaluate(
+                            source, &after, profile, root,
+                        ));
+                        let next = if branch.len() >= usize::from(limit) {
+                            branch.stop_at(PlanFrontier::Limit);
+                            None
+                        } else {
+                            choose_follow_up(&after, profile, strategic, control)?
+                        };
+                        let continuation = continue_plan::<REUSE_SELECTED>(
+                            source,
+                            after,
+                            profile,
+                            next,
+                            root,
+                            limit,
+                            control,
+                            branch,
+                            strategic,
+                            branch_budget,
+                        )?;
+                        plan.add_clue_branch(public.turn, touched, continuation);
+                    }
+                }
+            }
+            plan.stop_at(frontier);
             break;
         };
+        if let Action::Discard(card) = current {
+            consequences.save_principle_violation = important_discard(&public, profile, card);
+        }
         if consequences.score_gain > 0 {
             if let Action::Play(card) = current {
-                if let Some(played) = identity_of(&public, card) {
+                if let Some(played) =
+                    symbolic_identity(&public, &actor_deductions, &actor_inferences, card)
+                {
                     if let Some(alternative) = super::frontier_value::conditional_successor(
                         source, &after, profile, played,
                     ) {
@@ -198,6 +302,9 @@ fn project_h_group_plan_with_control<const REUSE_SELECTED: bool>(
             consequences,
         );
         public = after;
+        plan.record_checkpoint(super::frontier_value::evaluate(
+            source, &public, profile, root,
+        ));
         if plan.len() == source.hands.len() {
             plan.record_rotation(super::frontier_value::evaluate(
                 source, &public, profile, root,
@@ -205,6 +312,10 @@ fn project_h_group_plan_with_control<const REUSE_SELECTED: bool>(
         }
         if public.status != hanabi_core::GameStatus::InProgress {
             plan.stop_at(PlanFrontier::Terminal);
+            break;
+        }
+        if plan.len() >= usize::from(limit) {
+            plan.stop_at(PlanFrontier::Limit);
             break;
         }
         let next = public.current_player;
@@ -215,7 +326,11 @@ fn project_h_group_plan_with_control<const REUSE_SELECTED: bool>(
             break;
         };
         plan.record_assumptions(&projected.assumptions);
-        action = select_h_group_action(&projected.deductions, profile);
+        action = if strategic {
+            crate::planner::choose_projected_follow_up(&projected.deductions, profile, control)?
+        } else {
+            select_h_group_action(&projected.deductions, profile)
+        };
         if REUSE_SELECTED {
             selected_perspective = Some(projected);
         }
@@ -224,6 +339,210 @@ fn project_h_group_plan_with_control<const REUSE_SELECTED: bool>(
     control.checkpoint()?;
     plan.assess(value);
     Ok(plan)
+}
+
+fn choose_follow_up(
+    public: &PlayerView,
+    profile: HGroupProfile,
+    strategic: bool,
+    control: &crate::AnalysisControl,
+) -> Result<Option<Action>, crate::AnalysisStopped> {
+    let Some((d, _)) = PerspectiveProjector::new(public, profile)
+        .project(public.current_player, PerspectiveDepth::NestedRecipients)
+    else {
+        return Ok(None);
+    };
+    if strategic {
+        crate::planner::choose_projected_follow_up(&d, profile, control)
+    } else {
+        Ok(select_h_group_action(&d, profile))
+    }
+}
+
+/// Assess losses from the deciding observer's partial world, not the
+/// discarder who cannot see their own card, and never the simulator's deck.
+/// Sources:
+/// <https://hanabi.github.io/beginner/save-principle/>
+/// <https://hanabi.github.io/level-22/#phantom-playable-cards>
+fn important_discard(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    card: CardId,
+) -> Option<super::SavePrincipleViolation> {
+    use super::SavePrincipleViolation as Loss;
+    let observed = identity_of(source, card);
+    if observed.is_some_and(|identity| !super::is_eventually_useful(source, identity)) {
+        return None;
+    }
+    if observed.is_some_and(|identity| super::is_critical(source, identity)) {
+        return Some(Loss::CriticalCard);
+    }
+    let deductions = LogicalDeductions::new(source.clone()).ok()?;
+    let inferred = super::infer_h_group(&deductions, profile);
+    // A known replacement can support an intentional transfer. Merely having
+    // an unknown slot which COULD contain another copy cannot justify a loss.
+    let known = |id| {
+        identity_of(source, id).or_else(|| {
+            inferred
+                .cards
+                .iter()
+                .find(|note| note.card == id)
+                .filter(|note| note.identities.len() == 1)
+                .and_then(|note| note.identities.iter().next())
+        })
+    };
+    let identity = known(card)?;
+    if !super::is_eventually_useful(source, identity) {
+        return None;
+    }
+    if super::is_critical(source, identity) {
+        return Some(Loss::CriticalCard);
+    }
+    if source
+        .hands
+        .iter()
+        .flatten()
+        .any(|other| other.id != card && known(other.id) == Some(identity))
+    {
+        return None;
+    }
+    if identity.rank == hanabi_core::Rank::Two {
+        return Some(Loss::UniqueTwo);
+    }
+    if is_playable_now(source, identity) {
+        return Some(Loss::UniquePlayable);
+    }
+    let gotten = inferred.gotten();
+    let gotten = &gotten;
+    let connectors = source
+        .hands
+        .iter()
+        .flat_map(|hand| {
+            let position = super::finesse_position(hand, gotten, 0).map(|card| card.id);
+            hand.iter()
+                .filter(move |candidate| {
+                    super::was_clued_before(source, source.turn, candidate.id)
+                        || Some(candidate.id) == position
+                })
+                .filter_map(|candidate| known(candidate.id))
+        })
+        .collect::<Vec<_>>();
+    // All intervening ranks must be clued/promised or on Finesse Position.
+    // Mere visibility is only Phantom Playability and is not this invariant.
+    ((source.play_stacks[identity.suit.index()].len() + 1)..usize::from(identity.rank.number()))
+        .all(|rank| {
+            connectors.contains(&Card::new(identity.suit, hanabi_core::Rank::ALL[rank - 1]))
+        })
+        .then_some(Loss::UniqueDelayedPlayable)
+}
+
+/// Partitions clue outcomes without assigning hidden card identities. The
+/// resulting positive/negative clue facts constrain each branch independently.
+fn clue_touch_outcomes(source: &PlayerView, target: PlayerId, clue: Clue) -> Vec<Vec<CardId>> {
+    let mut outcomes = vec![Vec::new()];
+    for card in &source.hands[target.index()] {
+        let domain = card.identity.map_or_else(
+            || crate::IdentitySet::from_mask(card.clues.identity_mask()),
+            crate::IdentitySet::singleton,
+        );
+        let yes = domain.iter().any(|identity| clue.matches(identity));
+        let no = domain.iter().any(|identity| !clue.matches(identity));
+        let mut next = Vec::new();
+        for touched in outcomes {
+            if no {
+                next.push(touched.clone());
+            }
+            if yes {
+                let mut touched = touched;
+                touched.push(card.id);
+                next.push(touched);
+            }
+        }
+        outcomes = next;
+    }
+    outcomes.retain(|touched| {
+        !touched.is_empty() && feasible_touch_outcome(source, target, clue, touched)
+    });
+    outcomes
+}
+
+/// Matching checks physical feasibility without selecting or publishing a
+/// hidden assignment. Multiple unknown cards cannot consume the same last copy.
+fn feasible_touch_outcome(
+    source: &PlayerView,
+    target: PlayerId,
+    clue: Clue,
+    touched: &[CardId],
+) -> bool {
+    let mut copies = hanabi_core::standard_deck();
+    let visible = source
+        .hands
+        .iter()
+        .flatten()
+        .filter_map(|card| card.identity)
+        .chain(source.discard_pile.iter().map(|(_, identity)| *identity))
+        .chain(hanabi_core::Suit::ALL.into_iter().flat_map(|suit| {
+            hanabi_core::Rank::ALL
+                .into_iter()
+                .take(source.play_stacks[suit.index()].len())
+                .map(move |rank| Card::new(suit, rank))
+        }));
+    for identity in visible {
+        let Some(index) = copies.iter().position(|candidate| *candidate == identity) else {
+            return false;
+        };
+        copies.swap_remove(index);
+    }
+    let domains = source
+        .hands
+        .iter()
+        .enumerate()
+        .flat_map(|(owner, hand)| {
+            hand.iter()
+                .filter(|card| card.identity.is_none())
+                .map(move |card| (owner, card))
+        })
+        .map(|(owner, card)| {
+            copies
+                .iter()
+                .enumerate()
+                .filter_map(|(index, identity)| {
+                    (card.clues.allows(*identity)
+                        && (owner != target.index()
+                            || clue.matches(*identity) == touched.contains(&card.id)))
+                    .then_some(index)
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let mut assignments = vec![None; copies.len()];
+    (0..domains.len()).all(|card| {
+        assign_copy(
+            card,
+            &domains,
+            &mut assignments,
+            &mut vec![false; copies.len()],
+        )
+    })
+}
+
+fn assign_copy(
+    card: usize,
+    domains: &[Vec<usize>],
+    assignments: &mut [Option<usize>],
+    seen: &mut [bool],
+) -> bool {
+    for &copy in &domains[card] {
+        if seen[copy] {
+            continue;
+        }
+        seen[copy] = true;
+        if assignments[copy].is_none_or(|prior| assign_copy(prior, domains, assignments, seen)) {
+            assignments[copy] = Some(card);
+            return true;
+        }
+    }
+    false
 }
 
 fn final_assessment(
@@ -362,6 +681,206 @@ mod tests {
     use hanabi_core::{FullState, PlayerId, standard_deck};
 
     use super::*;
+
+    #[test]
+    fn reviewed_turn_fourteen_rejects_losing_cathys_delayed_purple_four() {
+        // p4v0s3 turn 14, human-reviewed: saving the 2s exposes Cathy's p4
+        // to a discard. Bob can see p2/p3 already touched in Donald's hand.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s3.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(13).unwrap();
+        let source = state.view_for(state.current_player()).unwrap();
+        assert_eq!(
+            important_discard(&source, HGroupProfile::Max, CardId::new(10)),
+            Some(super::super::SavePrincipleViolation::UniqueDelayedPlayable)
+        );
+        // The other p4 is in Bob's hidden hand, not evidence that the visible
+        // p4 is disposable. Conversely, no loss may be invented for a blank.
+        assert_eq!(
+            important_discard(&source, HGroupProfile::Max, CardId::new(16)),
+            None
+        );
+        let rank_two = Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(hanabi_core::Rank::Two),
+        };
+        let plan = project_h_group_plan(&source, HGroupProfile::Max, rank_two, 2).into_evidence();
+        assert_eq!(
+            plan.steps[1].projected.action,
+            Action::Discard(CardId::new(10))
+        );
+        assert_eq!(plan.maximum_save_violations(), 1);
+        assert_eq!(
+            plan.steps[1].consequences.save_principle_violation,
+            Some(super::super::SavePrincipleViolation::UniqueDelayedPlayable)
+        );
+    }
+
+    #[test]
+    fn reviewed_fourth_replay_purple_allows_rank_three_self_bluff() {
+        // Human-reviewed p4v0s3 turn 11: after Bob's purple clue, Cathy's
+        // rank-3 clue to Donald is a Self-Bluff on Donald's newest card.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s3.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(9).unwrap();
+        let mut public = state.view_for(state.current_player()).unwrap();
+        for clue in [
+            Clue::Suit(hanabi_core::Suit::Purple),
+            Clue::Rank(hanabi_core::Rank::Three),
+        ] {
+            let action = Action::Clue {
+                target: PlayerId::new(3),
+                clue,
+            };
+            let (d, r) = PerspectiveProjector::new(&public, HGroupProfile::Max)
+                .project(public.current_player, PerspectiveDepth::NestedRecipients)
+                .unwrap();
+            let inferred = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+            if matches!(clue, Clue::Rank(_)) {
+                let analysis = crate::SupportedConvention::HGroup(HGroupProfile::Max).analyze(&d);
+                assert!(
+                    analysis
+                        .actions
+                        .iter()
+                        .any(|candidate| candidate.action == action)
+                );
+            }
+            public = apply_symbolic_action(&public, &d, &inferred, public.current_player, action)
+                .unwrap()
+                .0;
+        }
+        let (d, _) = PerspectiveProjector::new(&public, HGroupProfile::Max)
+            .project(public.current_player, PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        assert_eq!(
+            select_h_group_action(&d, HGroupProfile::Max),
+            Some(Action::Play(CardId::new(19)))
+        );
+    }
+
+    #[test]
+    fn reviewed_fourth_replay_turn_ten_projects_strategic_followups() {
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s3.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(9).unwrap();
+        let source = state.view_for(state.current_player()).unwrap();
+        for (target, suit) in [
+            (3, hanabi_core::Suit::Purple),
+            (2, hanabi_core::Suit::Green),
+        ] {
+            let plan = project_h_group_plan(
+                &source,
+                HGroupProfile::Max,
+                Action::Clue {
+                    target: PlayerId::new(target),
+                    clue: Clue::Suit(suit),
+                },
+                4,
+            );
+            if suit == hanabi_core::Suit::Green {
+                assert_eq!(
+                    plan.into_evidence().steps[1].projected.action,
+                    Action::Clue {
+                        target: PlayerId::new(3),
+                        clue: Clue::Suit(hanabi_core::Suit::Purple)
+                    }
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn reviewed_purple_line_branches_on_the_draw_not_on_donalds_choice() {
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s3.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(9).unwrap();
+        let root = Action::Clue {
+            target: PlayerId::new(3),
+            clue: Clue::Suit(hanabi_core::Suit::Purple),
+        };
+        // Branch from the reviewed position, not the fixture's later history.
+        let source = state.view_for(state.current_player()).unwrap();
+        let mut public = source.clone();
+        for action in [root, Action::Play(CardId::new(8))] {
+            let (d, r) = PerspectiveProjector::new(&public, HGroupProfile::Max)
+                .project(public.current_player, PerspectiveDepth::NestedRecipients)
+                .unwrap();
+            let notes = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+            public = apply_symbolic_action(&public, &d, &notes, public.current_player, action)
+                .unwrap()
+                .0;
+        }
+        let clue = Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(hanabi_core::Rank::Two),
+        };
+        let mut budget = 4;
+        let plan = continue_plan::<true>(
+            &public,
+            public.clone(),
+            HGroupProfile::Max,
+            Some(clue),
+            clue,
+            2,
+            &crate::AnalysisControl::default(),
+            ConditionalPlan::new(public.clue_tokens),
+            false,
+            &mut budget,
+        )
+        .unwrap();
+        let evidence = plan.into_evidence();
+        assert_eq!(evidence.clue_branches.len(), 2);
+        for branch in &evidence.clue_branches {
+            assert_eq!(branch.continuation.steps[0].projected.action, clue);
+            assert_eq!(
+                branch.continuation.steps[1].projected.action,
+                Action::Play(CardId::new(20))
+            );
+            assert_eq!(branch.outcome.strikes, 0);
+        }
+        assert_eq!(
+            evidence.clue_branches[0].touched.len() + 1,
+            evidence.clue_branches[1].touched.len()
+        );
+    }
+
+    #[test]
+    fn unknown_touch_feasibility_respects_shared_card_copies() {
+        let mut slots = vec![None];
+        assert!(assign_copy(
+            0,
+            &[vec![0], vec![0]],
+            &mut slots,
+            &mut [false]
+        ));
+        assert!(!assign_copy(
+            1,
+            &[vec![0], vec![0]],
+            &mut slots,
+            &mut [false]
+        ));
+        let mut slots = vec![None; 2];
+        assert!(assign_copy(
+            0,
+            &[vec![0, 1], vec![0]],
+            &mut slots,
+            &mut [false; 2]
+        ));
+        assert!(assign_copy(
+            1,
+            &[vec![0, 1], vec![0]],
+            &mut slots,
+            &mut [false; 2]
+        ));
+    }
 
     #[test]
     fn priority_projection_does_not_prove_absence_from_a_blank_hand() {

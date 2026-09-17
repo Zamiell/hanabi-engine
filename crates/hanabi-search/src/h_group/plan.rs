@@ -19,11 +19,20 @@ pub struct ProjectedConsequences {
     pub clues_spent: u8,
     pub clues_gained: u8,
     pub strikes: u8,
+    pub save_principle_violation: Option<SavePrincipleViolation>,
 }
 
-/// One node in the convention-forced plan. `depends_on` makes sequencing
-/// explicit and leaves room for future conditional branches without treating
-/// the projection as an authoritative list of actual actions.
+/// Important-card loss established in the projection's source perspective.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SavePrincipleViolation {
+    CriticalCard,
+    UniqueTwo,
+    UniquePlayable,
+    UniqueDelayedPlayable,
+}
+
+/// One node in a projected plan. `depends_on` makes sequencing explicit;
+/// conditional continuations are not authoritative replay actions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PlanStep {
     /// Zero-based engine turn; UI diagnostics render turn + 1.
@@ -147,6 +156,79 @@ pub struct ProjectionEvidence {
     pub frontier: PlanFrontier,
     pub resources: ResourceSchedule,
     pub windows: Vec<super::ActionWindow>,
+    /// Equal elapsed-turn evaluations; the full continuation is retained.
+    pub checkpoints: Vec<crate::RotationCheckpoint>,
+    /// Exhaustive clue-touch alternatives. These are mutually exclusive,
+    /// not extra actions appended to the unconditional prefix.
+    pub clue_branches: Vec<ClueTouchBranch>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClueTouchBranch {
+    pub turn: u32,
+    pub touched: Vec<CardId>,
+    pub outcome: SymbolicLineOutcome,
+    pub continuation: ProjectionEvidence,
+}
+
+impl ProjectionEvidence {
+    /// Includes every modeled tail, even when summaries trim to a shared
+    /// horizon. Conditional losses are hazards, not guaranteed outcomes.
+    pub(crate) fn maximum_save_violations(&self) -> usize {
+        let prefix = self
+            .steps
+            .iter()
+            .filter(|step| step.consequences.save_principle_violation.is_some())
+            .count();
+        self.clue_branches
+            .iter()
+            .map(|branch| branch.continuation.maximum_save_violations())
+            .max()
+            .unwrap_or(0)
+            .max(prefix)
+    }
+    pub(crate) fn common_horizon(&self) -> u8 {
+        if self.clue_branches.is_empty() {
+            self.checkpoints
+                .last()
+                .map_or(0, |checkpoint| checkpoint.actions)
+        } else {
+            self.clue_branches
+                .iter()
+                .map(|branch| branch.continuation.common_horizon())
+                .min()
+                .unwrap_or(0)
+        }
+    }
+
+    pub(crate) fn checkpoints_at(&self, actions: u8) -> Vec<crate::RotationCheckpoint> {
+        if self.clue_branches.is_empty() {
+            self.checkpoints
+                .iter()
+                .filter(|checkpoint| checkpoint.actions == actions)
+                .copied()
+                .collect()
+        } else {
+            self.clue_branches
+                .iter()
+                .flat_map(|branch| branch.continuation.checkpoints_at(actions))
+                .collect()
+        }
+    }
+
+    /// Worst modeled branch, not a claim that a conditional strike occurs in
+    /// every world. A common-horizon comparison must never hide this tail.
+    pub(crate) fn maximum_strikes(&self) -> u8 {
+        self.clue_branches
+            .iter()
+            .map(|branch| branch.continuation.maximum_strikes())
+            .max()
+            .unwrap_or_else(|| {
+                self.steps.iter().fold(0_u8, |sum, step| {
+                    sum.saturating_add(step.consequences.strikes)
+                })
+            })
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -158,9 +240,8 @@ pub struct PerspectiveAssumption {
     pub identity: Card,
 }
 
-/// A partial-order-ready convention plan. The present projector emits a
-/// single dependency chain; representing that chain as nodes prevents actual
-/// replay actions and observer-relative forecasts from sharing a type.
+/// A convention plan with dependency chains and conditional clue branches.
+/// Actual replay actions and observer-relative forecasts do not share a type.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(super) struct ConditionalPlan {
     evidence: ProjectionEvidence,
@@ -220,6 +301,24 @@ impl ConditionalPlan {
             value,
         });
     }
+    pub(super) fn record_checkpoint(&mut self, value: Option<crate::ProjectedPositionValue>) {
+        let summary = self.summarize();
+        if let Some(value) = value {
+            self.evidence.checkpoints.push(crate::RotationCheckpoint {
+                actions: summary.actions,
+                discards: summary.discards,
+                value,
+            });
+        }
+    }
+    pub(super) fn add_clue_branch(&mut self, turn: u32, touched: Vec<CardId>, plan: Self) {
+        self.evidence.clue_branches.push(ClueTouchBranch {
+            turn,
+            touched,
+            outcome: plan.summarize(),
+            continuation: plan.into_evidence(),
+        });
+    }
     pub(super) fn push(
         &mut self,
         turn: u32,
@@ -252,6 +351,9 @@ impl ConditionalPlan {
     }
 
     pub(super) fn summarize(&self) -> SymbolicLineOutcome {
+        if !self.evidence.clue_branches.is_empty() {
+            return self.summarize_branches();
+        }
         let mut outcome = SymbolicLineOutcome {
             position_value: self.position_value,
             first_rotation: self.first_rotation,
@@ -286,6 +388,48 @@ impl ConditionalPlan {
         }
         outcome
     }
+
+    fn summarize_branches(&self) -> SymbolicLineOutcome {
+        let branches = &self.evidence.clue_branches;
+        let mut shared = self.clone();
+        shared.evidence.clue_branches.clear();
+        let mut steps = branches[0].continuation.steps.clone();
+        for branch in &branches[1..] {
+            let common = steps
+                .iter()
+                .zip(&branch.continuation.steps)
+                .take_while(|(a, b)| a == b)
+                .count();
+            steps.truncate(common);
+        }
+        shared.evidence.steps = steps;
+        let actions = u8::try_from(shared.len()).unwrap_or(u8::MAX);
+        // Different branch states must not be advertised as one exact state.
+        // Keep an endpoint only when all branches agree on its full value.
+        let values = branches
+            .iter()
+            .map(|branch| {
+                branch
+                    .continuation
+                    .checkpoints
+                    .iter()
+                    .find(|checkpoint| checkpoint.actions == actions)
+                    .map(|checkpoint| checkpoint.value)
+            })
+            .collect::<Vec<_>>();
+        shared.position_value =
+            values[0].filter(|value| values.iter().all(|other| *other == Some(*value)));
+        shared.first_rotation = None;
+        shared.evidence.frontier = if branches.iter().all(|branch| {
+            branch.outcome.stop_reason == SymbolicStopReason::Terminal
+                && branch.outcome.actions == actions
+        }) {
+            PlanFrontier::Terminal
+        } else {
+            PlanFrontier::IdentityBranch
+        };
+        shared.summarize()
+    }
 }
 
 #[cfg(test)]
@@ -293,6 +437,48 @@ mod tests {
     use hanabi_core::CardId;
 
     use super::*;
+
+    #[test]
+    fn shared_checkpoints_retain_conditional_tail_risk() {
+        let mut prefix = ConditionalPlan::new(2);
+        prefix.push(
+            0,
+            ProjectedAction {
+                actor: PlayerId::new(0),
+                action: Action::Clue {
+                    target: PlayerId::new(1),
+                    clue: hanabi_core::Clue::Rank(hanabi_core::Rank::Two),
+                },
+            },
+            ProjectedConsequences {
+                clues_spent: 1,
+                ..Default::default()
+            },
+        );
+        prefix.record_checkpoint(Some(crate::ProjectedPositionValue::default()));
+        let safe = prefix.clone();
+        let mut risky = prefix.clone();
+        risky.push(
+            1,
+            ProjectedAction {
+                actor: PlayerId::new(1),
+                action: Action::Play(CardId::new(4)),
+            },
+            ProjectedConsequences {
+                strikes: 1,
+                save_principle_violation: Some(SavePrincipleViolation::UniqueDelayedPlayable),
+                ..Default::default()
+            },
+        );
+        risky.record_checkpoint(Some(crate::ProjectedPositionValue::default()));
+        prefix.add_clue_branch(0, vec![CardId::new(4)], safe);
+        prefix.add_clue_branch(0, vec![CardId::new(4), CardId::new(5)], risky);
+        let evidence = prefix.into_evidence();
+        assert_eq!(evidence.common_horizon(), 1);
+        assert_eq!(evidence.checkpoints_at(1).len(), 2);
+        assert_eq!(evidence.maximum_strikes(), 1);
+        assert_eq!(evidence.maximum_save_violations(), 1);
+    }
 
     #[test]
     fn resource_schedules_require_prefix_funding_and_cap_refunds() {
