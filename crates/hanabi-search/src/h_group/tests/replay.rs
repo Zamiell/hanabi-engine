@@ -1,6 +1,48 @@
 use super::*;
 
 #[test]
+fn fourth_replay_two_save_preserves_positional_red_options() {
+    // Human-reviewed p4v0s3 turn 24: Bob/Cathy both have r1 on Finesse
+    // Position. Saving r2 leaves a possible r1 -> prompted r2 -> r3 line.
+    // Donald may hold r3, but neither its identity nor a future Bluff is known.
+    let state = expert_replay_p4v0s3().state_at_turn(23).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let d = LogicalDeductions::new(view.clone()).unwrap();
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    let candidate = |rank| {
+        *candidates
+            .iter()
+            .find(|candidate| {
+                candidate.action
+                    == Action::Clue {
+                        target: PlayerId::new(2),
+                        clue: Clue::Rank(rank),
+                    }
+            })
+            .unwrap()
+    };
+    let direct =
+        super::super::positional_value::evaluate(&d, HGroupProfile::Max, candidate(Rank::One));
+    let save =
+        super::super::positional_value::evaluate(&d, HGroupProfile::Max, candidate(Rank::Two));
+    assert_eq!(direct.foregone_blind_plays, 1);
+    assert_eq!(save.foregone_blind_plays, 0);
+    assert_eq!(save.conditional_prompt_chains, 1);
+    assert!(view.hands[3].iter().all(|card| card.identity.is_none()));
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        analysis.planner.best_action,
+        candidate(Rank::Two).action,
+        "{analysis:#?}"
+    );
+}
+
+#[test]
 fn fourth_replay_rank_four_recipient_does_not_stomp_the_red_one() {
     // Reviewed alternative at p4v0s3 turn 24: Donald's 4s promises Alice
     // r4 through Cathy's r1. Alice must not spend another clue naming r1.

@@ -61,6 +61,7 @@ mod primary;
 mod projection_requirements;
 mod prospective;
 use history_reducer::replay_h_group_inner_uncached;
+mod positional_value;
 mod public_layers;
 mod recognition;
 mod rule_engine;

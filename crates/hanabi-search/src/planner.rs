@@ -230,6 +230,11 @@ pub struct ProjectedPositionValue {
     /// Visible, unpromised playable identities currently on finesse position.
     /// Opportunities, not secured points or assumptions about blank draws.
     pub playable_finesse_opportunities: u8,
+    /// Pang of Guilt: directly consuming an available positional blind play.
+    pub foregone_blind_plays: u8,
+    /// A saved connector could support a clue through a hidden successor.
+    /// An option only, not an established card identity or future point.
+    pub conditional_prompt_chains: u8,
 }
 
 impl ProjectedPositionValue {
@@ -354,6 +359,8 @@ impl ProjectedPositionValue {
 
     fn dominates_resources(self, other: Self) -> bool {
         self != other
+            && self.foregone_blind_plays <= other.foregone_blind_plays
+            && self.conditional_prompt_chains >= other.conditional_prompt_chains
             && self.score >= other.score
             && self.clues >= other.clues
             && self.exposed_critical_chops <= other.exposed_critical_chops

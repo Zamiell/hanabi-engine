@@ -371,6 +371,7 @@ pub(super) fn conditional_successor(
     None
 }
 
+#[allow(clippy::too_many_lines)]
 fn add_root_opportunities(
     source: &PlayerView,
     profile: HGroupProfile,
@@ -385,6 +386,9 @@ fn add_root_opportunities(
     let candidate = candidates
         .iter()
         .find(|candidate| candidate.action == root)?;
+    let positional = super::positional_value::evaluate(&d, profile, *candidate);
+    value.foregone_blind_plays = positional.foregone_blind_plays;
+    value.conditional_prompt_chains = positional.conditional_prompt_chains;
     if candidate.immediate_play() {
         for touched in source.hands[target.index()]
             .iter()

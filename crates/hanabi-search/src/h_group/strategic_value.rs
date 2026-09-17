@@ -184,6 +184,13 @@ pub(super) fn apply_strategic_clue_values(
             source, *candidate, &baselines,
         ));
         let action_coverage = value.action_coverage;
+        let positional = super::positional_value::evaluate(deductions, profile, *candidate);
+        candidate.value.penalize_opportunity(
+            POSITIONAL_OPPORTUNITY_LOSS_PENALTY * u16::from(positional.foregone_blind_plays),
+        );
+        candidate.value.reward_teamwork(
+            POSITIONAL_OPPORTUNITY_LOSS_PENALTY * u16::from(positional.conditional_prompt_chains),
+        );
         candidate.set_compiled_line(value);
         candidate.set_expiring_multi_card_opportunity(expiring_multi_card_opportunity(
             source, profile, *candidate, value, &baselines,
