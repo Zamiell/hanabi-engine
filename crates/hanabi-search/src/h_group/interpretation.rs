@@ -1300,7 +1300,10 @@ pub(super) fn advanced_clue_candidates(
                 && layout.contains(&prior.focus))
             .then_some(prior.focus)
         }));
-        let tempo = newly_touched.is_empty()
+        // A first clue on a Chop-Moved card is a normal Play Clue, not
+        // Tempo. Protection alone does not establish a future play.
+        // https://hanabi.github.io/level-6/#chop-moves--tempo-clues
+        let tempo = newly_informed.is_empty()
             && touched.iter().any(|card| {
                 !previously_fixed.contains(card)
                     && !recipient_playing.contains(card)
@@ -1990,6 +1993,14 @@ pub(super) fn advanced_clue_candidates(
             continue;
         };
         let replaces_ordinary_play = named_interpretation_replaces_ordinary(kind);
+        if matches!(
+            kind,
+            HGroupMoveKind::OutOfPositionEjection | HGroupMoveKind::StackedEjection
+        ) && !super::prospective::prospective_ejection_is_demonstrable(
+            view, profile, target, clue, &touched, kind,
+        ) {
+            continue;
+        }
         // A reactor may infer a blind play because they cannot see its face.
         // That is not evidence the giver can safely initiate the move. Named
         // replacement meanings must still respect visible, completed stacks.
@@ -2011,16 +2022,19 @@ pub(super) fn advanced_clue_candidates(
             && clue_focus
                 .and_then(|focus| identity_of(view, focus))
                 .is_some_and(|identity| identity.rank == Rank::Five || is_critical(view, identity));
-        let target_already_has_a_play = replay.hands[target.index()].iter().any(|card| {
-            (replay.cards.already_playing.contains(card)
-                || replay.cards.forced_playable.contains(card)
-                || replay.pending_connections.iter().any(|connection| {
-                    connection.actor == target
-                        && connection.cards.contains(card)
-                        && replay.pending_connections.is_active(connection)
-                }))
-                && identity_of(view, *card).is_some_and(|identity| is_playable_now(view, identity))
-        });
+        let target_already_has_a_play = subjective_playable_cards(view, profile, target)
+            .is_some_and(|cards| !cards.is_empty())
+            || replay.hands[target.index()].iter().any(|card| {
+                (replay.cards.already_playing.contains(card)
+                    || replay.cards.forced_playable.contains(card)
+                    || replay.pending_connections.iter().any(|connection| {
+                        connection.actor == target
+                            && connection.cards.contains(card)
+                            && replay.pending_connections.is_active(connection)
+                    }))
+                    && identity_of(view, *card)
+                        .is_some_and(|identity| is_playable_now(view, identity))
+            });
         let ejection_actor_already_has_a_play =
             replay.hands[ejection_actor.index()].iter().any(|card| {
                 (replay.cards.already_playing.contains(card)
@@ -2278,9 +2292,7 @@ pub(super) fn save_clue_score(
     let valid = match (clue, identity.rank) {
         (Clue::Rank(Rank::Five), Rank::Five) => true,
         (Clue::Rank(Rank::Two), Rank::Two) => {
-            !card_is_trash(view, identity)
-                && !has_false_two_save_prompt(target_hand, focus, identity, gotten)
-                && two_save_allowed(view, focus, identity, &chops)
+            !card_is_trash(view, identity) && two_save_allowed(view, focus, identity, &chops)
         }
         (_, Rank::Five) => false,
         _ => is_critical(view, identity),
@@ -2292,21 +2304,6 @@ pub(super) fn save_clue_score(
     // Whether the Save may preempt an existing play obligation is represented
     // separately on `CompiledClueAction`.
     Some(if target == next_player { 450 } else { 400 })
-}
-
-pub(super) fn has_false_two_save_prompt(
-    target_hand: &[hanabi_core::ObservedCard],
-    focus: CardId,
-    identity: Card,
-    gotten: &CardSet,
-) -> bool {
-    let connector = Card::new(identity.suit, Rank::One);
-    target_hand.iter().any(|card| {
-        card.id != focus
-            && gotten.contains(&card.id)
-            && card.clues.allows(connector)
-            && card.identity != Some(connector)
-    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3005,6 +3002,7 @@ pub(super) fn tempo_clue_candidates(
     profile: HGroupProfile,
 ) -> Vec<CompiledClueAction> {
     let mut candidates = Vec::new();
+    let promptable = replay.promptable();
     for action in view.legal_actions() {
         let Action::Clue { target, clue } = action else {
             continue;
@@ -3022,7 +3020,11 @@ pub(super) fn tempo_clue_candidates(
         }) {
             continue;
         }
-        if touched.iter().any(|card| !gotten.contains(card)) {
+        // Chop movement protects a card but does not make its first clue
+        // Tempo. Match the primary classifier rather than reviving a rejected
+        // normal Play Clue through this fallback.
+        // https://hanabi.github.io/level-6/#chop-moves--tempo-clues
+        if touched.iter().any(|card| !promptable.contains(card)) {
             continue;
         }
         let target_chop = chop(&replay.hands[target.index()], gotten);

@@ -791,6 +791,48 @@ pub(super) fn prospective_clue_forces_visible_trash(
     })
 }
 
+/// An Ejection must have a demonstrable reactor, not merely appear in one
+/// observer's speculative signal list. In a partial-world forecast, an unseen
+/// teammate card cannot be credited as a successful blind play.
+/// <https://hanabi.github.io/extras/ejection-extensions/#the-out-of-position-ejection>
+pub(super) fn prospective_ejection_is_demonstrable(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    target: PlayerId,
+    clue: Clue,
+    touched: &[CardId],
+    kind: HGroupMoveKind,
+) -> bool {
+    let Some(snapshot) = compiled_prospective_clue(source, profile, target, clue, touched) else {
+        return false;
+    };
+    // A recipient acting before any reactor cannot interpret this as a Fix
+    // while candidate admission assumes they understand an Ejection.
+    if target == next_player(source.observer, source.hands.len())
+        && snapshot
+            .signal_kinds(target)
+            .is_some_and(|kinds| kinds.contains(&HGroupMoveKind::FixClue))
+    {
+        return false;
+    }
+    (0..source.hands.len()).any(|player| {
+        let actor = PlayerId::new(u8::try_from(player).expect("at most five players"));
+        let Some(projection) = snapshot.projection(actor) else {
+            return false;
+        };
+        projection.replay.signals.iter().any(|signal| {
+            signal.turn == source.turn
+                && signal.kind == kind
+                && signal.target == Some(actor)
+                && signal.cards.first().is_some_and(|card| {
+                    identity_of(source, *card)
+                        .is_some_and(|identity| is_playable_now(source, identity))
+                        && projection.inferred.playable_now.contains(card)
+                })
+        })
+    })
+}
+
 /// Card ordered to blind-play by a team-recognized Stacked Ejection or
 /// Stacked Discharge in a hypothetical clue.
 pub(super) fn prospective_stacked_ejection_card(

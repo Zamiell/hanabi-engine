@@ -133,9 +133,29 @@ pub(super) fn projected_line_state(
 ) -> ProjectedLineState {
     let observer = projection.deductions.view().observer;
     let replay = &projection.replay;
+    // Recipient hypotheses are alternatives, not simultaneous plays. A giver
+    // who sees a purple focus cannot credit a green connector that exists
+    // only in the recipient's hypothetical green-focus interpretation.
+    // Keep owner beliefs intact; this filters only giver-visible accounting.
+    let supported = |connection: &super::ConnectionObligation| {
+        identity_of(source, connection.focus)
+            .is_none_or(|actual| actual == connection.focus_identity)
+    };
+    let unsupported = |card: CardId| {
+        !replay.cards.explicitly_clued.contains(&card)
+            && replay
+                .pending_connections
+                .iter()
+                .any(|connection| connection.cards.contains(&card))
+            && !replay
+                .pending_connections
+                .iter()
+                .any(|connection| connection.cards.contains(&card) && supported(connection))
+    };
     let connection_lines = replay
         .pending_connections
         .iter()
+        .filter(|connection| supported(connection))
         .map(|connection| {
             (
                 connection.actor,
@@ -167,6 +187,7 @@ pub(super) fn projected_line_state(
     let mut giver_visible_commitments = inferred
         .cards
         .iter()
+        .filter(|note| !unsupported(note.card))
         .filter_map(|note| {
             note.identities
                 .iter()
@@ -179,17 +200,24 @@ pub(super) fn projected_line_state(
                 .map(|identity| (note.card, identity))
         })
         .collect::<Vec<_>>();
-    giver_visible_commitments.extend(inferred.playable_now.iter().filter_map(|card| {
-        identity_of(source, *card)
-            .filter(|identity| is_playable_now(source, *identity))
-            .map(|identity| (*card, identity))
-    }));
+    giver_visible_commitments.extend(
+        inferred
+            .playable_now
+            .iter()
+            .filter(|card| !unsupported(**card))
+            .filter_map(|card| {
+                identity_of(source, *card)
+                    .filter(|identity| is_playable_now(source, *identity))
+                    .map(|identity| (*card, identity))
+            }),
+    );
     giver_visible_commitments
         .sort_unstable_by_key(|(card, identity)| (card.index(), identity.index()));
     giver_visible_commitments.dedup();
     let mut giver_visible_promises = promised
         .iter()
         .copied()
+        .filter(|card| !unsupported(*card))
         .filter_map(|card| {
             identity_of(source, card)
                 .or_else(|| {

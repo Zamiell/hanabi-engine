@@ -562,48 +562,13 @@ fn ordered_h_group_actions_from_analysis(
         });
     }
     if !actions.is_empty() {
-        let urgent_next_save = clue_candidates
-            .iter()
-            .any(|candidate| hard_clue_obligation(view, &analysis.replay, candidate));
-        actions.sort_by(|left, right| {
-            let score = |action: &Action| {
-                clue_candidates
-                    .iter()
-                    .find(|candidate| candidate.action == *action)
-                    .map_or_else(
-                        || {
-                            if inferred
-                                .playable_now
-                                .iter()
-                                .any(|card| *action == Action::Play(*card))
-                            {
-                                if urgent_next_save { 300 } else { 425 }
-                            } else if inferred
-                                .discard_now
-                                .iter()
-                                .any(|card| *action == Action::Discard(*card))
-                            {
-                                575
-                            } else if let Action::Discard(card) = action {
-                                scored_discard_candidate(view, inferred, profile)
-                                    .filter(|(candidate, _)| candidate == card)
-                                    .map_or(0, |(_, score)| score)
-                            } else {
-                                0
-                            }
-                        },
-                        |candidate| {
-                            if !inferred.playable_now.is_empty()
-                                && !clue_preempts_play_obligation(view, &analysis.replay, candidate)
-                            {
-                                candidate.score().min(400)
-                            } else {
-                                candidate.score()
-                            }
-                        },
-                    )
-            };
-            score(right).cmp(&score(left))
+        // Use the same priority model exposed to planning and diagnostics.
+        // A separate legacy sort used to demote even forced plays for an
+        // apparent urgent Save while reporting those plays as priority 900.
+        actions.sort_by_cached_key(|action| {
+            core::cmp::Reverse(raw_h_group_action_priority(
+                deductions, profile, analysis, *action,
+            ))
         });
         return actions;
     }

@@ -1,6 +1,155 @@
 use super::*;
 
 #[test]
+fn fourth_replay_two_save_does_not_invent_a_prompt_on_a_chop_moved_card() {
+    let state = expert_replay_p4v0s3().state_at_turn(21).unwrap();
+    let view = state.view_for(PlayerId::new(1)).unwrap();
+    let d = LogicalDeductions::new(view.clone()).unwrap();
+    // Human-reviewed turn 22. The old precheck treated Cathy's Chop-Moved
+    // p4 as a potential r1 Prompt using only its literal clue mask. Trust the
+    // actual recipient interpretation and its ordinary safety validation.
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    assert!(
+        candidates.iter().any(|candidate| candidate.action
+            == Action::Clue {
+                target: PlayerId::new(2),
+                clue: Clue::Rank(Rank::Two)
+            }
+            && candidate.is_save()),
+        "{candidates:#?}"
+    );
+}
+
+#[test]
+fn fourth_replay_cannot_tempo_a_chop_moved_duplicate_purple_three() {
+    // Turn 20: Alice's p3 is Chop Moved, not positively clued. Donald's
+    // known p3 is already playing, so purple cannot bypass Good Touch by
+    // being reclassified as a Tempo Clue Chop Move.
+    let state = expert_replay_p4v0s3().state_at_turn(19).unwrap();
+    let d = LogicalDeductions::new(state.view_for(PlayerId::new(3)).unwrap()).unwrap();
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    assert!(
+        !candidates.iter().any(|candidate| candidate.action
+            == Action::Clue {
+                target: PlayerId::new(0),
+                clue: Clue::Suit(Suit::Purple)
+            }),
+        "{candidates:#?}"
+    );
+}
+
+#[test]
+fn fourth_replay_green_gets_more_new_plays_than_rank_four() {
+    let state = expert_replay_p4v0s3().state_at_turn(16).unwrap();
+    let d = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    for (clue, count) in [(Clue::Suit(Suit::Green), 2), (Clue::Rank(Rank::Four), 1)] {
+        let candidate = candidates
+            .iter()
+            .find(|candidate| {
+                candidate.action
+                    == Action::Clue {
+                        target: PlayerId::new(1),
+                        clue,
+                    }
+            })
+            .unwrap();
+        let outcome = super::super::strategic_value::scheduled_clue_outcome(
+            d.view(),
+            HGroupProfile::Max,
+            candidate,
+        )
+        .unwrap();
+        assert_eq!(outcome.action_coverage, count, "{clue:?}: {outcome:#?}");
+    }
+}
+
+#[test]
+fn fourth_replay_green_continuation_plays_instead_of_inventing_an_urgent_ejection() {
+    // Reviewed turn 17 continuation, from Alice's perspective: Bob plays
+    // the transferred p2, then Cathy plays g2 to advance the green Finesse.
+    // In particular Alice's hidden cards and Bob's new draw stay unknown.
+    let state = expert_replay_p4v0s3().state_at_turn(16).unwrap();
+    let source = state.view_for(PlayerId::new(0)).unwrap();
+    let source = ProspectiveTransition::clue_by(
+        &source,
+        PlayerId::new(0),
+        PlayerId::new(1),
+        Clue::Suit(Suit::Green),
+        &[CardId::new(7)],
+    );
+    let source = ProspectiveTransition::successful_play(
+        &source,
+        PlayerId::new(1),
+        CardId::new(18),
+        Card::new(Suit::Purple, Rank::Two),
+    );
+    let (d, _) = PerspectiveProjector::new(&source, HGroupProfile::Max)
+        .project(PlayerId::new(2), PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    assert!(!prospective_play_has_unsafe_inference(
+        &d,
+        HGroupProfile::Max,
+        CardId::new(11)
+    ));
+    assert_eq!(
+        select_h_group_action(&d, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(11)))
+    );
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    assert!(!candidates.iter().any(|candidate| candidate.action
+        == Action::Clue {
+            target: PlayerId::new(3),
+            clue: Clue::Suit(Suit::Blue),
+        }));
+    assert!(
+        !candidates
+            .iter()
+            .any(|candidate| candidate.target() == PlayerId::new(3) && candidate.is_urgent_save())
+    );
+    assert_eq!(
+        ordered_h_group_actions(&d, HGroupProfile::Max).first(),
+        Some(&Action::Play(CardId::new(11)))
+    );
+    assert_eq!(
+        crate::planner::choose_projected_follow_up(
+            &d,
+            HGroupProfile::Max,
+            &crate::AnalysisControl::default()
+        )
+        .unwrap(),
+        Some(Action::Play(CardId::new(11)))
+    );
+    let source = ProspectiveTransition::successful_play(
+        &source,
+        PlayerId::new(2),
+        CardId::new(11),
+        Card::new(Suit::Green, Rank::Two),
+    );
+    let (donald, _) = PerspectiveProjector::new(&source, HGroupProfile::Max)
+        .project(PlayerId::new(3), PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    let inferred = infer_h_group(&donald, HGroupProfile::Max);
+    assert_eq!(
+        select_h_group_action(&donald, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(14))),
+        "{inferred:#?}"
+    );
+    let decision = crate::planner::choose_projected_follow_up(
+        &donald,
+        HGroupProfile::Max,
+        &crate::AnalysisControl::default(),
+    )
+    .unwrap();
+    // Alice's partial-world forecast need not choose Donald's actual replay
+    // move: he may instead Save Cathy's r2. The regression here is avoiding
+    // the critical b5 discard that used to win by hiding behind a zero-length
+    // forecast. Actual turn-20 move parity is tested by the complete replay.
+    assert!(decision.is_some());
+    assert_ne!(decision, Some(Action::Discard(CardId::new(21))));
+}
+
+#[test]
 fn fourth_replay_leaves_the_shared_green_clue_to_unoccupied_alice() {
     // Reviewed p4v0s3 turn 16: Donald can play/transfer p2; Alice has no
     // play and can give the same green clue to Bob without losing the line.

@@ -204,7 +204,9 @@ impl ProjectionEvidence {
             .take(horizon)
             .filter(|step| step.consequences.bottom_deck_risk.is_some())
             .count()
-            + usize::from(self.unresolved_discard_risk.is_some() && self.steps.len() <= horizon);
+            // The unexecuted discard would be the next action, not the last
+            // completed action in this prefix.
+            + usize::from(self.unresolved_discard_risk.is_some() && self.steps.len() < horizon);
         self.clue_branches
             .iter()
             .map(|branch| branch.continuation.bottom_deck_risks_at(horizon))
@@ -216,14 +218,21 @@ impl ProjectionEvidence {
     /// Includes every modeled tail, even when summaries trim to a shared
     /// horizon. Conditional losses are hazards, not guaranteed outcomes.
     pub(crate) fn maximum_save_violations(&self) -> usize {
+        self.save_violations_at(usize::MAX)
+    }
+
+    /// Losses observed within a comparable prefix, not in a longer forecast's
+    /// speculative tail. The full diagnostic count remains available above.
+    pub(crate) fn save_violations_at(&self, horizon: usize) -> usize {
         let prefix = self
             .steps
             .iter()
+            .take(horizon)
             .filter(|step| step.consequences.save_principle_violation.is_some())
             .count();
         self.clue_branches
             .iter()
-            .map(|branch| branch.continuation.maximum_save_violations())
+            .map(|branch| branch.continuation.save_violations_at(horizon))
             .max()
             .unwrap_or(0)
             .max(prefix)
@@ -510,6 +519,11 @@ mod tests {
         );
         assert_eq!(
             evidence.bottom_deck_risks_at(1),
+            1,
+            "the next unknown discard is outside a one-action prefix"
+        );
+        assert_eq!(
+            evidence.bottom_deck_risks_at(2),
             2,
             "unknown next discard is a possible hazard only when reached"
         );
@@ -524,7 +538,7 @@ mod tests {
         );
         prefix.add_clue_branch(0, vec![CardId::new(5)], ConditionalPlan::new(2));
         assert_eq!(
-            prefix.into_evidence().bottom_deck_risks_at(1),
+            prefix.into_evidence().bottom_deck_risks_at(2),
             2,
             "mutually exclusive branches use a maximum, not a sum"
         );
@@ -570,6 +584,8 @@ mod tests {
         assert_eq!(evidence.checkpoints_at(1).len(), 2);
         assert_eq!(evidence.maximum_strikes(), 1);
         assert_eq!(evidence.maximum_save_violations(), 1);
+        assert_eq!(evidence.save_violations_at(1), 0);
+        assert_eq!(evidence.save_violations_at(2), 1);
     }
 
     #[test]

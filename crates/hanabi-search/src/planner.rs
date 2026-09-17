@@ -1059,11 +1059,7 @@ fn compare_endpoints(
     left: &PlannerActionEvaluation,
     right: &PlannerActionEvaluation,
 ) -> EndpointComparison {
-    match left
-        .projection
-        .maximum_save_violations()
-        .cmp(&right.projection.maximum_save_violations())
-    {
+    match compare_save_principle_risks(left, right) {
         Ordering::Less => return EndpointComparison::PreferLeft(ComparisonReason::SavePrinciple),
         Ordering::Greater => {
             return EndpointComparison::PreferRight(ComparisonReason::SavePrinciple);
@@ -1220,11 +1216,30 @@ fn compare_bottom_deck_risks(
     let horizon = usize::from(
         left.projection
             .common_horizon()
-            .min(right.projection.common_horizon()),
+            .min(right.projection.common_horizon())
+            .max(1),
     );
     left.projection
         .bottom_deck_risks_at(horizon)
         .cmp(&right.projection.bottom_deck_risks_at(horizon))
+}
+
+fn compare_save_principle_risks(
+    left: &PlannerActionEvaluation,
+    right: &PlannerActionEvaluation,
+) -> Ordering {
+    // An unexpanded unknown discard is not proof of avoiding a loss several
+    // turns down another line. Compare equal elapsed time, retaining direct
+    // first-action Save Principle violations even at an unknown frontier.
+    let horizon = usize::from(
+        left.projection
+            .common_horizon()
+            .min(right.projection.common_horizon()),
+    )
+    .max(1);
+    left.projection
+        .save_violations_at(horizon)
+        .cmp(&right.projection.save_violations_at(horizon))
 }
 
 fn symbolic_fallback_comparison(
@@ -1238,10 +1253,7 @@ fn symbolic_fallback_comparison(
         .zip(right.symbolic_line.position_value);
     let dimensions = [
         (
-            right
-                .projection
-                .maximum_save_violations()
-                .cmp(&left.projection.maximum_save_violations()),
+            compare_save_principle_risks(right, left),
             ComparisonReason::SavePrinciple,
         ),
         (
