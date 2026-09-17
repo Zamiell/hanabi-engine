@@ -344,6 +344,7 @@ fn position_value_json(value: hanabi_search::ProjectedPositionValue) -> Value {
         "exposedCriticalChops": value.exposed_critical_chops,
         "blockedCluedCards": value.blocked_clued_cards,
         "securedFuturePlays": value.secured_future_plays,
+        "committedFuturePlays": value.committed_future_plays,
         "protectedBottomDeckRisks": value.protected_bottom_deck_risks,
         "visibleSuccessors": value.visible_successors,
         "finesseOpportunities": value.finesse_opportunities,

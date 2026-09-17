@@ -78,6 +78,7 @@ pub(super) fn evaluate(
         ..ProjectedPositionValue::default()
     };
     let mut secured = IdentitySet::default();
+    let mut committed = IdentitySet::default();
     let mut positional = IdentitySet::default();
     let mut clued_domains = Vec::new();
     let mut mandatory_clues = 0_u8;
@@ -109,21 +110,39 @@ pub(super) fn evaluate(
             }
         }
         for card in &inferred.cards {
-            let promised = card
-                .promised_identity
+            let established = card.promised_identity.or_else(|| {
+                (card.identities.len() == 1)
+                    .then(|| card.identities.iter().next())
+                    .flatten()
+            });
+            // A held, clued face is protected, but is not necessarily an
+            // executable promise. Keep those concepts separate. Reviewed
+            // p4v0s9 turn 10: 4s establishes p3 -> p4, whereas 2s merely
+            // retains the previously touched ambiguous purple card.
+            // https://hanabi.github.io/level-1/#minimum-clue-value-principle
+            if let Some(identity) = established
                 .or_else(|| {
-                    (card.identities.len() == 1)
-                        .then(|| card.identities.iter().next())
-                        .flatten()
-                })
-                .or_else(|| {
-                    // Protecting a useful future card is still progress even
-                    // when it cannot play soon. Otherwise a valuable Save
-                    // would count only as a hand blockage in this assessment.
-                    was_clued_before(frontier, frontier.turn, card.card)
+                    inferred
+                        .playable_now
+                        .contains(&card.card)
                         .then(|| super::identity_of(frontier, card.card))
                         .flatten()
-                });
+                })
+                .filter(|identity| is_eventually_useful(frontier, *identity))
+                .filter(|identity| {
+                    super::identity_of(frontier, card.card).is_none_or(|actual| actual == *identity)
+                })
+            {
+                committed = committed.union(IdentitySet::singleton(identity));
+            }
+            let promised = established.or_else(|| {
+                // Protecting a useful future card is still progress even
+                // when it cannot play soon. Otherwise a valuable Save
+                // would count only as a hand blockage in this assessment.
+                was_clued_before(frontier, frontier.turn, card.card)
+                    .then(|| super::identity_of(frontier, card.card))
+                    .flatten()
+            });
             if let Some(identity) =
                 promised.filter(|identity| is_eventually_useful(frontier, *identity))
             {
@@ -145,6 +164,18 @@ pub(super) fn evaluate(
             .count(),
     );
     value.secured_future_plays = narrow(secured.len());
+    // All prerequisites must also be established, not just visible, saved,
+    // or guessed on a future draw. Count identities once across the team.
+    value.committed_future_plays = narrow(
+        committed
+            .iter()
+            .filter(|identity| {
+                ((frontier.play_stacks[identity.suit.index()].len() + 1)
+                    ..usize::from(identity.rank.number()))
+                    .all(|rank| committed.contains(Card::new(identity.suit, Rank::ALL[rank - 1])))
+            })
+            .count(),
+    );
     value.playable_finesse_opportunities = narrow(
         positional
             .iter()

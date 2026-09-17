@@ -1,6 +1,74 @@
 use super::*;
 
 #[test]
+fn second_replay_projected_ejection_cannot_force_a_green_five_misplay() {
+    // p4v0s9 turn 15 after Bob's reviewed blue clue. Bob's projection of
+    // Cathy must not authorize green as a Stacked Ejection when Donald
+    // instead reads his green 5 as an immediately playable green 3.
+    let mut state = expert_replay_p4v0s9().state_at_turn(13).unwrap();
+    state
+        .apply(Action::Clue {
+            target: PlayerId::new(3),
+            clue: Clue::Suit(Suit::Blue),
+        })
+        .unwrap();
+    let public = state.view_for(PlayerId::new(1)).unwrap();
+    let projected = PerspectiveProjector::new(&public, HGroupProfile::Max)
+        .project_with_evidence(PlayerId::new(2), PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    let a = analyze_h_group_convention(&projected.deductions, HGroupProfile::Max);
+    assert!(!a.actions.iter().any(|candidate| candidate.action
+        == Action::Clue {
+            target: PlayerId::new(3),
+            clue: Clue::Suit(Suit::Green)
+        }));
+}
+
+#[test]
+fn second_replay_finesse_establishes_one_more_play_than_rank_two() {
+    // Human-reviewed p4v0s9 turn 10: p2 -> p3 -> p4 plus the b1 follow-up
+    // yields one more play than p2 + b2 plus that same b1. Protection of an
+    // unthreatened b2 must not erase the extra established play.
+    let state = expert_replay_p4v0s9().state_at_turn(9).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    let four = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Rank(Rank::Four),
+    };
+    let two = Action::Clue {
+        target: PlayerId::new(3),
+        clue: Clue::Rank(Rank::Two),
+    };
+    let endpoint = |action| {
+        analysis
+            .planner
+            .root_actions
+            .iter()
+            .find(|candidate| candidate.action == action)
+            .unwrap()
+            .symbolic_line
+            .position_value
+            .unwrap()
+    };
+    let a = endpoint(four);
+    let b = endpoint(two);
+    assert_eq!(a.score, b.score);
+    assert_eq!(a.clues, b.clues);
+    assert_eq!(
+        a.committed_future_plays,
+        b.committed_future_plays + 1,
+        "{a:?} vs {b:?}"
+    );
+    assert_eq!(analysis.planner.best_action, four);
+}
+
+#[test]
 fn first_replay_final_clue_does_not_override_an_available_play() {
     // Human-reviewed p4v0s415 turn 45: Alice can advance p4 -> p5 herself.
     // The final-clue-over-idle-discard preference must not override a play.

@@ -2099,7 +2099,7 @@ pub(super) fn advanced_clue_candidates(
             // stall or chop move can manufacture a false layered finesse.
             continue;
         }
-        if !replaces_ordinary_play
+        if (!replaces_ordinary_play || target == next_player(view.current_player, view.hands.len()))
             && clue_focus.is_some_and(|focus| {
                 prospective_clue_has_unsafe_connection(
                     view, profile, target, focus, clue, &touched, false,
@@ -2110,6 +2110,10 @@ pub(super) fn advanced_clue_candidates(
             // example, a same-clue chop move followed by a 2 Save on 5) that
             // are not represented by the focused card's generic safety test.
             // Validate the recipient's complete post-clue inference as well.
+            // Named blind-play lines can repair a recipient's provisional
+            // reading on an intervening turn. When the recipient acts next,
+            // no such intervening resolution exists: Ejection recognition by
+            // someone else cannot excuse the recipient's immediate misplay.
             continue;
         }
         let efficiency = if matches!(
