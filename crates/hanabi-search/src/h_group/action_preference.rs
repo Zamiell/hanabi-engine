@@ -8,6 +8,7 @@ pub struct ActionPreference {
     policy_tier: ConventionPolicyTier,
     advances_terminal_plan: bool,
     within_category: i32,
+    play_order: Option<core::cmp::Reverse<usize>>,
 }
 
 impl ActionPreference {
@@ -16,7 +17,23 @@ impl ActionPreference {
             policy_tier: ConventionPolicyTier::Admitted,
             advances_terminal_plan,
             within_category,
+            play_order: None,
         }
+    }
+
+    pub(crate) const fn with_play_order(mut self, order: Option<usize>) -> Self {
+        self.play_order = match order {
+            Some(order) => Some(core::cmp::Reverse(order)),
+            None => None,
+        };
+        self
+    }
+
+    /// Only compares two scheduled plays; clues and discards are unaffected.
+    pub(crate) fn compare_play_order(self, other: Self) -> core::cmp::Ordering {
+        self.play_order
+            .zip(other.play_order)
+            .map_or(core::cmp::Ordering::Equal, |(left, right)| left.cmp(&right))
     }
 
     pub(crate) const fn set_policy_tier(&mut self, policy_tier: ConventionPolicyTier) {

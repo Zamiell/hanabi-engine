@@ -839,6 +839,7 @@ fn analyze_h_group_actions_from_analysis(
     clue_candidates.sort_by_key(|candidate| core::cmp::Reverse(candidate.score()));
 
     let ordered = ordered_h_group_actions_from_analysis(deductions, profile, analysis);
+    let play_order = ordered_playable_cards(deductions.view(), inferred, profile);
     let analyzed = ordered
         .iter()
         .copied()
@@ -855,7 +856,13 @@ fn analyze_h_group_actions_from_analysis(
                 preference: ActionPreference::new(
                     terminal_progress.map_or(priority, TerminalPlanProgress::within_category),
                     terminal_progress.is_some(),
-                ),
+                )
+                .with_play_order(match action {
+                    Action::Play(card) if rule_enabled(profile, HGroupRuleId::Priority) => {
+                        play_order.iter().position(|candidate| *candidate == card)
+                    }
+                    _ => None,
+                }),
             }
         })
         .collect::<Vec<_>>();

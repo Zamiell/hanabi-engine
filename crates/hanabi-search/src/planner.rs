@@ -456,6 +456,7 @@ pub enum ComparisonReason {
     KnownStrikes,
     ConditionalStrikes,
     EndpointResources,
+    ConventionPlayOrder,
     ConditionalOpportunity,
     SpeculativeFinesse,
     SavePressure,
@@ -1087,6 +1088,19 @@ fn compare_endpoints(
         }
         Ordering::Equal => {}
     }
+    // Globally known transferred cards follow ordinary Priority, not urgent
+    // blind-play priority. Preserve the convention's scheduled order rather
+    // than letting endpoint resources silently reverse it.
+    // https://hanabi.github.io/level-25/#3-playing-globally-known-cards
+    match left.preference.compare_play_order(right.preference) {
+        Ordering::Greater => {
+            return EndpointComparison::PreferLeft(ComparisonReason::ConventionPlayOrder);
+        }
+        Ordering::Less => {
+            return EndpointComparison::PreferRight(ComparisonReason::ConventionPlayOrder);
+        }
+        Ordering::Equal => {}
+    }
     // This development comparison schedules a held play versus spending
     // the turn on a clue. Clue-versus-clue comparisons retain their causal
     // efficiency/Clarity ordering: positional access alone must not replace
@@ -1249,6 +1263,7 @@ fn compare_save_principle_risks(
         .cmp(&right.projection.save_violations_at(horizon))
 }
 
+#[allow(clippy::too_many_lines)]
 fn symbolic_fallback_comparison(
     left: &PlannerActionEvaluation,
     right: &PlannerActionEvaluation,
@@ -1289,6 +1304,10 @@ fn symbolic_fallback_comparison(
                 .advances_terminal_plan()
                 .cmp(&right.preference.advances_terminal_plan()),
             ComparisonReason::TerminalProgress,
+        ),
+        (
+            left.preference.compare_play_order(right.preference),
+            ComparisonReason::ConventionPlayOrder,
         ),
         (
             resources.map_or(Ordering::Equal, |(a, b)| {

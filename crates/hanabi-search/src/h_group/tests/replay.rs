@@ -1,6 +1,28 @@
 use super::*;
 
 #[test]
+fn fourth_replay_red_one_precedes_transferred_green_four() {
+    // Human-reviewed p4v0s3 turn 27: the GD establishes g4, but r1 leads
+    // into Cathy's clued r2. A globally known transfer is not an urgent finesse.
+    let state = expert_replay_p4v0s3().state_at_turn(26).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let deductions = LogicalDeductions::new(view.clone()).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    assert_eq!(
+        ordered_playable_cards(&view, &inferred, HGroupProfile::Max).first(),
+        Some(&CardId::new(29)),
+        "{inferred:#?}"
+    );
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(analysis.planner.best_action, Action::Play(CardId::new(29)));
+}
+
+#[test]
 fn fourth_replay_red_clue_checks_cathys_actual_decision_turn() {
     // p4v0s3 turn 25: r1/r3 is unresolved immediately after red. Bob acts
     // before Cathy; admission must evaluate his response before rejecting r1.

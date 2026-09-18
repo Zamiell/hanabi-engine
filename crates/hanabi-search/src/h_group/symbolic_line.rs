@@ -1018,7 +1018,7 @@ mod tests {
         .unwrap();
         let state = replay.state_at_turn(18).unwrap();
         let view = state.view_for(state.current_player()).unwrap();
-        let outcome = project_h_group_line(
+        let (outcome, evidence) = project_h_group_projection(
             &view,
             HGroupProfile::Max,
             Action::Clue {
@@ -1026,15 +1026,21 @@ mod tests {
                 clue: Clue::Suit(hanabi_core::Suit::Purple),
             },
             32,
-        );
+            &crate::AnalysisControl::default(),
+        )
+        .unwrap();
         assert_eq!(outcome.strikes, 0, "{outcome:?}");
-        assert_eq!(
+        assert!(matches!(
             outcome.stop_reason,
-            SymbolicStopReason::UnknownInterpretation
-        );
-        assert_eq!(
-            outcome.actions, 3,
-            "stop before Bob's unsupported blind play"
+            SymbolicStopReason::UnknownInterpretation | SymbolicStopReason::UnknownIdentity
+        ));
+        // Priority may select a different preceding play. Test the forbidden
+        // inference, not the old policy's exact three-action prefix.
+        assert!(
+            !evidence.steps.iter().any(|step| {
+                step.turn == 21 && step.projected.action == Action::Play(CardId::new(25))
+            }),
+            "do not execute Bob's unsupported blind play: {evidence:#?}"
         );
         let mut public = ProspectiveTransition::clue_by(
             &view,
