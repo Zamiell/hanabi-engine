@@ -54,8 +54,13 @@ pub(super) fn demonstrated_hidden_layer(
             return None;
         };
         let height = clue.stack_heights[suit.index()];
-        if clue.target != next_player(player, hands.len())
-            || clue.giver == player
+        // A demonstrated Reverse/Layered Finesse may connect past the giver
+        // to a non-adjacent recipient. Attribution comes from the unique
+        // unresolved colour clue to a teammate, not adjacency to its recipient.
+        // A self-connection needs its own interpretation evidence; an unrelated
+        // blind play cannot retroactively demonstrate one's own old clue.
+        if clue.giver == player
+            || clue.target == player
             || next_player(clue.giver, hands.len()) == player
             || clue.turn + 1 >= entry.turn
             || suit == identity.suit

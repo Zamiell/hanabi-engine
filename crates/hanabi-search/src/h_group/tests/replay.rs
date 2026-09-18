@@ -1,6 +1,217 @@
 use super::*;
 
 #[test]
+fn first_seed_demonstrated_reverse_layer_survives_nonadjacent_recipient() {
+    // User-reviewed red branch, p4v0s1 turn 25: Alice's p2 blind play
+    // demonstrated the red connection to Cathy, with Bob between them.
+    let state = expert_replay_p4v0s1().state_at_turn(17).unwrap();
+    let mut view = state.view_for(state.current_player()).unwrap();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Red),
+        },
+        Action::Discard(CardId::new(9)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Play(CardId::new(24)),
+        Action::Play(CardId::new(17)),
+        Action::Clue {
+            target: PlayerId::new(3),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(14)),
+    ] {
+        let (d, r) = PerspectiveProjector::new(&view, HGroupProfile::Max)
+            .project(view.current_player, PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        let inferred = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+        view = super::super::symbolic_line::apply_symbolic_action(
+            &view,
+            &d,
+            &inferred,
+            view.current_player,
+            action,
+        )
+        .unwrap()
+        .0;
+    }
+    let (d, r) = PerspectiveProjector::new(&view, HGroupProfile::Max)
+        .project(view.current_player, PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    let inferred = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+    assert_eq!(inferred.connection.unwrap().card, CardId::new(21));
+    assert!(inferred.demonstrated_connections.contains(&CardId::new(21)));
+}
+
+fn assert_first_seed_turn_eighteen_prefers_zero_bdr_line(analysis: &crate::PositionAnalysis) {
+    assert_eq!(
+        analysis.planner.best_action,
+        Action::Clue {
+            target: PlayerId::new(3),
+            clue: Clue::Suit(Suit::Purple)
+        },
+        "{:#?}",
+        analysis.planner.comparisons
+    );
+    let purple = Action::Clue {
+        target: PlayerId::new(3),
+        clue: Clue::Suit(Suit::Purple),
+    };
+    let red = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Suit(Suit::Red),
+    };
+    assert!(
+        analysis.planner.comparisons.iter().any(|comparison| {
+            ((comparison.left == purple && comparison.right == red)
+                || (comparison.right == purple && comparison.left == red))
+                && comparison.preferred == purple
+                && comparison.reason == crate::ComparisonReason::BottomDeckRisk
+        }),
+        "{:#?}",
+        analysis.planner.comparisons
+    );
+}
+
+#[test]
+fn first_seed_fresh_bluff_precedes_an_older_clued_prompt() {
+    // User-reviewed purple branch at p4v0s1 turn 24: Donald must show
+    // the Bluff immediately; his clued p3 remains due afterwards.
+    let state = expert_replay_p4v0s1().state_at_turn(17).unwrap();
+    let mut view = state.view_for(state.current_player()).unwrap();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(3),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Discard(CardId::new(9)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Play(CardId::new(24)),
+        Action::Play(CardId::new(17)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Four),
+        },
+    ] {
+        let (d, r) = PerspectiveProjector::new(&view, HGroupProfile::Max)
+            .project(view.current_player, PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        let inferred = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+        view = super::super::symbolic_line::apply_symbolic_action(
+            &view,
+            &d,
+            &inferred,
+            view.current_player,
+            action,
+        )
+        .unwrap()
+        .0;
+    }
+    let (d, r) = PerspectiveProjector::new(&view, HGroupProfile::Max)
+        .project(view.current_player, PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    assert!(
+        r.pending_connections
+            .active()
+            .any(|pending| pending.cards.contains(&CardId::new(14))
+                && pending.kind == HGroupConnectionKind::Prompt)
+    );
+    let inferred = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+    assert_eq!(inferred.connection.unwrap().card, CardId::new(23));
+}
+
+#[test]
+fn first_seed_turn_eighteen_compares_reviewed_full_lines() {
+    let state = expert_replay_p4v0s1().state_at_turn(17).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig {
+            objective: crate::PlanningObjective::PerfectScore,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_first_seed_turn_eighteen_prefers_zero_bdr_line(&analysis);
+    let purple = Action::Clue {
+        target: PlayerId::new(3),
+        clue: Clue::Suit(Suit::Purple),
+    };
+    let red = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Suit(Suit::Red),
+    };
+    let five = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Rank(Rank::Five),
+    };
+    let four = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Rank(Rank::Four),
+    };
+    for (root, expected) in [
+        (
+            purple,
+            vec![
+                purple,
+                Action::Discard(CardId::new(9)),
+                five,
+                Action::Play(CardId::new(24)),
+                Action::Play(CardId::new(17)),
+                four,
+                Action::Play(CardId::new(23)),
+                Action::Discard(CardId::new(1)),
+                red,
+            ],
+        ),
+        (
+            red,
+            vec![
+                red,
+                Action::Discard(CardId::new(9)),
+                five,
+                Action::Play(CardId::new(24)),
+                Action::Play(CardId::new(17)),
+                purple,
+                Action::Play(CardId::new(14)),
+                Action::Play(CardId::new(21)),
+            ],
+        ),
+    ] {
+        let projection = &analysis
+            .planner
+            .root_actions
+            .iter()
+            .find(|candidate| candidate.action == root)
+            .unwrap()
+            .projection;
+        let actual = projection
+            .steps
+            .iter()
+            .take(9)
+            .map(|s| s.projected.action)
+            .collect::<Vec<_>>();
+        assert_eq!(actual, expected, "root {root:?}");
+        if root == purple {
+            assert_eq!(projection.bottom_deck_risks_at(9), 0);
+        } else {
+            assert_eq!(projection.bottom_deck_risks_at(9), 1);
+            let discard = projection.unresolved_discard.unwrap();
+            assert_eq!(discard.card, CardId::new(5));
+            assert!(discard.bottom_deck_risk);
+            assert!(discard.strategically_selected);
+        }
+    }
+}
+
+#[test]
 fn first_seed_purple_line_uses_fives_chop_move() {
     // Reviewed p4v0s1 branch, turns 14-22. This does not change the fixture:
     // green to Donald, b4, g1, discard y4, then purple to Donald.

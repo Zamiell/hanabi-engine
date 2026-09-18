@@ -264,7 +264,12 @@ fn continue_plan<const REUSE_SELECTED: bool>(
                             profile,
                         )
                     });
-                plan.record_unresolved_discard(card, risk, required_protection);
+                plan.record_unresolved_discard(
+                    card,
+                    risk,
+                    required_protection,
+                    strategic || plan.len() == 0,
+                );
             }
             plan.stop_at(frontier);
             break;

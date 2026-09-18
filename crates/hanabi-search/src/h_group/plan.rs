@@ -176,6 +176,9 @@ pub struct UnresolvedDiscard {
     /// A convention requires this discard to protect the next player, rather
     /// than it merely being the current policy's speculative continuation.
     pub required_protection: bool,
+    /// The root candidate or a continuation chosen by comparing projected
+    /// alternatives, rather than an unsearched leaf-policy fallback.
+    pub strategically_selected: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -277,17 +280,18 @@ impl ProjectionEvidence {
         }
     }
 
-    /// A required protection discard is an unavoidable liability even when
-    /// its identity prevents executing it. Include it for risk comparisons
-    /// only, without crediting a token or draw. An ordinary speculative
-    /// discard does not extend the comparable prefix.
+    /// Count an assessed, strategically selected discard even if its unknown
+    /// identity prevents execution, without crediting its token or draw.
+    /// An unsearched leaf-policy fallback is not a demonstrated decision:
+    /// a deeper choice may find a productive clue instead. Such fallbacks
+    /// remain diagnostic risks but do not extend the comparable horizon,
+    /// unless convention obligations make that discard necessary.
     pub(crate) fn risk_horizon(&self) -> usize {
         if self.clue_branches.is_empty() {
             self.steps.len()
-                + usize::from(
-                    self.unresolved_discard
-                        .is_some_and(|discard| discard.required_protection),
-                )
+                + usize::from(self.unresolved_discard.is_some_and(|discard| {
+                    discard.required_protection || discard.strategically_selected
+                }))
         } else {
             self.clue_branches
                 .iter()
@@ -452,11 +456,13 @@ impl ConditionalPlan {
         card: CardId,
         bottom_deck_risk: bool,
         required_protection: bool,
+        strategically_selected: bool,
     ) {
         self.evidence.unresolved_discard = Some(UnresolvedDiscard {
             card,
             bottom_deck_risk,
             required_protection,
+            strategically_selected,
         });
     }
 
@@ -552,7 +558,7 @@ mod tests {
     fn unknown_discard_risk_is_not_a_loss_beyond_the_shared_horizon() {
         let mut unknown = ConditionalPlan::new(2);
         assert_eq!(unknown.evidence.forecast_discard_risk(), None);
-        unknown.record_unresolved_discard(CardId::new(5), false, false);
+        unknown.record_unresolved_discard(CardId::new(5), false, false, false);
         assert_eq!(unknown.evidence.forecast_discard_risk(), Some(0));
         let mut plan = ConditionalPlan::new(2);
         plan.push(
@@ -569,7 +575,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        plan.record_unresolved_discard(CardId::new(5), true, true);
+        plan.record_unresolved_discard(CardId::new(5), true, true, false);
         let evidence = plan.into_evidence();
         assert_eq!(evidence.risk_horizon(), 2);
         let mut speculative = evidence.clone();
@@ -579,6 +585,12 @@ mod tests {
             .unwrap()
             .required_protection = false;
         assert_eq!(speculative.risk_horizon(), 1);
+        speculative
+            .unresolved_discard
+            .as_mut()
+            .unwrap()
+            .strategically_selected = true;
+        assert_eq!(speculative.risk_horizon(), 2);
         assert_eq!(evidence.maximum_bottom_deck_risks(), 1);
         assert_eq!(evidence.forecast_discard_risk(), Some(2));
         assert_eq!(

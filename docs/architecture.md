@@ -226,11 +226,15 @@ card, and identity. The original legal `PlayerView` is never modified.
   bonuses. Unknown discards remain unresolved possible hazards, not executed
   actions or guaranteed losses; strategic risks are compared only at a shared
   horizon so longer forecasts are not punished merely for reaching uncertainty.
-  Live diagnostics expose both the lost identity and unresolved discard card.
-  Conditional alternatives name their observer, hidden-card assumption, enabling
-  step, concrete follow-up clue, deadline, and independent funding. They never
-  add guaranteed plays or merge mutually exclusive identities into ordinary
-  steps.
+  A strategically selected unresolved discard extends that risk horizon by one
+  action, without credit for its token or draw. An unsearched leaf-policy
+  fallback does not extend it unless a convention requires the discard:
+  otherwise a deeper choice could still find a productive alternative. Live
+  diagnostics expose the lost identity, unresolved discard card, and
+  `requiredProtection` / `strategicallySelected` decision evidence. Conditional
+  alternatives name their observer, hidden-card assumption, enabling step,
+  concrete follow-up clue, deadline, and independent funding. They never add
+  guaranteed plays or merge mutually exclusive identities into ordinary steps.
 - Symbolic clues touch only cards whose match is known. Blank cards receive
   neither positive nor negative clue information: omitting an unknown touch does
   not prove a non-match. Candidate previews and executed forecasts share this

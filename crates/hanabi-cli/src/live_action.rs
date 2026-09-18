@@ -386,6 +386,8 @@ fn projection_evidence_json(table_id: u64, evidence: &hanabi_search::ProjectionE
         "unresolvedDiscard": evidence.unresolved_discard.map(|discard| serde_json::json!({
             "card": discard.card.index(),
             "bottomDeckRisk": discard.bottom_deck_risk,
+            "requiredProtection": discard.required_protection,
+            "strategicallySelected": discard.strategically_selected,
         })),
         "clueBranches": evidence.clue_branches.iter().map(|branch| json!({
             "turn": branch.turn + 1, "touched": branch.touched.iter().map(|card| card.index()).collect::<Vec<_>>(),

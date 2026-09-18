@@ -276,9 +276,33 @@ pub(super) fn infer_h_group_from_replay(
                         })
                         && is_playable_now(view, pending.expected)
                 })
-                .min_by_key(|pending| match pending.kind {
-                    HGroupConnectionKind::Prompt => 0,
-                    HGroupConnectionKind::Finesse => 1,
+                .min_by_key(|pending| {
+                    // A fresh blind response from Bluff Seat must resolve
+                    // immediately, ahead of an ordinary clued Prompt. It
+                    // cannot jump an older Finesse (Queued Bluffs are illegal).
+                    // https://hanabi.github.io/level-11/#lie-principle
+                    let immediate_blind_response = rule_enabled(profile, HGroupRuleId::Bluffs)
+                        && pending.kind == HGroupConnectionKind::Finesse
+                        && view.history.last().is_some_and(|entry| {
+                            matches!(entry.event, ObservedEvent::Clued { giver, .. }
+                                if next_player(giver, view.hands.len()) == view.observer)
+                                && replay
+                                    .pending_connections
+                                    .was_created_on(pending, entry.turn)
+                        })
+                        && !super::bluff::bluff_is_queued(
+                            &replay.pending_connections,
+                            view.observer,
+                            Some(pending.focus),
+                        );
+                    if immediate_blind_response {
+                        0
+                    } else {
+                        match pending.kind {
+                            HGroupConnectionKind::Prompt => 1,
+                            HGroupConnectionKind::Finesse => 2,
+                        }
+                    }
                 })
                 .and_then(|pending| {
                     // A disjunctive Prompt is an ordered obligation: play its newest
