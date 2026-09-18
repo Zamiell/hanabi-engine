@@ -78,6 +78,25 @@ move. Artificial inputs remain appropriate for ordinary game-rule, codec,
 algorithm, and data-structure unit tests and invariant-only smoke tests. See
 `docs/testing.md` for the categories and known coverage gaps.
 
+## Clear bugs discovered during examination
+
+When examining code, explaining an engine decision, auditing behavior, or
+investigating a replay, autonomously fix clear implementation bugs discovered
+within that task. This is standing authorization to make those scoped fixes,
+even when the immediate question asks why something happens. Do not stop after
+identifying the bug or ask for another prompt merely to implement it. Reproduce
+the issue, add or update appropriate regression coverage, fix it, run the
+applicable implementation checks above, and resume the original examination.
+
+A clear bug has an established expected behavior supported by the convention
+documentation, a reviewed user interpretation, or an ordinary software
+invariant. An unexplained score difference or uncertain convention is not
+enough. Ask for judgment when the intended behavior is genuinely ambiguous; do
+not invent convention rules, one-off exceptions, or fixture changes to force
+parity. Respect an explicit request for read-only analysis or no edits. This
+standing authorization does not expand a localized task into unrelated fixes or
+a full replay scan, and documentation-only requests remain documentation-only.
+
 ## Version control
 
 After every user prompt that changes this repository:
