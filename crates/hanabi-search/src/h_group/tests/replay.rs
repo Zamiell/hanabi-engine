@@ -1,6 +1,58 @@
 use super::*;
 
 #[test]
+fn fourth_replay_red_clue_checks_cathys_actual_decision_turn() {
+    // p4v0s3 turn 25: r1/r3 is unresolved immediately after red. Bob acts
+    // before Cathy; admission must evaluate his response before rejecting r1.
+    let state = expert_replay_p4v0s3().state_at_turn(24).unwrap();
+    let d = LogicalDeductions::new(state.view_for(state.current_player()).unwrap()).unwrap();
+    let red = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Suit(Suit::Red),
+    };
+    let after = ProspectiveTransition::clue(
+        d.view(),
+        PlayerId::new(2),
+        Clue::Suit(Suit::Red),
+        &[CardId::new(9), CardId::new(29)],
+    );
+    let arrival = super::super::prospective::project_recipient_arrival(
+        &after,
+        HGroupProfile::Max,
+        PlayerId::new(2),
+        &[CardId::new(9), CardId::new(29)],
+    )
+    .unwrap();
+    let recipient = arrival.projection(PlayerId::new(2)).unwrap();
+    assert_eq!(recipient.deductions.view().turn, 26);
+    assert_eq!(
+        recipient
+            .inferred
+            .cards
+            .iter()
+            .find(|card| card.card == CardId::new(29))
+            .unwrap()
+            .identities,
+        IdentitySet::singleton(Card::new(Suit::Red, Rank::One))
+    );
+    let hazard = super::super::prospective::prospective_clue_hazard(
+        d.view(),
+        HGroupProfile::Max,
+        PlayerId::new(2),
+        CardId::new(29),
+        Clue::Suit(Suit::Red),
+        &[CardId::new(9), CardId::new(29)],
+        true,
+    );
+    assert_eq!(hazard, None);
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    assert!(
+        candidates.iter().any(|candidate| candidate.action == red),
+        "{candidates:#?}"
+    );
+}
+
+#[test]
 fn fourth_replay_two_save_preserves_positional_red_options() {
     // Human-reviewed p4v0s3 turn 24: Bob/Cathy both have r1 on Finesse
     // Position. Saving r2 leaves a possible r1 -> prompted r2 -> r3 line.

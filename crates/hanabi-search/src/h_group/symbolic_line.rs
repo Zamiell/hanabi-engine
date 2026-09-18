@@ -632,7 +632,7 @@ fn has_unresolved_requirement(
         })
 }
 
-fn apply_symbolic_action(
+pub(super) fn apply_symbolic_action(
     source: &PlayerView,
     actor_deductions: &LogicalDeductions,
     actor_inferences: &super::HGroupInferences,

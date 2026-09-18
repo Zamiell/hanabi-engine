@@ -918,6 +918,67 @@ pub(super) fn prospective_clue_has_unsafe_connection(
     hazard.is_some()
 }
 
+thread_local! {
+    static CHECKING_RECIPIENT_ARRIVAL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Admission may need the next player's response, not a static clue-time
+/// note. Reuse the ordinary policy and symbolic transition: all draws stay
+/// blank and each actor chooses from their own perspective. Nested candidate
+/// checks retain conservative snapshot validation rather than recursively
+/// launching another policy search. A missing transition is unknown, not safe.
+pub(super) fn project_recipient_arrival(
+    after_clue: &PlayerView,
+    profile: HGroupProfile,
+    target: PlayerId,
+    touched: &[CardId],
+) -> Option<TeamConventionSnapshot> {
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            CHECKING_RECIPIENT_ARRIVAL.with(|active| active.set(false));
+        }
+    }
+    if CHECKING_RECIPIENT_ARRIVAL.with(|active| active.replace(true)) {
+        return None;
+    }
+    let _reset = Reset;
+    let mut position = after_clue.clone();
+    for _ in 0..position.hands.len() {
+        if position.current_player == target {
+            return Some(TeamConventionSnapshot::new(position, profile));
+        }
+        let actor = position.current_player;
+        let (deductions, replay) = PerspectiveProjector::new(&position, profile)
+            .project(actor, PerspectiveDepth::NestedRecipients)?;
+        let inferred = infer_h_group_from_replay(&deductions, replay, profile);
+        let action = super::select_h_group_action(&deductions, profile)?;
+        if let Action::Play(card) = action {
+            if identity_of(&position, card).is_some_and(|identity| {
+                touched.iter().any(|touched| {
+                    *touched != card && identity_of(&position, *touched) == Some(identity)
+                })
+            }) {
+                // Resolving a branch cannot erase the duplicate blind play
+                // it actually executed while the other copy was touched.
+                return None;
+            }
+        }
+        let (after, consequence) = super::symbolic_line::apply_symbolic_action(
+            &position,
+            &deductions,
+            &inferred,
+            actor,
+            action,
+        )?;
+        if consequence.strikes > 0 {
+            return None;
+        }
+        position = after;
+    }
+    None
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ProspectiveClueHazard {
     ProjectionFailed,
@@ -936,6 +997,7 @@ fn prospective_new_good_touch_identities(
     inferred: &HGroupInferences,
     target: PlayerId,
     focus: CardId,
+    at_decision_turn: bool,
 ) -> (IdentitySet, Vec<CardId>) {
     let interpretation = replay.clues.iter().rev().find(|interpretation| {
         interpretation.turn == source.turn
@@ -945,25 +1007,26 @@ fn prospective_new_good_touch_identities(
     let interpreted_focus = interpretation.map_or_else(IdentitySet::default, |interpretation| {
         interpretation.play_identities
     });
+    let focus_identities = if at_decision_turn || inferred.playable_now.contains(&focus) {
+        inferred
+            .cards
+            .iter()
+            .find(|card| card.card == focus)
+            .map_or(interpreted_focus, |card| {
+                interpreted_focus.intersection(card.identities)
+            })
+    } else {
+        interpreted_focus
+    };
     let connection_cards = interpretation.map_or_else(Vec::new, |interpretation| {
         interpretation
             .hypotheses
             .iter()
-            .filter(|hypothesis| interpreted_focus.contains(hypothesis.focus_identity))
+            .filter(|hypothesis| focus_identities.contains(hypothesis.focus_identity))
             .flat_map(|hypothesis| &hypothesis.connection_steps)
             .flat_map(|step| step.cards.iter().copied())
             .collect()
     });
-    if !inferred.playable_now.contains(&focus) {
-        return (interpreted_focus, connection_cards);
-    }
-    let focus_identities = inferred
-        .cards
-        .iter()
-        .find(|card| card.card == focus)
-        .map_or(interpreted_focus, |card| {
-            interpreted_focus.intersection(card.identities)
-        });
     (focus_identities, connection_cards)
 }
 
@@ -1052,6 +1115,27 @@ fn duplicates_good_touch_superposition(
     )
 }
 
+fn has_intervening_bluff(
+    source: &PlayerView,
+    team: &TeamConventionSnapshot,
+    target: PlayerId,
+    focus: CardId,
+) -> bool {
+    let next = next_player(source.current_player, source.hands.len());
+    target != next
+        && (0..source.hands.len()).any(|player| {
+            let observer = PlayerId::new(u8::try_from(player).expect("player index"));
+            team.projection(observer).is_some_and(|projection| {
+                projection.replay.signals.iter().any(|signal| {
+                    signal.turn == source.turn
+                        && signal.kind == HGroupMoveKind::Bluff
+                        && signal.target == Some(next)
+                        && signal.cards.last() == Some(&focus)
+                })
+            })
+        })
+}
+
 pub(super) fn prospective_clue_hazard(
     source: &PlayerView,
     profile: HGroupProfile,
@@ -1064,36 +1148,32 @@ pub(super) fn prospective_clue_hazard(
     let Some(snapshot) = compiled_prospective_clue(source, profile, target, clue, touched) else {
         return Some(ProspectiveClueHazard::ProjectionFailed);
     };
-    let after_clue = &snapshot.after;
-    let Some(recipient) = snapshot.team.projection(target) else {
+    let Some(initial_recipient) = snapshot.team.projection(target) else {
+        return Some(ProspectiveClueHazard::ProjectionFailed);
+    };
+    let Some(baseline) = prospective_baseline_projection(source, profile, target) else {
+        return Some(ProspectiveClueHazard::ProjectionFailed);
+    };
+    let arrival = (expect_immediate_focus
+        && snapshot.after.current_player != target
+        && !initial_recipient.inferred.playable_now.contains(&focus))
+    .then(|| project_recipient_arrival(&snapshot.after, profile, target, touched))
+    .flatten();
+    let team = arrival.as_ref().unwrap_or(&snapshot.team);
+    let after_clue = &team.source;
+    let Some(recipient) = team.projection(target) else {
         return Some(ProspectiveClueHazard::ProjectionFailed);
     };
     let replay = &recipient.replay;
     let inferred = &recipient.inferred;
-    let Some(baseline) = prospective_baseline_projection(source, profile, target) else {
-        return Some(ProspectiveClueHazard::ProjectionFailed);
-    };
-    let intervening_bluff = target != next_player(source.current_player, source.hands.len())
-        && (0..source.hands.len()).any(|player| {
-            let observer = PlayerId::new(
-                u8::try_from(player).expect("standard Hanabi has at most five players"),
-            );
-            snapshot
-                .team
-                .projection(observer)
-                .is_some_and(|projection| {
-                    projection.replay.signals.iter().any(|signal| {
-                        signal.turn == source.turn
-                            && signal.kind == HGroupMoveKind::Bluff
-                            && signal.target
-                                == Some(next_player(source.current_player, source.hands.len()))
-                            && signal.cards.last() == Some(&focus)
-                    })
-                })
-        });
+    let intervening_bluff = has_intervening_bluff(source, &snapshot.team, target, focus);
     if let Some(hazard) = recipient_projection_hazard(
         RecipientProjectionComparison {
-            source,
+            source: if arrival.is_some() {
+                after_clue
+            } else {
+                source
+            },
             replay,
             inferred,
             baseline: &baseline.replay,
@@ -1110,8 +1190,14 @@ pub(super) fn prospective_clue_hazard(
     // direct and delayed identities, then settle to its sole direct play after
     // connection validation. Treating a discarded delayed branch as a live
     // Good Touch promise incorrectly rejects the direct clue as duplication.
-    let (new_play_identities, new_connection_cards) =
-        prospective_new_good_touch_identities(source, replay, inferred, target, focus);
+    let (new_play_identities, new_connection_cards) = prospective_new_good_touch_identities(
+        source,
+        replay,
+        inferred,
+        target,
+        focus,
+        arrival.is_some(),
+    );
     let Some(duplicates_existing_promise) = duplicates_good_touch_superposition(
         source,
         profile,
@@ -1138,7 +1224,7 @@ pub(super) fn prospective_clue_hazard(
     {
         return Some(ProspectiveClueHazard::RecipientWrongConnection);
     }
-    if other_player_projection_is_unsafe(source, after_clue, profile, target, &snapshot.team) {
+    if other_player_projection_is_unsafe(source, after_clue, profile, target, team) {
         return Some(ProspectiveClueHazard::OtherPlayerWrongPromise);
     }
     // Good Touch includes connectors, not only the focused identity. A
@@ -1147,6 +1233,7 @@ pub(super) fn prospective_clue_hazard(
     // https://hanabi.github.io/beginner/good-touch-principle/
     if replay.pending_connections.iter().any(|connection| {
         connection.focus == focus
+            && (arrival.is_none() || new_play_identities.contains(connection.focus_identity))
             && is_new_connection(connection, &baseline.replay)
             && touched.iter().any(|card| {
                 !connection.cards.contains(card)
@@ -1162,6 +1249,9 @@ pub(super) fn prospective_clue_hazard(
         .pending_connections
         .iter()
         .filter(|connection| connection.focus == focus)
+        .filter(|connection| {
+            arrival.is_none() || new_play_identities.contains(connection.focus_identity)
+        })
         .filter(|connection| is_new_connection(connection, &baseline.replay))
         .any(|connection| {
             connection.cards.iter().copied().any(|card| {
@@ -1211,6 +1301,21 @@ struct RecipientProjectionComparison<'a> {
     baseline_inferred: &'a HGroupInferences,
 }
 
+fn focus_is_known_playable(
+    source: &PlayerView,
+    inferred: &HGroupInferences,
+    focus: CardId,
+) -> bool {
+    inferred.cards.iter().any(|note| {
+        note.card == focus
+            && !note.identities.is_empty()
+            && note
+                .identities
+                .iter()
+                .all(|identity| is_playable_now(source, identity))
+    })
+}
+
 fn recipient_projection_hazard(
     comparison: RecipientProjectionComparison<'_>,
     focus: CardId,
@@ -1225,10 +1330,15 @@ fn recipient_projection_hazard(
         baseline_inferred,
     } = comparison;
     let intervening_predecessor = has_intervening_playable_predecessor(source, replay, focus);
+    let focus_known_playable = focus_is_known_playable(source, inferred, focus);
+    // The action list may retain only a higher-priority transfer/Finesse.
+    // A settled playable focus remains safe even when it is not first in line.
     let missing_focus = expect_immediate_focus
         && identity_of(source, focus).is_some_and(|actual| is_playable_now(source, actual))
-        && !inferred.playable_now.contains(&focus);
+        && !inferred.playable_now.contains(&focus)
+        && !focus_known_playable;
     let competing_connection = expect_immediate_focus
+        && !focus_known_playable
         && identity_of(source, focus).is_some_and(|actual| is_playable_now(source, actual))
         && [
             super::HGroupMoveKind::Prompt,
