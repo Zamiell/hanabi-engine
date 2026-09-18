@@ -29,7 +29,7 @@ fn seed_replay_link_matches_hanab_live_codec_and_turn_number() {
     );
     assert_eq!(
         String::from_utf8(output.stdout).unwrap().trim(),
-        "https://hanab.live/shared-replay-json/415howrnrhjibpqadkaq-glbsvtsfvpnulfyxumcc-kxeiwkagpufdm,02fcla-dkdpoblddqdolcefdsob-ddduejdtidicdydrdwrc-,0#23"
+        "https://hanab.live/shared-replay-json/415howrnrhjibpqadkaq-glbsvtsfvpnulfyxumcc-kxeiwkagpufdm,02fcla-dkdpoblddqdolcefdsob-ddduejdtidicdydrdwrc-,0,p4v0s10#23"
     );
 }
 
@@ -60,7 +60,8 @@ fn link_round_trips_every_expert_replay_deck_and_action() {
             .unwrap()
             .replace('-', "");
         let parts = payload.split(',').collect::<Vec<_>>();
-        assert_eq!(parts.len(), 3);
+        assert_eq!(parts.len(), 4);
+        assert_eq!(parts[3], seed);
         assert_eq!(parts[2], "0");
         assert_eq!(
             parts[0][..1].parse::<usize>().unwrap(),
@@ -115,10 +116,10 @@ fn supports_empty_and_single_action_prefixes_but_rejects_illegal_actions() {
         "seed": "p4v0s10", "players": ["Alice", "Bob", "Cathy", "Donald"], "actions": []
     });
     for (actions, expected) in [
-        (serde_json::json!([]), Some(",00,0#1")),
+        (serde_json::json!([]), Some(",00,0,p4v0s10#1")),
         (
             serde_json::json!([{"type":2,"target":2,"value":0}]),
-            Some(",22bc,0#1"),
+            Some(",22bc,0,p4v0s10#1"),
         ),
         // #10 belongs to Cathy, not Alice, who acts first.
         (serde_json::json!([{"type":0,"target":10}]), None),

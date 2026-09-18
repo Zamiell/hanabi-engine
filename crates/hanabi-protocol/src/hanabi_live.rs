@@ -8,6 +8,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 /// The compact JSON replay exported by Hanabi Live's `/copy` command.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct HanabiLiveReplay {
+    pub seed: Option<String>,
     pub players: Vec<String>,
     pub deck: Vec<HanabiLiveCard>,
     pub actions: Vec<HanabiLiveAction>,
@@ -60,6 +61,7 @@ impl<'de> Deserialize<'de> for HanabiLiveReplay {
             crate::seed::deck_from_seed(seed, players.len()).map_err(serde::de::Error::custom)?
         };
         Ok(Self {
+            seed: wire.seed,
             players,
             deck,
             actions: wire.actions,

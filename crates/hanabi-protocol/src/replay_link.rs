@@ -1,5 +1,6 @@
 //! Hanab Live replay URL encoding shared by the CLI and replay diagnostics.
 //! Source: <https://github.com/Hanabi-Live/hanabi-live/blob/3a149d7c42e5c7ff79b61c949dccc5a419564b4a/packages/client/src/lobby/hypoCompress.ts>
+//! Includes the fourth seed field implemented in the sibling Hanab Live codec.
 
 use crate::HanabiLiveReplay;
 
@@ -33,6 +34,15 @@ fn digit(index: usize) -> Result<char, String> {
 }
 
 fn compress(replay: &HanabiLiveReplay) -> Result<String, String> {
+    let seed = replay.seed.as_deref().unwrap_or_default();
+    if !seed
+        .bytes()
+        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+    {
+        return Err(
+            "replay-link seed must contain only ASCII letters, digits, and hyphens".to_owned(),
+        );
+    }
     // Validation above guarantees a full standard deck, hence ranks 1..5.
     let mut encoded = format!("{}15", replay.players.len());
     for card in &replay.deck {
@@ -72,10 +82,12 @@ fn compress(replay: &HanabiLiveReplay) -> Result<String, String> {
     }
     encoded.push_str(",0");
     // The upstream codec inserts hyphens every 20 characters for wrapping.
-    Ok(encoded
+    let wrapped = encoded
         .as_bytes()
         .chunks(20)
         .map(|chunk| std::str::from_utf8(chunk).expect("the codec emits ASCII"))
         .collect::<Vec<_>>()
-        .join("-"))
+        .join("-");
+    // Seed hyphens are meaningful, unlike the wrapping in the first three fields.
+    Ok(format!("{wrapped},{seed}"))
 }
