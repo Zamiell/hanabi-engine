@@ -4490,3 +4490,89 @@ fn third_replay_donald_resolves_the_ambiguous_layer_by_playing_green_one() {
         "Cathy's off-suit layer transfers the ambiguous green-1 obligation to Donald",
     );
 }
+#[test]
+fn first_seed_projected_purple_retains_critical_save_alternative() {
+    // Reviewed p4v0s1 turn-11 Stall hypothetical: after y2, b3, and
+    // Bob's p4 discard, Cathy's purple clue must retain the critical p4
+    // alternative, not force Donald to play it as p2. Future draws stay blank.
+    let state = expert_replay_p4v0s1().state_at_turn(10).unwrap();
+    let mut view = state.view_for(state.current_player()).unwrap();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Play(CardId::new(15)),
+        Action::Play(CardId::new(3)),
+        Action::Discard(CardId::new(5)),
+    ] {
+        let (d, r) = PerspectiveProjector::new(&view, HGroupProfile::Max)
+            .project(view.current_player, PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        let inferred = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+        view = super::super::symbolic_line::apply_symbolic_action(
+            &view,
+            &d,
+            &inferred,
+            view.current_player,
+            action,
+        )
+        .unwrap()
+        .0;
+    }
+    let (d, r) = PerspectiveProjector::new(&view, HGroupProfile::Max)
+        .project(view.current_player, PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    let purple = Action::Clue {
+        target: PlayerId::new(3),
+        clue: Clue::Suit(Suit::Purple),
+    };
+    let admitted = h_group_clue_candidates(&d, HGroupProfile::Max)
+        .iter()
+        .any(|c| c.action == purple);
+    assert_eq!(
+        crate::planner::choose_projected_follow_up(
+            &d,
+            HGroupProfile::Max,
+            &crate::AnalysisControl::default()
+        )
+        .unwrap(),
+        Some(purple)
+    );
+    let inferred = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+    let after = super::super::symbolic_line::apply_symbolic_action(
+        &view,
+        &d,
+        &inferred,
+        view.current_player,
+        purple,
+    )
+    .unwrap()
+    .0;
+    let (d, r) = PerspectiveProjector::new(&after, HGroupProfile::Max)
+        .project(after.current_player, PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    let inferred = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+    let focus = inferred
+        .cards
+        .iter()
+        .find(|card| card.card == CardId::new(12))
+        .unwrap();
+    assert_eq!(
+        focus.identities,
+        IdentitySet::singleton(Card::new(Suit::Purple, Rank::Two))
+            .union(IdentitySet::singleton(Card::new(Suit::Purple, Rank::Four)))
+    );
+    assert!(focus.saved);
+    assert!(!inferred.playable_now.contains(&CardId::new(12)));
+    assert!(admitted);
+    // A selected unknown discard is not a convention-forced action. In
+    // particular, this hypothetical does not establish inevitable BDR.
+    assert_eq!(d.view().clue_tokens, 1);
+    assert_eq!(
+        crate::SupportedConvention::HGroup(HGroupProfile::Max)
+            .analyze(&d)
+            .forced_action,
+        None
+    );
+}

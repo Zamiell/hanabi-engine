@@ -697,9 +697,10 @@ pub(super) fn prospective_clue_marks_focus_saved(
     // Ordinary Level 1 Save precedence is independent of the giver's hidden
     // hand. Rank 2/5 clues may be represented as `PlayOrSave` when the focus
     // spans both categories, but it remains saved in every branch. A genuinely
-    // critical focus is likewise invariant. Resolving more of the giver's
-    // cards may narrow the recipient's Save identities but cannot turn the
-    // focus into a non-Save. Eight-Clue Saves remain contextual and require
+    // critical focus is likewise invariant, including a color clue with
+    // both a playable identity and a Critical Save alternative. Resolving
+    // more of the giver's cards may narrow the recipient's Save identities
+    // but cannot turn the focus into a non-Save. Eight-Clue Saves remain contextual and require
     // the exhaustive check below.
     let primary_save_is_hidden_hand_invariant =
         compiled
@@ -713,7 +714,10 @@ pub(super) fn prospective_clue_marks_focus_saved(
                         )
                     ) || matches!(interpretation.kind, HGroupClueKind::PlayOrSave)
                         && !interpretation.save_identities.is_empty()
-                        && matches!(clue, Clue::Rank(Rank::Two | Rank::Five)))
+                        && (matches!(clue, Clue::Rank(Rank::Two | Rank::Five))
+                            || interpretation.save_identities.iter().all(|identity| {
+                                super::is_critical_save_identity(source, identity)
+                            })))
             });
     if primary_save_is_hidden_hand_invariant {
         cache_save_validation(source, profile, key, true);

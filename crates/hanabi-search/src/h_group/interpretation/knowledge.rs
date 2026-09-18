@@ -1112,7 +1112,12 @@ fn compile_convention_card_inferences(
                                 .fold(0, |mask, identity| mask | (1 << identity.index())),
                         );
                         if !direct.is_empty() && !external_finesse_remains_live {
-                            narrowed = direct;
+                            // Clarity compares ways to establish a play; it
+                            // cannot disprove an independently valid Save.
+                            // Preserve surviving Save identities, not ones
+                            // already eliminated by observation/Good Touch.
+                            // https://hanabi.github.io/beginner/clue-interpretation/#clue-interpretation-algorithm
+                            narrowed = direct.union(narrowed.intersection(clue.save_identities));
                         }
                     }
                     if !narrowed.is_empty() {
