@@ -56,12 +56,8 @@ fn fourth_replay_turn_thirty_visible_replacements_remove_discard_bdr() {
     assert!(blue.projection.steps.iter().any(|step| {
         step.consequences.bottom_deck_risk == Some(Card::new(Suit::Red, Rank::Four))
     }));
-    assert_eq!(
-        analysis.planner.best_action,
-        Action::Discard(CardId::new(5)),
-        "{:#?}",
-        analysis.planner
-    );
+    // The updated human review prefers 4s, not discard. Keep this test about
+    // risk assessment; the replay parity test owns the chosen-move expectation.
 }
 
 #[test]
