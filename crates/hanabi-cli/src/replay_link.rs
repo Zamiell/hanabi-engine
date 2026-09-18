@@ -11,6 +11,7 @@ use crate::{CliError, next_value, parse_value, read_replay};
 pub(super) struct Arguments {
     replay: PathBuf,
     turn: usize,
+    markdown: bool,
 }
 
 pub(super) fn parse(
@@ -21,9 +22,11 @@ pub(super) fn parse(
         return Ok(None);
     }
     let mut turn = 1;
+    let mut markdown = false;
     while let Some(flag) = arguments.next() {
         match flag.as_str() {
             "--turn" => turn = parse_value(&flag, &next_value(arguments, &flag)?)?,
+            "--markdown" => markdown = true,
             "--help" | "-h" => return Ok(None),
             _ => return Err(CliError::Usage(format!("unknown option {flag:?}"))),
         }
@@ -31,14 +34,22 @@ pub(super) fn parse(
     Ok(Some(Arguments {
         replay: path.into(),
         turn,
+        markdown,
     }))
 }
 
 pub(super) fn run(arguments: &Arguments) -> Result<(), CliError> {
     let replay = read_replay(&arguments.replay)?;
-    println!(
-        "{}",
-        replay_link(&replay, arguments.turn).map_err(CliError::Usage)?
-    );
+    let url = replay_link(&replay, arguments.turn).map_err(CliError::Usage)?;
+    if arguments.markdown {
+        let label = replay
+            .seed
+            .as_deref()
+            .filter(|seed| !seed.is_empty())
+            .unwrap_or("Replay");
+        println!("[{label}, turn {}]({url})", arguments.turn);
+    } else {
+        println!("{url}");
+    }
     Ok(())
 }

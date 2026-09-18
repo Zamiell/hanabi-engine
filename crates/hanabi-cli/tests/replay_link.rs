@@ -100,6 +100,26 @@ fn invalid_turns_fail_without_printing_a_link() {
 }
 
 #[test]
+fn markdown_link_contains_the_unmodified_verified_url() {
+    let plain = String::from_utf8(run("23").stdout).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
+        .arg("replay-link")
+        .arg(fixture())
+        .args(["--turn", "23", "--markdown"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).unwrap(),
+        format!("[p4v0s10, turn 23]({})\n", plain.trim())
+    );
+}
+
+#[test]
 fn missing_replay_fails_without_printing_a_link() {
     let output = Command::new(env!("CARGO_BIN_EXE_hanabi-engine"))
         .args(["replay-link", "nonexistent-replay.json"])

@@ -460,7 +460,7 @@ fn print_usage_to_stderr() {
 
 fn usage() -> &'static str {
     "Usage:\n  hanabi-engine analyze <replay.json> --turn <N> [options]\n  \
-     hanabi-engine replay-link <replay.json> [--turn <N>]\n  \
+     hanabi-engine replay-link <replay.json> [--turn <N>] [--markdown]\n  \
      hanabi-engine protocol-info\n  \
      hanabi-engine live-action [options] < live-snapshot.json\n\n\
      hanabi-engine live-session [options] < session-requests.ndjson\n\n\

@@ -154,14 +154,22 @@ Always include a generated clickable Hanab Live replay link, the seed, the
 one-based turn, and the competing actions or concrete issue. This applies even
 when reporting status rather than explicitly asking a question.
 
-The expert replay comparison prints a link on disagreement. Include that link in
-the user-facing response. Otherwise, generate it with:
+The expert replay comparison prints a link on disagreement. For a ready-to-paste
+Markdown link, generate it with:
 
 ```bash
 scripts/generate-hanab-live-link.sh path/to/game.json --turn 1
 ```
 
 Use Hanab Live's **one-based** turn number.
+
+Copy the generator's complete Markdown link verbatim into the response. Never
+retype, reconstruct, shorten, or manually edit the compressed URL, including its
+turn fragment; rerun the generator with the desired turn instead. The generator
+checks that its payload decodes to the original player count, deck, actions,
+variant, and seed before printing. That check protects generation, not later
+transcription: compare the final response link against the tool output before
+sending. If using the comparison tool's URL directly, copy that URL verbatim.
 
 ### Candidate Clues
 
