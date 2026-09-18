@@ -1,6 +1,70 @@
 use super::*;
 
 #[test]
+fn fourth_replay_turn_twenty_six_does_not_assume_an_unfinished_play_line_is_safe() {
+    // Reviewed GD of g4. A longer GD forecast must not lose to the shorter
+    // play forecast merely because it reaches a later loss. An unresolved
+    // clue in the play line is not evidence that the continuation is safe.
+    let state = expert_replay_p4v0s3().state_at_turn(25).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        analysis.planner.best_action,
+        Action::Discard(CardId::new(7)),
+        "{:#?}",
+        analysis.planner.comparisons
+    );
+}
+
+#[test]
+fn fourth_replay_turn_thirty_visible_replacements_remove_discard_bdr() {
+    // Human-reviewed p4v0s3 turn 30: all needed non-critical identities have
+    // visible replacements. Bob's unknown chop must not acquire BDR merely
+    // because it could contain an unseen critical card. The blue line loses r4.
+    let state = expert_replay_p4v0s3().state_at_turn(29).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    let discard = analysis
+        .planner
+        .root_actions
+        .iter()
+        .find(|candidate| candidate.action == Action::Discard(CardId::new(5)))
+        .unwrap();
+    assert_eq!(discard.projection.forecast_discard_risk(), Some(0));
+    let blue = analysis
+        .planner
+        .root_actions
+        .iter()
+        .find(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(0),
+                    clue: Clue::Suit(Suit::Blue),
+                }
+        })
+        .unwrap();
+    assert!(blue.projection.steps.iter().any(|step| {
+        step.consequences.bottom_deck_risk == Some(Card::new(Suit::Red, Rank::Four))
+    }));
+    assert_eq!(
+        analysis.planner.best_action,
+        Action::Discard(CardId::new(5)),
+        "{:#?}",
+        analysis.planner
+    );
+}
+
+#[test]
 fn fourth_replay_red_one_precedes_transferred_green_four() {
     // Human-reviewed p4v0s3 turn 27: the GD establishes g4, but r1 leads
     // into Cathy's clued r2. A globally known transfer is not an urgent finesse.

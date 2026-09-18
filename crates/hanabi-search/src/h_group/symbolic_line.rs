@@ -230,20 +230,26 @@ fn continue_plan<const REUSE_SELECTED: bool>(
                 // An unexecuted unknown discard is not evidence of zero loss.
                 // Keep it as a possible hazard without inventing an identity,
                 // spending the turn, or crediting a token/draw.
-                if LogicalDeductions::new(public.clone())
-                    .ok()
-                    .and_then(|deductions| deductions.possible_identities(card))
-                    .is_some_and(|identities| {
+                let risk = LogicalDeductions::new(public.clone()).ok().is_none_or(|deductions| {
+                    let source_inferred = super::infer_h_group(&deductions, profile);
+                    deductions.possible_identities(card).is_none_or(|identities| {
                         identities.iter().any(|identity| {
                             super::is_eventually_useful(&public, identity)
+                                // Losing a last copy is a distinct critical-card
+                                // risk, not a risk that its other copy is bottom
+                                // deck. Do not count unknown 5s as BDR evidence.
+                                && !is_last_copy(&public, identity)
                                 && !public.hands.iter().flatten().any(|other| {
-                                    other.id != card && other.identity == Some(identity)
+                                    other.id != card && (other.identity == Some(identity)
+                                        || source_inferred.cards.iter().any(|note| {
+                                            note.card == other.id
+                                                && note.identities == crate::IdentitySet::singleton(identity)
+                                        }))
                                 })
                         })
                     })
-                {
-                    plan.record_unresolved_discard_risk(card);
-                }
+                });
+                plan.record_unresolved_discard(card, risk);
             }
             if let Action::Clue { target, clue } = current {
                 let outcomes = clue_touch_outcomes(&public, target, clue);
@@ -420,7 +426,7 @@ fn important_discard(
     if observed.is_some_and(|identity| !super::is_eventually_useful(source, identity)) {
         return (None, None);
     }
-    if observed.is_some_and(|identity| super::is_critical(source, identity)) {
+    if observed.is_some_and(|identity| is_last_copy(source, identity)) {
         return (Some(Loss::CriticalCard), None);
     }
     let Ok(deductions) = LogicalDeductions::new(source.clone()) else {
@@ -445,7 +451,7 @@ fn important_discard(
     if !super::is_eventually_useful(source, identity) {
         return (None, None);
     }
-    if super::is_critical(source, identity) {
+    if is_last_copy(source, identity) {
         return (Some(Loss::CriticalCard), None);
     }
     if source
@@ -489,6 +495,17 @@ fn important_discard(
     // Do not confuse absence of immediate Save urgency with a harmless loss.
     // https://hanabi.github.io/level-25/#the-load-clue
     (save_violation, Some(identity))
+}
+
+/// Physical last-copy loss includes 5s, unlike the non-5 Critical Save
+/// convention. BDR requires another copy that could be buried in the deck.
+fn is_last_copy(view: &PlayerView, identity: Card) -> bool {
+    view.discard_pile
+        .iter()
+        .filter(|(_, discarded)| *discarded == identity)
+        .count()
+        + 1
+        >= usize::from(identity.rank.copies())
 }
 
 /// Partitions clue outcomes without assigning hidden card identities. The

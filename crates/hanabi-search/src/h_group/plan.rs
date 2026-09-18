@@ -157,9 +157,9 @@ pub struct ProjectionEvidence {
     pub steps: Vec<PlanStep>,
     pub alternatives: Vec<ConditionalAlternative>,
     pub frontier: PlanFrontier,
-    /// The next selected discard could lose a needed identity, but its card
-    /// is unknown. It has not executed and is not a proven harmless discard.
-    pub unresolved_discard_risk: Option<CardId>,
+    /// The next selected discard has an unknown identity and has not executed.
+    /// A false BDR assessment excludes bottom-deck risk, not last-copy risk.
+    pub unresolved_discard: Option<UnresolvedDiscard>,
     pub resources: ResourceSchedule,
     pub windows: Vec<super::ActionWindow>,
     /// Equal elapsed-turn evaluations; the full continuation is retained.
@@ -167,6 +167,12 @@ pub struct ProjectionEvidence {
     /// Exhaustive clue-touch alternatives. These are mutually exclusive,
     /// not extra actions appended to the unconditional prefix.
     pub clue_branches: Vec<ClueTouchBranch>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UnresolvedDiscard {
+    pub card: CardId,
+    pub bottom_deck_risk: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -178,6 +184,23 @@ pub struct ClueTouchBranch {
 }
 
 impl ProjectionEvidence {
+    /// Unbranched risk up to an assessed discard frontier. If a forecast stops
+    /// on an unresolved clue/play, absence of a recorded loss is not evidence
+    /// of safety. A zero-risk unknown discard is a usable local alternative,
+    /// but does not certify anything after that discard or its unknown draw.
+    pub(crate) fn forecast_discard_risk(&self) -> Option<usize> {
+        let known = self
+            .steps
+            .iter()
+            .filter(|step| step.consequences.bottom_deck_risk.is_some())
+            .count();
+        match self.unresolved_discard {
+            Some(discard) => Some(known + usize::from(discard.bottom_deck_risk)),
+            None if known > 0 || self.frontier == PlanFrontier::Terminal => Some(known),
+            None => None,
+        }
+    }
+
     #[cfg(test)]
     pub(crate) fn maximum_bottom_deck_risks(&self) -> usize {
         let prefix = self
@@ -206,7 +229,8 @@ impl ProjectionEvidence {
             .count()
             // The unexecuted discard would be the next action, not the last
             // completed action in this prefix.
-            + usize::from(self.unresolved_discard_risk.is_some() && self.steps.len() < horizon);
+            + usize::from(self.unresolved_discard.is_some_and(|discard| discard.bottom_deck_risk)
+                && self.steps.len() < horizon);
         self.clue_branches
             .iter()
             .map(|branch| branch.continuation.bottom_deck_risks_at(horizon))
@@ -400,8 +424,11 @@ impl ConditionalPlan {
         self.evidence.frontier = frontier;
     }
 
-    pub(super) fn record_unresolved_discard_risk(&mut self, card: CardId) {
-        self.evidence.unresolved_discard_risk = Some(card);
+    pub(super) fn record_unresolved_discard(&mut self, card: CardId, bottom_deck_risk: bool) {
+        self.evidence.unresolved_discard = Some(UnresolvedDiscard {
+            card,
+            bottom_deck_risk,
+        });
     }
 
     pub(super) fn summarize(&self) -> SymbolicLineOutcome {
@@ -494,6 +521,10 @@ mod tests {
 
     #[test]
     fn unknown_discard_risk_is_not_a_loss_beyond_the_shared_horizon() {
+        let mut unknown = ConditionalPlan::new(2);
+        assert_eq!(unknown.evidence.forecast_discard_risk(), None);
+        unknown.record_unresolved_discard(CardId::new(5), false);
+        assert_eq!(unknown.evidence.forecast_discard_risk(), Some(0));
         let mut plan = ConditionalPlan::new(2);
         plan.push(
             0,
@@ -509,9 +540,10 @@ mod tests {
                 ..Default::default()
             },
         );
-        plan.record_unresolved_discard_risk(CardId::new(5));
+        plan.record_unresolved_discard(CardId::new(5), true);
         let evidence = plan.into_evidence();
         assert_eq!(evidence.maximum_bottom_deck_risks(), 1);
+        assert_eq!(evidence.forecast_discard_risk(), Some(2));
         assert_eq!(
             evidence.bottom_deck_risks_at(0),
             0,
@@ -537,10 +569,16 @@ mod tests {
             },
         );
         prefix.add_clue_branch(0, vec![CardId::new(5)], ConditionalPlan::new(2));
+        let evidence = prefix.into_evidence();
         assert_eq!(
-            prefix.into_evidence().bottom_deck_risks_at(2),
+            evidence.bottom_deck_risks_at(2),
             2,
             "mutually exclusive branches use a maximum, not a sum"
+        );
+        assert_eq!(
+            evidence.forecast_discard_risk(),
+            None,
+            "a hypothetical clue outcome is not an unbranched forecast loss"
         );
     }
 

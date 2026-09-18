@@ -449,6 +449,7 @@ pub enum ExactSearchStatus {
 pub enum ComparisonReason {
     SavePrinciple,
     BottomDeckRisk,
+    ForecastBottomDeckRisk,
     RotationDevelopment,
     ProtectedDevelopment,
     PolicyTier,
@@ -1323,6 +1324,18 @@ fn symbolic_fallback_comparison(
             ComparisonReason::WaitingOpportunity,
         ),
         (
+            // A checked discard frontier provides a local risk assessment;
+            // an unfinished clue/play is not evidence of zero future losses.
+            match (
+                left.projection.forecast_discard_risk(),
+                right.projection.forecast_discard_risk(),
+            ) {
+                (Some(left), Some(right)) => right.cmp(&left),
+                _ => Ordering::Equal,
+            },
+            ComparisonReason::ForecastBottomDeckRisk,
+        ),
+        (
             left.preference
                 .within_category()
                 .cmp(&right.preference.within_category()),
@@ -1829,8 +1842,11 @@ mod tests {
         let unknown_discard = find(Action::Discard(hanabi_core::CardId::new(9)));
         assert!(unknown_discard.projection.steps.is_empty());
         assert_eq!(
-            unknown_discard.projection.unresolved_discard_risk,
-            Some(hanabi_core::CardId::new(9))
+            unknown_discard
+                .projection
+                .unresolved_discard
+                .map(|discard| (discard.card, discard.bottom_deck_risk)),
+            Some((hanabi_core::CardId::new(9), true))
         );
         assert_eq!(
             unknown_discard.projection.maximum_bottom_deck_risks(),

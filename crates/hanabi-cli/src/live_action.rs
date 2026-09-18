@@ -382,7 +382,11 @@ fn projection_evidence_json(table_id: u64, evidence: &hanabi_search::ProjectionE
             "actions": checkpoint.actions, "discards": checkpoint.discards,
             "positionValue": position_value_json(checkpoint.value),
         })).collect::<Vec<_>>(),
-        "unresolvedDiscardRisk": evidence.unresolved_discard_risk.map(hanabi_core::CardId::index),
+        "unresolvedDiscardRisk": evidence.unresolved_discard.filter(|discard| discard.bottom_deck_risk).map(|discard| discard.card.index()),
+        "unresolvedDiscard": evidence.unresolved_discard.map(|discard| serde_json::json!({
+            "card": discard.card.index(),
+            "bottomDeckRisk": discard.bottom_deck_risk,
+        })),
         "clueBranches": evidence.clue_branches.iter().map(|branch| json!({
             "turn": branch.turn + 1, "touched": branch.touched.iter().map(|card| card.index()).collect::<Vec<_>>(),
             "projection": projection_evidence_json(table_id, &branch.continuation),
