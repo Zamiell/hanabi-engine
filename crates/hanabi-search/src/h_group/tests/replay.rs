@@ -1,6 +1,30 @@
 use super::*;
 
 #[test]
+fn first_seed_four_charm_does_not_secure_visibly_false_connectors() {
+    // Reviewed p4v0s1 opening comparison: the 4 Charm saves g4 and b4.
+    // Recipient connector assumptions that disagree with Alice's visible
+    // cards cannot count as additional saved cards or protected BDR.
+    let state = expert_replay_p4v0s1().state_at_turn(0).unwrap();
+    let view = state.view_for(PlayerId::new(0)).unwrap();
+    let (outcome, _) = super::super::symbolic_line::project_h_group_projection(
+        &view,
+        HGroupProfile::Max,
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::Four),
+        },
+        2,
+        &crate::AnalysisControl::default(),
+    )
+    .unwrap();
+    let value = outcome.position_value.unwrap();
+    assert_eq!(value.secured_future_plays, 2, "{value:#?}");
+    // The played b1 also counts as protected; fictitious connectors do not.
+    assert_eq!(value.protected_bottom_deck_risks, 3, "{value:#?}");
+}
+
+#[test]
 fn reviewed_rank_two_opening_queues_purple_before_an_early_five_save() {
     fn check(evidence: &super::super::plan::ProjectionEvidence, expected: &[Action]) -> usize {
         let actions = evidence

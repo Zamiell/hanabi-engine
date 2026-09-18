@@ -143,8 +143,14 @@ pub(super) fn evaluate(
                     .then(|| super::identity_of(frontier, card.card))
                     .flatten()
             });
-            if let Some(identity) =
-                promised.filter(|identity| is_eventually_useful(frontier, *identity))
+            if let Some(identity) = promised
+                .filter(|identity| is_eventually_useful(frontier, *identity))
+                // A recipient's mistaken promise is not a secured physical
+                // card. Use only faces visible in the forecasting observer's
+                // view, never the simulator's hidden hand or future deck.
+                .filter(|identity| {
+                    super::identity_of(frontier, card.card).is_none_or(|actual| actual == *identity)
+                })
             {
                 secured = secured.union(IdentitySet::singleton(identity));
             }
