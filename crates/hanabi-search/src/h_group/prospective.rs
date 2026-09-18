@@ -578,7 +578,33 @@ pub(super) fn prospective_play_has_unsafe_inference(
     let Some(identity) = identity else {
         return false;
     };
-    let following = next_player(source.observer, source.hands.len());
+    assumed_play_has_unsafe_inference(source, profile, card, identity)
+}
+
+/// Conditional consequence check: `identity` is the promised play, not a
+/// revelation of the actor's hidden card. AFPB must check every teammate, not
+/// merely the player immediately after the actor.
+/// <https://hanabi.github.io/extras/special-finesses/#the-ambiguous-finesse-pass-back-afpb>
+pub(super) fn assumed_play_has_unsafe_inference(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    card: CardId,
+    identity: Card,
+) -> bool {
+    (0..source.hands.len()).any(|index| {
+        let following = PlayerId::new(u8::try_from(index).expect("player index"));
+        following != source.observer
+            && assumed_play_misleads_observer(source, profile, card, identity, following)
+    })
+}
+
+fn assumed_play_misleads_observer(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    card: CardId,
+    identity: Card,
+    following: PlayerId,
+) -> bool {
     let Some((baseline_deductions, baseline_replay)) =
         projected_h_group_replay(source, profile, following)
     else {
@@ -608,16 +634,25 @@ pub(super) fn prospective_play_has_unsafe_inference(
                 .connection
                 .map(|connection| connection.card)
                 .filter(|candidate| {
-                    baseline
-                        .connection
-                        .is_none_or(|prior| prior.card != *candidate)
+                    baseline.connection.is_none_or(|prior| {
+                        prior.card != *candidate
+                            || after
+                                .connection
+                                .is_some_and(|next| next.identity != prior.identity)
+                    })
                 }),
         );
 
     newly_promised.any(|candidate| {
         identity_of(source, candidate).is_some_and(|actual| {
             let caused_by_play = causal_cards.contains(&candidate)
-                || (actual.suit == identity.suit && actual.rank.number() > identity.rank.number());
+                || (actual.suit == identity.suit
+                    && (actual.rank.number() > identity.rank.number()
+                        || after.connection.is_some_and(|connection| {
+                            connection.card == candidate
+                                && connection.identity.suit == identity.suit
+                                && connection.identity.rank.number() > identity.rank.number()
+                        })));
             caused_by_play && !is_playable_now(&after_play, actual)
         })
     })

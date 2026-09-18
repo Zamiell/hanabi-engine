@@ -820,6 +820,9 @@ fn analyze_h_group_actions_from_analysis(
     if let Some(cached) = analysis.action_set.get() {
         return cached.clone();
     }
+    let action_cache = &analysis.action_set;
+    let pass_back = pass_back_analysis(deductions, profile, analysis);
+    let analysis = pass_back.as_ref().unwrap_or(analysis);
     let inferred = &analysis.inferences;
     let mut clue_candidates = analysis_clue_candidates(deductions, profile, analysis).to_vec();
     clue_candidates.sort_by_key(|candidate| core::cmp::Reverse(candidate.score()));
@@ -915,8 +918,38 @@ fn analyze_h_group_actions_from_analysis(
         preferred,
         predictable,
     };
-    let _ = analysis.action_set.set(decision.clone());
+    let _ = action_cache.set(decision.clone());
     decision
+}
+
+fn pass_back_analysis(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+    analysis: &HGroupAnalysis,
+) -> Option<HGroupAnalysis> {
+    let connection = analysis.inferences.connection?;
+    if connection.kind != HGroupConnectionKind::Finesse
+        || !rule_enabled(profile, HGroupRuleId::SpecialFinesses)
+        || !super::prospective::assumed_play_has_unsafe_inference(
+            deductions.view(),
+            profile,
+            connection.card,
+            connection.identity,
+        )
+    {
+        return None;
+    }
+    // AFPB suspends an unsafe blind-play obligation, not the underlying
+    // identity promise. Choose an unrelated legal action instead; merely
+    // lowering the play's score cannot override ConnectionResponse.
+    // https://hanabi.github.io/extras/special-finesses/#the-ambiguous-finesse-pass-back-afpb
+    let mut adjusted = analysis.clone();
+    adjusted.inferences.connection = None;
+    adjusted
+        .inferences
+        .playable_now
+        .retain(|card| *card != connection.card);
+    Some(adjusted)
 }
 
 /// Constructs every convention-facing result from one history replay and one

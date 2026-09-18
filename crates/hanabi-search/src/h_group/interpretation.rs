@@ -298,6 +298,33 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
     }
     let mut candidates = Vec::new();
 
+    // Save urgency is measured at the recipient's next turn, not at the
+    // giver's current stack heights. An already-promised predecessor may
+    // give the recipient a play before their chop is endangered.
+    let schedule = super::ActionSchedule::from_replay(view, replay);
+    let mut after_giver = view.clone();
+    after_giver.current_player = next_player;
+    let mut occupied_on_arrival = players_with_current_play.clone();
+    for index in 0..view.hands.len() {
+        let player = PlayerId::new(u8::try_from(index).expect("player index"));
+        if player == view.current_player {
+            continue;
+        }
+        let heights = schedule.stack_heights_before(&after_giver, player);
+        if schedule.plays_for(player).any(|obligation| {
+            obligation
+                .promised_identity
+                .is_some_and(|identity| super::is_playable_at(heights, identity))
+                || (!obligation.identities.is_empty()
+                    && obligation
+                        .identities
+                        .iter()
+                        .all(|identity| super::is_playable_at(heights, identity)))
+        }) {
+            occupied_on_arrival.insert(player);
+        }
+    }
+
     for action in view.legal_actions() {
         let Action::Clue { target, clue } = action else {
             continue;
@@ -849,7 +876,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                     ClueValue::new(score),
                     CluePurpose::Save,
                     ClueSchedule::new(
-                        !players_with_current_play.contains(&target)
+                        !occupied_on_arrival.contains(&target)
                             && (focus_identity.rank == Rank::Five
                                 || is_critical_save_identity(view, focus_identity)),
                         false,
@@ -865,7 +892,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
         .filter(|candidate| {
             candidate.is_save()
                 && candidate.target() == next_player
-                && !players_with_current_play.contains(&next_player)
+                && !occupied_on_arrival.contains(&next_player)
         })
         .map(|candidate| candidate.target())
         .collect::<PlayerSet>();

@@ -3086,6 +3086,66 @@ fn cathy_does_not_stomp_donalds_pending_purple_finesse() {
 }
 
 #[test]
+fn reviewed_ambiguous_purple_line_passes_back_instead_of_duplicating() {
+    // Human-reviewed counterfactual from p4v0s2 turn 2. Cathy defers to
+    // Donald, and Donald must not make her duplicate p1 as the next rank.
+    // The extra 5 Save only supplies Cathy's unrelated intervening action.
+    let mut state = expert_replay_p4v0s2().state_at_turn(1).unwrap();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(15)),
+        Action::Play(CardId::new(1)),
+        Action::Play(CardId::new(7)),
+        Action::Clue {
+            target: PlayerId::new(3),
+            clue: Clue::Rank(Rank::Five),
+        },
+    ] {
+        state.apply(action).unwrap();
+    }
+    let d = LogicalDeductions::new(state.view_for(PlayerId::new(3)).unwrap()).unwrap();
+    assert!(
+        super::super::prospective::assumed_play_has_unsafe_inference(
+            d.view(),
+            HGroupProfile::Max,
+            CardId::new(14),
+            Card::new(Suit::Purple, Rank::One)
+        )
+    );
+    assert!(
+        !ordered_h_group_actions(&d, HGroupProfile::Max).contains(&Action::Play(CardId::new(14)))
+    );
+}
+
+#[test]
+fn third_replay_save_does_not_preempt_an_arriving_promised_play() {
+    // p4v0s2 turn 5: Cathy's promised r1 makes Donald's r2 playable before
+    // his next turn. His b5 is not an urgent Save merely because r1 is
+    // absent from the stack at Alice's current turn.
+    let state = expert_replay_p4v0s2().state_at_turn(4).unwrap();
+    let d = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    let save = candidates
+        .iter()
+        .find(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(3),
+                    clue: Clue::Rank(Rank::Five),
+                }
+        })
+        .unwrap();
+    assert!(!save.is_urgent_save(), "{save:#?}");
+}
+
+#[test]
 fn third_replay_move_sixteen_does_not_reinterpret_an_already_promised_play_as_a_bluff() {
     let fixture = expert_replay_p4v0s2();
     let state = fixture.state_at_turn(16).expect("fixture prefix is legal");
