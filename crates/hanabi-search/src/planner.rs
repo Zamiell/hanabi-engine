@@ -1241,9 +1241,30 @@ fn compare_bottom_deck_risks(
             .min(right.projection.common_horizon())
             .max(1),
     );
-    left.projection
-        .bottom_deck_risks_at(horizon)
-        .cmp(&right.projection.bottom_deck_risks_at(horizon))
+    let left_prefix = left.projection.bottom_deck_risks_at(horizon);
+    let right_prefix = right.projection.bottom_deck_risks_at(horizon);
+    let prefix = left_prefix.cmp(&right_prefix);
+    // A shared prefix prevents penalizing a longer forecast merely for seeing
+    // farther. But it must not certify avoidance when the allegedly safer line
+    // already predicts the same loss just beyond that cutoff. Require both
+    // comparisons to support the advantage; otherwise defer to other evidence.
+    // Keep unresolved discard risk already inside the prefix: it is risk, not
+    // a recorded known-card loss, so the full known-loss counter omits it.
+    let complete = left
+        .projection
+        .maximum_bottom_deck_risks()
+        .max(left_prefix)
+        .cmp(
+            &right
+                .projection
+                .maximum_bottom_deck_risks()
+                .max(right_prefix),
+        );
+    if prefix == complete {
+        prefix
+    } else {
+        Ordering::Equal
+    }
 }
 
 fn compare_save_principle_risks(
@@ -1806,6 +1827,93 @@ impl std::error::Error for PlannerError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delayed_known_bdr_is_not_avoidance_at_the_shared_cutoff() {
+        // Comparison invariant, not an invented convention/strategy history.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s2.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(1).unwrap();
+        let d = LogicalDeductions::new(state.view_for(state.current_player()).unwrap()).unwrap();
+        let mut early = symbolic_evaluation(
+            &d,
+            ConventionAction {
+                action: Action::Discard(hanabi_core::CardId::new(4)),
+                preference: crate::ActionPreference::new(0, false),
+                reason: crate::ConventionActionReason::Fallback,
+            },
+        );
+        let mut delayed = early.clone();
+        let risk = crate::PlanStep {
+            turn: 1,
+            projected: crate::ProjectedAction {
+                actor: state.current_player(),
+                action: early.action,
+            },
+            depends_on: None,
+            consequences: crate::ProjectedConsequences {
+                bottom_deck_risk: Some(hanabi_core::Card::new(
+                    hanabi_core::Suit::Red,
+                    hanabi_core::Rank::Four,
+                )),
+                ..Default::default()
+            },
+        };
+        early.projection.steps = vec![risk];
+        early.projection.checkpoints = vec![RotationCheckpoint {
+            actions: 1,
+            discards: 1,
+            value: ProjectedPositionValue::default(),
+        }];
+        delayed.projection.steps = vec![
+            crate::PlanStep {
+                consequences: crate::ProjectedConsequences::default(),
+                ..risk
+            },
+            risk,
+        ];
+        delayed.projection.checkpoints = vec![RotationCheckpoint {
+            actions: 2,
+            discards: 1,
+            value: ProjectedPositionValue::default(),
+        }];
+        assert_eq!(compare_bottom_deck_risks(&early, &delayed), Ordering::Equal);
+        assert_eq!(compare_bottom_deck_risks(&delayed, &early), Ordering::Equal);
+        delayed.projection.steps[1].consequences.bottom_deck_risk = None;
+        assert_eq!(
+            compare_bottom_deck_risks(&early, &delayed),
+            Ordering::Greater
+        );
+        early.projection.checkpoints[0].actions = 0;
+        early.projection.steps[0].consequences.bottom_deck_risk = None;
+        delayed.projection.steps[1].consequences.bottom_deck_risk =
+            risk.consequences.bottom_deck_risk;
+        assert_eq!(
+            compare_bottom_deck_risks(&early, &delayed),
+            Ordering::Equal,
+            "a longer speculative tail alone must not penalize a candidate"
+        );
+        let (_, unknown) = crate::h_group::symbolic_line::project_leaf_projection(
+            d.view(),
+            crate::HGroupProfile::Max,
+            early.action,
+            &crate::AnalysisControl::default(),
+        )
+        .unwrap();
+        assert!(
+            unknown
+                .unresolved_discard
+                .is_some_and(|discard| discard.bottom_deck_risk)
+        );
+        delayed.projection = unknown;
+        assert_eq!(
+            compare_bottom_deck_risks(&early, &delayed),
+            Ordering::Less,
+            "preserve risk at an unresolved discard inside the shared prefix"
+        );
+    }
 
     #[test]
     fn reviewed_turn_eleven_self_bluff_avoids_the_blue_three_bottom_deck_risk() {

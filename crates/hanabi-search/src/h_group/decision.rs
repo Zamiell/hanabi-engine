@@ -925,10 +925,11 @@ fn analyze_h_group_actions_from_analysis(
     decision
 }
 
-/// Give a Play Clue to an unoccupied player's playable chop before spending
-/// a single-card Save on someone already occupied by a promised play.
+/// Make a known play or queue a productive Play Clue before a single-card Save on
+/// someone already occupied by a promised play.
 /// The Save remains legal and projected, but has no immediate deadline.
-/// Human-reviewed p4v0s2 turn 3; not a general bonus for cluing chop cards.
+/// Human-reviewed p4v0s2 turns 3 and 5. The play need not be on chop, nor
+/// must its recipient be idle: queuing a continuation is productive too.
 /// <https://hanabi.github.io/beginner/other-general-strategy/#give-play-clues-over-save-clues>
 fn deferred_early_saves(
     view: &PlayerView,
@@ -936,20 +937,11 @@ fn deferred_early_saves(
     clues: &[CompiledClueAction],
 ) -> Vec<Action> {
     let schedule = ActionSchedule::from_replay(view, &analysis.replay);
-    let protects_playable_chop = clues.iter().any(|candidate| {
-        candidate.purpose() == CluePurpose::Play
-            && candidate.immediate_play()
-            && !schedule.occupied_after_clue(view, candidate.target())
-            && analysis.inferences.chops[candidate.target().index()].is_some_and(|chop| {
-                let Action::Clue { clue, .. } = candidate.action else {
-                    return false;
-                };
-                identity_of(view, chop).is_some_and(|identity| {
-                    clue.matches(identity) && is_playable_now(view, identity)
-                })
-            })
-    });
-    if !protects_playable_chop {
+    let productive_play = !analysis.inferences.playable_now.is_empty()
+        || clues
+            .iter()
+            .any(|candidate| candidate.purpose() == CluePurpose::Play);
+    if !productive_play {
         return Vec::new();
     }
     clues.iter().filter(|candidate| {

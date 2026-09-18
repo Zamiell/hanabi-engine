@@ -1,6 +1,80 @@
 use super::*;
 
 #[test]
+fn reviewed_rank_two_opening_queues_purple_before_an_early_five_save() {
+    fn check(evidence: &super::super::plan::ProjectionEvidence, expected: &[Action]) -> usize {
+        let actions = evidence
+            .steps
+            .iter()
+            .map(|step| step.projected.action)
+            .collect::<Vec<_>>();
+        assert_eq!(actions, expected[..actions.len()], "{evidence:#?}");
+        assert!(
+            evidence
+                .steps
+                .iter()
+                .all(|step| step.consequences.strikes == 0)
+        );
+        evidence
+            .clue_branches
+            .iter()
+            .map(|branch| check(&branch.continuation, expected))
+            .max()
+            .unwrap_or(0)
+            .max(actions.len())
+    }
+    // User-reviewed p4v0s2 turn 2 line, projected from Bob's information.
+    // Unknown draws and Bob's hand must not be filled from simulator truth.
+    let state = expert_replay_p4v0s2().state_at_turn(1).unwrap();
+    let view = state.view_for(PlayerId::new(1)).unwrap();
+    let root = Action::Clue {
+        target: PlayerId::new(3),
+        clue: Clue::Rank(Rank::Two),
+    };
+    let (_, evidence) = super::super::symbolic_line::project_h_group_projection(
+        &view,
+        HGroupProfile::Max,
+        root,
+        14,
+        &crate::AnalysisControl::default(),
+    )
+    .unwrap();
+    let expected = [
+        root,
+        Action::Play(CardId::new(11)), // p1
+        Action::Play(CardId::new(15)), // g1
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(7)),  // g2
+        Action::Play(CardId::new(10)), // r1
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(1)), // b1
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(9)),  // p2
+        Action::Play(CardId::new(13)), // r2
+        Action::Play(CardId::new(0)),  // p3
+        Action::Clue {
+            target: PlayerId::new(3),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Discard(CardId::new(8)), // r4, turn 15 (not turn 11)
+    ];
+    assert_eq!(
+        check(&evidence, &expected),
+        expected.len(),
+        "must actually reach the reviewed discard"
+    );
+}
+
+#[test]
 fn fourth_replay_anxiety_play_does_not_layer_a_gentlemans_discard() {
     // p4v0s3 turn 34: Alice's forced r3 play does not ask Bob to play g4.
     // Cathy already owns the exact g4 transferred by Bob on turn 26.

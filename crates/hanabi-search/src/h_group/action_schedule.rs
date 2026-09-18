@@ -212,16 +212,32 @@ impl ActionSchedule {
             let playable = self
                 .plays_for(player)
                 .filter_map(|obligation| {
-                    obligation.promised_identity.or_else(|| {
+                    let identity = obligation.promised_identity.or_else(|| {
                         (obligation.identities.len() == 1)
                             .then(|| obligation.identities.iter().next())
                             .flatten()
                             .or_else(|| identity_of(view, obligation.card))
-                    })
+                    })?;
+                    is_playable_at(heights, identity).then_some((identity, obligation.source))
                 })
-                .filter(|identity| is_playable_at(heights, *identity))
                 .collect::<Vec<_>>();
-            if let [identity] = playable.as_slice() {
+            // A due blind-play connection precedes an ordinary queued play.
+            // Multiple playable cards therefore need not make the scheduled
+            // stack advance ambiguous (reviewed p4v0s2 turn 7: r1 before p2).
+            // https://hanabi.github.io/level-1/#the-finesse
+            let connections = playable
+                .iter()
+                .filter(|(_, source)| matches!(source, ObligationSource::Connection(_)))
+                .map(|(identity, _)| *identity)
+                .collect::<Vec<_>>();
+            let selected = if let [identity] = connections.as_slice() {
+                Some(*identity)
+            } else if let [(identity, _)] = playable.as_slice() {
+                Some(*identity)
+            } else {
+                None
+            };
+            if let Some(identity) = selected {
                 heights[identity.suit.index()] += 1;
             }
             player = next_player(player, view.hands.len());

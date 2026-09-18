@@ -201,7 +201,6 @@ impl ProjectionEvidence {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn maximum_bottom_deck_risks(&self) -> usize {
         let prefix = self
             .steps
