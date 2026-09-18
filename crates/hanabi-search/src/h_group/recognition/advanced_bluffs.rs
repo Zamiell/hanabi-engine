@@ -2,8 +2,8 @@ use super::{
     BluffTargetKind, Card, CardSet, Clue, ConnectionTransitionReason, HGroupClueKind,
     HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, IdentitySet, ObservedEvent, PlayerView,
     Rank, bluff_play_connects, bluff_target_kind_at, bluff_target_order_is_legal, chop,
-    finesse_position_id, focus, identity_of, is_critical, is_playable_at, is_trash_at, next_player,
-    protected_cards, push_signal, same_turn_signal, was_clued_before,
+    finesse_position_id, focus, identity_of, is_critical_save_identity, is_playable_at,
+    is_trash_at, next_player, protected_cards, push_signal, same_turn_signal, was_clued_before,
 };
 
 #[allow(clippy::too_many_lines)]
@@ -311,8 +311,9 @@ pub(in crate::h_group) fn apply_intermediate_bluff_effects(
     }
     let critical_color = matches!(clue, Clue::Suit(_))
         && !was_clued_before(view, entry.turn, focus)
-        && focus_identity
-            .is_some_and(|identity| identity.rank != Rank::Five && is_critical(view, identity));
+        && focus_identity.is_some_and(|identity| {
+            identity.rank != Rank::Five && is_critical_save_identity(view, identity)
+        });
     let connecting_identity = bluff_identity.and_then(|identity| {
         (identity.rank != Rank::Five)
             .then(|| Card::new(identity.suit, Rank::ALL[identity.rank.index() + 1]))

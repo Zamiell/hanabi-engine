@@ -2,7 +2,7 @@ use super::{
     Card, CardId, CardSet, Clue, ConnectionObligation, ConnectionTransitionReason, HGroupClueKind,
     HGroupConnectionKind, HGroupMoveKind, HGroupRuleEffects, HGroupTurnContext, IdentitySet,
     ObservedEvent, PlayerId, PlayerView, PromiseId, Rank, RequiredFix, chop, finesse_position_id,
-    five_pulled_card, focus, is_critical, is_playable_at, is_trash_at, next_player,
+    five_pulled_card, focus, is_critical_save_identity, is_playable_at, is_trash_at, next_player,
     protected_cards, push_signal, same_turn_signal, was_clued_before,
 };
 use crate::h_group::EffectSource;
@@ -1606,7 +1606,8 @@ pub(in crate::h_group) fn apply_max_special_effects(
                             .historical
                             .identity(meaning.focus)
                             .is_some_and(|identity| {
-                                identity.rank != Rank::Five && is_critical(view, identity)
+                                identity.rank != Rank::Five
+                                    && is_critical_save_identity(view, identity)
                             })
                         && hands[target.index()].iter().copied().any(|card| {
                             card != meaning.focus

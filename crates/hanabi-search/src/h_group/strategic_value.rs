@@ -566,7 +566,7 @@ fn positional_opportunity_losses(
                 card.id == anchor
                     || card
                         .identity
-                        .is_some_and(|identity| super::is_critical(source, identity))
+                        .is_some_and(|identity| super::is_critical_save_identity(source, identity))
             }) {
                 continue;
             }
@@ -637,7 +637,7 @@ fn secured_critical_chop_deadline_value(
             }
             let chop = baseline.chop?;
             let identity = identity_of(source, chop)?;
-            if identity.rank != Rank::Five && !super::is_critical(source, identity) {
+            if identity.rank != Rank::Five && !super::is_critical_save_identity(source, identity) {
                 return None;
             }
             let protected = value.protects(chop);

@@ -6,8 +6,8 @@
 use super::{
     Card, CardId, Clue, CluePurpose, CompiledClueAction, HGroupInferences, HGroupProfile,
     HGroupRuleId, LogicalDeductions, PerspectiveDepth, PerspectiveProjector, ProspectiveTransition,
-    Rank, Suit, h_group_clue_candidates_from_replay, is_critical, is_eventually_useful,
-    next_player, rule_enabled,
+    Rank, Suit, h_group_clue_candidates_from_replay, is_critical_save_identity,
+    is_eventually_useful, next_player, rule_enabled,
 };
 
 /// Conservative preference over a non-urgent direct clue, never a mandatory
@@ -80,7 +80,7 @@ pub(super) fn discard_priority(
         || identities.contains(*connector)
         || identities.iter().any(|identity| {
             is_eventually_useful(view, identity)
-                && (identity.rank == Rank::Five || is_critical(view, identity))
+                && (identity.rank == Rank::Five || is_critical_save_identity(view, identity))
         })
     {
         return None;

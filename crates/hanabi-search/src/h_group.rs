@@ -99,7 +99,7 @@ use event_reducer::HGroupRuleEffects;
 use facts::{ConventionFacts, IdentityClaimRelation};
 use hand::{
     chop, finesse_position, finesse_position_id, five_chop_moved_card, five_pulled_card, focus,
-    is_critical, remove_card,
+    is_critical_save_identity, remove_card,
 };
 use hypothesis::{InterpretationHypotheses, InterpretationSource};
 use identity::{

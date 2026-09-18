@@ -23,8 +23,8 @@ use super::{
     RequiredFix, SemanticallyAdmittedCandidates, StackTimeline, bluff_play_connects,
     bluff_target_order_is_legal, card_is_trash, chop, convention_information_value,
     finesse_position, five_chop_moved_card, five_pulled_card, focus, identity_of, identity_set,
-    infer_h_group_from_replay, is_convention_trash, is_critical, is_eventually_useful,
-    is_playable_at, is_playable_now, next_player, ordered_playable_cards,
+    infer_h_group_from_replay, is_convention_trash, is_critical_save_identity,
+    is_eventually_useful, is_playable_at, is_playable_now, next_player, ordered_playable_cards,
     pending_card_allows_identity, preferred_due_play_card, projected_h_group_replay,
     prospective_clue_has_unsafe_connection, prospective_clue_marks_focus_saved,
     prospective_clue_primary_interpretation, prospective_clue_primary_kind,
@@ -821,7 +821,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                     ClueSchedule::new(
                         !players_with_current_play.contains(&target)
                             && (focus_identity.rank == Rank::Five
-                                || is_critical(view, focus_identity)),
+                                || is_critical_save_identity(view, focus_identity)),
                         false,
                     ),
                     0,
@@ -2021,7 +2021,9 @@ pub(super) fn advanced_clue_candidates(
         let protects_critical_chop = clue_focus == chop(layout, gotten)
             && clue_focus
                 .and_then(|focus| identity_of(view, focus))
-                .is_some_and(|identity| identity.rank == Rank::Five || is_critical(view, identity));
+                .is_some_and(|identity| {
+                    identity.rank == Rank::Five || is_critical_save_identity(view, identity)
+                });
         let target_already_has_a_play = subjective_playable_cards(view, profile, target)
             .is_some_and(|cards| !cards.is_empty())
             || replay.hands[target.index()].iter().any(|card| {
@@ -2295,7 +2297,7 @@ pub(super) fn save_clue_score(
             !card_is_trash(view, identity) && two_save_allowed(view, focus, identity, &chops)
         }
         (_, Rank::Five) => false,
-        _ => is_critical(view, identity),
+        _ => is_critical_save_identity(view, identity),
     };
     if !valid || !target_hand.iter().any(|card| card.id == focus) {
         return None;

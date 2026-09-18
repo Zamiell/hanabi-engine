@@ -102,7 +102,10 @@ pub(super) fn focus(
     }
 }
 
-pub(super) fn is_critical(view: &PlayerView, identity: Card) -> bool {
+/// Non-5 last copies eligible by identity for the Critical Save convention.
+/// This does not check chop position or clue legality. Unlike a physical
+/// last-copy predicate, it deliberately excludes 5s, which use 5 Saves.
+pub(super) fn is_critical_save_identity(view: &PlayerView, identity: Card) -> bool {
     identity.rank != Rank::Five
         && view
             .discard_pile

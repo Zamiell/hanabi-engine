@@ -12,9 +12,9 @@ use super::{
     TeamConventionSnapshot, TerminalPlanProgress, chop, convention_card_inferences,
     finesse_position, h_group_clue_candidates_from_replay, h_group_phase,
     h_group_rejected_clues_from_replay, identity_of, infer_clue_to_self, is_convention_trash,
-    is_critical, is_eventually_useful, is_playable_now, next_player, ordered_playable_cards,
-    owner_knowledge_read_model, projected_h_group_replay, prospective_clue_primary_kind,
-    prospective_clue_view, prospective_play_has_unsafe_inference,
+    is_critical_save_identity, is_eventually_useful, is_playable_now, next_player,
+    ordered_playable_cards, owner_knowledge_read_model, projected_h_group_replay,
+    prospective_clue_primary_kind, prospective_clue_view, prospective_play_has_unsafe_inference,
     prospective_team_clue_signal_kinds, replay_h_group, rule_enabled, was_clued_before,
 };
 
@@ -812,8 +812,9 @@ fn no_valid_first_turn_damage(
     let protected = touched
         .iter()
         .filter(|card| {
-            identity_of(view, **card)
-                .is_some_and(|identity| identity.rank == Rank::Five || is_critical(view, identity))
+            identity_of(view, **card).is_some_and(|identity| {
+                identity.rank == Rank::Five || is_critical_save_identity(view, identity)
+            })
         })
         .count();
     (
@@ -2145,7 +2146,7 @@ pub(super) fn can_park_surplus_five(source: &PlayerView, inferred: &HGroupInfere
         .flatten()
         .filter(|card| {
             super::identity_of(source, **card)
-                .is_some_and(|identity| super::is_critical(source, identity))
+                .is_some_and(|identity| super::is_critical_save_identity(source, identity))
         })
         .count();
     let reserve = super::ResourceSchedule::reserve(

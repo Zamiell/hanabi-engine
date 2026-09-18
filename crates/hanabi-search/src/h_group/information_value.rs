@@ -1,7 +1,7 @@
 use super::{
     Card, CardId, CardSet, Clue, HGroupCardInference, HGroupIdentityStatus, HGroupProfile,
-    HGroupState, IdentitySet, PlayerId, PlayerView, Rank, is_critical, prospective_clue_view,
-    subjective_convention_cards,
+    HGroupState, IdentitySet, PlayerId, PlayerView, Rank, is_critical_save_identity,
+    prospective_clue_view, subjective_convention_cards,
 };
 
 /// Convention-aware value of the negative information supplied by a clue.
@@ -172,7 +172,7 @@ fn identity_relevance(source: &PlayerView, identity: Card) -> u16 {
             _ => 2,
         }
     };
-    let criticality = if is_critical(source, identity) {
+    let criticality = if is_critical_save_identity(source, identity) {
         5
     } else if identity.rank == Rank::Five {
         3
