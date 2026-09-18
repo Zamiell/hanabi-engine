@@ -38,15 +38,14 @@
     { "type": 2, "target": 1, "value": 0 },
     { "type": 0, "target": 2 },
     { "type": 0, "target": 34 },
-    { "type": 3, "target": 1, "value": 3 },
-    { "type": 2, "target": 1, "value": 2 },
-    { "type": 1, "target": 3 },
-    { "type": 0, "target": 40 },
-    { "type": 1, "target": 20 },
+    { "type": 3, "target": 0, "value": 4 },
     { "type": 2, "target": 2, "value": 1 },
+    { "type": 1, "target": 36 },
+    { "type": 0, "target": 40 },
+    { "type": 0, "target": 38 },
+    { "type": 2, "target": 1, "value": 2 },
     { "type": 0, "target": 39 },
-    { "type": 0, "target": 23 },
-    { "type": 0, "target": 38 }
+    { "type": 0, "target": 23 }
   ],
   "seed": "p4v0s2"
 }
