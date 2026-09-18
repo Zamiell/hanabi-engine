@@ -23,6 +23,28 @@ run_check() {
 repository_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repository_root"
 
+mode=full
+case "${1:-}" in
+  "") ;;
+  --fast) mode=fast; shift ;;
+  --help)
+    echo 'Usage: scripts/check.sh [--fast]'
+    echo 'Default: full validation. --fast: all stages except the ordinary Rust test suite.'
+    echo 'Run focused Rust tests separately; fast success is not full validation.'
+    exit 0 ;;
+  *) echo "Unknown option: $1" >&2; exit 2 ;;
+esac
+if (( $# != 0 )); then
+  echo 'Unexpected arguments; see --help.' >&2
+  exit 2
+fi
+if [[ "${HANABI_CHECK_TIMED:-0}" != 1 ]]; then
+  args=()
+  if [[ "$mode" == fast ]]; then args+=(--fast); fi
+  exec env HANABI_CHECK_TIMED=1 python3 scripts/workflow.py run \
+    --label "check-$mode" -- bash scripts/check.sh "${args[@]}"
+fi
+
 # Full validations compete for the same CPU and build cache. Do not silently
 # queue or overlap another full run, which also invalidates timing comparisons.
 mkdir -p target
@@ -99,7 +121,7 @@ EOF
   exit 1
 fi
 
-if ! cargo nextest --version >/dev/null 2>&1; then
+if [[ "$mode" == full ]] && ! cargo nextest --version >/dev/null 2>&1; then
   cat >&2 <<'EOF'
 cargo-nextest 0.9.143 is missing. Install its prebuilt WSL/Linux binary with:
 
@@ -120,12 +142,16 @@ echo 'Running Clippy...'
 run_check 'Clippy' cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
 echo 'Running all ordinary Rust tests...'
+if [[ "$mode" == full ]]; then
 run_check 'Rust tests' cargo nextest run \
   --workspace \
   --all-targets \
   --all-features \
   --locked \
   --no-fail-fast
+else
+  echo 'FAST CHECK: ordinary Rust tests skipped; run focused tests for this change.'
+fi
 
 # Nextest deliberately does not run rustdoc tests.
 echo 'Running Rust documentation tests...'
@@ -144,6 +170,7 @@ run_check 'Python compilation' .venv/bin/python -m py_compile \
   scripts/hanabi_live_engine.py \
   scripts/hanabi_live_game.py \
   scripts/hanabi_live_trace.py \
+  scripts/workflow.py \
   scripts/tests/test_hanabi_live_bot.py
 
 echo 'Running Python tests...'
@@ -163,9 +190,9 @@ run_check 'Final ownership' check_file_ownership
 
 check_elapsed_seconds=$((SECONDS - check_started_seconds))
 if (( check_failed != 0 )); then
-  printf 'Checks failed; full suite completed in %dm %ds.\n' \
+  printf '%s checks failed; completed in %dm %ds.\n' "$mode" \
     "$((check_elapsed_seconds / 60))" "$((check_elapsed_seconds % 60))"
   exit 1
 fi
-printf 'All checks passed in %dm %ds.\n' \
+printf '%s checks passed in %dm %ds.\n' "$mode" \
   "$((check_elapsed_seconds / 60))" "$((check_elapsed_seconds % 60))"

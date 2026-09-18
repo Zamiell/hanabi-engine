@@ -27,9 +27,64 @@ govern arbitrary Cargo invocations.
 `check.sh` runs all ordinary tests without fail-fast and continues to the other
 validation stages after failures. It reports each stage's elapsed seconds and a
 total on success or failure, and exits nonzero if any stage failed. Missing
-prerequisites still stop the run immediately. Use focused tests while editing,
-then one full validation at task completion; do not repeat completed checks just
-because an unrelated regression remains failing.
+prerequisites still stop the run immediately. Use focused tests while editing;
+full local validation is for broad changes, milestones, or explicit requests,
+not every prompt. CI retains full validation on every push. Do not repeat
+completed checks just because an unrelated regression remains failing.
+
+## Interactive workflow and timing
+
+For a localized Rust fix, reproduce and fix the focused regression, run related
+tests, then use `scripts/check.sh --fast`. Fast mode runs the same build, lint,
+documentation, Python, ownership, and dead-code stages as full mode, but skips
+the ordinary Rust suite. It does not replace focused Rust tests or claim full
+replay agreement. Documentation-only changes need formatting, not engine tests.
+Fixture edits need legality and affected-position checks, not automatic scans of
+every replay. See the validation matrix in [AGENTS.md](../AGENTS.md).
+
+The full suite is still `scripts/check.sh` with no arguments. CI invokes that
+unchanged default, together with MSRV and exhaustive-profile jobs. Full runs
+remain nonzero on any failure; known failures are not ignored or deleted.
+
+Record local work sessions and substantive commands:
+
+```bash
+python3 scripts/workflow.py start "Fix turn 27 play priority"
+python3 scripts/workflow.py run --label focused -- cargo test -p hanabi-search fourth_replay_red_one_precedes --lib
+scripts/check.sh --fast
+python3 scripts/workflow.py finish
+python3 scripts/workflow.py report
+```
+
+Both check modes automatically record output, per-stage timings, exit status,
+commit and tracked-diff fingerprint in ignored `target/workflow/`. Other
+commands must use the wrapper to be recorded. The local records survive prompts
+but are removed by `cargo clean`; archive them elsewhere before cleaning if
+needed. They are not a reconstruction of historical prompt latency.
+
+Use `wait-start` and `wait-end` to record intervals actually spent waiting for
+tools. Do not mark time spent editing/investigating while a check runs as
+waiting. The report separates work-session elapsed time, union of command
+intervals, explicitly recorded waiting, and full-suite run count. These
+quantities overlap; do not add them together. Zero recorded wait does not prove
+there was no waiting. Task start/finish timestamps approximate the recorded
+session, not model thinking time, app queuing, or precise
+user-message-to-response latency.
+
+After inspecting a completed full-check log, explicitly capture a diagnostic
+failure baseline with its originating revision:
+
+```bash
+python3 scripts/workflow.py baseline /tmp/reviewed-check.log --revision COMMIT
+```
+
+Subsequent completed full runs report new, still-failing, and no-longer-reported
+nextest failures. This is a local comparison, not CI acceptance of those
+failures. No-longer-reported tests may have been omitted or renamed; inspect the
+test count, stage exit codes, and log before calling them fixed. Non-test
+failures and incomplete runs remain visible in recorded stage results and
+process status. Do not refresh the baseline automatically after a regression.
+New failures remain failures regardless of the baseline.
 
 For per-turn, nested stage timings of an expert action-parity test:
 

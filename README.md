@@ -29,7 +29,9 @@ cargo test --workspace --all-targets --all-features --locked
 Run `scripts/check.sh` for the complete local CI suite, including Rust
 documentation, Python typing/tests, and closed-workspace dead-code analysis. The
 additional setup is documented in the
-[technical overview](docs/technical-overview.md#development-and-ci).
+[technical overview](docs/technical-overview.md#development-and-ci). For quick
+iteration, run focused Rust tests plus `scripts/check.sh --fast`; see
+[validation and timing](docs/testing.md#interactive-workflow-and-timing).
 
 ## Example usage
 

@@ -8,22 +8,61 @@ editing tools can accidentally create files owned by `root:root`.
 
 ## Validation
 
-While working, run the checks most relevant to the files being changed. Before
-completing a task, run the repository's full validation suite:
+Optimize for short, evidence-backed interactive turns. Full validation is a
+checkpoint, not an automatic tax on every prompt. Preserve all tests and their
+assertions; change when they run, not their strength.
 
-```bash
-scripts/check.sh
-```
+| Change                                        | Local validation before responding                                                     |
+| --------------------------------------------- | -------------------------------------------------------------------------------------- |
+| Discussion / diagnosis                        | Relevant read-only inspection; no full suite                                           |
+| Documentation                                 | Formatting and any affected examples/scripts                                           |
+| Fixture edit                                  | Parse and replay legality; inspect/test the affected position                          |
+| Localized convention fix                      | Reproduce the failure; focused regression and related tests; `scripts/check.sh --fast` |
+| Shared inference/planner refactor             | Focused checks first; one full `scripts/check.sh` after implementation settles         |
+| Milestone or explicit full-validation request | Full `scripts/check.sh`                                                                |
 
-If the full suite cannot be run, report which checks were skipped and why.
+`--fast` retains build, lint, documentation, Python, and dead-code checks but
+omits the expensive ordinary Rust suite. Run relevant Rust tests separately. Run
+inexpensive formatting/Clippy before launching broad tests. A failing focused
+test is a reason to keep debugging, not to start full validation.
+
+CI runs full validation on each push, plus the existing MSRV and exhaustive
+profile jobs. Do not wait for CI unless requested or necessary for the task.
+Never describe local fast/focused success or an unobserved CI run as a full
+pass. Report what ran, what was deferred to CI, and any known failures.
 
 Do not overlap full validation runs or CPU-heavy benchmarks. For performance
 comparisons, use the same precompiled workload and configuration, run before and
 after sequentially, and distinguish reduced test setup from engine speed.
-Preserve assertions and reasoning coverage. `check.sh` completes all stages even
-when tests fail and reports stage/total timings; do not manually repeat its
-completed stages. Use focused checks during editing and one full run after the
-final changes, rather than a full run after every intermediate edit.
+`check.sh` completes all stages even when tests fail. Do not restart the entire
+suite for a formatting-only fix or test-only assertion adjustment: rerun the
+affected stage/tests. Rerun the full suite only if subsequent implementation
+changes invalidate its coverage. Do not run full validation repeatedly to
+rediscover unchanged pre-existing failures.
+
+### Timing and failure records
+
+For implementation/investigation tasks, start
+`python3 scripts/workflow.py start "short task label"` at the beginning and use
+`finish` before the final response. These measure the recorded work session, not
+the app's complete prompt latency or model thinking time. If interrupted, finish
+the stale session before starting another; do not quietly overwrite it. Pure
+conversational answers need no timer.
+
+`check.sh` automatically records commands, output logs, stage times, exit codes,
+and Git/worktree identity under ignored `target/workflow/`. Wrap other
+substantive commands with
+`python3 scripts/workflow.py run --label LABEL -- COMMAND ...`. Use `wait-start`
+/ `wait-end` only for intervals spent waiting, not intervals used to investigate
+or edit while checks run. Unrecorded waits are unknown. `report` shows task
+durations, command execution, explicitly recorded waiting, and full-run counts.
+Do not add overlapping command durations to task duration.
+
+Use an explicit `baseline LOG --revision REVISION` from a completed full run to
+distinguish new, persistent, and no-longer-reported test failures. Never
+automatically accept new failures into the baseline. Baselines are diagnostic:
+all failures retain nonzero exit status, including in CI. Stage failures and
+incomplete runs must also be reported; missing results are not proof of fixes.
 
 ## Test provenance
 
@@ -43,8 +82,7 @@ algorithm, and data-structure unit tests and invariant-only smoke tests. See
 
 After every user prompt that changes this repository:
 
-1. Run the relevant checks, including `scripts/check.sh` before completing the
-   prompt.
+1. Run the relevant checks according to the validation matrix above.
 2. Commit all in-scope changes with a descriptive commit message.
 3. Push the commit to the current branch's configured upstream.
 
@@ -72,13 +110,17 @@ is complete.
 Whenever reporting a replay disagreement, convention bug, or position requiring
 human review, use the following instructions.
 
-### Continue After a Fix
+### Scope and replay checkpoints
 
-When working through replay disagreements, do not stop at reporting that the
-current fix passes. Re-run the active replay comparison from the beginning and
-identify its next disagreement. If the active replay fully agrees, inspect any
-remaining expert-replay failures from validation and report the first mismatch
-in the next failing replay. Do not silently switch replays: name the new seed.
+For a request to fix a specific bug, verify that position and related behavior,
+then report the fix. Do not automatically search for the next disagreement or
+expand into other replays. Fixture edits likewise do not authorize changing
+subsequent moves. A full replay scan is a separate task or checkpoint.
+
+When the user explicitly asks to continue through a replay, re-run that replay
+from the beginning and proceed until a non-obvious convention/strategy question
+or genuine blocker. Do not silently switch replays. Full replay scans belong in
+this workflow, not every small fix or explanation.
 
 Within the user's authorized bug-fixing scope, investigate and fix obvious bugs
 without waiting for another prompt. Stop for a non-obvious convention or
@@ -93,17 +135,18 @@ uncertainty handling, then fix clear implementation errors and continue. Unknown
 cards must remain unknown; an unfinished forecast is neither proof that an
 action is good nor grounds to reject it automatically.
 
-Before ending a bug-fixing turn with an unresolved disagreement, state the
-specific convention/strategy question that requires the user's judgment (and why
-the documentation and already-reviewed expectations do not answer it), or the
-concrete external blocker. If no such question or blocker exists, continue
-working rather than asking the user to authorize the same investigation again.
+When an explicitly requested replay investigation ends with an unresolved
+disagreement, state the specific convention/strategy question that requires the
+user's judgment (and why the documentation and already-reviewed expectations do
+not answer it), or the concrete external blocker. If no such question or blocker
+exists, continue working rather than asking the user to authorize the same
+investigation again.
 
-The final response must state one of: the next unresolved disagreement (with
-link, seed, turn, all candidate clues, and reasoning), all expert replays fully
-agree, or the concrete blocker preventing the next comparison. A passing focused
-test or a count of remaining failures is not a substitute for this handoff.
-Documentation-only requests do not authorize additional engine fixes.
+For that replay investigation, report the next unresolved disagreement (with
+link, seed, turn, candidate clues, and reasoning), agreement for the tested
+replay/range, or the concrete blocker. For localized fixes, report the fix and
+focused validation; do not claim untested replay-wide agreement.
+Documentation/workflow-only requests do not authorize additional engine fixes.
 
 ### Replay Link
 
@@ -120,9 +163,9 @@ scripts/generate-hanab-live-link.sh path/to/game.json --turn 1
 
 Use Hanab Live's **one-based** turn number.
 
-### Canditate Clues
+### Candidate Clues
 
-Always enumerate all canditate clues that the engine considered.
+When reporting a disagreement, enumerate the candidate clues considered.
 
 ### Move Reasoning
 
