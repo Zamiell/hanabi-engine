@@ -3083,6 +3083,37 @@ fn cathy_does_not_stomp_donalds_pending_purple_finesse() {
             target: PlayerId::new(0),
             clue: Clue::Suit(Suit::Blue)
         }));
+    let save = candidates
+        .iter()
+        .find(|candidate| {
+            candidate.action
+                == Action::Clue {
+                    target: PlayerId::new(3),
+                    clue: Clue::Rank(Rank::Five),
+                }
+        })
+        .unwrap();
+    assert!(!save.is_urgent_save(), "{save:#?}");
+    assert!(
+        analysis.actions.iter().any(|candidate| {
+            candidate.action == save.action
+                && candidate.preference.policy_tier() == crate::ConventionPolicyTier::Deferred
+        }),
+        "the Early Save stays admitted, but must not displace the playable-chop clue"
+    );
+    assert_eq!(
+        crate::planner::choose_projected_follow_up(
+            &deductions,
+            HGroupProfile::Max,
+            &crate::AnalysisControl::default()
+        )
+        .unwrap(),
+        Some(Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue)
+        }),
+        "{candidates:#?}"
+    );
 }
 
 #[test]

@@ -302,25 +302,13 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
     // giver's current stack heights. An already-promised predecessor may
     // give the recipient a play before their chop is endangered.
     let schedule = super::ActionSchedule::from_replay(view, replay);
-    let mut after_giver = view.clone();
-    after_giver.current_player = next_player;
     let mut occupied_on_arrival = players_with_current_play.clone();
     for index in 0..view.hands.len() {
         let player = PlayerId::new(u8::try_from(index).expect("player index"));
         if player == view.current_player {
             continue;
         }
-        let heights = schedule.stack_heights_before(&after_giver, player);
-        if schedule.plays_for(player).any(|obligation| {
-            obligation
-                .promised_identity
-                .is_some_and(|identity| super::is_playable_at(heights, identity))
-                || (!obligation.identities.is_empty()
-                    && obligation
-                        .identities
-                        .iter()
-                        .all(|identity| super::is_playable_at(heights, identity)))
-        }) {
+        if schedule.occupied_after_clue(view, player) {
             occupied_on_arrival.insert(player);
         }
     }
@@ -489,8 +477,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 focus,
                 focus_identity,
                 clue,
-                target,
-                next_player,
+                target == next_player && !occupied_on_arrival.contains(&target),
                 &replay.hands,
                 &gotten,
             )
@@ -2314,8 +2301,7 @@ pub(super) fn save_clue_score(
     focus: CardId,
     identity: Card,
     clue: Clue,
-    target: PlayerId,
-    next_player: PlayerId,
+    immediate_deadline: bool,
     layouts: &[Vec<CardId>],
     gotten: &CardSet,
 ) -> Option<u16> {
@@ -2359,10 +2345,11 @@ pub(super) fn save_clue_score(
     if !valid || !target_hand.iter().any(|card| card.id == focus) {
         return None;
     }
-    // Save Principle, with next-player timing as a deterministic tie-break.
+    // Save Principle: the next-player bonus belongs to an actual deadline,
+    // not merely a seat. An occupied player can safely wait for their Save.
     // Whether the Save may preempt an existing play obligation is represented
     // separately on `CompiledClueAction`.
-    Some(if target == next_player { 450 } else { 400 })
+    Some(if immediate_deadline { 450 } else { 400 })
 }
 
 #[allow(clippy::too_many_arguments)]

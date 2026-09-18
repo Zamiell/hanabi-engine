@@ -124,6 +124,24 @@ impl ActionSchedule {
         })
     }
 
+    /// Whether an existing promise gives this player a play on their next
+    /// turn when the current actor spends this turn giving a clue.
+    pub(super) fn occupied_after_clue(&self, view: &PlayerView, player: PlayerId) -> bool {
+        let mut after_giver = view.clone();
+        after_giver.current_player = next_player(view.current_player, view.hands.len());
+        let heights = self.stack_heights_before(&after_giver, player);
+        self.plays_for(player).any(|obligation| {
+            obligation
+                .promised_identity
+                .is_some_and(|identity| is_playable_at(heights, identity))
+                || (!obligation.identities.is_empty()
+                    && obligation
+                        .identities
+                        .iter()
+                        .all(|identity| is_playable_at(heights, identity)))
+        })
+    }
+
     /// Cards that cannot act before the observer's currently due connection
     /// steps resolve. This is the canonical blocking query for inference;
     /// consumers must not rebuild connection suffix semantics themselves.

@@ -877,11 +877,14 @@ fn analyze_h_group_actions_from_analysis(
         .into_iter()
         .filter(|candidate| constraints.allows(candidate.action))
         .collect::<Vec<_>>();
+    let early_saves = deferred_early_saves(deductions.view(), analysis, &clue_candidates);
     for candidate in &mut analyzed {
         let policy_tier = if constraints.kind().is_some() {
             ConventionPolicyTier::Required
         } else if candidate.kind == HGroupActionKind::Fallback {
             ConventionPolicyTier::Fallback
+        } else if early_saves.contains(&candidate.action) {
+            ConventionPolicyTier::Deferred
         } else {
             ConventionPolicyTier::Admitted
         };
@@ -920,6 +923,42 @@ fn analyze_h_group_actions_from_analysis(
     };
     let _ = action_cache.set(decision.clone());
     decision
+}
+
+/// Give a Play Clue to an unoccupied player's playable chop before spending
+/// a single-card Save on someone already occupied by a promised play.
+/// The Save remains legal and projected, but has no immediate deadline.
+/// Human-reviewed p4v0s2 turn 3; not a general bonus for cluing chop cards.
+/// <https://hanabi.github.io/beginner/other-general-strategy/#give-play-clues-over-save-clues>
+fn deferred_early_saves(
+    view: &PlayerView,
+    analysis: &HGroupAnalysis,
+    clues: &[CompiledClueAction],
+) -> Vec<Action> {
+    let schedule = ActionSchedule::from_replay(view, &analysis.replay);
+    let protects_playable_chop = clues.iter().any(|candidate| {
+        candidate.purpose() == CluePurpose::Play
+            && candidate.immediate_play()
+            && !schedule.occupied_after_clue(view, candidate.target())
+            && analysis.inferences.chops[candidate.target().index()].is_some_and(|chop| {
+                let Action::Clue { clue, .. } = candidate.action else {
+                    return false;
+                };
+                identity_of(view, chop).is_some_and(|identity| {
+                    clue.matches(identity) && is_playable_now(view, identity)
+                })
+            })
+    });
+    if !protects_playable_chop {
+        return Vec::new();
+    }
+    clues.iter().filter(|candidate| {
+        candidate.is_save()
+            && !candidate.is_urgent_save()
+            && schedule.occupied_after_clue(view, candidate.target())
+            && matches!(candidate.action, Action::Clue { target, clue }
+                if view.hands[target.index()].iter().filter(|card| card.identity.is_some_and(|identity| clue.matches(identity))).count() == 1)
+    }).map(|candidate| candidate.action).collect()
 }
 
 fn pass_back_analysis(

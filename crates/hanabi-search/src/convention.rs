@@ -178,6 +178,8 @@ pub struct ConventionAction {
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ConventionPolicyTier {
     Fallback,
+    /// Legal, but deferrable while a more immediate convention need exists.
+    Deferred,
     #[default]
     Admitted,
     Required,
