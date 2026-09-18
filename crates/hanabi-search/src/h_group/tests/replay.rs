@@ -1,6 +1,81 @@
 use super::*;
 
 #[test]
+fn fourth_replay_anxiety_play_does_not_layer_a_gentlemans_discard() {
+    // p4v0s3 turn 34: Alice's forced r3 play does not ask Bob to play g4.
+    // Cathy already owns the exact g4 transferred by Bob on turn 26.
+    let state = expert_replay_p4v0s3().state_at_turn(33).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let d = LogicalDeductions::new(view).unwrap();
+    let inferred = infer_h_group(&d, HGroupProfile::Max);
+    assert!(inferred.connection.is_none(), "{inferred:#?}");
+    assert_eq!(
+        select_h_group_action(&d, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(30))),
+        "{inferred:#?}"
+    );
+}
+
+#[test]
+fn fourth_replay_rank_four_locks_alice_into_the_leftmost_anxiety_play() {
+    // Human-reviewed p4v0s3 turns 30–33: the 4s clue leaves both untouched
+    // cards chop-moved. At zero tokens Alice must play leftmost slot 3 (r3).
+    // https://hanabi.github.io/level-9/#the-anxiety-play-forcing-a-locked-player-to-play
+    let state = expert_replay_p4v0s3().state_at_turn(32).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    assert_eq!(view.clue_tokens, 0);
+    let d = LogicalDeductions::new(view).unwrap();
+    let inferred = infer_h_group(&d, HGroupProfile::Max);
+    assert_eq!(
+        select_h_group_action(&d, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(1))),
+        "{inferred:#?}"
+    );
+    let state = expert_replay_p4v0s3().state_at_turn(29).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let d = LogicalDeductions::new(view.clone()).unwrap();
+    let four = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Rank(Rank::Four),
+    };
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    assert!(
+        candidates.iter().any(|candidate| candidate.action == four),
+        "{candidates:#?}"
+    );
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    // This regression owns admission and the forced-play prefix. Full replay
+    // parity still checks the root choice and the unresolved later 4 identity.
+    let projection = &analysis
+        .planner
+        .root_actions
+        .iter()
+        .find(|candidate| candidate.action == four)
+        .unwrap()
+        .projection;
+    assert_eq!(
+        projection
+            .steps
+            .iter()
+            .take(4)
+            .map(|step| step.projected.action)
+            .collect::<Vec<_>>(),
+        vec![
+            four,
+            Action::Play(CardId::new(9)),
+            Action::Play(CardId::new(32)),
+            Action::Play(CardId::new(1))
+        ],
+        "{projection:#?}"
+    );
+}
+
+#[test]
 fn fourth_replay_turn_twenty_six_does_not_assume_an_unfinished_play_line_is_safe() {
     // Reviewed GD of g4. A longer GD forecast must not lose to the shorter
     // play forecast merely because it reaches a later loss. An unresolved

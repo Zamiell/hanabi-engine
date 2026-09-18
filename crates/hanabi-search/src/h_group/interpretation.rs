@@ -801,6 +801,36 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 )
                 .expect("a standard connection has at most four steps"),
             ));
+        } else if save_score.is_none()
+            && view.clue_tokens == 1
+            && hand.iter().any(|card| !gotten.contains(&card.id))
+            && hand
+                .iter()
+                .all(|card| gotten.contains(&card.id) || touched.contains(&card.id))
+            && !duplicates_known_good_touch(GoodTouchContext {
+                view,
+                newly_touched: &newly_informed,
+                clue: Some((clue, &touched)),
+                explicitly_clued: &promptable,
+                fixed_cards,
+                convention_cards: &convention_cards,
+            })
+            && super::prospective::prospective_anxiety_play(view, profile, target, clue, &touched)
+                .is_some()
+        {
+            // The play comes from the locked hand, not necessarily a touched
+            // card. Do not manufacture a focus identity or a Finesse promise.
+            // https://hanabi.github.io/level-9/#the-anxiety-play-forcing-a-locked-player-to-play
+            candidates.push(CompiledClueAction::new(
+                action,
+                Some(HGroupMoveKind::AnxietyPlay),
+                // Same base as one directly established play; let projected
+                // outcomes value the additionally protected/touched cards.
+                ClueValue::new(330 + u16::from(matches!(clue, Clue::Suit(_)))),
+                CluePurpose::Advanced,
+                ClueSchedule::new(false, false),
+                0,
+            ));
         } else if let Some(score) = save_score {
             if !duplicates_known_good_touch(GoodTouchContext {
                 view,

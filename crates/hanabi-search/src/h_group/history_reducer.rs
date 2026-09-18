@@ -1860,6 +1860,14 @@ impl ReplayReducer {
                 .iter()
                 .find(|connection| {
                     connection.kind == HGroupConnectionKind::Finesse
+                        // Transfers share the scheduling kind, but are not
+                        // ambiguous clue connections. An unrelated blind
+                        // play cannot add a layer to an exact GD recipient.
+                        && !connection.cards.iter().any(|card| {
+                            self.signals
+                                .facts()
+                                .is_exact_transfer(*card, connection.expected)
+                        })
                         && connection.actor != *player
                         && connection.actor != view.observer
                         && connection.actor == next_player(view.observer, self.hands.len())

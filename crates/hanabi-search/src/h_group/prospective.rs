@@ -979,6 +979,33 @@ pub(super) fn project_recipient_arrival(
     None
 }
 
+/// A clue may create a play by leaving a newly locked recipient at zero
+/// tokens, rather than by immediately promising its focus. Use the ordinary
+/// recipient policy at their actual arrival; never fill unknown draws.
+/// <https://hanabi.github.io/level-9/#the-anxiety-play-forcing-a-locked-player-to-play>
+pub(super) fn prospective_anxiety_play(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    target: PlayerId,
+    clue: Clue,
+    touched: &[CardId],
+) -> Option<CardId> {
+    if source.clue_tokens != 1 || !super::rule_enabled(profile, super::HGroupRuleId::Stalling) {
+        return None;
+    }
+    let after = prospective_clue_view(source, target, clue, touched);
+    let arrival = project_recipient_arrival(&after, profile, target, touched)?;
+    let projection = arrival.projection(target)?;
+    let Action::Play(card) = super::select_h_group_action(&projection.deductions, profile)? else {
+        return None;
+    };
+    (projection.inferred.cards.iter().any(|note| {
+        note.card == card && note.play_obligation == Some(super::HGroupPlayObligation::Anxiety)
+    }) && identity_of(source, card)
+        .is_some_and(|identity| is_playable_now(projection.deductions.view(), identity)))
+    .then_some(card)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ProspectiveClueHazard {
     ProjectionFailed,

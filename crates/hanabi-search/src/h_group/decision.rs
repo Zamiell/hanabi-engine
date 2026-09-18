@@ -236,25 +236,10 @@ pub(super) fn infer_h_group_from_replay(
                 if total == 0 || playable == 0 {
                     continue;
                 }
-                let playable_identities = IdentitySet::from_mask(
-                    note.identities
-                        .iter()
-                        .filter(|identity| is_playable_now(view, *identity))
-                        .fold(0, |mask, identity| mask | (1 << identity.index())),
-                );
-                if inferred.cards.iter().any(|other| {
-                    other.card != card
-                        && !other
-                            .identities
-                            .intersection(playable_identities)
-                            .is_empty()
-                }) {
-                    // Anxiety does not distinguish between two cards that can
-                    // represent the same currently playable identity. Picking
-                    // one by position would manufacture information that no
-                    // clue or convention supplied.
-                    continue;
-                }
+                // Anxiety explicitly resolves ambiguity by playability,
+                // then leftmost position. Overlapping identity domains must
+                // not suppress that convention-provided choice.
+                // https://hanabi.github.io/level-9/#the-anxiety-play-forcing-a-locked-player-to-play
                 if best.is_none_or(|(_, best_playable, best_total)| {
                     playable * best_total > best_playable * total
                 }) {

@@ -101,6 +101,12 @@ pub(in crate::h_group) fn recipient_replay_assessment(
                 HGroupMoveKind::TempoClue | HGroupMoveKind::TempoClueChopMove
             )
         }),
+        CluePurpose::Advanced if candidate.move_kind() == Some(HGroupMoveKind::AnxietyPlay) => {
+            super::super::prospective::prospective_anxiety_play(
+                view, profile, target, clue, &touched,
+            )
+            .is_some()
+        }
         CluePurpose::Advanced => !signals.is_empty(),
     };
     if recognized {
