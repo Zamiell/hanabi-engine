@@ -231,18 +231,16 @@ card, and identity. The original legal `PlayerView` is never modified.
   step, concrete follow-up clue, deadline, and independent funding. They never
   add guaranteed plays or merge mutually exclusive identities into ordinary
   steps.
-- Unknown clue touches branch over feasible touched-card subsets, without
-  assigning identities to blank cards. A card-copy matching check rejects
-  impossible subsets. `clueBranches` retains each conditional continuation; only
-  branches whose focus has a known identity execute the selected clue. If an
-  unseen draw becomes the focus, the branch stops before the clue at an
-  interpretation boundary: the giver would see that draw and might choose a
-  different action. A physically possible touch set alone cannot justify that
-  choice or the resulting blind plays. Only action prefixes common to every
-  branch enter the aggregate summary. Divergent endpoint values remain separate
-  rather than being averaged without probabilities. Projection allows 16 branch
-  outcomes; lookahead leaves allow four. Exhausting that budget reports a limit,
-  not a successful completion.
+- Symbolic clues touch only cards whose match is known. Blank cards receive
+  neither positive nor negative clue information: omitting an unknown touch does
+  not prove a non-match. Candidate previews and executed forecasts share this
+  transition. Forecasts no longer enumerate hypothetical touch subsets; the
+  conditional-evidence representation remains available, but ordinary blank-card
+  forecasts leave `clueBranches` empty. A play or discard of a new unresolved
+  draw stops the forecast before awarding resources, even if a convention tells
+  the hypothetical player to try that card. This is a partial known-card
+  forecast, not a prediction of the draw or a guarantee over all possible future
+  clue outcomes.
 - Hypothetical teammates use the root's candidate admission and endpoint
   comparator with one level of strategic lookahead. Those candidate forecasts
   use the convention policy as their leaf evaluator, with a 32-action bound;

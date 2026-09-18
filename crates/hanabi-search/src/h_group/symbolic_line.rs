@@ -122,7 +122,6 @@ fn project_h_group_plan_with_control<const REUSE_SELECTED: bool>(
     limit: u8,
     control: &crate::AnalysisControl,
 ) -> Result<ConditionalPlan, crate::AnalysisStopped> {
-    let mut branch_budget = 16;
     continue_plan::<REUSE_SELECTED>(
         source,
         source.clone(),
@@ -136,7 +135,6 @@ fn project_h_group_plan_with_control<const REUSE_SELECTED: bool>(
         // convention policy. Asking that proof to run strategic forecasts
         // again would multiply historical proof work and change its model.
         !super::inverse_planning::is_active(),
-        &mut branch_budget,
     )
 }
 
@@ -146,7 +144,6 @@ pub(crate) fn project_leaf_projection(
     root: Action,
     control: &crate::AnalysisControl,
 ) -> Result<(SymbolicLineOutcome, super::ProjectionEvidence), crate::AnalysisStopped> {
-    let mut branch_budget = 4;
     let plan = continue_plan::<true>(
         source,
         source.clone(),
@@ -157,7 +154,6 @@ pub(crate) fn project_leaf_projection(
         control,
         ConditionalPlan::new(source.clue_tokens),
         false,
-        &mut branch_budget,
     )?;
     Ok((plan.summarize(), plan.into_evidence()))
 }
@@ -173,7 +169,6 @@ fn continue_plan<const REUSE_SELECTED: bool>(
     control: &crate::AnalysisControl,
     mut plan: ConditionalPlan,
     strategic: bool,
-    branch_budget: &mut usize,
 ) -> Result<ConditionalPlan, crate::AnalysisStopped> {
     #[cfg(test)]
     let _profile = crate::test_profile::span("symbolic_projection");
@@ -218,14 +213,25 @@ fn continue_plan<const REUSE_SELECTED: bool>(
             plan.stop_at(PlanFrontier::InterpretationBranch);
             break;
         }
-        let Some((after, mut consequences)) = apply_symbolic_action(
-            &public,
-            &actor_deductions,
-            &actor_inferences,
-            actor,
-            current,
-        ) else {
-            let mut frontier = PlanFrontier::IdentityBranch;
+        // A convention may tell a future player to try a newly drawn card,
+        // but cannot reveal that draw's physical identity to the root observer.
+        // Stop before crediting a successful play, discard token, or new draw.
+        let unresolved_draw = matches!(current, Action::Play(card) | Action::Discard(card)
+            if identity_of(&public, card).is_none()
+                && !source.hands.iter().flatten().any(|known| known.id == card));
+        let transition = (!unresolved_draw)
+            .then(|| {
+                apply_symbolic_action(
+                    &public,
+                    &actor_deductions,
+                    &actor_inferences,
+                    actor,
+                    current,
+                )
+            })
+            .flatten();
+        let Some((after, mut consequences)) = transition else {
+            let frontier = PlanFrontier::IdentityBranch;
             if let Action::Discard(card) = current {
                 // An unexecuted unknown discard is not evidence of zero loss.
                 // Keep it as a possible hazard without inventing an identity,
@@ -250,78 +256,6 @@ fn continue_plan<const REUSE_SELECTED: bool>(
                     })
                 });
                 plan.record_unresolved_discard(card, risk);
-            }
-            if let Action::Clue { target, clue } = current {
-                let outcomes = clue_touch_outcomes(&public, target, clue);
-                if outcomes.len() > *branch_budget {
-                    frontier = PlanFrontier::Limit;
-                }
-                if !outcomes.is_empty() && outcomes.len() <= *branch_budget {
-                    *branch_budget -= outcomes.len();
-                    let prefix = plan.clone();
-                    for touched in outcomes {
-                        let layout = public.hands[target.index()]
-                            .iter()
-                            .map(|card| card.id)
-                            .collect::<Vec<_>>();
-                        let focus = super::focus(
-                            &layout,
-                            &touched,
-                            actor_inferences.chops[target.index()],
-                            &actor_inferences.gotten(),
-                        );
-                        if focus.is_some_and(|card| {
-                            symbolic_identity(&public, &actor_deductions, &actor_inferences, card)
-                                .is_none()
-                        }) {
-                            // Candidate selection used visible/known cards. An
-                            // unseen draw becoming focus changes the giver's
-                            // decision, not merely the clue's collateral touch.
-                            // Do not execute that different clue meaning and
-                            // blame its invented blind plays on this root.
-                            let mut unresolved = prefix.clone();
-                            unresolved.stop_at(PlanFrontier::InterpretationBranch);
-                            plan.add_clue_branch(public.turn, touched, unresolved);
-                            continue;
-                        }
-                        let after =
-                            ProspectiveTransition::clue_by(&public, actor, target, clue, &touched);
-                        let mut branch = prefix.clone();
-                        branch.push(
-                            public.turn,
-                            ProjectedAction {
-                                actor,
-                                action: current,
-                            },
-                            ProjectedConsequences {
-                                clues_spent: 1,
-                                ..Default::default()
-                            },
-                        );
-                        branch.record_checkpoint(super::frontier_value::evaluate(
-                            source, &after, profile, root,
-                        ));
-                        let next = if branch.len() >= usize::from(limit) {
-                            branch.stop_at(PlanFrontier::Limit);
-                            None
-                        } else {
-                            choose_follow_up(&after, profile, strategic, control)?
-                        };
-                        let continuation = continue_plan::<REUSE_SELECTED>(
-                            source,
-                            after,
-                            profile,
-                            next,
-                            root,
-                            limit,
-                            control,
-                            branch,
-                            strategic,
-                            branch_budget,
-                        )?;
-                        plan.add_clue_branch(public.turn, touched, continuation);
-                    }
-                }
             }
             plan.stop_at(frontier);
             break;
@@ -391,24 +325,6 @@ fn continue_plan<const REUSE_SELECTED: bool>(
     control.checkpoint()?;
     plan.assess(value);
     Ok(plan)
-}
-
-fn choose_follow_up(
-    public: &PlayerView,
-    profile: HGroupProfile,
-    strategic: bool,
-    control: &crate::AnalysisControl,
-) -> Result<Option<Action>, crate::AnalysisStopped> {
-    let Some((d, _)) = PerspectiveProjector::new(public, profile)
-        .project(public.current_player, PerspectiveDepth::NestedRecipients)
-    else {
-        return Ok(None);
-    };
-    if strategic {
-        crate::planner::choose_projected_follow_up(&d, profile, control)
-    } else {
-        Ok(select_h_group_action(&d, profile))
-    }
 }
 
 /// Assess losses from the deciding observer's partial world, not the
@@ -508,115 +424,6 @@ fn is_last_copy(view: &PlayerView, identity: Card) -> bool {
         >= usize::from(identity.rank.copies())
 }
 
-/// Partitions clue outcomes without assigning hidden card identities. The
-/// resulting positive/negative clue facts constrain each branch independently.
-fn clue_touch_outcomes(source: &PlayerView, target: PlayerId, clue: Clue) -> Vec<Vec<CardId>> {
-    let mut outcomes = vec![Vec::new()];
-    for card in &source.hands[target.index()] {
-        let domain = card.identity.map_or_else(
-            || crate::IdentitySet::from_mask(card.clues.identity_mask()),
-            crate::IdentitySet::singleton,
-        );
-        let yes = domain.iter().any(|identity| clue.matches(identity));
-        let no = domain.iter().any(|identity| !clue.matches(identity));
-        let mut next = Vec::new();
-        for touched in outcomes {
-            if no {
-                next.push(touched.clone());
-            }
-            if yes {
-                let mut touched = touched;
-                touched.push(card.id);
-                next.push(touched);
-            }
-        }
-        outcomes = next;
-    }
-    outcomes.retain(|touched| {
-        !touched.is_empty() && feasible_touch_outcome(source, target, clue, touched)
-    });
-    outcomes
-}
-
-/// Matching checks physical feasibility without selecting or publishing a
-/// hidden assignment. Multiple unknown cards cannot consume the same last copy.
-fn feasible_touch_outcome(
-    source: &PlayerView,
-    target: PlayerId,
-    clue: Clue,
-    touched: &[CardId],
-) -> bool {
-    let mut copies = hanabi_core::standard_deck();
-    let visible = source
-        .hands
-        .iter()
-        .flatten()
-        .filter_map(|card| card.identity)
-        .chain(source.discard_pile.iter().map(|(_, identity)| *identity))
-        .chain(hanabi_core::Suit::ALL.into_iter().flat_map(|suit| {
-            hanabi_core::Rank::ALL
-                .into_iter()
-                .take(source.play_stacks[suit.index()].len())
-                .map(move |rank| Card::new(suit, rank))
-        }));
-    for identity in visible {
-        let Some(index) = copies.iter().position(|candidate| *candidate == identity) else {
-            return false;
-        };
-        copies.swap_remove(index);
-    }
-    let domains = source
-        .hands
-        .iter()
-        .enumerate()
-        .flat_map(|(owner, hand)| {
-            hand.iter()
-                .filter(|card| card.identity.is_none())
-                .map(move |card| (owner, card))
-        })
-        .map(|(owner, card)| {
-            copies
-                .iter()
-                .enumerate()
-                .filter_map(|(index, identity)| {
-                    (card.clues.allows(*identity)
-                        && (owner != target.index()
-                            || clue.matches(*identity) == touched.contains(&card.id)))
-                    .then_some(index)
-                })
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
-    let mut assignments = vec![None; copies.len()];
-    (0..domains.len()).all(|card| {
-        assign_copy(
-            card,
-            &domains,
-            &mut assignments,
-            &mut vec![false; copies.len()],
-        )
-    })
-}
-
-fn assign_copy(
-    card: usize,
-    domains: &[Vec<usize>],
-    assignments: &mut [Option<usize>],
-    seen: &mut [bool],
-) -> bool {
-    for &copy in &domains[card] {
-        if seen[copy] {
-            continue;
-        }
-        seen[copy] = true;
-        if assignments[copy].is_none_or(|prior| assign_copy(prior, domains, assignments, seen)) {
-            assignments[copy] = Some(card);
-            return true;
-        }
-    }
-    false
-}
-
 fn final_assessment(
     source: &PlayerView,
     public: &PlayerView,
@@ -662,7 +469,7 @@ pub(super) fn apply_symbolic_action(
             let touched = touched_cards(source, target, clue)?;
             consequences.clues_spent = 1;
             Some((
-                ProspectiveTransition::clue_by(source, actor, target, clue, &touched),
+                ProspectiveTransition::symbolic_clue_by(source, actor, target, clue, &touched),
                 consequences,
             ))
         }
@@ -732,13 +539,7 @@ fn touched_cards(source: &PlayerView, target: PlayerId, clue: Clue) -> Option<Ve
             if identities.is_empty() {
                 return None;
             }
-            if identities.iter().all(|identity| clue.matches(identity)) {
-                true
-            } else if identities.iter().all(|identity| !clue.matches(identity)) {
-                false
-            } else {
-                return None;
-            }
+            identities.iter().all(|identity| clue.matches(identity))
         };
         if matches {
             touched.push(card.id);
@@ -939,7 +740,7 @@ mod tests {
     }
 
     #[test]
-    fn reviewed_purple_line_branches_on_the_draw_not_on_donalds_choice() {
+    fn reviewed_purple_line_keeps_the_draw_blank() {
         let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
             "../../../hanabi-protocol/tests/fixtures/game-p4v0s3.json"
         ))
@@ -965,7 +766,42 @@ mod tests {
             target: PlayerId::new(2),
             clue: Clue::Rank(hanabi_core::Rank::Two),
         };
-        let mut budget = 4;
+        let touched = touched_cards(
+            &public,
+            PlayerId::new(2),
+            Clue::Rank(hanabi_core::Rank::Two),
+        )
+        .unwrap();
+        let after = ProspectiveTransition::symbolic_clue_by(
+            &public,
+            public.current_player,
+            PlayerId::new(2),
+            Clue::Rank(hanabi_core::Rank::Two),
+            &touched,
+        );
+        for blank in public.hands[2]
+            .iter()
+            .filter(|card| card.identity.is_none())
+        {
+            assert!(!touched.contains(&blank.id));
+            assert_eq!(
+                after.hands[2]
+                    .iter()
+                    .find(|card| card.id == blank.id)
+                    .unwrap()
+                    .clues,
+                blank.clues
+            );
+            if let hanabi_core::ObservedEvent::Clued {
+                touched, untouched, ..
+            } = &after.history.last().unwrap().event
+            {
+                assert!(!touched.contains(&blank.id));
+                assert!(!untouched.contains(&blank.id));
+            } else {
+                panic!("expected clue event");
+            }
+        }
         let plan = continue_plan::<true>(
             &public,
             public.clone(),
@@ -976,53 +812,15 @@ mod tests {
             &crate::AnalysisControl::default(),
             ConditionalPlan::new(public.clue_tokens),
             false,
-            &mut budget,
         )
         .unwrap();
         let evidence = plan.into_evidence();
-        assert_eq!(evidence.clue_branches.len(), 2);
-        for branch in &evidence.clue_branches {
-            assert_eq!(branch.continuation.steps[0].projected.action, clue);
-            assert_eq!(
-                branch.continuation.steps[1].projected.action,
-                Action::Play(CardId::new(20))
-            );
-            assert_eq!(branch.outcome.strikes, 0);
-        }
+        assert!(evidence.clue_branches.is_empty());
+        assert_eq!(evidence.steps[0].projected.action, clue);
         assert_eq!(
-            evidence.clue_branches[0].touched.len() + 1,
-            evidence.clue_branches[1].touched.len()
+            evidence.steps[1].projected.action,
+            Action::Play(CardId::new(20))
         );
-    }
-
-    #[test]
-    fn unknown_touch_feasibility_respects_shared_card_copies() {
-        let mut slots = vec![None];
-        assert!(assign_copy(
-            0,
-            &[vec![0], vec![0]],
-            &mut slots,
-            &mut [false]
-        ));
-        assert!(!assign_copy(
-            1,
-            &[vec![0], vec![0]],
-            &mut slots,
-            &mut [false]
-        ));
-        let mut slots = vec![None; 2];
-        assert!(assign_copy(
-            0,
-            &[vec![0, 1], vec![0]],
-            &mut slots,
-            &mut [false; 2]
-        ));
-        assert!(assign_copy(
-            1,
-            &[vec![0, 1], vec![0]],
-            &mut slots,
-            &mut [false; 2]
-        ));
     }
 
     #[test]

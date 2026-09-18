@@ -224,7 +224,7 @@ impl ProspectiveTransition {
         clue: Clue,
         touched: &[CardId],
     ) -> PlayerView {
-        Self::clue_by(source, source.observer, target, clue, touched)
+        Self::symbolic_clue_by(source, source.observer, target, clue, touched)
     }
 
     pub(super) fn clue_by(
@@ -259,6 +259,45 @@ impl ProspectiveTransition {
         });
         after.clue_tokens = after.clue_tokens.saturating_sub(1);
         Self::finish_turn(source, &mut after, giver);
+        after
+    }
+
+    /// Forecast only known touches. A blank draw provides neither positive nor
+    /// negative clue information; the ordinary transition remains exhaustive.
+    pub(super) fn symbolic_clue_by(
+        source: &PlayerView,
+        giver: PlayerId,
+        target: PlayerId,
+        clue: Clue,
+        touched: &[CardId],
+    ) -> PlayerView {
+        let unresolved = source.hands[target.index()]
+            .iter()
+            .filter(|card| {
+                if card.identity.is_some() {
+                    return false;
+                }
+                let domain = crate::IdentitySet::from_mask(card.clues.identity_mask());
+                domain.iter().any(|identity| clue.matches(identity))
+                    && domain.iter().any(|identity| !clue.matches(identity))
+            })
+            .collect::<Vec<_>>();
+        let mut after = Self::clue_by(source, giver, target, clue, touched);
+        for prior in &unresolved {
+            if let Some(card) = after.hands[target.index()]
+                .iter_mut()
+                .find(|card| card.id == prior.id)
+            {
+                card.clues = prior.clues;
+            }
+        }
+        if let Some(ObservedHistoryEntry {
+            event: ObservedEvent::Clued { untouched, .. },
+            ..
+        }) = after.history.last_mut()
+        {
+            untouched.retain(|card| !unresolved.iter().any(|prior| prior.id == *card));
+        }
         after
     }
 

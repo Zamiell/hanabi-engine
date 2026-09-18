@@ -384,6 +384,7 @@ impl ConditionalPlan {
             });
         }
     }
+    #[cfg(test)]
     pub(super) fn add_clue_branch(&mut self, turn: u32, touched: Vec<CardId>, plan: Self) {
         self.evidence.clue_branches.push(ClueTouchBranch {
             turn,

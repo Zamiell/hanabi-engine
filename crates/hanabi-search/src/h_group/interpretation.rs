@@ -1841,10 +1841,35 @@ pub(super) fn advanced_clue_candidates(
                 .is_some_and(|kinds| kinds.contains(&HGroupMoveKind::DistributionClue));
         let double_bluff = rule_enabled(profile, HGroupRuleId::DoubleBluffs)
             && super::prospective::compiled_prospective_clue(view, profile, target, clue, &touched)
-                .and_then(|compiled| {
-                    compiled.signal_kinds(next_player(view.current_player, view.hands.len()))
-                })
-                .is_some_and(|kinds| kinds.contains(&HGroupMoveKind::DoubleBluff));
+                .is_some_and(|compiled| {
+                    // Receiver recognition alone is not giver-side safety:
+                    // the first reactor cannot see their own finesse card.
+                    // Both immediate blind plays must work in the giver's
+                    // view, not merely be imaginable by the receiver.
+                    // https://hanabi.github.io/level-15/#the-double-bluff
+                    let first = next_player(view.current_player, view.hands.len());
+                    let second = next_player(first, view.hands.len());
+                    let mut heights = core::array::from_fn(|index| {
+                        u8::try_from(view.play_stacks[index].len()).expect("stack fits in u8")
+                    });
+                    [first, second].into_iter().all(|player| {
+                        let Some(identity) = finesse_position(
+                            &view.hands[player.index()],
+                            &replay.cards.explicitly_clued,
+                            0,
+                        )
+                        .and_then(|card| card.identity) else {
+                            return false;
+                        };
+                        if !is_playable_at(heights, identity) {
+                            return false;
+                        }
+                        heights[identity.suit.index()] = identity.rank.number();
+                        true
+                    }) && compiled
+                        .signal_kinds(first)
+                        .is_some_and(|kinds| kinds.contains(&HGroupMoveKind::DoubleBluff))
+                });
         let classification = if double_bluff {
             Some((HGroupMoveKind::DoubleBluff, 336))
         } else if unnecessary_ignition {

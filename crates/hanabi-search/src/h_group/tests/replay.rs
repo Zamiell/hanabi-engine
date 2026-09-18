@@ -1,6 +1,74 @@
 use super::*;
 
 #[test]
+fn first_seed_blank_draw_does_not_enable_an_unsafe_double_bluff() {
+    // Reviewed p4v0s1 turn 7 counterfactual. Unknown draws must not add
+    // purple touches; Cathy cannot bluff Donald's unplayable finesse card.
+    let state = expert_replay_p4v0s1().state_at_turn(6).unwrap();
+    let view = state.view_for(PlayerId::new(2)).unwrap();
+    let (outcome, evidence) = super::super::symbolic_line::project_h_group_projection(
+        &view,
+        HGroupProfile::Max,
+        Action::Play(CardId::new(8)),
+        12,
+        &crate::AnalysisControl::default(),
+    )
+    .unwrap();
+    assert!(evidence.clue_branches.is_empty());
+    assert_eq!(outcome.strikes, 0);
+    assert!(
+        evidence
+            .steps
+            .iter()
+            .all(|step| match step.projected.action {
+                Action::Play(card) | Action::Discard(card) =>
+                    view.hands.iter().flatten().any(|known| known.id == card),
+                Action::Clue { .. } => true,
+            }),
+        "a future draw cannot be credited as a known physical card"
+    );
+    let mut public = view.clone();
+    // Execute the reviewed visible prefix, without drawing actual deck cards.
+    for action in [
+        Action::Play(CardId::new(8)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Clue {
+            target: PlayerId::new(3),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Play(CardId::new(6)),
+    ] {
+        let (d, r) =
+            super::super::perspective::PerspectiveProjector::new(&public, HGroupProfile::Max)
+                .project(public.current_player, PerspectiveDepth::NestedRecipients)
+                .unwrap();
+        let notes = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+        public = super::super::symbolic_line::apply_symbolic_action(
+            &public,
+            &d,
+            &notes,
+            public.current_player,
+            action,
+        )
+        .unwrap()
+        .0;
+    }
+    let d = LogicalDeductions::new(public).unwrap();
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    assert!(
+        !candidates.iter().any(|candidate| candidate.action
+            == Action::Clue {
+                target: PlayerId::new(1),
+                clue: Clue::Suit(Suit::Purple),
+            }),
+        "{candidates:#?}"
+    );
+}
+
+#[test]
 fn first_seed_four_charm_does_not_secure_visibly_false_connectors() {
     // Reviewed p4v0s1 opening comparison: the 4 Charm saves g4 and b4.
     // Recipient connector assumptions that disagree with Alice's visible
