@@ -1543,6 +1543,32 @@ fn other_player_projection_is_unsafe(
                 identity_of(source, card).is_some_and(|actual| !is_playable_now(after_clue, actual))
             });
         let wrong_new_connection = other_after.connection.is_some_and(|connection| {
+            // Becoming the actor can expose an older Reverse Finesse that
+            // was not actionable in the baseline snapshot. Its provenance,
+            // not a changed selected-action note, decides whether this clue
+            // created a duplicate connection. Actual new misplays are still
+            // checked independently by `wrong_new_play` above.
+            if other_projection
+                .replay
+                .pending_connections
+                .iter()
+                .any(|pending| {
+                    pending.actor == observer
+                        && pending.cards.contains(&connection.card)
+                        && pending.expected == connection.identity
+                        && other_projection
+                            .replay
+                            .pending_connections
+                            .is_active(pending)
+                        && other_projection
+                            .replay
+                            .pending_connections
+                            .provenance(pending.promise)
+                            .is_some_and(|origin| origin.created_turn < source.turn)
+                })
+            {
+                return false;
+            }
             let height = other_projection.deductions.view().play_stacks
                 [connection.identity.suit.index()]
             .len();

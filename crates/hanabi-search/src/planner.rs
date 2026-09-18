@@ -1235,12 +1235,11 @@ fn compare_bottom_deck_risks(
     left: &PlannerActionEvaluation,
     right: &PlannerActionEvaluation,
 ) -> Ordering {
-    let horizon = usize::from(
-        left.projection
-            .common_horizon()
-            .min(right.projection.common_horizon())
-            .max(1),
-    );
+    let horizon = left
+        .projection
+        .risk_horizon()
+        .min(right.projection.risk_horizon())
+        .max(1);
     let left_prefix = left.projection.bottom_deck_risks_at(horizon);
     let right_prefix = right.projection.bottom_deck_risks_at(horizon);
     let prefix = left_prefix.cmp(&right_prefix);

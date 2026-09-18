@@ -834,24 +834,22 @@ pub const H_GROUP_LEVELS: [HGroupLevelDescriptor; 26] = [
 /// critical-card forms.
 #[allow(clippy::too_many_lines)]
 fn replay_h_group(deductions: &LogicalDeductions, profile: HGroupProfile) -> HGroupState {
+    replay_h_group_at_depth(deductions, profile, PerspectiveDepth::NestedRecipients)
+}
+
+fn replay_h_group_at_depth(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+    depth: PerspectiveDepth,
+) -> HGroupState {
     with_replay_memo(|| {
-        let ordinary = replay_h_group_inner(
-            deductions,
-            profile,
-            PerspectiveDepth::NestedRecipients,
-            false,
-        );
+        let ordinary = replay_h_group_inner(deductions, profile, depth, false);
         let current = deductions.view().current_player;
         let mut hypotheses = InterpretationHypotheses::ordinary(ordinary);
         if hypotheses.ordinary_gives_actor_a_live_connection(current) {
             return hypotheses.resolve_for_actor(current);
         }
-        let empathetic = replay_h_group_inner(
-            deductions,
-            profile,
-            PerspectiveDepth::NestedRecipients,
-            true,
-        );
+        let empathetic = replay_h_group_inner(deductions, profile, depth, true);
         hypotheses.add(InterpretationSource::BlindReverseEmpathy, empathetic);
         hypotheses.resolve_for_actor(current)
     })
@@ -1480,6 +1478,7 @@ fn schedule_connection(
                 connection.actor == giver
                     && connection.expected == expected
                     && pending.is_active(connection)
+                    && is_playable_at(stack_heights, expected)
             });
             if giver_is_deferring_this_connection {
                 // By giving the connecting clue instead of taking their own

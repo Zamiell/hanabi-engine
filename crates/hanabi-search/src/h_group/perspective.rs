@@ -131,7 +131,29 @@ impl<'a> PerspectiveProjector<'a> {
             }
         }
         let deductions = LogicalDeductions::new(view).ok()?;
-        let replay = replay_h_group_inner(&deductions, self.profile, depth, false);
+        // Preserve an actor's pre-existing reverse-finesse obligation when
+        // projecting a later clue. Do not promote a newly imagined empathy
+        // connection into an established promise while admitting that clue.
+        let ordinary = replay_h_group_inner(&deductions, self.profile, depth, false);
+        let replay = if observer == deductions.view().current_player
+            && depth == PerspectiveDepth::NestedRecipients
+            && !ordinary.pending_connections.actor_has_active(observer)
+        {
+            let resolved = super::replay_h_group_at_depth(&deductions, self.profile, depth);
+            let established = resolved.pending_connections.iter().any(|connection| {
+                connection.actor == observer
+                    && resolved.pending_connections.is_active(connection)
+                    && resolved
+                        .pending_connections
+                        .provenance(connection.promise)
+                        .is_some_and(|origin| {
+                            origin.created_turn.saturating_add(1) < deductions.view().turn
+                        })
+            });
+            if established { resolved } else { ordinary }
+        } else {
+            ordinary
+        };
         Some(ConditionalObserverProjection {
             deductions,
             replay,

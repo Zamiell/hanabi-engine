@@ -1,6 +1,110 @@
 use super::*;
 
 #[test]
+fn first_seed_purple_line_uses_fives_chop_move() {
+    // Reviewed p4v0s1 branch, turns 14-22. This does not change the fixture:
+    // green to Donald, b4, g1, discard y4, then purple to Donald.
+    let mut state = expert_replay_p4v0s1().state_at_turn(14).unwrap();
+    for action in [
+        Action::Play(CardId::new(11)),
+        Action::Play(CardId::new(20)),
+        Action::Discard(CardId::new(0)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let purple = Action::Clue {
+        target: PlayerId::new(3),
+        clue: Clue::Suit(Suit::Purple),
+    };
+    let five = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Rank(Rank::Five),
+    };
+    let source = state.view_for(state.current_player()).unwrap();
+    let mut public = source.clone();
+    for action in [purple, Action::Discard(CardId::new(9))] {
+        let (d, r) = PerspectiveProjector::new(&public, HGroupProfile::Max)
+            .project(public.current_player, PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        let notes = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+        public = super::super::symbolic_line::apply_symbolic_action(
+            &public,
+            &d,
+            &notes,
+            public.current_player,
+            action,
+        )
+        .unwrap()
+        .0;
+    }
+    let (donald, _) = PerspectiveProjector::new(&public, HGroupProfile::Max)
+        .project(PlayerId::new(3), PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    let candidates = h_group_clue_candidates(&donald, HGroupProfile::Max);
+    let purple_to_cathy = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Suit(Suit::Purple),
+    };
+    let candidate = candidates
+        .iter()
+        .find(|c| c.action == purple_to_cathy)
+        .unwrap();
+    assert_eq!(candidate.purpose(), CluePurpose::Play);
+    assert_eq!(
+        candidates
+            .iter()
+            .find(|c| c.action == five)
+            .unwrap()
+            .move_kind(),
+        Some(HGroupMoveKind::FiveChopMove)
+    );
+    let (_, risky) = super::super::symbolic_line::project_h_group_projection(
+        &public,
+        HGroupProfile::Max,
+        purple_to_cathy,
+        3,
+        &crate::AnalysisControl::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        risky
+            .steps
+            .iter()
+            .map(|step| step.projected.action)
+            .collect::<Vec<_>>(),
+        vec![purple_to_cathy, Action::Play(CardId::new(24))]
+    );
+    let discard = risky
+        .unresolved_discard
+        .expect("Bob must Scream Discard; his card stays unknown to Bob");
+    assert_eq!(discard.card, CardId::new(5));
+    assert!(discard.bottom_deck_risk);
+    assert!(discard.required_protection);
+    let (_, projection) = super::super::symbolic_line::project_h_group_projection(
+        &source,
+        HGroupProfile::Max,
+        purple,
+        5,
+        &crate::AnalysisControl::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        projection
+            .steps
+            .iter()
+            .map(|step| step.projected.action)
+            .collect::<Vec<_>>(),
+        vec![
+            purple,
+            Action::Discard(CardId::new(9)),
+            five,
+            Action::Play(CardId::new(24)),
+            Action::Play(CardId::new(17))
+        ]
+    );
+}
+
+#[test]
 fn first_seed_red_line_protects_the_five_before_the_next_play() {
     // User-reviewed p4v0s1 branch: green to Donald at 14, b4, g1,
     // discard y4. Red to Cathy at 18 must not let her p5 be discarded.

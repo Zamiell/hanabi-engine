@@ -1132,6 +1132,14 @@ fn derive_convention_constraints(
     clues: &[CompiledClueAction],
     analyzed: &[CompiledHGroupAction],
 ) -> ConventionConstraints {
+    if emergency_discard_is_required(view, inferred, replay, profile) {
+        return ConventionConstraints::require(
+            ConventionRequirementKind::UrgentProtection,
+            analyzed.iter().filter_map(|candidate| {
+                matches!(candidate.action, Action::Discard(_)).then_some(candidate.action)
+            }),
+        );
+    }
     let has_forced_play = inferred.cards.iter().any(|card| {
         inferred.playable_now.contains(&card.card)
             && card.play_obligation == Some(HGroupPlayObligation::Forced)
@@ -1206,6 +1214,57 @@ fn derive_convention_constraints(
         );
     }
     ConventionConstraints::default()
+}
+
+/// At zero clues an ordinary known play cannot be chosen over the only
+/// available protection for the next player's endangered chop. Recognition
+/// already understands Scream/Shout Discards; planning must also choose them.
+/// <https://hanabi.github.io/level-7/#the-scream-discard-chop-move-sdcm>
+pub(super) fn emergency_discard_is_required(
+    view: &PlayerView,
+    inferred: &HGroupInferences,
+    replay: &HGroupState,
+    profile: HGroupProfile,
+) -> bool {
+    if view.clue_tokens != 0
+        || !rule_enabled(profile, HGroupRuleId::EmergencyDiscards)
+        || !inferred
+            .playable_now
+            .iter()
+            .any(|card| replay.cards.explicitly_clued.contains(card))
+    {
+        return false;
+    }
+    let target = next_player(view.current_player, view.hands.len());
+    if target_is_occupied(view, replay, target) {
+        return false;
+    }
+    if projected_h_group_replay(view, profile, target).is_some_and(|(d, r)| {
+        let target_notes = super::infer_h_group_from_replay(&d, r, profile);
+        !target_notes.playable_now.is_empty()
+            || convention_known_trash_discard(d.view(), &target_notes).is_some()
+    }) {
+        return false;
+    }
+    let Some(card) = inferred.chops[target.index()] else {
+        return false;
+    };
+    let Some(identity) = identity_of(view, card) else {
+        return false;
+    };
+    if !is_eventually_useful(view, identity) {
+        return false;
+    }
+    let another_copy = view.hands.iter().flatten().any(|other| {
+        other.id != card
+            && (other.identity == Some(identity)
+                || inferred.cards.iter().any(|note| {
+                    note.card == other.id && note.identities == IdentitySet::singleton(identity)
+                }))
+    });
+    identity.rank == Rank::Five
+        || is_critical_save_identity(view, identity)
+        || (!another_copy && (identity.rank == Rank::Two || is_playable_now(view, identity)))
 }
 
 fn h_group_planning_action_safe(

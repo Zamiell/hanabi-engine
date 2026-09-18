@@ -255,7 +255,16 @@ fn continue_plan<const REUSE_SELECTED: bool>(
                         })
                     })
                 });
-                plan.record_unresolved_discard(card, risk);
+                let required_protection = super::projected_h_group_replay(&public, profile, actor)
+                    .is_some_and(|(deductions, replay)| {
+                        super::decision::emergency_discard_is_required(
+                            deductions.view(),
+                            &actor_inferences,
+                            &replay,
+                            profile,
+                        )
+                    });
+                plan.record_unresolved_discard(card, risk, required_protection);
             }
             plan.stop_at(frontier);
             break;
