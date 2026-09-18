@@ -346,7 +346,7 @@ fn continue_plan<const REUSE_SELECTED: bool>(
 /// Sources:
 /// <https://hanabi.github.io/beginner/save-principle/>
 /// <https://hanabi.github.io/level-22/#phantom-playable-cards>
-fn important_discard(
+pub(super) fn important_discard(
     source: &PlayerView,
     profile: HGroupProfile,
     card: CardId,

@@ -5,6 +5,44 @@ an individual convention regression. Entries describe the problem, the boundary
 introduced to solve it, and the property that future changes should preserve.
 Commit hashes refer to this repository's Git history.
 
+## 2026-09-18: net chop exposure in projected comparisons
+
+The reviewed p4v0s1 turn-4 alternative exposed a one-sided protection value: the
+projected turn-7 TCCM saved p4 but put the more valuable r3 on chop. An
+unfinished line could also look safer merely because its next discard had not
+been reached. Donald's hidden 3 must not count as a known r3 replacement.
+
+- Share the observer-relative discard-risk assessment between clue valuation and
+  endpoint valuation. Reuse the existing rank/distance card-quality order.
+- Charge a soft cost for a worsening chop-move exchange instead of rewarding its
+  protection in isolation. Keep the convention admissible.
+- Carry the newly exposed liability at endpoints, even behind a queued play,
+  without counting it as an executed discard or inventing a future card.
+- Share the existing fresh Trash Chop Move discard permission with valuation,
+  rather than pretending its focus must already be literal known trash. A safe
+  available discard delays exposure; a saved critical card is not zero-value
+  merely because critical loss and non-critical BDR occupy different fields.
+- Prevent development/resource shortcuts and BDR avoidance claims from ignoring
+  that liability. Retain selected/required discard tails when comparing risk,
+  but do not promote an unsearched leaf fallback into a strategically chosen
+  continuation.
+- Distinguish an actually assessed safe discard from an unfinished play/clue
+  frontier. Tests cover the reviewed opening and explicit conditional b3/no-b3
+  witnesses, not an assumption that Donald knows his hidden hand.
+
+This extends the existing endpoint evidence model; it does not replace it with
+sampled worlds, ban TCCMs, or implement the broader comparison-contract
+redesign.
+
+Validation: the full checkpoint took 4m45s (356 passed, 33 failed, 30 skipped;
+all non-test stages passed). Relative to the immediately preceding completed
+full run, three named failures disappeared and two appeared. The new Trash Chop
+Move failure was subsequently fixed and its focused test passed. The final
+first-seed group has 11 passing tests and one remaining turn-18 ranking failure
+(4s to Donald versus the reviewed purple clue). Opening/conditional branch
+checks, the risk-comparison invariant, and final fast checks pass. No fixture or
+regression expectation was changed to bless the remaining failure.
+
 ## 2026-09-18: distinguish held development from realized progress
 
 The September 16 aligned-checkpoint comparison allowed a short clue forecast to

@@ -445,27 +445,7 @@ fn ordered_h_group_actions_from_analysis(
         return Vec::new();
     }
     let inferred = &analysis.inferences;
-    let fresh_trash_chop_move_focus = analysis.replay.clues.iter().rev().find_map(|clue| {
-        let recipient_has_acted = view.history.iter().any(|entry| {
-            entry.turn > clue.turn
-                && match entry.event {
-                    ObservedEvent::Played { player, .. }
-                    | ObservedEvent::Discarded { player, .. } => player == clue.target,
-                    ObservedEvent::Clued { giver, .. } => giver == clue.target,
-                    ObservedEvent::Drew { .. } => false,
-                }
-        });
-        (clue.target == view.observer
-            && !recipient_has_acted
-            && analysis
-                .replay
-                .signals
-                .has_at_turn(clue.turn, HGroupMoveKind::TrashChopMove)
-            && view.hands[view.observer.index()]
-                .iter()
-                .any(|card| card.id == clue.focus))
-        .then_some(clue.focus)
-    });
+    let fresh_trash_chop_move_focus = fresh_trash_chop_move_focus(view, &analysis.replay);
     let mut clue_candidates = analysis_clue_candidates(deductions, profile, analysis).to_vec();
     clue_candidates.sort_by_key(|candidate| core::cmp::Reverse(candidate.score()));
     // https://hanabi.github.io/level-2/#the-5-stall-cluing-off-chop-5s
@@ -1564,7 +1544,35 @@ fn transfer_delays_next_five(
         if identity_of(view, due) == Some(five))
 }
 
-fn convention_known_trash_discard(
+/// The convention supplies a safe discard even before literal domains prove
+/// the focus trash. Share this scheduling fact with protection valuation.
+pub(super) fn fresh_trash_chop_move_focus(
+    view: &PlayerView,
+    replay: &super::HGroupState,
+) -> Option<CardId> {
+    replay.clues.iter().rev().find_map(|clue| {
+        let recipient_has_acted = view.history.iter().any(|entry| {
+            entry.turn > clue.turn
+                && match entry.event {
+                    ObservedEvent::Played { player, .. }
+                    | ObservedEvent::Discarded { player, .. } => player == clue.target,
+                    ObservedEvent::Clued { giver, .. } => giver == clue.target,
+                    ObservedEvent::Drew { .. } => false,
+                }
+        });
+        (clue.target == view.observer
+            && !recipient_has_acted
+            && replay
+                .signals
+                .has_at_turn(clue.turn, HGroupMoveKind::TrashChopMove)
+            && view.hands[view.observer.index()]
+                .iter()
+                .any(|card| card.id == clue.focus))
+        .then_some(clue.focus)
+    })
+}
+
+pub(super) fn convention_known_trash_discard(
     view: &PlayerView,
     inferred: &HGroupInferences,
 ) -> Option<CardId> {

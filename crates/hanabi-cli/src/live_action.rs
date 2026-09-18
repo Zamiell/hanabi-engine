@@ -338,12 +338,25 @@ fn card_ids_json(cards: &[hanabi_core::CardId]) -> Vec<usize> {
 }
 
 fn position_value_json(value: hanabi_search::ProjectedPositionValue) -> Value {
+    let quality = |cards: hanabi_search::SecuredCardQuality| {
+        cards
+            .cards()
+            .map(|(rank, missing, successor)| {
+                json!({
+                    "rank": rank.number(), "missingPredecessors": missing,
+                    "visibleSuccessor": successor,
+                })
+            })
+            .collect::<Vec<_>>()
+    };
     json!({
         "score": value.score,
         "clues": value.clues,
         "exposedCriticalChops": value.exposed_critical_chops,
         "blockedCluedCards": value.blocked_clued_cards,
         "securedFuturePlays": value.secured_future_plays,
+        "securedCardQuality": quality(value.secured_card_quality),
+        "exposedChopQuality": quality(value.exposed_chop_quality),
         "committedFuturePlays": value.committed_future_plays,
         "protectedBottomDeckRisks": value.protected_bottom_deck_risks,
         "visibleSuccessors": value.visible_successors,

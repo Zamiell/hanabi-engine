@@ -217,6 +217,9 @@ pub struct ProjectedPositionValue {
     /// these do not need another identity/connection clue to become plays.
     pub committed_future_plays: u8,
     pub secured_card_quality: crate::SecuredCardQuality,
+    /// Needed cards newly exposed by a worsening chop-protection exchange,
+    /// including behind a queued play. Not an executed discard.
+    pub exposed_chop_quality: crate::SecuredCardQuality,
     pub protected_bottom_deck_risks: u8,
     pub visible_successors: u8,
     pub finesse_opportunities: u8,
@@ -260,6 +263,9 @@ impl ProjectedPositionValue {
     /// may account for the increase in blocked cards.
     fn protection_development_preference(self, other: Self) -> bool {
         self.score == other.score
+            && other
+                .exposed_chop_quality
+                .no_worse_than(self.exposed_chop_quality)
             && self.clues >= other.clues
             && self.secured_future_plays > other.secured_future_plays
             && self.protected_bottom_deck_risks > other.protected_bottom_deck_risks
@@ -288,6 +294,9 @@ impl ProjectedPositionValue {
                 .saturating_add(value.playable_finesse_opportunities)
         };
         self.score == other.score
+            && other
+                .exposed_chop_quality
+                .no_worse_than(self.exposed_chop_quality)
             && accessible(self) >= accessible(other)
             && self.exposed_critical_chops <= other.exposed_critical_chops
             && self.blocked_clued_cards <= other.blocked_clued_cards
@@ -321,6 +330,9 @@ impl ProjectedPositionValue {
     fn developed_points_preference(self, other: Self) -> bool {
         let reserve = self.clue_demand.max(other.clue_demand);
         self.score >= other.score
+            && other
+                .exposed_chop_quality
+                .no_worse_than(self.exposed_chop_quality)
             && self.score.saturating_add(self.secured_future_plays)
                 > other.score.saturating_add(other.secured_future_plays)
             && self.clues >= reserve
@@ -365,6 +377,7 @@ impl ProjectedPositionValue {
 
     fn dominates_resources(self, other: Self) -> bool {
         self != other
+            && other.exposed_chop_quality.no_worse_than(self.exposed_chop_quality)
             && self.foregone_blind_plays <= other.foregone_blind_plays
             && self.conditional_prompt_chains >= other.conditional_prompt_chains
             && self.score >= other.score
@@ -1249,20 +1262,44 @@ fn compare_bottom_deck_risks(
     let left_prefix = left.projection.bottom_deck_risks_at(horizon);
     let right_prefix = right.projection.bottom_deck_risks_at(horizon);
     let prefix = left_prefix.cmp(&right_prefix);
+    // A worsened chop remains a liability when a short projection stops
+    // before discarding it. It cannot prove risk avoidance, but also must
+    // not be counted as an executed loss.
+    let unresolved_exposure = |candidate: &PlannerActionEvaluation| {
+        candidate.projection.forecast_discard_risk().is_none()
+            || candidate.symbolic_line.position_value.is_some_and(|value| {
+                value.exposed_chop_quality != crate::SecuredCardQuality::default()
+            })
+    };
+    if (prefix == Ordering::Less && unresolved_exposure(left))
+        || (prefix == Ordering::Greater && unresolved_exposure(right))
+    {
+        return Ordering::Equal;
+    }
     // A shared prefix prevents penalizing a longer forecast merely for seeing
     // farther. But it must not certify avoidance when the allegedly safer line
     // already predicts the same loss just beyond that cutoff. Require both
     // comparisons to support the advantage; otherwise defer to other evidence.
     // Keep unresolved discard risk already inside the prefix: it is risk, not
     // a recorded known-card loss, so the full known-loss counter omits it.
+    let assessed_tail = |candidate: &PlannerActionEvaluation| {
+        candidate
+            .projection
+            .unresolved_discard
+            .filter(|discard| discard.required_protection || discard.strategically_selected)
+            .and_then(|_| candidate.projection.forecast_discard_risk())
+            .unwrap_or(0)
+    };
     let complete = left
         .projection
         .maximum_bottom_deck_risks()
+        .max(assessed_tail(left))
         .max(left_prefix)
         .cmp(
             &right
                 .projection
                 .maximum_bottom_deck_risks()
+                .max(assessed_tail(right))
                 .max(right_prefix),
         );
     if prefix == complete {
@@ -1864,6 +1901,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::too_many_lines)]
     fn delayed_known_bdr_is_not_avoidance_at_the_shared_cutoff() {
         // Comparison invariant, not an invented convention/strategy history.
         let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
@@ -1917,6 +1955,24 @@ mod tests {
         assert_eq!(compare_bottom_deck_risks(&early, &delayed), Ordering::Equal);
         assert_eq!(compare_bottom_deck_risks(&delayed, &early), Ordering::Equal);
         delayed.projection.steps[1].consequences.bottom_deck_risk = None;
+        delayed.projection.checkpoints[0].value.exposed_chop_quality =
+            crate::SecuredCardQuality::from_cards([
+                crate::future_card_quality::FutureCardQuality {
+                    rank: hanabi_core::Rank::Three,
+                    missing_predecessors: 2,
+                    visible_successor: false,
+                },
+            ]);
+        delayed.symbolic_line.position_value = Some(delayed.projection.checkpoints[0].value);
+        assert_eq!(
+            compare_bottom_deck_risks(&early, &delayed),
+            Ordering::Equal,
+            "stopping before a newly exposed chop is discarded does not remove its risk"
+        );
+        delayed.projection.checkpoints[0].value.exposed_chop_quality =
+            crate::SecuredCardQuality::default();
+        delayed.symbolic_line.position_value = Some(delayed.projection.checkpoints[0].value);
+        delayed.projection.frontier = crate::PlanFrontier::Terminal;
         assert_eq!(
             compare_bottom_deck_risks(&early, &delayed),
             Ordering::Greater
@@ -1943,6 +1999,7 @@ mod tests {
                 .is_some_and(|discard| discard.bottom_deck_risk)
         );
         delayed.projection = unknown;
+        early.projection.frontier = crate::PlanFrontier::Terminal;
         assert_eq!(
             compare_bottom_deck_risks(&early, &delayed),
             Ordering::Less,

@@ -80,6 +80,15 @@ impl fmt::Debug for SecuredCardQuality {
 }
 
 impl SecuredCardQuality {
+    /// Ordered rank, missing-predecessor count, and visible-successor evidence
+    /// for diagnostics. These are strategic qualities, not card identities.
+    pub fn cards(self) -> impl Iterator<Item = (Rank, u8, bool)> {
+        self.cards
+            .into_iter()
+            .flatten()
+            .map(|card| (card.rank, card.missing_predecessors, card.visible_successor))
+    }
+
     pub(crate) fn from_cards(cards: impl IntoIterator<Item = FutureCardQuality>) -> Self {
         let mut result = Self::default();
         for (index, card) in cards.into_iter().enumerate() {

@@ -57,6 +57,9 @@ impl ActionCommitment {
 /// this object before converting genuine preferences to numeric ordering.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(super) struct LineOutcome {
+    /// Protecting the old chop exposes a more valuable needed card. A
+    /// strategic cost, not grounds to reinterpret or reject the convention.
+    pub(super) worsened_chop_exposure: bool,
     /// Publicly secured actions, used for team coverage and tempo.
     pub(super) public_actions: Vec<ActionCommitment>,
     /// Actions known by each card's owner, used for Clarity equivalence.

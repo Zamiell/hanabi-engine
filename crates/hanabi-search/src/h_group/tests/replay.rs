@@ -1,6 +1,136 @@
 use super::*;
 
 #[test]
+fn first_seed_two_for_one_survives_unresolved_discard_comparison() {
+    // User-reviewed turn 4: neither 1s nor 4s proves avoidance of BDR;
+    // retain the stronger 2-for-1 instead of awarding an unfinished line zero.
+    let state = expert_replay_p4v0s1().state_at_turn(3).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        analysis.planner.best_action,
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::Four)
+        }
+    );
+}
+
+#[test]
+fn first_seed_critical_five_is_not_zero_value_in_a_chop_exchange() {
+    let state = expert_replay_p4v0s1().state_at_turn(17).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    assert_eq!(
+        super::super::symbolic_line::important_discard(&view, HGroupProfile::Max, CardId::new(22))
+            .0,
+        Some(SavePrincipleViolation::CriticalCard)
+    );
+    assert_eq!(
+        super::super::frontier_value::worsened_chop_exposure(
+            &view,
+            &view,
+            HGroupProfile::Max,
+            Some(CardId::new(22)),
+            Some(CardId::new(18))
+        ),
+        None
+    );
+}
+
+#[test]
+fn first_seed_tempo_does_not_exchange_purple_four_for_red_three() {
+    // User-reviewed alternative from Donald's turn 4. His unknown 3s are
+    // not replacements for Bob's visible r3. Draws remain blank.
+    let state = expert_replay_p4v0s1().state_at_turn(3).unwrap();
+    let mut view = state.view_for(state.current_player()).unwrap();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(1)),
+        Action::Play(CardId::new(4)),
+    ] {
+        let (d, r) = PerspectiveProjector::new(&view, HGroupProfile::Max)
+            .project(view.current_player, PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        let i = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+        view = super::super::symbolic_line::apply_symbolic_action(
+            &view,
+            &d,
+            &i,
+            view.current_player,
+            action,
+        )
+        .unwrap()
+        .0;
+    }
+    let (d, _) = PerspectiveProjector::new(&view, HGroupProfile::Max)
+        .project(view.current_player, PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    let action = Action::Clue {
+        target: PlayerId::new(1),
+        clue: Clue::Rank(Rank::Two),
+    };
+    assert_ne!(
+        crate::planner::choose_projected_follow_up(
+            &d,
+            HGroupProfile::Max,
+            &crate::AnalysisControl::default()
+        )
+        .unwrap(),
+        Some(action)
+    );
+    for (identity, expected) in [
+        (
+            Card::new(Suit::Blue, Rank::Three),
+            Action::Discard(CardId::new(8)),
+        ),
+        (
+            Card::new(Suit::Yellow, Rank::Three),
+            Action::Clue {
+                target: PlayerId::new(0),
+                clue: Clue::Suit(Suit::Blue),
+            },
+        ),
+    ] {
+        // Explicit conditional assignments, never supplied to the root as
+        // known facts. Other draws and the un-clued hidden slots stay blank.
+        let mut branch = view.clone();
+        branch.hands[3]
+            .iter_mut()
+            .find(|c| c.id == CardId::new(13))
+            .unwrap()
+            .identity = Some(Card::new(Suit::Purple, Rank::Three));
+        branch.hands[3]
+            .iter_mut()
+            .find(|c| c.id == CardId::new(14))
+            .unwrap()
+            .identity = Some(identity);
+        let (d, _) = PerspectiveProjector::new(&branch, HGroupProfile::Max)
+            .project(branch.current_player, PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        let selected = crate::planner::choose_projected_follow_up(
+            &d,
+            HGroupProfile::Max,
+            &crate::AnalysisControl::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            selected,
+            Some(expected),
+            "conditional {identity:?}; candidates {:?}",
+            analyze_h_group_convention(&d, HGroupProfile::Max).actions
+        );
+    }
+}
+
+#[test]
 fn first_seed_projected_bob_plays_blue_one_before_queueing_yellow_two() {
     // User-reviewed hypothetical from p4v0s1 turn 3. At turn 6 Bob has
     // b1 to play; merely counting another held card must not force him to

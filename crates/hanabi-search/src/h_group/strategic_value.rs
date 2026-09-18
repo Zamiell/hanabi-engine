@@ -204,10 +204,21 @@ pub(super) fn apply_strategic_clue_values(
         // A deficit from the best clue unfairly penalizes productive clues
         // against ordinary discards, which are outside this clue-only pass
         // and protect none of these identities either.
-        candidate.value.reward_protection(
-            BOTTOM_DECK_RISK_PROTECTION_BONUS
-                .saturating_mul(u16::try_from(bottom_deck_risk_values[index]).unwrap_or(u16::MAX)),
-        );
+        // Net protection, not a reward for merely moving the chopping block.
+        // The endpoint guards unsafe dominance claims; this soft preference
+        // also applies when neither endpoint dominates the other.
+        // Reviewed p4v0s1 turn 7: protect p4, expose the needed r3.
+        if value.worsened_chop_exposure {
+            candidate
+                .value
+                .penalize_teamwork(BOTTOM_DECK_RISK_PROTECTION_BONUS);
+        } else {
+            candidate.value.reward_protection(
+                BOTTOM_DECK_RISK_PROTECTION_BONUS.saturating_mul(
+                    u16::try_from(bottom_deck_risk_values[index]).unwrap_or(u16::MAX),
+                ),
+            );
+        }
         let candidate_action_count = value
             .convention_action_count
             .unwrap_or(value.action_coverage)
@@ -915,6 +926,35 @@ fn clue_line_value(
         let projection = compiled.projection(observer)?;
         let conflicts_with_giver = evidence.conflicting_observers.contains(&observer);
         let after = projected_line_state(after_clue, &projection);
+        if baseline.chop != after.chop {
+            let safe_discard = super::decision::convention_known_trash_discard(
+                projection.deductions.view(),
+                &projection.inferred,
+            )
+            .is_some();
+            // Only protection-driven chop changes are an exchange. A clue
+            // causing an ordinary play is valued by the ensuing line.
+            if baseline
+                .chop
+                .is_some_and(|card| after.chop_moved.contains(&card))
+                && !safe_discard
+                && super::decision::fresh_trash_chop_move_focus(
+                    projection.deductions.view(),
+                    &projection.replay,
+                )
+                .is_none()
+                && super::frontier_value::worsened_chop_exposure(
+                    source,
+                    after_clue,
+                    profile,
+                    baseline.chop,
+                    after.chop,
+                )
+                .is_some()
+            {
+                value.worsened_chop_exposure = true;
+            }
+        }
         record_clued_superpositions(&mut value, observer, &after);
         let changed_connection_cards = after
             .connection_lines

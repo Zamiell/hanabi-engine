@@ -82,11 +82,39 @@ pub(super) fn evaluate(
     let mut positional = IdentitySet::default();
     let mut clued_domains = Vec::new();
     let mut mandatory_clues = 0_u8;
+    let mut exposed_chops = IdentitySet::default();
     for player in 0..frontier.hands.len() {
         let actor = PlayerId::new(narrow(player));
         let (d, replay) = PerspectiveProjector::new(frontier, profile)
             .project(actor, PerspectiveDepth::NestedRecipients)?;
+        let fresh_trash = super::decision::fresh_trash_chop_move_focus(d.view(), &replay).is_some();
         let inferred = infer_h_group_from_replay(&d, replay, profile);
+        // Charge the worsening introduced by protection, not every existing
+        // chop. Ordinary draws/plays change chop too, without constituting a
+        // protection exchange. A queued play delays this liability; it does
+        // not erase it. Unknown identities are never filled from the deck.
+        let has_moved_card = frontier.hands[player]
+            .iter()
+            .any(|card| inferred.chop_moved.contains(&card.id));
+        let safe_discard =
+            super::decision::convention_known_trash_discard(d.view(), &inferred).is_some();
+        if let Some((before_d, before_r)) = (has_moved_card && !safe_discard && !fresh_trash)
+            .then(|| {
+                PerspectiveProjector::new(source, profile)
+                    .project(actor, PerspectiveDepth::NestedRecipients)
+            })
+            .flatten()
+        {
+            let before = infer_h_group_from_replay(&before_d, before_r, profile);
+            let old = before.chops.get(player).copied().flatten();
+            let new = inferred.chops.get(player).copied().flatten();
+            if old != new && old.is_some_and(|card| inferred.chop_moved.contains(&card)) {
+                if let Some(identity) = worsened_chop_exposure(source, frontier, profile, old, new)
+                {
+                    exposed_chops = exposed_chops.union(IdentitySet::singleton(identity));
+                }
+            }
+        }
         if let Some(identity) =
             super::finesse_position(&frontier.hands[player], &inferred.gotten(), 0)
                 .and_then(|card| card.identity)
@@ -189,6 +217,7 @@ pub(super) fn evaluate(
             .count(),
     );
     value.secured_card_quality = secured_card_quality(frontier, secured);
+    value.exposed_chop_quality = secured_card_quality(frontier, exposed_chops);
     let mut protected = secured;
     for suit in Suit::ALL {
         for rank in source.play_stacks[suit.index()].len()..frontier.play_stacks[suit.index()].len()
@@ -266,6 +295,33 @@ fn secured_card_quality(frontier: &PlayerView, secured: IdentitySet) -> crate::S
             visible_successor,
         }
     }))
+}
+
+/// Shared net-risk assessment for clue scoring and unfinished endpoints.
+/// The caller establishes that protection, rather than an ordinary draw or
+/// play, moved chop. Only observer-known replacements remove BDR.
+pub(super) fn worsened_chop_exposure(
+    before: &PlayerView,
+    after: &PlayerView,
+    profile: HGroupProfile,
+    old: Option<hanabi_core::CardId>,
+    new: Option<hanabi_core::CardId>,
+) -> Option<Card> {
+    let old_loss = old.map(|card| super::symbolic_line::important_discard(before, profile, card));
+    // Critical loss is worse than non-critical BDR. These occupy different
+    // fields; absence of BDR must not be mistaken for zero old value.
+    if old_loss.is_some_and(|(loss, _)| loss == Some(super::SavePrincipleViolation::CriticalCard)) {
+        return None;
+    }
+    let old_risk = old_loss.and_then(|(_, risk)| risk);
+    let new_risk =
+        new.and_then(|card| super::symbolic_line::important_discard(after, profile, card).1)?;
+    let old_quality = secured_card_quality(
+        after,
+        old_risk.map_or_else(IdentitySet::default, IdentitySet::singleton),
+    );
+    let new_quality = secured_card_quality(after, IdentitySet::singleton(new_risk));
+    (!old_quality.no_worse_than(new_quality)).then_some(new_risk)
 }
 
 /// Check an explicit conditional branch immediately after a stack advances.
