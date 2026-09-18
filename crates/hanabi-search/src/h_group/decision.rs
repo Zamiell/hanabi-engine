@@ -990,6 +990,7 @@ fn pass_back_analysis(
 /// Constructs every convention-facing result from one history replay and one
 /// inference pass.
 pub(crate) struct HGroupConventionDecision {
+    pub(crate) clue_explanations: Vec<crate::ClueExplanation>,
     pub(crate) inferences: HGroupInferences,
     pub(crate) actions: Vec<crate::ConventionAction>,
     pub(crate) rejected_actions: Vec<RejectedConventionAction>,
@@ -1045,6 +1046,19 @@ pub(crate) fn analyze_h_group_convention(
         ConventionConstraintGraph::from_replay(deductions, &analysis.replay, &analysis.inferences)
             .into_belief_constraints();
     HGroupConventionDecision {
+        clue_explanations: if crate::diagnostics::enabled() {
+            analysis_clue_candidates(deductions, profile, &analysis)
+                .iter()
+                .map(|candidate| {
+                    let mut explanation = candidate.explanation();
+                    explanation.interpretation =
+                        crate::diagnostics::meaning(deductions.view(), candidate.action);
+                    explanation
+                })
+                .collect()
+        } else {
+            Vec::new()
+        },
         inferences: analysis.inferences.clone(),
         actions: ranked,
         rejected_actions,

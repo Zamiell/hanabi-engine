@@ -27,9 +27,8 @@ use super::{
     is_eventually_useful, is_playable_at, is_playable_now, next_player, ordered_playable_cards,
     pending_card_allows_identity, preferred_due_play_card, projected_h_group_replay,
     prospective_clue_has_unsafe_connection, prospective_clue_marks_focus_saved,
-    prospective_clue_primary_interpretation, prospective_clue_primary_kind,
-    prospective_clue_signal_kinds, prospective_clue_view, prospective_play_view,
-    prospective_stacked_ejection_card, prospective_team_clue_signal_kinds,
+    prospective_clue_primary_interpretation, prospective_clue_signal_kinds, prospective_clue_view,
+    prospective_play_view, prospective_stacked_ejection_card, prospective_team_clue_signal_kinds,
     replay_identity_is_queued, rule_enabled, subjective_convention_cards,
     subjective_playable_cards, was_clued_before, with_prospective_analysis_cache,
 };

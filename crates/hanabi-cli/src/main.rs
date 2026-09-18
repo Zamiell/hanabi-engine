@@ -14,6 +14,7 @@ use hanabi_search::{
     WorldCount, analyze_position,
 };
 
+mod explain;
 mod live_action;
 mod replay_link;
 
@@ -71,6 +72,9 @@ fn run_analyze(arguments: &AnalyzeArguments) -> Result<(), CliError> {
     let view = state
         .view_for(actor)
         .ok_or(CliError::InvalidCurrentPlayer)?;
+    if arguments.explain {
+        return explain::run(arguments, &replay, &view);
+    }
     print_position(&replay, &state, &view);
     println!("Convention: {}", arguments.convention);
     println!("Objective: {}", arguments.objective);
@@ -246,6 +250,10 @@ fn select_convention(
 }
 
 struct AnalyzeArguments {
+    candidates: Vec<String>,
+    explain: bool,
+    lines: usize,
+    format: explain::OutputFormat,
     replay: PathBuf,
     turn: u32,
     exact_world_limit: u64,
@@ -312,6 +320,10 @@ fn parse_analyze_arguments(
     let mut convention = Some(ConventionChoice::default());
     let mut h_group_profile = None;
     let mut objective = PlanningObjective::ExpectedScore;
+    let mut explain = false;
+    let mut lines = 2_usize;
+    let mut format = explain::OutputFormat::Text;
+    let mut candidates = Vec::new();
 
     while let Some(flag) = arguments.next() {
         if parse_planning_option(
@@ -326,6 +338,39 @@ fn parse_analyze_arguments(
             continue;
         }
         match flag.as_str() {
+            "--explain" => explain = true,
+            "--lines" => {
+                let value = next_value(arguments, "--lines")?;
+                lines = if value == "all" {
+                    usize::MAX
+                } else {
+                    parse_value("--lines", &value)?
+                };
+                if lines == 0 {
+                    return Err(CliError::Usage("--lines must be positive".to_owned()));
+                }
+                explain = true;
+            }
+            "--candidate" => {
+                candidates.push(next_value(arguments, "--candidate")?);
+                explain = true;
+            }
+            "--live-turn" => {
+                let value: u32 =
+                    parse_value("--live-turn", &next_value(arguments, "--live-turn")?)?;
+                turn =
+                    Some(value.checked_sub(1).ok_or_else(|| {
+                        CliError::Usage("--live-turn must be positive".to_owned())
+                    })?);
+            }
+            "--format" => {
+                format = match next_value(arguments, "--format")?.as_str() {
+                    "text" => explain::OutputFormat::Text,
+                    "json" => explain::OutputFormat::Json,
+                    _ => return Err(CliError::Usage("--format must be text or json".to_owned())),
+                };
+                explain = true;
+            }
             "--turn" => {
                 turn = Some(parse_value("--turn", &next_value(arguments, "--turn")?)?);
             }
@@ -339,6 +384,10 @@ fn parse_analyze_arguments(
         h_group_profile,
     )?;
     Ok(Some(AnalyzeArguments {
+        candidates,
+        explain,
+        lines,
+        format,
         replay: replay.into(),
         turn: turn.ok_or_else(|| CliError::Usage("missing required --turn".to_owned()))?,
         exact_world_limit,
@@ -467,6 +516,11 @@ fn usage() -> &'static str {
      Turn N is the position after N completed game actions; turn 0 is the initial deal.\n\n\
      Exception: replay-link uses Hanab Live turns (1 = initial deal; default: 1).\n\n\
      Analyze options:\n  --exact-world-limit <N>  Worlds allowed in exact endgame (default: 4096)\n  \
+     --explain              Show candidates, comparisons, and projected lines\n  \
+     --lines <N|all>        Lines to show (default: 2), plus fixture/requested actions\n  \
+     --candidate <ACTION>   Include purple:Donald, 3:Alice, play:17, discard:12 (repeatable)\n  \
+     --live-turn <N>        One-based Hanab Live turn, instead of --turn\n  \
+     --format <text|json>    Explanation format (implies --explain)\n  \
      --exact-node-limit <N>   Nodes allowed in exact endgame (default: 50000)\n  \
      --objective <expected-score|perfect-score>  Exact-planning objective (default: expected-score)\n  \
      --convention <none|h-group>  Convention framework (default: none)\n  \

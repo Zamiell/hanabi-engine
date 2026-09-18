@@ -414,6 +414,7 @@ pub(super) fn conditional_successor(
                     identity: successor,
                 },
                 follow_up: super::PlanStep {
+                    interpreted_identities: None,
                     turn: after.turn,
                     depends_on: None,
                     projected: super::ProjectedAction {

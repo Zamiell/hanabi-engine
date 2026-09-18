@@ -130,7 +130,7 @@ fn logical_deductions_json(deductions: &LogicalDeductions) -> Value {
     json!({"ownCards": own_cards})
 }
 
-fn convention_inferences_json(inferences: ConventionInferences) -> Value {
+pub(crate) fn convention_inferences_json(inferences: ConventionInferences) -> Value {
     match inferences {
         ConventionInferences::None => json!({"framework": "none"}),
         ConventionInferences::HGroup(inferences) => h_group_inferences_json(&inferences),
@@ -253,7 +253,7 @@ fn planning_json(
     planning
 }
 
-fn planner_details_json(
+pub(crate) fn planner_details_json(
     table_id: u64,
     best_action: hanabi_core::Action,
     result: &hanabi_search::PlannerResult,
@@ -293,6 +293,7 @@ fn planner_details_json(
             "criticalTouched": evaluation.critical_touched,
             "oldestCardTouched": evaluation.oldest_card_touched,
             "symbolicLine": {
+                "stopReason": format!("{:?}", evaluation.symbolic_line.stop_reason),
                 "actions": evaluation.symbolic_line.actions,
                 "scoreGain": evaluation.symbolic_line.score_gain,
                 "discards": evaluation.symbolic_line.discards,
@@ -337,7 +338,7 @@ fn card_ids_json(cards: &[hanabi_core::CardId]) -> Vec<usize> {
     cards.iter().map(|card| card.index()).collect()
 }
 
-fn position_value_json(value: hanabi_search::ProjectedPositionValue) -> Value {
+pub(crate) fn position_value_json(value: hanabi_search::ProjectedPositionValue) -> Value {
     let quality = |cards: hanabi_search::SecuredCardQuality| {
         cards
             .cards()
@@ -371,6 +372,7 @@ fn position_value_json(value: hanabi_search::ProjectedPositionValue) -> Value {
 
 fn projected_step_json(table_id: u64, step: &hanabi_search::PlanStep) -> Value {
     json!({
+        "interpretedIdentities": step.interpreted_identities.map(|identities| identities.iter().map(identity_json).collect::<Vec<_>>()),
         "turn": step.turn + 1, "actor": step.projected.actor.index(),
         "action": HanabiLiveActionCommand::from_engine_action(table_id, step.projected.action),
         "dependsOn": step.depends_on,
@@ -389,7 +391,10 @@ fn condition_json(condition: hanabi_search::HiddenCardCondition) -> Value {
         "card": condition.card.index(), "identity": identity_json(condition.identity)})
 }
 
-fn projection_evidence_json(table_id: u64, evidence: &hanabi_search::ProjectionEvidence) -> Value {
+pub(crate) fn projection_evidence_json(
+    table_id: u64,
+    evidence: &hanabi_search::ProjectionEvidence,
+) -> Value {
     json!({
         "checkpoints": evidence.checkpoints.iter().map(|checkpoint| json!({
             "actions": checkpoint.actions, "discards": checkpoint.discards,

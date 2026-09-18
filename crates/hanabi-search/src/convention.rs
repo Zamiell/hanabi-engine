@@ -225,12 +225,27 @@ pub struct RejectedConventionAction {
 /// cannot be reconstructed by separate call paths.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ConventionAnalysis {
+    /// Clue semantics and numeric terms retained from candidate compilation.
+    pub clue_explanations: Vec<ClueExplanation>,
     pub inferences: ConventionInferences,
     pub actions: Vec<ConventionAction>,
     pub rejected_actions: Vec<RejectedConventionAction>,
     pub preferred_action: Option<hanabi_core::Action>,
     pub forced_action: Option<hanabi_core::Action>,
     pub belief_constraints: BeliefConstraints,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClueExplanation {
+    pub interpretation: Option<crate::HGroupClueInterpretation>,
+    pub recognition: &'static str,
+    pub connection_steps: u8,
+    pub action_coverage: u8,
+    pub action: hanabi_core::Action,
+    pub kind: Option<crate::HGroupMoveKind>,
+    pub score: u16,
+    /// Signed terms, before saturation and later scheduling adjustments.
+    pub score_components: Vec<(&'static str, i32)>,
 }
 
 /// Convention frameworks built into this engine.
@@ -306,6 +321,7 @@ impl SupportedConvention {
         let _profile = crate::test_profile::span("convention_analyze");
         match self {
             Self::None => ConventionAnalysis {
+                clue_explanations: Vec::new(),
                 inferences: ConventionInferences::None,
                 actions: deductions
                     .view()
@@ -325,6 +341,7 @@ impl SupportedConvention {
             Self::HGroup(profile) => {
                 let decision = crate::h_group::analyze_h_group_convention(deductions, profile);
                 ConventionAnalysis {
+                    clue_explanations: decision.clue_explanations,
                     inferences: ConventionInferences::HGroup(Box::new(decision.inferences)),
                     actions: decision.actions,
                     rejected_actions: decision.rejected_actions,

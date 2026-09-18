@@ -94,6 +94,7 @@ pub(crate) fn project_h_group_projection(
     limit: u8,
     control: &crate::AnalysisControl,
 ) -> Result<(SymbolicLineOutcome, super::ProjectionEvidence), crate::AnalysisStopped> {
+    let _trace_root = crate::diagnostics::root(root);
     let plan = project_h_group_plan_with_control::<true>(source, profile, root, limit, control)?;
     Ok((plan.summarize(), plan.into_evidence()))
 }
@@ -301,6 +302,15 @@ fn continue_plan<const REUSE_SELECTED: bool>(
             },
             consequences,
         );
+        plan.record_interpretation(match current {
+            Action::Play(card) | Action::Discard(card) => actor_inferences
+                .cards
+                .iter()
+                .find(|note| note.card == card)
+                .map(|note| note.identities)
+                .or_else(|| actor_deductions.possible_identities(card)),
+            Action::Clue { .. } => None,
+        });
         public = after;
         plan.record_checkpoint(super::frontier_value::evaluate(
             source, &public, profile, root,

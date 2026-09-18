@@ -38,6 +38,8 @@ pub enum SavePrincipleViolation {
 /// conditional continuations are not authoritative replay actions.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PlanStep {
+    /// Acting player's inferred card domain, captured before the action.
+    pub interpreted_identities: Option<crate::IdentitySet>,
     /// Zero-based engine turn; UI diagnostics render turn + 1.
     pub turn: u32,
     pub projected: ProjectedAction,
@@ -436,6 +438,7 @@ impl ConditionalPlan {
             "a projected action must be funded before it is applied"
         );
         self.evidence.steps.push(PlanStep {
+            interpreted_identities: None,
             turn,
             projected,
             depends_on,
@@ -445,6 +448,12 @@ impl ConditionalPlan {
 
     pub(super) fn len(&self) -> usize {
         self.evidence.steps.len()
+    }
+
+    pub(super) fn record_interpretation(&mut self, identities: Option<crate::IdentitySet>) {
+        if let Some(step) = self.evidence.steps.last_mut() {
+            step.interpreted_identities = identities;
+        }
     }
 
     pub(super) const fn stop_at(&mut self, frontier: PlanFrontier) {
@@ -707,6 +716,7 @@ mod tests {
                     identity: Card::new(suit, hanabi_core::Rank::Two),
                 },
                 follow_up: PlanStep {
+                    interpreted_identities: None,
                     turn: 1,
                     projected: ProjectedAction {
                         actor: PlayerId::new(1),

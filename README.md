@@ -35,9 +35,9 @@ iteration, run focused Rust tests plus `scripts/check.sh --fast`; see
 
 ## Example usage
 
-Analyze turn 17 of a Hanabi Live replay with H-Group max. The default planner
-keeps unknown identities symbolic and automatically switches to exact endgame
-search when the complete belief is small enough:
+Analyze the position after 17 actions (Hanab Live turn 18) with H-Group max. The
+default planner keeps unknown identities symbolic and automatically switches to
+exact endgame search when the complete belief is small enough:
 
 ```sh
 cargo run --release -p hanabi-cli --bin hanabi-engine -- \
@@ -47,6 +47,9 @@ cargo run --release -p hanabi-cli --bin hanabi-engine -- \
 ```
 
 Run `cargo run -p hanabi-cli --bin hanabi-engine -- --help` for all CLI options.
+Add `--explain` for candidates, decision comparisons, and the leading projected
+lines; use `--lines 3 --format json` for structured output. See
+[decision explanations](docs/explanations.md).
 
 ## Try the bot on Hanabi Live
 

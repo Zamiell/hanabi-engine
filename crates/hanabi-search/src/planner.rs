@@ -504,6 +504,8 @@ pub enum EndpointComparison {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CandidateComparison {
+    /// Exact checkpoint operands retained only when diagnostic tracing is enabled.
+    pub basis: Option<ComparisonBasis>,
     pub left: Action,
     pub right: Action,
     pub endpoint: EndpointComparison,
@@ -511,6 +513,31 @@ pub struct CandidateComparison {
     pub reason: ComparisonReason,
     /// The preference graph contains a path back across this edge.
     pub in_cycle: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ComparisonBasis {
+    pub stage: &'static str,
+    pub horizon: usize,
+    pub left: Vec<RotationCheckpoint>,
+    pub right: Vec<RotationCheckpoint>,
+}
+
+fn retain_comparison_basis(
+    basis: &mut Option<ComparisonBasis>,
+    stage: &'static str,
+    horizon: usize,
+    left: impl FnOnce() -> Vec<RotationCheckpoint>,
+    right: impl FnOnce() -> Vec<RotationCheckpoint>,
+) {
+    if crate::diagnostics::enabled() {
+        *basis = Some(ComparisonBasis {
+            stage,
+            horizon,
+            left: left(),
+            right: right(),
+        });
+    }
 }
 
 /// Plans from known information without random world construction.
@@ -786,6 +813,13 @@ pub(crate) fn choose_projected_follow_up(
     let analysis = convention.analyze(deductions);
     let candidates = planning_candidates(&analysis);
     if candidates.len() == 1 {
+        crate::diagnostics::record(
+            deductions.view(),
+            &analysis,
+            &[],
+            &[],
+            Some(candidates[0].action),
+        );
         return Ok(Some(candidates[0].action));
     }
     let mut evaluations = Vec::with_capacity(candidates.len());
@@ -801,8 +835,16 @@ pub(crate) fn choose_projected_follow_up(
             )?;
         evaluations.push(evaluation);
     }
-    let (best, _) = compare_symbolic_candidates(&evaluations, analysis.preferred_action);
-    Ok(best.map(|index| evaluations[index].action))
+    let (best, comparisons) = compare_symbolic_candidates(&evaluations, analysis.preferred_action);
+    let selected = best.map(|index| evaluations[index].action);
+    crate::diagnostics::record(
+        deductions.view(),
+        &analysis,
+        &evaluations,
+        &comparisons,
+        selected,
+    );
+    Ok(selected)
 }
 
 /// Applies convention-forced continuations identically at the root and at
@@ -1004,7 +1046,7 @@ fn compare_symbolic_candidates(
         for right in left + 1..count {
             let a = &evaluations[left];
             let b = &evaluations[right];
-            let endpoint = compare_endpoints(a, b);
+            let (endpoint, basis) = compare_endpoints_with_basis(a, b);
             match endpoint {
                 EndpointComparison::PreferLeft(
                     ComparisonReason::RotationDevelopment
@@ -1032,6 +1074,7 @@ fn compare_symbolic_candidates(
             reaches[left][right] = ordering.is_gt();
             reaches[right][left] = !ordering.is_gt();
             comparisons.push(CandidateComparison {
+                basis,
                 left: a.action,
                 right: b.action,
                 endpoint,
@@ -1082,11 +1125,20 @@ fn compare_symbolic_candidates(
     (selected, comparisons)
 }
 
+#[cfg(test)]
 fn compare_endpoints(
     left: &PlannerActionEvaluation,
     right: &PlannerActionEvaluation,
 ) -> EndpointComparison {
-    let comparison = compare_endpoint_evidence(left, right);
+    compare_endpoints_with_basis(left, right).0
+}
+
+fn compare_endpoints_with_basis(
+    left: &PlannerActionEvaluation,
+    right: &PlannerActionEvaluation,
+) -> (EndpointComparison, Option<ComparisonBasis>) {
+    let mut basis = None;
+    let comparison = compare_endpoint_evidence(left, right, &mut basis);
     let horizon = left
         .projection
         .risk_horizon()
@@ -1099,7 +1151,7 @@ fn compare_endpoints(
     // A resource snapshot cannot dominate by trimming away its next risky
     // discard. Keep the converse comparison available: a safer endpoint can
     // still be better on resources, without claiming permanent risk avoidance.
-    match comparison {
+    let guarded = match comparison {
         EndpointComparison::PreferLeft(ComparisonReason::EndpointResources)
             if risk == Ordering::Greater =>
         {
@@ -1111,13 +1163,18 @@ fn compare_endpoints(
             EndpointComparison::Incomparable
         }
         _ => comparison,
+    };
+    if guarded != comparison {
+        basis = None;
     }
+    (guarded, basis)
 }
 
 #[allow(clippy::too_many_lines)]
 fn compare_endpoint_evidence(
     left: &PlannerActionEvaluation,
     right: &PlannerActionEvaluation,
+    basis: &mut Option<ComparisonBasis>,
 ) -> EndpointComparison {
     match compare_save_principle_risks(left, right) {
         Ordering::Less => return EndpointComparison::PreferLeft(ComparisonReason::SavePrinciple),
@@ -1174,9 +1231,23 @@ fn compare_endpoint_evidence(
                 .value
                 .development_preference(a.value, b.discards, a.discards);
             if prefer_left && !prefer_right {
+                retain_comparison_basis(
+                    basis,
+                    "firstRotation",
+                    usize::from(a.actions),
+                    || vec![a],
+                    || vec![b],
+                );
                 return EndpointComparison::PreferLeft(ComparisonReason::RotationDevelopment);
             }
             if prefer_right && !prefer_left {
+                retain_comparison_basis(
+                    basis,
+                    "firstRotation",
+                    usize::from(a.actions),
+                    || vec![a],
+                    || vec![b],
+                );
                 return EndpointComparison::PreferRight(ComparisonReason::RotationDevelopment);
             }
         }
@@ -1194,6 +1265,13 @@ fn compare_endpoint_evidence(
         let left_values = left.projection.checkpoints_at(horizon);
         let right_values = right.projection.checkpoints_at(horizon);
         if !left_values.is_empty() && !right_values.is_empty() {
+            retain_comparison_basis(
+                basis,
+                "sharedHorizon",
+                usize::from(horizon),
+                || left_values.clone(),
+                || right_values.clone(),
+            );
             let every_pair =
                 |predicate: fn(ProjectedPositionValue, ProjectedPositionValue) -> bool| {
                     left_values
@@ -1219,6 +1297,7 @@ fn compare_endpoint_evidence(
     if left.symbolic_line.actions != right.symbolic_line.actions
         || left.symbolic_line.stop_reason != right.symbolic_line.stop_reason
     {
+        *basis = None;
         return EndpointComparison::Incomparable;
     }
     let Some((mut a, mut b)) = left
@@ -1246,6 +1325,25 @@ fn compare_endpoint_evidence(
             }
         }
     }
+    retain_comparison_basis(
+        basis,
+        "normalizedEndpoints",
+        usize::from(left.symbolic_line.actions),
+        || {
+            vec![RotationCheckpoint {
+                actions: left.symbolic_line.actions,
+                discards: left.symbolic_line.discards,
+                value: a,
+            }]
+        },
+        || {
+            vec![RotationCheckpoint {
+                actions: right.symbolic_line.actions,
+                discards: right.symbolic_line.discards,
+                value: b,
+            }]
+        },
+    );
     if a.protection_development_preference(b) {
         return EndpointComparison::PreferLeft(ComparisonReason::ProtectedDevelopment);
     }
@@ -1952,6 +2050,7 @@ mod tests {
         );
         let mut delayed = early.clone();
         let risk = crate::PlanStep {
+            interpreted_identities: None,
             turn: 1,
             projected: crate::ProjectedAction {
                 actor: state.current_player(),
@@ -2002,7 +2101,7 @@ mod tests {
             },
         );
         assert_eq!(
-            compare_endpoint_evidence(&resource_rich, &safer_prefix),
+            compare_endpoint_evidence(&resource_rich, &safer_prefix, &mut None),
             EndpointComparison::PreferLeft(ComparisonReason::EndpointResources)
         );
         assert_eq!(
@@ -2148,6 +2247,7 @@ mod tests {
         unsafe_line.preference = crate::ActionPreference::new(9999, false);
         // Algorithm invariant: this tail lies beyond the aggregate summary.
         unsafe_line.projection.steps.push(crate::PlanStep {
+            interpreted_identities: None,
             turn: 14,
             projected: crate::ProjectedAction {
                 actor: hanabi_core::PlayerId::new(2),

@@ -1,6 +1,8 @@
 //! Hidden-information modeling and deterministic planning for Hanabi.
 
 mod analysis;
+mod diagnostics;
+pub use diagnostics::{ProjectedDecision, capture_decisions};
 mod control;
 pub use control::{AnalysisControl, AnalysisStopped, CancellationToken};
 mod baseline;
@@ -18,10 +20,10 @@ pub use analysis::{
 };
 pub use baseline::{CardAssessment, ConventionAgnosticPolicy, PolicyError, assess_card};
 pub use convention::{
-    ConventionAction, ConventionActionReason, ConventionAnalysis, ConventionInferences,
-    ConventionPolicyTier, ConventionRejectionReason, H_GROUP_RULESET_REVISION, HGroupLevel,
-    HGroupProfile, ParseConventionError, ParseHGroupProfileError, RejectedConventionAction,
-    SupportedConvention,
+    ClueExplanation, ConventionAction, ConventionActionReason, ConventionAnalysis,
+    ConventionInferences, ConventionPolicyTier, ConventionRejectionReason,
+    H_GROUP_RULESET_REVISION, HGroupLevel, HGroupProfile, ParseConventionError,
+    ParseHGroupProfileError, RejectedConventionAction, SupportedConvention,
 };
 pub use h_group::{
     ActionPreference, ActionWindow, ClueTouchBranch, ConditionalAlternative, DependencyAssessment,
@@ -38,8 +40,8 @@ pub use information_set::{
     LogicalDeductions, WorldCount,
 };
 pub use planner::{
-    CandidateComparison, ComparisonReason, EndpointComparison, ExactActionValue, ExactSearchStatus,
-    ParsePlanningObjectiveError, PlannerActionEvaluation, PlannerConfig, PlannerError,
-    PlannerPhase, PlannerResult, PlanningObjective, ProjectedPositionValue, RotationCheckpoint,
-    SymbolicLineOutcome, SymbolicStopReason, plan_move,
+    CandidateComparison, ComparisonBasis, ComparisonReason, EndpointComparison, ExactActionValue,
+    ExactSearchStatus, ParsePlanningObjectiveError, PlannerActionEvaluation, PlannerConfig,
+    PlannerError, PlannerPhase, PlannerResult, PlanningObjective, ProjectedPositionValue,
+    RotationCheckpoint, SymbolicLineOutcome, SymbolicStopReason, plan_move,
 };

@@ -66,6 +66,22 @@ pub(super) struct ClueValue {
 }
 
 impl ClueValue {
+    fn components(self) -> Vec<(&'static str, i32)> {
+        vec![
+            ("base", i32::from(self.base)),
+            ("information", i32::from(self.information)),
+            ("teamworkBonus", i32::from(self.teamwork_bonus)),
+            ("protectionBonus", i32::from(self.protection_bonus)),
+            ("teamworkPenalty", -i32::from(self.teamwork_penalty)),
+            ("delayPenalty", -i32::from(self.delay_penalty)),
+            ("complexityPenalty", -i32::from(self.complexity_penalty)),
+            ("opportunityPenalty", -i32::from(self.opportunity_penalty)),
+            (
+                "ownerKnowledgePenalty",
+                -i32::from(self.owner_knowledge_penalty),
+            ),
+        ]
+    }
     pub(super) const fn new(base: u16) -> Self {
         Self {
             base,
@@ -222,6 +238,22 @@ impl CompiledClueAction {
 
     pub(super) const fn move_kind(self) -> Option<HGroupMoveKind> {
         self.semantics.move_kind
+    }
+
+    pub(super) fn explanation(self) -> crate::ClueExplanation {
+        crate::ClueExplanation {
+            interpretation: None,
+            recognition: match self.recognition {
+                ClueRecognition::GeneratorProof => "generatorProof",
+                ClueRecognition::RecipientReplay => "recipientReplay",
+            },
+            connection_steps: self.connection_steps(),
+            action_coverage: self.action_coverage(),
+            action: self.action,
+            kind: self.move_kind(),
+            score: self.value.total(),
+            score_components: self.value.components(),
+        }
     }
 
     pub(super) const fn purpose(self) -> CluePurpose {

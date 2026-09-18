@@ -198,3 +198,25 @@ When reporting a disagreement, enumerate the candidate clues considered.
 
 Explain the full reasoning of why the engine chose one canditate clue over the
 others.
+
+Use the built-in explanation before adding temporary diagnostics:
+
+```bash
+cargo run --release -p hanabi-cli --bin hanabi-engine -- \
+  analyze path/to/game.json --live-turn 15 --convention h-group --h-group-level max \
+  --objective perfect-score --explain --lines 2
+```
+
+Here `--live-turn 15` means Hanab Live turn 15 (`--turn 14` is equivalent). Use
+`--format json` for structured evidence. Reports include the fixture action when
+evaluated, all admission/rejection decisions, and recorded pairwise comparisons.
+See [decision explanations](docs/explanations.md). Do not treat display order as
+a strict ranking or a forecast discard as necessarily forced.
+
+Use repeatable `--candidate purple:Donald` / `--candidate 4:Alice` selectors to
+include the specific competing actions, or `--lines all`. Inspect
+`projectedDecisions` for a future player's actual alternatives and
+`comparisons[].evidence.actualBasis` for the operands and horizon actually used.
+Do not substitute raw endpoint values for normalized comparison values. Generic
+exclusion classifications and unrecorded exact principal variations are
+explicitly marked; never present missing evidence as a proven explanation.
