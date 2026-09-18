@@ -1,6 +1,49 @@
 use super::*;
 
 #[test]
+fn first_seed_red_line_protects_the_five_before_the_next_play() {
+    // User-reviewed p4v0s1 branch: green to Donald at 14, b4, g1,
+    // discard y4. Red to Cathy at 18 must not let her p5 be discarded.
+    let mut state = expert_replay_p4v0s1().state_at_turn(14).unwrap();
+    for action in [
+        Action::Play(CardId::new(11)),
+        Action::Play(CardId::new(20)),
+        Action::Discard(CardId::new(0)),
+    ] {
+        state.apply(action).unwrap();
+    }
+    let red = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Suit(Suit::Red),
+    };
+    let (_, projection) = super::super::symbolic_line::project_h_group_projection(
+        &state.view_for(state.current_player()).unwrap(),
+        HGroupProfile::Max,
+        red,
+        5,
+        &crate::AnalysisControl::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        projection
+            .steps
+            .iter()
+            .map(|step| step.projected.action)
+            .collect::<Vec<_>>(),
+        vec![
+            red,
+            Action::Discard(CardId::new(9)),
+            Action::Clue {
+                target: PlayerId::new(2),
+                clue: Clue::Rank(Rank::Five)
+            },
+            Action::Play(CardId::new(24)),
+            Action::Play(CardId::new(17)),
+        ],
+    );
+}
+
+#[test]
 fn first_seed_play_is_not_penalized_for_a_longer_discard_forecast() {
     // Human-reviewed p4v0s1 turn 12: play the promised y2. Both lines
     // eventually reach Donald's unknown chop; the longer line is not more
