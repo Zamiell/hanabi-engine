@@ -1082,8 +1082,40 @@ fn compare_symbolic_candidates(
     (selected, comparisons)
 }
 
-#[allow(clippy::too_many_lines)]
 fn compare_endpoints(
+    left: &PlannerActionEvaluation,
+    right: &PlannerActionEvaluation,
+) -> EndpointComparison {
+    let comparison = compare_endpoint_evidence(left, right);
+    let horizon = left
+        .projection
+        .risk_horizon()
+        .min(right.projection.risk_horizon())
+        .max(1);
+    let risk = left
+        .projection
+        .bottom_deck_risks_at(horizon)
+        .cmp(&right.projection.bottom_deck_risks_at(horizon));
+    // A resource snapshot cannot dominate by trimming away its next risky
+    // discard. Keep the converse comparison available: a safer endpoint can
+    // still be better on resources, without claiming permanent risk avoidance.
+    match comparison {
+        EndpointComparison::PreferLeft(ComparisonReason::EndpointResources)
+            if risk == Ordering::Greater =>
+        {
+            EndpointComparison::Incomparable
+        }
+        EndpointComparison::PreferRight(ComparisonReason::EndpointResources)
+            if risk == Ordering::Less =>
+        {
+            EndpointComparison::Incomparable
+        }
+        _ => comparison,
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn compare_endpoint_evidence(
     left: &PlannerActionEvaluation,
     right: &PlannerActionEvaluation,
 ) -> EndpointComparison {
@@ -1954,6 +1986,33 @@ mod tests {
         }];
         assert_eq!(compare_bottom_deck_risks(&early, &delayed), Ordering::Equal);
         assert_eq!(compare_bottom_deck_risks(&delayed, &early), Ordering::Equal);
+        // Both forecasts contain a loss, but the shorter one reaches it
+        // first. Better resources before that loss cannot certify dominance.
+        let mut resource_rich = early.clone();
+        let mut safer_prefix = delayed.clone();
+        resource_rich.symbolic_line.actions = 1;
+        safer_prefix.symbolic_line.actions = 2;
+        resource_rich.projection.checkpoints[0].value.score = 1;
+        safer_prefix.projection.checkpoints.insert(
+            0,
+            RotationCheckpoint {
+                actions: 1,
+                discards: 0,
+                value: ProjectedPositionValue::default(),
+            },
+        );
+        assert_eq!(
+            compare_endpoint_evidence(&resource_rich, &safer_prefix),
+            EndpointComparison::PreferLeft(ComparisonReason::EndpointResources)
+        );
+        assert_eq!(
+            compare_endpoints(&resource_rich, &safer_prefix),
+            EndpointComparison::Incomparable
+        );
+        assert_eq!(
+            compare_endpoints(&safer_prefix, &resource_rich),
+            EndpointComparison::Incomparable
+        );
         delayed.projection.steps[1].consequences.bottom_deck_risk = None;
         delayed.projection.checkpoints[0].value.exposed_chop_quality =
             crate::SecuredCardQuality::from_cards([

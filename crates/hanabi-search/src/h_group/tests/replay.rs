@@ -222,7 +222,7 @@ fn first_seed_demonstrated_reverse_layer_survives_nonadjacent_recipient() {
     assert!(inferred.demonstrated_connections.contains(&CardId::new(21)));
 }
 
-fn assert_first_seed_turn_eighteen_prefers_zero_bdr_line(analysis: &crate::PositionAnalysis) {
+fn assert_first_seed_turn_eighteen_prefers_reviewed_line(analysis: &crate::PositionAnalysis) {
     assert_eq!(
         analysis.planner.best_action,
         Action::Clue {
@@ -240,16 +240,30 @@ fn assert_first_seed_turn_eighteen_prefers_zero_bdr_line(analysis: &crate::Posit
         target: PlayerId::new(2),
         clue: Clue::Suit(Suit::Red),
     };
+    // The reviewed nine-action prefix avoids the red line's discard, tested
+    // below. A longer purple forecast can still reach BDR, so do not require
+    // the comparator to claim permanent risk avoidance as its reason.
     assert!(
         analysis.planner.comparisons.iter().any(|comparison| {
             ((comparison.left == purple && comparison.right == red)
                 || (comparison.right == purple && comparison.left == red))
                 && comparison.preferred == purple
-                && comparison.reason == crate::ComparisonReason::BottomDeckRisk
         }),
         "{:#?}",
         analysis.planner.comparisons
     );
+    // The 4s forecast ends at a required risky discard. Its earlier resource
+    // snapshot must not dominate purple by omitting that pending obligation.
+    let four = Action::Clue {
+        target: PlayerId::new(3),
+        clue: Clue::Rank(Rank::Four),
+    };
+    assert!(analysis.planner.comparisons.iter().any(|comparison| {
+        ((comparison.left == purple && comparison.right == four)
+            || (comparison.right == purple && comparison.left == four))
+            && comparison.preferred == purple
+            && comparison.reason != crate::ComparisonReason::EndpointResources
+    }));
 }
 
 #[test]
@@ -315,7 +329,7 @@ fn first_seed_turn_eighteen_compares_reviewed_full_lines() {
         },
     )
     .unwrap();
-    assert_first_seed_turn_eighteen_prefers_zero_bdr_line(&analysis);
+    assert_first_seed_turn_eighteen_prefers_reviewed_line(&analysis);
     let purple = Action::Clue {
         target: PlayerId::new(3),
         clue: Clue::Suit(Suit::Purple),
