@@ -1,6 +1,26 @@
 use super::*;
 
 #[test]
+fn first_seed_play_is_not_penalized_for_a_longer_discard_forecast() {
+    // Human-reviewed p4v0s1 turn 12: play the promised y2. Both lines
+    // eventually reach Donald's unknown chop; the longer line is not more
+    // dangerous merely because its forecast sees more intervening turns.
+    let state = expert_replay_p4v0s1().state_at_turn(11).unwrap();
+    let analysis = crate::analyze_position(
+        &state.view_for(state.current_player()).unwrap(),
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        analysis.planner.best_action,
+        Action::Play(CardId::new(15)),
+        "{:#?}",
+        analysis.planner.comparisons
+    );
+}
+
+#[test]
 fn first_seed_blank_draw_does_not_enable_an_unsafe_double_bluff() {
     // Reviewed p4v0s1 turn 7 counterfactual. Unknown draws must not add
     // purple touches; Cathy cannot bluff Donald's unplayable finesse card.

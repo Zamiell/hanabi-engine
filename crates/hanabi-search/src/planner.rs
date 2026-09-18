@@ -1351,7 +1351,15 @@ fn symbolic_fallback_comparison(
                 left.projection.forecast_discard_risk(),
                 right.projection.forecast_discard_risk(),
             ) {
-                (Some(left), Some(right)) => right.cmp(&left),
+                // These totals cover the whole forecast, unlike the shared-
+                // horizon comparison above. Comparing different durations
+                // rewards stopping early at an unknown card. Keep full-tail
+                // diagnostics without using them to bypass that cutoff.
+                (Some(a), Some(b))
+                    if left.projection.steps.len() == right.projection.steps.len() =>
+                {
+                    b.cmp(&a)
+                }
                 _ => Ordering::Equal,
             },
             ComparisonReason::ForecastBottomDeckRisk,
