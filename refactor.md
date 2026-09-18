@@ -5,6 +5,35 @@ an individual convention regression. Entries describe the problem, the boundary
 introduced to solve it, and the property that future changes should preserve.
 Commit hashes refer to this repository's Git history.
 
+## 2026-09-18: distinguish held development from realized progress
+
+The September 16 aligned-checkpoint comparison allowed a short clue forecast to
+win by adding `score + secured_future_plays`, despite having fewer actual points
+than the play alternative. In the reviewed p4v0s1 opening hypothetical, this
+made Bob queue Donald's y2 instead of playing his known b1. Its downstream
+unknown-discard risk then distorted the original opening comparison.
+
+- Keep the shared-horizon comparison, full forecast, and existing policy tiers.
+- Require no loss of realized score before the held-card development shortcut
+  can override ordinary ordering. Additional held cards are not evidence that a
+  delayed play has already been recovered.
+- Retain development preference once realized progress catches up. This is not
+  an unconditional play-over-clue rule: safety, obligations, efficiency, and
+  demonstrated continuations still have their existing comparison paths.
+- Add a regression for the human-reviewed hypothetical and an independent
+  comparator invariant. No fixture actions or old assertions are changed.
+
+This narrows an unsound comparison contract; it does not replace the September 7
+evidence model or August knowledge compiler. The remaining architectural
+recommendations are in
+[the September 18 review](docs/architecture-review-2026-09-18.md).
+
+Validation: 11 focused checks passed. The full check took 4m30s: 353 ordinary
+tests passed, 34 failed, and 30 were skipped; all non-test stages passed.
+Against the immediately preceding full run, two existing failures were resolved
+and no new named failures appeared. The suite is not green and no failure
+expectations were weakened.
+
 ## 2026-09-16: bounded request-scoped history memoization
 
 Profiling p4v0s2 found 94% of runtime under history reduction. An exact-key

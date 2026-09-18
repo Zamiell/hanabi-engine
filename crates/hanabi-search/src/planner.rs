@@ -313,10 +313,16 @@ impl ProjectedPositionValue {
     /// cards. This is a strategic preference, not a guaranteed-score proof.
     /// A surplus refund must not outweigh an additional developed card; only
     /// new secured cards may account for additional hand congestion.
+    /// Held cards do not compensate for less realized progress at this cutoff.
+    /// Otherwise a one-action clue frontier can indefinitely postpone an
+    /// available play merely by adding another card to the team's queue.
+    /// This guards the development shortcut, not the general clue/play order:
+    /// a clue can still win on safety, policy, or its longer observed line.
     fn developed_points_preference(self, other: Self) -> bool {
         let reserve = self.clue_demand.max(other.clue_demand);
-        self.score.saturating_add(self.secured_future_plays)
-            > other.score.saturating_add(other.secured_future_plays)
+        self.score >= other.score
+            && self.score.saturating_add(self.secured_future_plays)
+                > other.score.saturating_add(other.secured_future_plays)
             && self.clues >= reserve
             && other.clues >= reserve
             && self.exposed_critical_chops <= other.exposed_critical_chops
@@ -1834,6 +1840,28 @@ impl std::error::Error for PlannerError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn held_card_development_cannot_buy_away_realized_progress() {
+        // Comparator invariant, not an invented convention history.
+        let played = ProjectedPositionValue {
+            score: 3,
+            secured_future_plays: 2,
+            clues: 5,
+            clue_demand: 1,
+            ..Default::default()
+        };
+        let queued = ProjectedPositionValue {
+            score: 2,
+            secured_future_plays: 4,
+            clues: 4,
+            ..played
+        };
+        assert!(!queued.developed_points_preference(played));
+        assert!(!played.developed_points_preference(queued));
+        // Once actual plays catch up, additional secured cards still matter.
+        assert!(ProjectedPositionValue { score: 3, ..queued }.developed_points_preference(played));
+    }
 
     #[test]
     fn delayed_known_bdr_is_not_avoidance_at_the_shared_cutoff() {

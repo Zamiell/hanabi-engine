@@ -1,6 +1,52 @@
 use super::*;
 
 #[test]
+fn first_seed_projected_bob_plays_blue_one_before_queueing_yellow_two() {
+    // User-reviewed hypothetical from p4v0s1 turn 3. At turn 6 Bob has
+    // b1 to play; merely counting another held card must not force him to
+    // spend a clue on Donald's y2 instead. Cathy's hidden cards stay hidden.
+    let state = expert_replay_p4v0s1().state_at_turn(2).unwrap();
+    let mut view = state.view_for(state.current_player()).unwrap();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::One),
+        },
+        Action::Play(CardId::new(1)),
+    ] {
+        let (deductions, replay) = PerspectiveProjector::new(&view, HGroupProfile::Max)
+            .project(view.current_player, PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        let inferences = infer_h_group_from_replay(&deductions, replay, HGroupProfile::Max);
+        view = super::super::symbolic_line::apply_symbolic_action(
+            &view,
+            &deductions,
+            &inferences,
+            view.current_player,
+            action,
+        )
+        .unwrap()
+        .0;
+    }
+    let (deductions, _) = PerspectiveProjector::new(&view, HGroupProfile::Max)
+        .project(view.current_player, PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    assert_eq!(
+        crate::planner::choose_projected_follow_up(
+            &deductions,
+            HGroupProfile::Max,
+            &crate::AnalysisControl::default(),
+        )
+        .unwrap(),
+        Some(Action::Play(CardId::new(4))),
+    );
+}
+
+#[test]
 fn first_seed_demonstrated_reverse_layer_survives_nonadjacent_recipient() {
     // User-reviewed red branch, p4v0s1 turn 25: Alice's p2 blind play
     // demonstrated the red connection to Cathy, with Bob between them.
