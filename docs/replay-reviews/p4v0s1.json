@@ -1,5 +1,26 @@
 [
   {
+    "id": "t34-four-save-followup-meaning-question",
+    "turn": 34,
+    "positionKey": "da9d560cd40fb33cc2f83fe649403b82681b2322cb1470f02079afdcc7372b2b",
+    "status": "unresolved",
+    "perspective": "Bob's projection; follow-up interpretation also checked from Cathy's and Donald's actual fixture perspectives",
+    "source": {
+      "conversation": "2026-09-19, from-start scan after the user completed turns 53–58; assistant investigation, not a user ruling"
+    },
+    "explanation": {
+      "agreement": "Current replay agrees through turn 33. Turn 34 selects blue to Alice rather than the user's 4 to Alice.",
+      "fourMeaning": "The recipient interpretation is PlayOrSave on #2 with r4/y4 possibilities (play r4, save y4), touching #2 and #36. The actual focus is critical y4, so giver-side admission is SaveClue.",
+      "fixtureContinuation": "34 Bob 4 to Alice; 35 Cathy yellow to Alice; 36 Donald plays unclued r4 #28; 37 Alice plays unclued r5 #33.",
+      "projectedContinuation": "After 4 to Alice, Cathy discards #18, Donald discards #23, Alice discards #29, then Bob reaches an unknown discard frontier. A separate analysis of actual turn 35 rejects yellow to Alice as NoConventionMeaning; actual turn 36 does not establish a promise on Donald's #28 either.",
+      "selectedContinuation": "Blue to Alice is a Trash Chop Move. Cathy gives 4 to Donald, Donald plays r4 #28, Alice discards blue trash #36, then Bob reaches an unknown discard frontier.",
+      "comparison": "4 to Alice beats blue directly by ConventionPreference, but the comparison graph cycles: yellow to Alice wins the 4-versus-yellow fallback, while blue beats yellow on SavePressure. The final selection is blue; this is not proof of direct dominance over 4.",
+      "question": "What convention in the 4-to-Alice then yellow-to-Alice sequence establishes Donald's r4 and Alice's r5? Neither card is touched, and the inspected Save, Tempo, and Elimination rules do not establish that particular sequence. Need the intended interpretation before changing admission or ranking; do not assume actual card faces supply the missing promises."
+    },
+    "regressions": [],
+    "coverageNote": "From-start CLI comparison and focused turn-35/36 explanations; no engine edits or full suite run. Existing later review anchors remain historical."
+  },
+  {
     "id": "t34-four-to-alice-continuation-through-52",
     "turn": 34,
     "positionKey": "da9d560cd40fb33cc2f83fe649403b82681b2322cb1470f02079afdcc7372b2b",
