@@ -123,7 +123,8 @@
     "id": "t20-green-versus-purple-scheduling-question",
     "turn": 20,
     "positionKey": "0d7a6a200e159308a030575cdf6f4da82fb68849b6cd16a921c9d94af18abe96",
-    "status": "unresolved",
+    "status": "superseded",
+    "supersededBy": "t20-green-approved-red-three-question",
     "perspective": "Donald at turn 20; future draws remain blank",
     "source": {
       "kind": "Engine investigation, not a user-approved strategic ruling",
@@ -168,6 +169,25 @@
     },
     "regressions": [],
     "coverageNote": "Full replay comparison stopped at turn 20 (82.27s execution, plus 52.24s rebuild). No engine or fixture change was made for this unresolved comparison."
+  },
+  {
+    "id": "t20-green-approved-red-three-question",
+    "turn": 20,
+    "positionKey": "0d7a6a200e159308a030575cdf6f4da82fb68849b6cd16a921c9d94af18abe96",
+    "status": "user-explained",
+    "perspective": "Donald-rooted turn-20 green hypothetical; revised actual fixture is separate",
+    "source": {
+      "conversation": "Current task, 2026-09-19, green continuation approval",
+      "quote": "alice would not clue red to cathy in this line because that kills red 3, which violates Save Principal ... I agree that the green line is a bit less complicated, because it does not involve a generation discard."
+    },
+    "explanation": {
+      "ruling": "Change actual turn 20 to green to Cathy and replace the suffix with the user's 38 following actions, through Bob's g5 on turn 58. Green is approved as the less complicated line without a Generation Discard.",
+      "requestedProjectionCorrection": "In the older forecast, Alice should discard y1 on turn 29 instead of cluing red to Cathy, allowing Bob to clue r2 or p5; the user describes the red clue as killing r3.",
+      "unresolvedEvidence": "The recorded forecast discards Bob's r3 #16 but retains Donald's rank-clued #13 as exactly r3 and plays it on turn 32. The loss assessor exempts a discard with a known replacement. Donald's original turn-20 knowledge already reports #13 as r3; the negative yellow, green and purple clues exclude those suits, while established blue-3 Good Touch excludes b3. It is unclear whether the user disputes that inference, or identifies a different loss. Do not add a blanket ban on discarding duplicate playable cards: Save Principle specifies unique playable cards.",
+      "scope": "Fixture update and legality are complete. No engine change to force the disputed projection was made pending clarification. Earlier turn-20 purple-versus-5s hypothetical reviews remain historical; they are not instructions to undo the newly approved green clue. The turn-23 review anchor is now stale because turn 20 changed."
+    },
+    "regressions": [],
+    "coverageNote": "Generated replay link validates complete replay legality and payload round-trip. Move parity and full checks were not run for this fixture update."
   },
   {
     "id": "t23-rank-two-new-ending",
