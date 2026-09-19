@@ -131,6 +131,28 @@ human review, use the following instructions.
 
 ### Scope and replay checkpoints
 
+Before analyzing a replay turn, run
+`python3 scripts/replay_reviews.py SEED --turn N` and read the matching records
+in `docs/replay-reviews/`. Search that directory for related principles, cards,
+and hypothetical lines too: turn numbers alone are not stable across fixture
+edits. Follow the recording and staleness rules in
+`docs/replay-reviews/README.md`.
+
+Record new user explanations there in the same change as their implementation or
+fixture update. Include the user's actual reasoning, perspective, conditions,
+and source excerpt, not just the preferred move. Link focused regression tests
+when available; explicitly mark missing coverage. Never promote an assistant's
+inference to a user ruling. Before asking the user a convention question, check
+these records and accessible conversation history; explain any genuinely new
+condition instead of asking them to repeat an established explanation.
+
+After fixture edits, inspect affected review anchors. Do not silently refresh
+hashes or apply stale notes as current authority. Preserve historical reasoning,
+mark superseded decisions, and re-anchor only after verifying that the same
+reasoning applies. A missing record is not evidence that a turn was never
+discussed. This ledger supplements, rather than replaces, executable regression
+tests and the expert manifest's review boundary.
+
 For a request to fix a specific bug, verify that position and related behavior,
 then report the fix. Do not automatically search for the next disagreement or
 expand into other replays. Fixture edits likewise do not authorize changing

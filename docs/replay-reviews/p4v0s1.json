@@ -1,0 +1,82 @@
+[
+  {
+    "id": "t11-immediate-versus-optional-discard",
+    "turn": 11,
+    "positionKey": "8d3551fa1b66066bb4c444d652d26de9ffda6c936cc0fbe33afc80d5dd6f7745",
+    "status": "user-explained",
+    "perspective": "Cathy, comparing her immediate discard with the 5 Stall to Bob",
+    "source": {
+      "conversation": "Current task, user correction immediately before the replay-resumption request",
+      "quote": "Donald has 1 clue and thus might not discard though, right? Whereas if Cathy discards right now, it could be g3 and instantly lose a perfect score."
+    },
+    "explanation": {
+      "candidates": ["5s to Bob", "Cathy discards unknown #9"],
+      "ruling": "Do not cancel the immediate discard's risk using an optional future discard merely selected by the bounded projection.",
+      "conditions": [
+        "Cathy cannot see her own card; g3 is a possibility, not an asserted identity.",
+        "Donald retains a clue token at the future discard frontier.",
+        "Required protection discards and zero-token frontiers are distinct cases; this explanation does not establish that all delayed risk can be ignored."
+      ],
+      "implementation": "Implemented in commit 1bdb2b6. Test results must be checked, not inferred from this record."
+    },
+    "regressions": [
+      "planner::tests::reviewed_turn_eleven_optional_future_discard_does_not_cancel_immediate_risk"
+    ]
+  },
+  {
+    "id": "t14-prior-explanation-retrieval-needed",
+    "turn": 14,
+    "positionKey": "e47c317e9665bac6ee75a4c52b35102adf11d16b8752f89d14e923b993434aa9",
+    "status": "unresolved",
+    "perspective": "Bob; fixture green to Donald versus engine red to Donald",
+    "source": {
+      "conversation": "Current task, immediately before the request to create this ledger",
+      "quote": "we already spoke about this exact turn, right? can't you see what I typed up last time?"
+    },
+    "explanation": {
+      "ruling": "Retrieve the prior explanation before asking the user to repeat it. No new strategic ruling was provided by this message.",
+      "warning": "The assistant claimed the general optional-discard principle settled this turn without identifying the exact earlier explanation. That claim is not user approval. The green projection currently reaches a zero-clue frontier, unlike the reviewed turn-11 case.",
+      "nextStep": "Search earlier conversation and Git history for this position and its preceding actions; do not blindly transplant the turn-11 ruling."
+    },
+    "regressions": []
+  },
+  {
+    "id": "historical-t18-purple-versus-red-lines",
+    "turn": 18,
+    "positionKey": null,
+    "status": "user-explained",
+    "perspective": "Bob's hypothetical, not omniscient replay truth",
+    "source": {
+      "conversation": "Earlier in current task; user requested purple to Donald at turn 18 and supplied two lines",
+      "quote": "#5 is BDR risk, and given that the lines are otherwise similar, the engine should prefer the first line."
+    },
+    "explanation": {
+      "purpleLine": [
+        "purple to Donald",
+        "discard p1",
+        "5s to Cathy",
+        "p2 play",
+        "b5 play",
+        "4s to Alice",
+        "r1 play",
+        "y1 discard",
+        "red to Cathy"
+      ],
+      "redLine": [
+        "red to Cathy",
+        "p1 discard",
+        "5 to Cathy (5 Save)",
+        "p2 play",
+        "b5 play",
+        "purple to Donald",
+        "p3 play",
+        "r1 play",
+        "Bob discards #5"
+      ],
+      "ruling": "User describes the first line as zero BDR and prefers it over the otherwise similar second line with #5 risk.",
+      "warning": "Historical fixture prefix has not been recovered and verified. Do not apply these lines to the current turn 18 without checking the position."
+    },
+    "regressions": [],
+    "coverageNote": "Exact historical position and test linkage still need verification."
+  }
+]
