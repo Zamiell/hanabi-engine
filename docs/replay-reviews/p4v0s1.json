@@ -210,6 +210,39 @@
     "coverageNote": "Human-reviewed projection recorded; no new executable regression added or replay scan run for this clarification. The fixture already contains green at turn 20."
   },
   {
+    "id": "t24-prompt-versus-new-red-connection",
+    "turn": 24,
+    "positionKey": "7e843dca2bf94946d6aa46a5af3dd784df7a311be7b221cd8b0a65a4583ad929",
+    "status": "unresolved",
+    "perspective": "Donald at actual turn 24, after Cathy's rank-2 clue to Alice",
+    "source": {
+      "kind": "Engine investigation; not a user-approved interpretation",
+      "conversation": "2026-09-19, replay resumption after turn-20 green approval"
+    },
+    "explanation": {
+      "established": "Current replay agrees through turn 23. Turn 24 expects p3 #14; the engine instead requires r1 #23. No candidate comparison runs: only play #23 is admitted, at connection priority 800. There are zero clue tokens.",
+      "mechanism": "The turn-23 clue focuses Alice's r2 #26. Donald's inference retains his earlier p3 Prompt but creates a Finesse for r1 #23. The decision selector lets a fresh Finesse from Bluff Seat preempt an ordinary Prompt when no older Finesse blocks it. The older pending p3 is a Prompt, so the guard does not block this override.",
+      "engineLine": [
+        "Donald plays r1 #23",
+        "Alice plays r2 #26",
+        "Bob discards p4 #5",
+        "Cathy plays g2 #25",
+        "Donald plays p3 #14"
+      ],
+      "fixtureLine": [
+        "Donald plays p3 #14",
+        "Alice plays r1 #21",
+        "Bob discards p4 #5",
+        "Cathy plays g2 #25",
+        "Donald plays p4 #12"
+      ],
+      "question": "Should Donald's existing p3 Prompt make him defer the new r1 connection so that Alice Self-Finesses r1 #21, and what distinguishes this from the older reviewed fresh-Bluff-over-Prompt case? Level 2 makes Self-Finesses a last resort, while Level 25 prioritizes blind plays. The queued-Finesse text does not explicitly settle the interaction with an older Prompt.",
+      "boundary": "Do not silently remove the fresh-Bluff priority behavior: first_seed_fresh_bluff_precedes_an_older_clued_prompt covers a historical rank-4 Bluff branch. This question concerns the current rank-2 clue. No code or fixture changes were made to force agreement."
+    },
+    "regressions": [],
+    "coverageNote": "fifth_expert_replay_matches_engine fails at turn 24 after agreeing through turn 23. A fresh explanation confirms the forced action and absence of pairwise comparisons."
+  },
+  {
     "id": "t23-rank-two-new-ending",
     "turn": 23,
     "positionKey": "b1be5dcf8255e7cea47fdc8a373a7018c92eb2eedd91aa14de92e8795f3f02d7",
