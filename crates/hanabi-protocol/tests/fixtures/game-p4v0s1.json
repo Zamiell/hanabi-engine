@@ -51,7 +51,13 @@
     { "type": 0, "target": 2 },
     { "type": 0, "target": 27 },
     { "type": 2, "target": 0, "value": 2 },
-    { "type": 2, "target": 0, "value": 2 }
+    { "type": 2, "target": 0, "value": 2 },
+    { "type": 0, "target": 44 },
+    { "type": 2, "target": 2, "value": 2 },
+    { "type": 0, "target": 10 },
+    { "type": 2, "target": 1, "value": 2 },
+    { "type": 1, "target": 41 },
+    { "type": 0, "target": 19 }
   ],
   "seed": "p4v0s1"
 }

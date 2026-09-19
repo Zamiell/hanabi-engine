@@ -12,7 +12,8 @@
     "explanation": {
       "supersedes": "t34-chop-move-protection-versus-red-stack-progress",
       "action": "Replace turn 34 onward with the user's sequence through turn 52, ending after two consecutive green clues to Alice.",
-      "boundary": "Turn 53 is Alice's turn; the requested third green-to-Alice clue would be a self-clue. Stop before that action for review; do not substitute a move or include the unconfirmed remainder.",
+      "boundary": "Initially stopped before turn 53 because the requested third green-to-Alice clue would be a self-clue. The user subsequently supplied the six final actions explicitly.",
+      "completion": "User follow-up: g3 play; green to Cathy; g4 play; green to Bob; g4 discard; g5 play. Appended as turns 53–58: Alice plays #44, Bob clues green to Cathy, Cathy plays #10, Donald clues green to Bob, Alice discards #41, Bob plays #19.",
       "historicalAnchors": "Later records retain their old position keys and reasoning; their continuations have been superseded by this fixture edit. They are not re-anchored to the new history."
     },
     "regressions": [],
