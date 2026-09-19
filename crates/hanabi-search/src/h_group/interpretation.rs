@@ -1508,20 +1508,22 @@ pub(super) fn advanced_clue_candidates(
             // rescued by classifying the same clue as an 8 Clue Save or Stall.
             continue;
         }
-        let unknown_discharge = touched.len() >= 2
-            && clue_focus.is_some_and(|focus| {
-                hand.iter()
-                    .find(|card| card.id == focus)
-                    .is_some_and(|card| {
-                        let mut facts = card.clues;
-                        facts.add_positive_clue(clue);
-                        let possibilities = IdentitySet::from_mask(facts.identity_mask());
-                        !possibilities.is_empty()
-                            && possibilities
-                                .iter()
-                                .all(|identity| card_is_trash(view, identity))
+        // Touching multiple *known* trash cards is not an Unknown Trash
+        // Discharge. Its blind response must be established by the reactor's
+        // interpretation, not invented by candidate admission from touch count.
+        // https://hanabi.github.io/level-16/#the-unknown-trash-discharge-1-for-1-form-utd
+        let unknown_discharge =
+            super::prospective::compiled_prospective_clue(view, profile, target, clue, &touched)
+                .and_then(|compiled| compiled.signal_kinds(ejection_actor))
+                .is_some_and(|kinds| {
+                    kinds.iter().any(|kind| {
+                        matches!(
+                            kind,
+                            HGroupMoveKind::UnknownTrashDischarge
+                                | HGroupMoveKind::UnknownDupeDischarge
+                        )
                     })
-            });
+                });
         let all_touched_trash = identities.len() == touched.len()
             && identities
                 .iter()

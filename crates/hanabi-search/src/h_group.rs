@@ -26,6 +26,7 @@ mod admission;
 mod bluff;
 mod candidate;
 mod candidate_pipeline;
+mod chop_safety;
 mod claims;
 mod compiled_line;
 mod connection;

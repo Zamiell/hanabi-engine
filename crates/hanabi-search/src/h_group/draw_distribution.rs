@@ -47,6 +47,9 @@ pub(super) fn discard_priority(
     {
         return None;
     }
+    if unloaded_hand_handoff(deductions, inferred, profile, best, discard) {
+        return Some(101 + i32::from(best.score()));
+    }
     let missing = Suit::ALL
         .into_iter()
         .filter_map(|suit| {
@@ -106,6 +109,85 @@ pub(super) fn discard_priority(
     // Stay below an ordinary guaranteed play (525). This only chooses who
     // performs a deferrable clue, not whether playing promises is optional.
     Some(101 + i32::from(best.score()))
+}
+
+/// Prefer drawing into an unloaded hand to adding work to a teammate's loaded
+/// hand, but only when the same direct clue can move one seat later without
+/// delaying its recipient. This is a scheduling tiebreak, not a bonus for every
+/// discard or permission to sacrifice a needed card.
+fn unloaded_hand_handoff(
+    deductions: &LogicalDeductions,
+    inferred: &HGroupInferences,
+    profile: HGroupProfile,
+    best: &CompiledClueAction,
+    discard: CardId,
+) -> bool {
+    let view = deductions.view();
+    let next = next_player(view.observer, view.hands.len());
+    if best.target() == next
+        || inferred.cards.iter().any(|card| {
+            card.identities
+                .iter()
+                .any(|identity| is_eventually_useful(view, identity))
+                && inferred.clued_or_promised().contains(&card.card)
+        })
+        || !view.hands[next.index()].iter().any(|card| {
+            card.identity
+                .is_some_and(|identity| is_eventually_useful(view, identity))
+        })
+    {
+        return false;
+    }
+    let Some(domain) = super::chop_safety::discard_domain(deductions, inferred, profile, discard)
+    else {
+        return false;
+    };
+    if domain.is_empty()
+        || domain.iter().any(|identity| {
+            is_eventually_useful(view, identity)
+                && !view
+                    .hands
+                    .iter()
+                    .flatten()
+                    .any(|held| held.id != discard && held.identity == Some(identity))
+        })
+    {
+        return false;
+    }
+    let Some(outcome) = super::strategic_value::scheduled_clue_outcome(view, profile, best) else {
+        return false;
+    };
+    for identity in domain.iter() {
+        let after = ProspectiveTransition::discard(view, view.observer, discard, identity);
+        let Some((d, replay)) = PerspectiveProjector::new(&after, profile)
+            .project(next, PerspectiveDepth::NestedRecipients)
+        else {
+            return false;
+        };
+        let notes = super::infer_h_group_from_replay(&d, replay.clone(), profile);
+        if !super::ActionWindow::from_inferences(d.view(), &notes).can_give_clue() {
+            return false;
+        }
+        let candidates = h_group_clue_candidates_from_replay(&d, profile, &replay);
+        let Some(same) = candidates
+            .iter()
+            .find(|candidate| candidate.action == best.action)
+        else {
+            return false;
+        };
+        let Some(later) = super::strategic_value::scheduled_clue_outcome(d.view(), profile, same)
+        else {
+            return false;
+        };
+        if later.public_actions != outcome.public_actions
+            || later.owner_actions != outcome.owner_actions
+            || later.protected_cards != outcome.protected_cards
+            || later.new_connections != outcome.new_connections
+        {
+            return false;
+        }
+    }
+    true
 }
 
 /// Conditional earliest completion offsets if the connector is drawn now or

@@ -1,6 +1,126 @@
 use super::*;
 
 #[test]
+fn first_seed_known_purple_trash_does_not_invent_a_discharge() {
+    // Counterfactual from p4v0s1 turn 34: Save Alice's critical y4. Purple
+    // is complete, so purple to Donald is not an *unknown* trash discharge.
+    let mut state = expert_replay_p4v0s1().state_at_turn(33).unwrap();
+    state
+        .apply(Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Four),
+        })
+        .unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let d = LogicalDeductions::new(view).unwrap();
+    let purple = Action::Clue {
+        target: PlayerId::new(3),
+        clue: Clue::Suit(Suit::Purple),
+    };
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    assert!(
+        candidates
+            .iter()
+            .filter(|candidate| candidate.action == purple)
+            .all(|candidate| candidate.move_kind() != Some(HGroupMoveKind::Discharge))
+    );
+    state.apply(purple).unwrap();
+    let d = LogicalDeductions::new(state.view_for(state.current_player()).unwrap()).unwrap();
+    let notes = infer_h_group(&d, HGroupProfile::Max);
+    assert!(!notes.playable_now.contains(&CardId::new(28)), "{notes:#?}");
+    assert_eq!(
+        select_h_group_action(&d, HGroupProfile::Max),
+        Some(Action::Discard(CardId::new(35)))
+    );
+}
+
+#[test]
+fn first_seed_red_four_enables_red_five_instead_of_a_scream() {
+    // Fixture turn 36: Cathy has just clued Alice's r5. Donald should play
+    // his known r4, not Scream to protect Alice's y4 and prevent r5 playing.
+    let state = expert_replay_p4v0s1().state_at_turn(35).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let d = LogicalDeductions::new(view).unwrap();
+    let replay = replay_h_group(&d, HGroupProfile::Max);
+    let notes = infer_h_group_from_replay(&d, replay.clone(), HGroupProfile::Max);
+    assert!(!super::super::decision::emergency_discard_is_required(
+        d.view(),
+        &notes,
+        &replay,
+        HGroupProfile::Max
+    ));
+    assert_eq!(
+        select_h_group_action(&d, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(28)))
+    );
+}
+
+#[test]
+fn first_seed_unloaded_hand_uses_declined_protection_to_draw_safely() {
+    // User-reviewed p4v0s1 turn 33: Alice has no work queued; Bob can give
+    // the same r4 clue. Do not use Alice's actual y1 or her hidden new r5.
+    let state = expert_replay_p4v0s1().state_at_turn(32).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let deductions = LogicalDeductions::new(view.clone()).unwrap();
+    let notes = infer_h_group(&deductions, HGroupProfile::Max);
+    let card = CardId::new(1);
+    let domain =
+        super::super::chop_safety::discard_domain(&deductions, &notes, HGroupProfile::Max, card)
+            .unwrap();
+    for identity in [
+        Card::new(Suit::Yellow, Rank::Three),
+        Card::new(Suit::Green, Rank::Three),
+        Card::new(Suit::Yellow, Rank::Four),
+        Card::new(Suit::Red, Rank::Five),
+    ] {
+        assert!(!domain.contains(identity), "{identity:?}: {domain:?}");
+    }
+    assert!(domain.contains(Card::new(Suit::Red, Rank::Four)));
+    assert!(domain.contains(Card::new(Suit::Green, Rank::Four)));
+    // An unprotected newly drawn card is not the old chop, and a teammate
+    // without a clue token did not decline a protection opportunity.
+    let fresh = CardId::new(33);
+    assert_eq!(
+        super::super::chop_safety::discard_domain(&deductions, &notes, HGroupProfile::Max, fresh),
+        deductions.possible_identities(fresh)
+    );
+    let mut no_token = view.clone();
+    no_token.clue_tokens = 0;
+    let no_token = LogicalDeductions::new(no_token).unwrap();
+    assert_eq!(
+        super::super::chop_safety::discard_domain(&no_token, &notes, HGroupProfile::Max, card),
+        no_token.possible_identities(card)
+    );
+    // The literal domain remains unchanged; the convention does not tell
+    // Alice her actual card, nor justify playing it.
+    assert!(
+        deductions
+            .possible_identities(card)
+            .unwrap()
+            .contains(Card::new(Suit::Green, Rank::Three))
+    );
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    let discard = analysis
+        .planner
+        .root_actions
+        .iter()
+        .find(|action| action.action == Action::Discard(card))
+        .unwrap();
+    assert_eq!(discard.projection.forecast_discard_risk(), Some(0));
+    assert_eq!(
+        analysis.planner.best_action,
+        Action::Discard(card),
+        "{:#?}",
+        analysis.planner.comparisons
+    );
+}
+
+#[test]
 fn first_seed_two_for_one_survives_unresolved_discard_comparison() {
     // User-reviewed turn 4: neither 1s nor 4s proves avoidance of BDR;
     // retain the stronger 2-for-1 instead of awarding an unfinished line zero.

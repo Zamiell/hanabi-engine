@@ -1,5 +1,54 @@
 [
   {
+    "id": "t38-chop-uncertainty-versus-yellow-four-save",
+    "turn": 38,
+    "positionKey": "6cca9e7d7c24b0b9d1429d4796c04999516a3208cb544471dc5d9b2e97adb8c4",
+    "status": "unresolved",
+    "perspective": "Bob; #16's actual red 3 and future draws are hidden",
+    "source": {
+      "conversation": "2026-09-19, continuation after implementing the user's turn-33 chop-safety explanation",
+      "quote": "Assistant investigation, not a user ruling."
+    },
+    "explanation": {
+      "actions": "Fixture discards #16; engine saves Alice's critical yellow 4 with rank 4.",
+      "reason": "Bob's literal #16 possibilities still include yellow 3 and green 3, neither visible elsewhere. The discard projection stops before revealing it and reports possible BDR. Saving instead lets Cathy discard visible trash red 2 #18. Rank 4 scores 580, yellow 498, discard 400; rank 4 versus discard is decided by BDR rather than raw priority.",
+      "newCondition": "Unlike turn 33, the immediately preceding player had no clue token: Alice's red-5 play generated the current token. Thus that play is not evidence that Alice declined an available Play Clue on Bob's chop. Bob also has a clued but currently unplayable 5, unlike Alice's unloaded turn-33 hand.",
+      "question": "Can Bob nevertheless exclude yellow 3 and green 3 through earlier public history, or should he accept possible BDR to draw while leaving Cathy the yellow-4 Save? Identify the inference or strategic trade-off before changing the fixture or ranking."
+    },
+    "regressions": [],
+    "coverageNote": "No preferred-move assertion added for this unresolved judgment. Fresh comparison agrees through turns 1-37."
+  },
+  {
+    "id": "t33-contextual-chop-safety-and-draw-allocation",
+    "turn": 33,
+    "positionKey": "540ec0e8ce5d41d078c4b7ccb347dcd0b22a5a235dc84af014210619f69c4415",
+    "status": "user-explained",
+    "perspective": "Alice; her own card identities and future draws remain unknown",
+    "source": {
+      "conversation": "2026-09-19, response to t33-unknown-chop-versus-direct-red-four",
+      "quote": "Thus, alice discarding carries 0 BDR, and the engine should evaluate that properly. ... Since Alice has 0 clued/playable cards in her hand and bob has 2, then alice should be the one drawing cards and Bob should be the one giving the clues, that is just basic teamwork."
+    },
+    "explanation": {
+      "supersedes": "t33-unknown-chop-versus-direct-red-four",
+      "identityCases": {
+        "r4": "Donald has a replacement.",
+        "r5": "Would have been saved already.",
+        "y3": "Would have been play-clued already.",
+        "y4": "Critical; would have been saved already.",
+        "y5": "Visible in Bob's hand; also would have been saved.",
+        "g3": "Would have been play-clued already.",
+        "g4": "Cathy has a clued replacement.",
+        "g5": "Visible in Bob's hand; also would have been saved."
+      },
+      "teamwork": "Alice draws and Bob gives the interchangeable red-4 clue. Drawing into Alice's unloaded hand is preferable to loading Bob further. The actual fixture has g5 positively clued and y5 visibly useful but not yet positively clued; the implementation uses useful workload rather than claiming both have positive clues.",
+      "implementationBoundary": "A conservative witness uses the immediately preceding ordinary clued play with a token available, the same exposed chop, and no recipient play/clue obligation. The absence of required protection excludes unique playable/2/last-copy possibilities for discard evaluation only. It does not infer the hidden face, change literal deductions, or mark all unclued cards trash. Handoff requires the same direct clue and scheduled outcome after every remaining discard identity."
+    },
+    "regressions": [
+      "h_group::tests::replay::first_seed_unloaded_hand_uses_declined_protection_to_draw_safely"
+    ],
+    "coverageNote": "Checks excluded needed identities, retained duplicate possibilities, unchanged literal domain, zero BDR and best discard; negative controls retain uncertainty without a token or for a fresh non-chop card."
+  },
+  {
     "id": "t11-immediate-versus-optional-discard",
     "turn": 11,
     "positionKey": "8d3551fa1b66066bb4c444d652d26de9ffda6c936cc0fbe33afc80d5dd6f7745",
@@ -288,7 +337,7 @@
     "id": "t33-unknown-chop-versus-direct-red-four",
     "turn": 33,
     "positionKey": "540ec0e8ce5d41d078c4b7ccb347dcd0b22a5a235dc84af014210619f69c4415",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Alice; neither her actual y1 chop nor her newly drawn r5 is visible to her",
     "source": {
       "kind": "Engine investigation, not a user ruling",

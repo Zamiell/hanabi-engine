@@ -163,12 +163,20 @@ pub(super) fn apply_strategic_clue_values(
     let mut best_immediate_action_count_by_target: Vec<Option<usize>> =
         vec![None; source.hands.len()];
     for (candidate, value) in candidates.iter().zip(&values) {
-        if !candidate.immediate_play() {
-            continue;
-        }
         let Some(value) = value else {
             continue;
         };
+        if !candidate.immediate_play()
+            && !occupies_next_turn(
+                source,
+                &baselines,
+                value,
+                candidate.target(),
+                current_stack_heights,
+            )
+        {
+            continue;
+        }
         let action_count = value
             .convention_action_count
             .unwrap_or(value.action_coverage)
@@ -442,8 +450,23 @@ fn bottom_deck_risk_protection(
     value
         .protected_cards
         .iter()
+        .copied()
+        // A Play Clue can protect the same threatened chop by occupying its
+        // owner. Count that protection just as for a direct Save; otherwise
+        // a Save gets an artificial bonus over the productive alternative.
+        .chain(
+            baselines
+                .iter()
+                .enumerate()
+                .filter_map(|(player, baseline)| {
+                    let owner = PlayerId::new(u8::try_from(player).expect("standard player count"));
+                    occupies_next_turn(source, baselines, value, owner, heights)
+                        .then_some(baseline.chop)
+                        .flatten()
+                }),
+        )
         .filter(|card| {
-            let Some(owner) = card_owner(source, **card) else {
+            let Some(owner) = card_owner(source, *card) else {
                 return false;
             };
             let baseline = &baselines[owner.index()];
@@ -454,7 +477,7 @@ fn bottom_deck_risk_protection(
             // https://hanabi.github.io/beginner/other-general-strategy/#give-play-clues-over-save-clues
             scheduled_play_continuation_value(source, baseline, owner, heights).is_none()
         })
-        .filter_map(|card| identity_of(source, *card))
+        .filter_map(|card| identity_of(source, card))
         .filter(|identity| {
             is_eventually_useful(source, *identity)
                 && !is_playable_now(source, *identity)
@@ -652,17 +675,46 @@ fn secured_critical_chop_deadline_value(
                 return None;
             }
             let protected = value.protects(chop);
-            let occupied = value.play_consequences().any(|consequence| {
-                consequence.owner == actor
-                    && !consequence.identities.is_empty()
-                    && consequence
-                        .identities
-                        .iter()
-                        .all(|identity| is_playable_at(stack_heights, identity))
-            });
+            let occupied = occupies_next_turn(source, baselines, value, actor, stack_heights);
             (protected || occupied).then_some(player_count - distance)
         })
         .sum()
+}
+
+/// A delayed play protects a chop if its already-scheduled predecessor plays
+/// before the recipient acts. Testing the stacks at clue time incorrectly
+/// treats this as a missed Save deadline. Advance only single, known existing
+/// plays, never a guessed hidden card or an optional choice between plays.
+fn occupies_next_turn(
+    source: &PlayerView,
+    baselines: &[ProjectedLineState],
+    value: &LineOutcome,
+    target: PlayerId,
+    mut heights: [u8; 5],
+) -> bool {
+    for offset in 1..source.hands.len() {
+        let seat = (source.current_player.index() + offset) % source.hands.len();
+        if seat == target.index() {
+            break;
+        }
+        let state = &baselines[seat];
+        if let [card] = state.playable_now.as_slice() {
+            if let Some(identity) = identity_of(source, *card)
+                .or_else(|| state.epistemic.belief(*card)?.known_identity())
+                .filter(|identity| is_playable_at(heights, *identity))
+            {
+                heights[identity.suit.index()] = identity.rank.number();
+            }
+        }
+    }
+    value.play_consequences().any(|consequence| {
+        consequence.owner == target
+            && !consequence.identities.is_empty()
+            && consequence
+                .identities
+                .iter()
+                .all(|identity| is_playable_at(heights, identity))
+    })
 }
 
 /// Whether giving a clue now preserves a more valuable sequence of already
@@ -1365,6 +1417,58 @@ mod tests {
                 clue: Clue::Suit(Suit::Red)
             }
         );
+    }
+
+    #[test]
+    fn first_seed_delayed_red_five_protects_the_chop_before_its_deadline() {
+        // Current reviewed fixture, turn 35: Donald's r4 will play before
+        // Alice acts. A red clue gives Alice r5 to play, protecting y4 on chop.
+        let replay = HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(34).unwrap();
+        let source = state.view_for(state.current_player()).unwrap();
+        let team = compiled_baseline_team(&source, HGroupProfile::Max);
+        let mut baselines = (0..4)
+            .map(|player| {
+                projected_line_state(&source, &team.projection(PlayerId::new(player)).unwrap())
+            })
+            .collect::<Vec<_>>();
+        let value = clue_line_value(
+            &source,
+            HGroupProfile::Max,
+            Action::Clue {
+                target: PlayerId::new(0),
+                clue: Clue::Suit(Suit::Red),
+            },
+            &baselines,
+            Some(HGroupMoveKind::PlayClue),
+        )
+        .unwrap();
+        let heights =
+            std::array::from_fn(|suit| u8::try_from(source.play_stacks[suit].len()).unwrap());
+        assert!(occupies_next_turn(
+            &source,
+            &baselines,
+            &value,
+            PlayerId::new(0),
+            heights
+        ));
+        assert_eq!(
+            secured_critical_chop_deadline_value(&source, &baselines, &value, heights, &[]),
+            2
+        );
+        assert_eq!(bottom_deck_risk_protection(&source, &baselines, &value), 1);
+        baselines[3].playable_now.clear();
+        assert!(!occupies_next_turn(
+            &source,
+            &baselines,
+            &value,
+            PlayerId::new(0),
+            heights
+        ));
+        assert_eq!(bottom_deck_risk_protection(&source, &baselines, &value), 0);
     }
 
     #[test]

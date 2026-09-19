@@ -213,6 +213,9 @@ pub(super) fn infer_h_group_from_replay(
     if rule_enabled(profile, HGroupRuleId::Stalling)
         && view.clue_tokens == 0
         && inferred.playable_now.is_empty()
+        // Fully protected is not locked when a known-trash discard exists.
+        // Do not turn a Trash Chop Move into an invented blind play.
+        && convention_known_trash_discard(view, &inferred).is_none()
         && !replay.pending_connections.iter().any(|connection| {
             connection.actor == view.observer && replay.pending_connections.is_active(connection)
         })
@@ -1270,7 +1273,9 @@ pub(super) fn emergency_discard_is_required(
         return false;
     }
     let target = next_player(view.current_player, view.hands.len());
-    if emergency_chop_needs_protection(view, inferred, replay, profile, target) {
+    if emergency_chop_needs_protection(view, inferred, replay, profile, target)
+        && !known_play_occupies_next_player(view, inferred, profile, target)
+    {
         return true;
     }
     // Generation Discard: provide the token BEFORE the next player's turn,
@@ -1293,6 +1298,31 @@ pub(super) fn emergency_discard_is_required(
             profile,
             next_player(target, view.hands.len()),
         )
+}
+
+/// A Scream is unnecessary when playing the known predecessor gives the
+/// endangered next player their own promised play. Evaluate the actual public
+/// transition, including knowledge updates, without filling an unknown draw.
+fn known_play_occupies_next_player(
+    view: &PlayerView,
+    inferred: &HGroupInferences,
+    profile: HGroupProfile,
+    target: PlayerId,
+) -> bool {
+    inferred.cards.iter().any(|note| {
+        if !inferred.playable_now.contains(&note.card) || note.identities.len() != 1 {
+            return false;
+        }
+        let identity = note.identities.iter().next().expect("singleton");
+        if !is_playable_now(view, identity) {
+            return false;
+        }
+        let after = ProspectiveTransition::play(view, view.observer, note.card, identity, true);
+        projected_h_group_replay(&after, profile, target).is_some_and(|(d, r)| {
+            let notes = super::infer_h_group_from_replay(&d, r, profile);
+            !notes.playable_now.is_empty() && !notes.must_clue.contains(&target)
+        })
+    })
 }
 
 fn emergency_chop_needs_protection(

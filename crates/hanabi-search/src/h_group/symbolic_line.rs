@@ -239,7 +239,7 @@ fn continue_plan<const REUSE_SELECTED: bool>(
                 // spending the turn, or crediting a token/draw.
                 let risk = LogicalDeductions::new(public.clone()).ok().is_none_or(|deductions| {
                     let source_inferred = super::infer_h_group(&deductions, profile);
-                    deductions.possible_identities(card).is_none_or(|identities| {
+                    super::chop_safety::discard_domain(&deductions, &source_inferred, profile, card).is_none_or(|identities| {
                         identities.iter().any(|identity| {
                             super::is_eventually_useful(&public, identity)
                                 // Losing a last copy is a distinct critical-card
