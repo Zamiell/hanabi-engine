@@ -112,11 +112,30 @@
         "red to Bob"
       ],
       "implementation": "Added proactive Generation Discard admission through the next player. Removed the structural rejection of a playable focus merely because the clue also retouches an older higher-rank card; recipient safety checks remain.",
-      "verificationBoundary": "Tests cover Generation in both lines and the direct-green continuation through turn 30 in both, through p5 at turn 31 in the purple branch. Subsequent requested red clues remain unresolved; Donald retains clued r3 while Bob also holds r3. Rank-5-only branch does not yet establish p5's suit. These are engine findings, not user-approved changes to the requested tail."
+      "verificationBoundary": "Tests cover Generation in both lines and the direct-green continuation through turn 30 in both, through p5 at turn 31 in the purple branch. Subsequent requested red clues remain unresolved; Donald retains clued r3 while Bob also holds r3. Rank-5-only branch does not yet establish p5's suit. These are engine findings, not user-approved changes to the requested tail.",
+      "fixtureRevision": "The later t23-rank-two-new-ending edit replaces the actual continuation from turn 23. This record describes a hypothetical branch, not the current fixture suffix; its unchanged root anchor does not establish agreement with the revised ending."
     },
     "regressions": [
       "h_group::tests::replay::first_seed_generation_discard_projects_reviewed_direct_green_line"
     ]
+  },
+  {
+    "id": "t23-rank-two-new-ending",
+    "turn": 23,
+    "positionKey": "b1be5dcf8255e7cea47fdc8a373a7018c92eb2eedd91aa14de92e8795f3f02d7",
+    "status": "user-explained",
+    "perspective": "User-specified actual replay continuation, not a root player's hypothetical",
+    "source": {
+      "conversation": "Current task, 2026-09-19, replacement continuation from turn 23",
+      "quote": "change the fixture to clue 2 to Alice on turn 23."
+    },
+    "explanation": {
+      "ruling": "Replace turns 23 onward with the supplied sequence, ending at turn 58 with Bob playing g5. Preserve turns 1–22.",
+      "reasoning": "No additional strategic justification was supplied; this fixture edit does not resolve the earlier hypothetical convention questions or establish engine move parity.",
+      "validation": "All named card targets resolved uniquely in the acting player's hand. The replay-link generator validated game-rule legality and payload round-trip. Earlier review anchors are unchanged because all recorded roots precede turn 23; their later hypothetical tails remain separate from this revised actual ending."
+    },
+    "regressions": [],
+    "coverageNote": "Replay legality checked; engine choice agreement and the full suite were not run for this fixture-only update."
   },
   {
     "id": "historical-t18-purple-versus-red-lines",
