@@ -54,6 +54,9 @@ pub enum PlanFrontier {
     #[default]
     Choice,
     IdentityBranch,
+    /// The discard and its refund are certain; its revealed face is still
+    /// unknown. No concrete post-discard public state has been fabricated.
+    SafeDiscardReveal,
     InterpretationBranch,
     Limit,
     ProjectionUnavailable,
@@ -210,7 +213,14 @@ impl ProjectionEvidence {
             .count();
         match self.unresolved_discard {
             Some(discard) => Some(known + usize::from(discard.bottom_deck_risk)),
-            None if known > 0 || self.frontier == PlanFrontier::Terminal => Some(known),
+            None if known > 0
+                || matches!(
+                    self.frontier,
+                    PlanFrontier::Terminal | PlanFrontier::SafeDiscardReveal
+                ) =>
+            {
+                Some(known)
+            }
             None => None,
         }
     }
@@ -512,7 +522,9 @@ impl ConditionalPlan {
             stop_reason: match self.evidence.frontier {
                 PlanFrontier::Terminal => SymbolicStopReason::Terminal,
                 PlanFrontier::Choice => SymbolicStopReason::Choice,
-                PlanFrontier::IdentityBranch => SymbolicStopReason::UnknownIdentity,
+                PlanFrontier::IdentityBranch | PlanFrontier::SafeDiscardReveal => {
+                    SymbolicStopReason::UnknownIdentity
+                }
                 PlanFrontier::InterpretationBranch => SymbolicStopReason::UnknownInterpretation,
                 PlanFrontier::Limit => SymbolicStopReason::Limit,
                 PlanFrontier::ProjectionUnavailable => SymbolicStopReason::ProjectionUnavailable,

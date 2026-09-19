@@ -1,5 +1,25 @@
 [
   {
+    "id": "t35-eliminated-trash-and-productive-discharge",
+    "turn": 35,
+    "positionKey": "093387f19e1437a70c5c5b36eaa4b965e98f748c893ded31eafb5bca0fe55926",
+    "status": "user-explained",
+    "perspective": "Cathy's turn-35 decision; her own card #18 remains physically hidden",
+    "source": {
+      "conversation": "2026-09-19, user correction of the discard-versus-yellow comparison",
+      "quote": "#18 is known trash through process of elimination ... clearly a 2-for-1 with 0 BDR is better than a discard"
+    },
+    "explanation": {
+      "ruling": "Do not penalize the line merely because the face of #18 is unknown. Prefer yellow's productive zero-BDR 2-for-1 over manufacturing a discard token here.",
+      "verifiedEvidence": "The existing Save Principle discard domain already excludes unreplaced useful faces. Remaining faces are obsolete or visibly replaceable; this is discard-safety knowledge, not proof of a particular identity or a literal trash note on an unclued card.",
+      "implementation": "Record the safe discard, its refund, and its assessed identity domain as a projected action. Stop at a typed SafeDiscardReveal frontier without fabricating the revealed face, a drawn face, or a concrete post-discard endpoint. Risky unknown cards still stop before executing.",
+      "remainingWork": "Continuation across the unknown reveal needs domain-valued state or exhaustive equivalent branches. The broader ranking redesign is proposed, not implemented: comparable guaranteed progress and required resource funding should precede static convention scores. This regression does not assert final move parity."
+    },
+    "regressions": [
+      "h_group::symbolic_line::tests::first_seed_turn_35_eliminates_discard_risk_without_an_exact_face"
+    ]
+  },
+  {
     "id": "t35-unknown-trash-discharge-unnecessary-push",
     "turn": 35,
     "positionKey": "093387f19e1437a70c5c5b36eaa4b965e98f748c893ded31eafb5bca0fe55926",

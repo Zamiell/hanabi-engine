@@ -234,6 +234,32 @@ fn continue_plan<const REUSE_SELECTED: bool>(
         let Some((after, mut consequences)) = transition else {
             let frontier = PlanFrontier::IdentityBranch;
             if let Action::Discard(card) = current {
+                if let Some(domain) = safe_discard_domain(&public, profile, card) {
+                    // The face is unknown, but the discard's resource effect
+                    // and lack of card loss are established. Record that
+                    // action, not an unexecuted hazardous frontier. Revealing
+                    // the face may change card counting/transfer inferences,
+                    // so do not invent a concrete public event or endpoint.
+                    plan.push(
+                        public.turn,
+                        ProjectedAction {
+                            actor,
+                            action: current,
+                        },
+                        ProjectedConsequences {
+                            discards: 1,
+                            clues_gained: u8::from(
+                                public.clue_tokens < hanabi_core::MAX_CLUE_TOKENS,
+                            ),
+                            ..ProjectedConsequences::default()
+                        },
+                    );
+                    plan.record_interpretation(Some(domain));
+                    plan.stop_at(PlanFrontier::SafeDiscardReveal);
+                    plan.assess(None);
+                    control.checkpoint()?;
+                    return Ok(plan);
+                }
                 // An unexecuted unknown discard is not evidence of zero loss.
                 // Keep it as a possible hazard without inventing an identity,
                 // spending the turn, or crediting a token/draw.
@@ -552,6 +578,30 @@ fn symbolic_identity(
     })
 }
 
+/// Root-observer evidence only. "No BDR" alone is insufficient: a last-copy
+/// loss is not BDR either. Every remaining face must be obsolete or have a
+/// visible replacement. Save Principle exclusions remain conditional discard
+/// knowledge, not invented exact identities or Good Touch notes on unclued cards.
+fn safe_discard_domain(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    card: CardId,
+) -> Option<crate::IdentitySet> {
+    let deductions = LogicalDeductions::new(source.clone()).ok()?;
+    let inferred = super::infer_h_group(&deductions, profile);
+    let domain = super::chop_safety::discard_domain(&deductions, &inferred, profile, card)?;
+    (!domain.is_empty()
+        && domain.iter().all(|identity| {
+            !super::is_eventually_useful(source, identity)
+                || source
+                    .hands
+                    .iter()
+                    .flatten()
+                    .any(|held| held.id != card && held.identity == Some(identity))
+        }))
+    .then_some(domain)
+}
+
 fn touched_cards(source: &PlayerView, target: PlayerId, clue: Clue) -> Option<Vec<CardId>> {
     let hand = source.hands.get(target.index())?;
     let mut touched = Vec::new();
@@ -578,6 +628,67 @@ mod tests {
     use hanabi_core::{FullState, PlayerId, standard_deck};
 
     use super::*;
+
+    #[test]
+    fn first_seed_turn_35_eliminates_discard_risk_without_an_exact_face() {
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(34).unwrap();
+        let view = state.view_for(PlayerId::new(2)).unwrap();
+        let deductions = LogicalDeductions::new(view.clone()).unwrap();
+        let inferred = super::super::infer_h_group(&deductions, HGroupProfile::Max);
+        let domain = super::super::chop_safety::discard_domain(
+            &deductions,
+            &inferred,
+            HGroupProfile::Max,
+            CardId::new(18),
+        )
+        .unwrap();
+        assert!(domain.len() > 1);
+        assert!(
+            domain.iter().all(|identity| {
+                !super::super::is_eventually_useful(&view, identity)
+                    || view
+                        .hands
+                        .iter()
+                        .flatten()
+                        .any(|held| held.identity == Some(identity))
+            }),
+            "{domain:?}"
+        );
+        let plan = project_h_group_plan(
+            &view,
+            HGroupProfile::Max,
+            Action::Discard(CardId::new(18)),
+            1,
+        );
+        assert_eq!(plan.summarize().discards, 1);
+        assert_eq!(plan.summarize().clues_gained, 1);
+        assert!(plan.summarize().position_value.is_none());
+        let evidence = plan.into_evidence();
+        assert_eq!(evidence.frontier, PlanFrontier::SafeDiscardReveal);
+        assert_eq!(evidence.resources.tokens, 2);
+        assert_eq!(evidence.forecast_discard_risk(), Some(0));
+        assert_eq!(evidence.steps[0].interpreted_identities, Some(domain));
+        assert!(evidence.unresolved_discard.is_none());
+        // An ordinary unknown card with genuinely useful possibilities is
+        // not certified trash by the absence of an observed misplay/loss.
+        assert!(safe_discard_domain(&view, HGroupProfile::Max, CardId::new(31)).is_none());
+        // A hidden last-copy 5 has no BDR in the narrow sense, but is not
+        // safe to discard. Never certify safety from the BDR boolean alone.
+        let bob = state.view_for(PlayerId::new(1)).unwrap();
+        assert!(safe_discard_domain(&bob, HGroupProfile::Max, CardId::new(19)).is_none());
+        assert!(
+            view.hands[2]
+                .iter()
+                .find(|held| held.id == CardId::new(18))
+                .unwrap()
+                .identity
+                .is_none()
+        );
+    }
 
     #[test]
     fn reviewed_turn_eleven_distinguishes_blue_three_risk_from_yellow_trash() {
