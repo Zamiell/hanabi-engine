@@ -1192,7 +1192,8 @@ pub(in crate::h_group) fn apply_unnecessary_move_effects(
         return;
     }
     let Some(connection) = effects.signals.iter().rev().find(|signal| {
-        signal.turn < entry.turn
+        (signal.turn < entry.turn
+            || (signal.turn == entry.turn && signal.kind == HGroupMoveKind::UnknownTrashDischarge))
             && signal.cards.contains(card)
             && matches!(
                 signal.kind,
@@ -1214,7 +1215,12 @@ pub(in crate::h_group) fn apply_unnecessary_move_effects(
         .clues
         .iter()
         .rev()
-        .find(|clue| clue.turn == connection.turn)
+        .find(|clue| {
+            clue.turn == connection.turn
+                || (connection.turn == entry.turn
+                    && connection.kind == HGroupMoveKind::UnknownTrashDischarge
+                    && clue.turn.saturating_add(1) == entry.turn)
+        })
         .cloned()
     else {
         return;
@@ -1258,7 +1264,16 @@ pub(in crate::h_group) fn apply_unnecessary_move_effects(
                 .collect::<Vec<_>>();
             focus(hand, &touched, chop(hand, &gotten), &gotten) == Some(*card)
         });
-    let trash_finesse_or_bluff = context
+    // Only Trash Finesses/Bluffs are automatically unnecessary. A Discharge
+    // also has a trash focus, but still needs the direct-clue alternative.
+    let trash_finesse_or_bluff = matches!(
+        connection.kind,
+        HGroupMoveKind::Finesse
+            | HGroupMoveKind::ReverseFinesse
+            | HGroupMoveKind::SelfFinesse
+            | HGroupMoveKind::LayeredFinesse
+            | HGroupMoveKind::Bluff
+    ) && context
         .historical
         .identity(origin.focus)
         .is_some_and(|known| is_trash_at(origin.stack_heights, known));
@@ -1315,6 +1330,10 @@ pub(in crate::h_group) fn apply_unnecessary_move_effects(
             let Some(pushed) = hand.get(position + 1).copied() else {
                 return;
             };
+            // Level 24 adds the Trash Push response before disposal of the
+            // discharged focus. Its Level-16 discard instruction must not
+            // preempt the extra blind play and consume this turn instead.
+            effects.discard_now.retain(|card| *card != origin.focus);
             effects.forced_playable.insert(pushed);
             (HGroupMoveKind::UnnecessaryTrashPush, vec![pushed])
         } else {

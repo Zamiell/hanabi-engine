@@ -312,17 +312,66 @@ pub(in crate::h_group) fn apply_ejection_discharge_effects(
             ObservedEvent::Clued {
                 giver,
                 target,
-                clue: Clue::Suit(suit),
+                clue,
                 ..
             } if next_player(*giver, hands_before.len()) == *player => {
-                Some((prior, *giver, *target, *suit))
+                Some((prior, *giver, *target, *clue))
             }
             _ => None,
         });
-        if let Some((prior, giver, target, suit)) = prior_clue {
+        if let Some((prior, giver, target, clue)) = prior_clue {
             let prior_interpretation = clues.iter().rev().find(|clue| clue.turn == prior.turn);
             let mut gotten = explicitly_clued.clone();
             gotten.extend(chop_moved.iter().copied());
+            // The third-position response proves unknown trash to the clue
+            // recipient, who could not see the focus when the clue was given.
+            // https://hanabi.github.io/level-16/#the-unknown-trash-discharge-1-for-1-form-utd
+            if finesse_position_id(&hands_before[player.index()], &gotten, 2) == Some(*card) {
+                if let Some(origin) = prior_interpretation {
+                    let possibilities =
+                        IdentitySet::from_mask(facts[origin.focus.index()].identity_mask());
+                    if identity_of(view, origin.focus)
+                        .is_none_or(|known| is_trash_at(origin.stack_heights, known))
+                        && possibilities
+                            .iter()
+                            .any(|candidate| is_trash_at(origin.stack_heights, candidate))
+                        && possibilities.iter().any(|candidate| {
+                            !is_trash_at(origin.stack_heights, candidate)
+                                && !is_playable_at(origin.stack_heights, candidate)
+                        })
+                    {
+                        let connections = pending
+                            .iter()
+                            .filter(|connection| connection.focus == origin.focus)
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        retract_connections(
+                            entry,
+                            giver,
+                            connections,
+                            pending,
+                            invisibly_clued,
+                            signals,
+                        );
+                        forced_playable.remove(&origin.focus);
+                        if !discard_now.contains(&origin.focus) {
+                            discard_now.push(origin.focus);
+                        }
+                        push_signal(
+                            signals,
+                            entry,
+                            giver,
+                            Some(*player),
+                            HGroupMoveKind::UnknownTrashDischarge,
+                            vec![*card, origin.focus],
+                            None,
+                        );
+                    }
+                }
+            }
+            let Clue::Suit(suit) = clue else {
+                return;
+            };
             let played_from_ejection_position =
                 finesse_position_id(&hands_before[player.index()], &gotten, 1) == Some(*card);
             if played_from_ejection_position
@@ -408,7 +457,7 @@ pub(in crate::h_group) fn apply_ejection_discharge_effects(
     // An Unknown Trash Discharge communicates that the focused card is trash.
     // Merely touching an already-played duplicate as a useful non-focus card is
     // an ordinary multi-card clue and must not eject the next player's slot 3.
-    let unknown_discharge = touched.len() >= 2
+    let unknown_discharge = !touched.is_empty()
         // A clue whose entire touch is already provably trash cannot be an
         // Unknown Trash Discharge: there is no unknown useful interpretation
         // to disambiguate. Preserve the ordinary Trash Push/Chop Move meaning.
@@ -417,15 +466,19 @@ pub(in crate::h_group) fn apply_ejection_discharge_effects(
             let possibilities = IdentitySet::from_mask(facts[card.index()].identity_mask());
             !possibilities.is_empty() && possibilities.iter().all(|identity| is_trash_at(stack_heights, identity))
         })
-        && !same_turn_signal(signals, entry.turn, HGroupMoveKind::PlayClue)
         && interpretation.is_none_or(|interpretation| interpretation.save_identities.is_empty())
         && interpretation.is_some_and(|interpretation| {
             let possibilities =
                 IdentitySet::from_mask(facts[interpretation.focus.index()].identity_mask());
-            !possibilities.is_empty()
-                && possibilities
-                    .iter()
-                    .all(|identity| is_trash_at(stack_heights, identity))
+            // The reactor sees the actual trash; the recipient still allows
+            // an unplayable useful card. Requiring the literal domain to be
+            // entirely trash inverted the meaning of *unknown* trash.
+            identity_of(view, interpretation.focus)
+                .is_some_and(|identity| is_trash_at(stack_heights, identity))
+                && possibilities.iter().any(|identity| {
+                    !is_trash_at(stack_heights, identity)
+                        && !is_playable_at(stack_heights, identity)
+                })
         });
     let unknown_dupe_discharge = touched.len() >= 2
         && !same_turn_signal(signals, entry.turn, HGroupMoveKind::PlayClue)

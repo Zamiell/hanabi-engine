@@ -1,6 +1,113 @@
 use super::*;
 
 #[test]
+fn first_seed_unknown_trash_discharge_and_unnecessary_push() {
+    // User-reviewed p4v0s1 turns 35–37: yellow focuses trash #29,
+    // Donald discharges #28, then Alice pushes #33 because r4 was directly
+    // clueable. The older y4 already has a 4 clue; it is not a new benefit.
+    let replay = expert_replay_p4v0s1();
+    let state = replay.state_at_turn(34).unwrap();
+    let d = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
+    let action = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Suit(Suit::Yellow),
+    };
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    assert!(
+        candidates.iter().any(|c| c.action == action),
+        "{candidates:?}"
+    );
+    let known_trash = prospective_clue_view(
+        d.view(),
+        PlayerId::new(0),
+        Clue::Suit(Suit::Blue),
+        &[CardId::new(36)],
+    );
+    let known = LogicalDeductions::new(known_trash).unwrap();
+    assert!(
+        !infer_h_group(&known, HGroupProfile::Max)
+            .signals
+            .iter()
+            .any(|s| s.turn == 34 && s.kind == HGroupMoveKind::UnknownTrashDischarge)
+    );
+    let state = replay.state_at_turn(35).unwrap();
+    let d = LogicalDeductions::new(state.view_for(PlayerId::new(3)).unwrap()).unwrap();
+    let notes = infer_h_group(&d, HGroupProfile::Max);
+    assert!(
+        notes
+            .signals
+            .iter()
+            .any(|s| s.turn == 34 && s.kind == HGroupMoveKind::UnknownTrashDischarge)
+    );
+    assert!(notes.playable_now.contains(&CardId::new(28)), "{notes:?}");
+    let lower = infer_h_group(&d, HGroupProfile::Level(HGroupLevel::Level15));
+    assert!(
+        !lower
+            .signals
+            .iter()
+            .any(|s| s.turn == 34 && s.kind == HGroupMoveKind::UnknownTrashDischarge)
+    );
+    let state = replay.state_at_turn(36).unwrap();
+    let d = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let notes = infer_h_group(&d, HGroupProfile::Max);
+    assert!(
+        notes
+            .signals
+            .iter()
+            .any(|s| s.kind == HGroupMoveKind::UnnecessaryTrashPush
+                && s.cards.contains(&CardId::new(33))),
+        "{notes:?}"
+    );
+    assert!(notes.playable_now.contains(&CardId::new(33)), "{notes:?}");
+    assert_eq!(
+        select_h_group_action(&d, HGroupProfile::Max),
+        Some(Action::Play(CardId::new(33)))
+    );
+    let lower = infer_h_group(&d, HGroupProfile::Level(HGroupLevel::Level16));
+    assert!(!lower.playable_now.contains(&CardId::new(33)));
+}
+
+#[test]
+fn first_seed_discharge_response_survives_bobs_projection() {
+    // Same reviewed line, but Bob's hand is unavailable to the forecast.
+    // Perspective changes must not lose the third-position demonstration.
+    let state = expert_replay_p4v0s1().state_at_turn(33).unwrap();
+    let view = state.view_for(PlayerId::new(1)).unwrap();
+    let after_four = prospective_clue_view(
+        &view,
+        PlayerId::new(0),
+        Clue::Rank(Rank::Four),
+        &[CardId::new(2), CardId::new(36)],
+    );
+    let after_yellow = ProspectiveTransition::symbolic_clue_by(
+        &after_four,
+        PlayerId::new(2),
+        PlayerId::new(0),
+        Clue::Suit(Suit::Yellow),
+        &[CardId::new(2), CardId::new(29)],
+    );
+    let (d, replay) = PerspectiveProjector::new(&after_yellow, HGroupProfile::Max)
+        .project(PlayerId::new(3), PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    let notes = infer_h_group_from_replay(&d, replay, HGroupProfile::Max);
+    assert!(notes.playable_now.contains(&CardId::new(28)), "{notes:?}");
+    let after_play = prospective_play_view(
+        &after_yellow,
+        PlayerId::new(3),
+        CardId::new(28),
+        Card::new(Suit::Red, Rank::Four),
+    );
+    let (d, replay) = PerspectiveProjector::new(&after_play, HGroupProfile::Max)
+        .project(PlayerId::new(0), PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    assert!(
+        infer_h_group_from_replay(&d, replay, HGroupProfile::Max)
+            .playable_now
+            .contains(&CardId::new(33))
+    );
+}
+
+#[test]
 fn first_seed_known_own_copy_prevents_false_discard_elimination() {
     // Bug-reproduction branch from p4v0s1 turn 29, Alice's perspective.
     // Alice's exact r2 is hidden physically, but is already known. Cathy's

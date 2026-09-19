@@ -1,9 +1,36 @@
 [
   {
+    "id": "t35-unknown-trash-discharge-unnecessary-push",
+    "turn": 35,
+    "positionKey": "093387f19e1437a70c5c5b36eaa4b965e98f748c893ded31eafb5bca0fe55926",
+    "status": "user-explained",
+    "perspective": "Cathy gives yellow; Donald recognizes the visible trash focus; Alice learns from Donald's third-position response",
+    "source": {
+      "conversation": "2026-09-19, user clarification of the revised first-seed ending",
+      "quote": "yellow is an Unknown Trash Discharge ... The r5 plays because it is unnecessary",
+      "urls": [
+        "https://hanabi.github.io/level-16#the-unknown-trash-discharge-1-for-1-form-utd",
+        "https://hanabi.github.io/level-24"
+      ]
+    },
+    "explanation": {
+      "supersedes": "t34-four-save-followup-meaning-question",
+      "discharge": "Yellow focuses Alice's unknown-trash y2 #29 on chop. Donald responds from Third Finesse Position with r4 #28, demonstrating that the focus is trash.",
+      "unnecessary": "The complicated move could obtain Donald's r4 directly instead. The unnecessary unknown-trash-on-chop response is a Trash Push on Alice's adjacent #33, which plays as r5.",
+      "implementation": "Recognize visible trash against the recipient's still-useful unplayable possibilities; do not require a wholly-trash domain or two touched cards. Observe the successful third-position response from the recipient's perspective, then apply the level-24 transform. Only Trash Finesses/Bluffs are automatically unnecessary; Discharges require a direct alternative. The added Trash Push takes priority over discarding the discharged focus.",
+      "verification": "The actual turn-35 yellow candidate is admitted as Discharge and projects Donald r4 #28, Alice r5 #33, then Bob discards #16. The planner still selects Cathy discarding at turn 35; this recognition fix does not assert that the separate move ranking or full replay parity is settled.",
+      "boundaries": "Known trash does not trigger UTD; level 15 does not enable discharge, and level 16 alone does not enable the unnecessary Trash Push. Forecast verification retains Bob's hidden hand."
+    },
+    "regressions": [
+      "h_group::tests::replay::first_seed_unknown_trash_discharge_and_unnecessary_push",
+      "h_group::tests::replay::first_seed_discharge_response_survives_bobs_projection"
+    ]
+  },
+  {
     "id": "t34-four-save-followup-meaning-question",
     "turn": 34,
     "positionKey": "da9d560cd40fb33cc2f83fe649403b82681b2322cb1470f02079afdcc7372b2b",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Bob's projection; follow-up interpretation also checked from Cathy's and Donald's actual fixture perspectives",
     "source": {
       "conversation": "2026-09-19, from-start scan after the user completed turns 53–58; assistant investigation, not a user ruling"
