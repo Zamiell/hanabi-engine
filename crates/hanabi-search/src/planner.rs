@@ -1408,15 +1408,31 @@ fn compare_bottom_deck_risks(
     }
     // A shared prefix prevents penalizing a longer forecast merely for seeing
     // farther. But it must not certify avoidance when the allegedly safer line
-    // already predicts the same loss just beyond that cutoff. Require both
-    // comparisons to support the advantage; otherwise defer to other evidence.
+    // already predicts the same committed loss just beyond that cutoff.
+    // Choosing an action in a bounded future forecast is not a commitment
+    // by that player. When comparing a discard that takes risk NOW against
+    // a reversible future choice, a still-available clue matters. Do not use
+    // that future choice to cancel the immediate risk. When neither root
+    // action takes that risk yet, retain the ordinary like-for-like forecast
+    // comparison: simply postponing a forecast is not evidence of avoidance.
+    // Preserve actual modeled losses and required protection discards, and
+    // keep a selected discard when there is no token to spend instead.
     // Keep unresolved discard risk already inside the prefix: it is risk, not
     // a recorded known-card loss, so the full known-loss counter omits it.
+    let immediate_discard_risk = [left, right].iter().any(|candidate| {
+        matches!(candidate.action, Action::Discard(_))
+            && candidate.projection.bottom_deck_risks_at(1) > 0
+    });
     let assessed_tail = |candidate: &PlannerActionEvaluation| {
         candidate
             .projection
             .unresolved_discard
-            .filter(|discard| discard.required_protection || discard.strategically_selected)
+            .filter(|discard| {
+                discard.required_protection
+                    || candidate.projection.steps.is_empty()
+                    || (discard.strategically_selected
+                        && (!immediate_discard_risk || candidate.projection.resources.tokens == 0))
+            })
             .and_then(|_| candidate.projection.forecast_discard_risk())
             .unwrap_or(0)
     };
@@ -2007,6 +2023,86 @@ impl std::error::Error for PlannerError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewed_turn_eleven_optional_future_discard_does_not_cancel_immediate_risk() {
+        // User-reviewed p4v0s1 turn 11: Cathy risks an unknown card now;
+        // Donald's later unknown discard remains optional with a clue left.
+        // No hidden hand identity or deck order is supplied to planning.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(10).unwrap();
+        let view = state.view_for(state.current_player()).unwrap();
+        let analysis = crate::analyze_position(
+            &view,
+            SupportedConvention::HGroup(crate::HGroupProfile::Max),
+            PlannerConfig::default(),
+        )
+        .unwrap();
+        assert!(
+            analysis
+                .information
+                .deductions()
+                .possible_identities(hanabi_core::CardId::new(9))
+                .unwrap()
+                .contains(hanabi_core::Card::new(
+                    hanabi_core::Suit::Green,
+                    hanabi_core::Rank::Three
+                ))
+        );
+        let discard = analysis
+            .planner
+            .root_actions
+            .iter()
+            .find(|c| c.action == Action::Discard(hanabi_core::CardId::new(9)))
+            .unwrap();
+        let stall_action = Action::Clue {
+            target: hanabi_core::PlayerId::new(1),
+            clue: hanabi_core::Clue::Rank(hanabi_core::Rank::Five),
+        };
+        let stall = analysis
+            .planner
+            .root_actions
+            .iter()
+            .find(|c| c.action == stall_action)
+            .unwrap();
+        assert!(discard.projection.steps.is_empty());
+        assert!(
+            discard
+                .projection
+                .unresolved_discard
+                .unwrap()
+                .bottom_deck_risk
+        );
+        assert_eq!(stall.projection.resources.tokens, 1);
+        let future = stall.projection.unresolved_discard.unwrap();
+        assert!(future.bottom_deck_risk);
+        assert!(!future.required_protection);
+        assert_eq!(compare_bottom_deck_risks(discard, stall), Ordering::Greater);
+        assert_eq!(compare_bottom_deck_risks(stall, discard), Ordering::Less);
+        assert_eq!(analysis.planner.best_action, stall_action);
+        // This distinction must not erase a required future sacrifice or a
+        // discard selected at a frontier where no clue token remains.
+        let mut required = stall.clone();
+        required
+            .projection
+            .unresolved_discard
+            .as_mut()
+            .unwrap()
+            .required_protection = true;
+        assert_eq!(
+            compare_bottom_deck_risks(discard, &required),
+            Ordering::Equal
+        );
+        let mut no_token = stall.clone();
+        no_token.projection.resources.tokens = 0;
+        assert_eq!(
+            compare_bottom_deck_risks(discard, &no_token),
+            Ordering::Equal
+        );
+    }
 
     #[test]
     fn held_card_development_cannot_buy_away_realized_progress() {
