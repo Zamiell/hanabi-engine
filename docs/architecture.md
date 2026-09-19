@@ -279,10 +279,18 @@ card, and identity. The original legal `PlayerView` is never modified.
   admitted Play Clue. The temporary assumption never enters the actual line or
   shared knowledge, and blank draws are not assigned identities. With equal
   recorded progress and safety, this opportunity can outweigh a surplus clue
-  token. Both lines must cover a bounded near-term reserve: one productive clue,
-  exposed critical chops, mandatory repairs, and any consecutive-save pressure.
-  This is a strategic tiebreaker, not a probability estimate or exhaustive proof
-  that every future clue need is funded.
+  token. Each line must cover its own bounded near-term reserve: a productive
+  clue when a visible or checked conditional opportunity supports one, exposed
+  critical chops, mandatory repairs, and any consecutive-save pressure. This is
+  a strategic tiebreaker, not a probability estimate or exhaustive proof that
+  every future clue need is funded.
+- Draw allocation compares each missing connector conditionally, without
+  assigning an identity to the next draw. A drawer must be no slower for every
+  connector and faster for at least one. Deferring a Play or Save Clue requires
+  a funded, semantically equivalent handoff before the recipient's turn in every
+  remaining discard-identity case. Known-trash collateral does not count as lost
+  protection, and owner knowledge—not merely two literal clues—determines
+  whether a successor needs another clue.
 - `hypothesis.rs` owns mutually exclusive whole-history interpretations. Each
   alternative retains its own connections, promises, and identity claims, so
   ordinary and empathy readings cannot be merged card-by-card.

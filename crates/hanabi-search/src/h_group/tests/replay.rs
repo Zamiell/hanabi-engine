@@ -1,6 +1,217 @@
 use super::*;
 
 #[test]
+fn first_seed_forecast_discharge_needs_giver_evidence() {
+    // Bug-reproduction branch from reviewed turn 39, not an optimal line:
+    // after yellow Save and trash discards, Bob cannot assume Cathy's
+    // hidden chop is y3 simply because a Discharge would promise y3.
+    let state = expert_replay_p4v0s1().state_at_turn(38).unwrap();
+    let mut view = state.view_for(PlayerId::new(2)).unwrap();
+    let actions = [
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Yellow),
+        },
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Discard(CardId::new(36)),
+        Action::Discard(CardId::new(30)),
+        Action::Clue {
+            target: PlayerId::new(3),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Discard(CardId::new(35)),
+        Action::Discard(CardId::new(38)),
+    ];
+    for action in actions {
+        let actor = view.current_player;
+        view = match action {
+            Action::Clue { target, clue } => {
+                let touched = view.hands[target.index()]
+                    .iter()
+                    .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
+                    .map(|card| card.id)
+                    .collect::<Vec<_>>();
+                super::super::ProspectiveTransition::symbolic_clue_by(
+                    &view, actor, target, clue, &touched,
+                )
+            }
+            Action::Discard(card) => super::super::ProspectiveTransition::discard(
+                &view,
+                actor,
+                card,
+                super::super::identity_of(&view, card).unwrap(),
+            ),
+            Action::Play(_) => unreachable!(),
+        };
+    }
+    let (d, replay) = super::super::PerspectiveProjector::new(&view, HGroupProfile::Max)
+        .project(
+            PlayerId::new(1),
+            super::super::PerspectiveDepth::NestedRecipients,
+        )
+        .unwrap();
+    assert!(super::super::identity_of(d.view(), CardId::new(18)).is_none());
+    let candidates =
+        super::super::h_group_clue_candidates_from_replay(&d, HGroupProfile::Max, &replay);
+    assert!(!candidates.iter().any(|c| c.action
+        == Action::Clue {
+            target: PlayerId::new(3),
+            clue: Clue::Rank(Rank::One)
+        }
+        && c.move_kind() == Some(HGroupMoveKind::TrashPushDischarge)));
+}
+
+#[test]
+fn first_seed_four_save_accounts_for_collateral_trash() {
+    // p4v0s1 turn 39: y4 is the exact critical focus, g4 is already clued
+    // in Cathy, and the other suits are complete. Alice's other touched
+    // 4s cannot be useful, even though literal rank information permits it.
+    let mut state = expert_replay_p4v0s1().state_at_turn(38).unwrap();
+    state
+        .apply(Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Four),
+        })
+        .unwrap();
+    let d = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let notes = infer_h_group(&d, HGroupProfile::Max);
+    for id in [36, 38] {
+        let note = notes
+            .cards
+            .iter()
+            .find(|note| note.card == CardId::new(id))
+            .unwrap();
+        assert!(!note.identities.is_empty());
+        assert!(
+            note.identities
+                .iter()
+                .all(|identity| !super::super::is_eventually_useful(d.view(), identity)),
+            "{note:?}"
+        );
+    }
+    assert_eq!(
+        notes
+            .cards
+            .iter()
+            .find(|note| note.card == CardId::new(2))
+            .unwrap()
+            .identities,
+        crate::IdentitySet::singleton(Card::new(Suit::Yellow, Rank::Four))
+    );
+}
+
+#[test]
+fn first_seed_missing_connectors_compare_both_drawers() {
+    // Reviewed p4v0s1 turn 38: Bob's discard has zero BDR. Compare who
+    // draws, conditional on each missing 3, with the same y4 Save funded.
+    // Never use the actual r3 on Bob's chop or assign an unseen 5 to him.
+    let state = expert_replay_p4v0s1().state_at_turn(37).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let d = LogicalDeductions::new(view.clone()).unwrap();
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    let save = candidates
+        .iter()
+        .find(|c| {
+            c.action
+                == Action::Clue {
+                    target: PlayerId::new(0),
+                    clue: Clue::Rank(Rank::Four),
+                }
+        })
+        .unwrap();
+    let yellow = super::super::draw_distribution::completion_times_after_clue(
+        &d,
+        HGroupProfile::Max,
+        save,
+        Card::new(Suit::Yellow, Rank::Three),
+    )
+    .unwrap();
+    let green = super::super::draw_distribution::completion_times_after_clue(
+        &d,
+        HGroupProfile::Max,
+        save,
+        Card::new(Suit::Green, Rank::Three),
+    )
+    .unwrap();
+    eprintln!("conditional y3 completion: {yellow:?}; g3: {green:?}");
+    assert!(yellow.0 <= yellow.1);
+    assert!(green.0 < green.1);
+    let notes = infer_h_group(&d, HGroupProfile::Max);
+    assert!(
+        super::super::draw_distribution::discard_priority(
+            &d,
+            &notes,
+            HGroupProfile::Max,
+            &candidates,
+            CardId::new(16)
+        )
+        .is_some(),
+        "handoff was rejected"
+    );
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        analysis.planner.best_action,
+        Action::Discard(CardId::new(16)),
+        "{:#?}",
+        analysis.planner.comparisons
+    );
+}
+
+#[test]
+fn first_seed_red_four_progress_beats_an_early_save() {
+    // p4v0s1 turn 34: the reviewed r4 clue enables Cathy's r5 clue, then
+    // both cards play. Saving y4 first must not win on a fictitious reserve
+    // for unseen g3/y3, or merely because both root actions are clues.
+    let state = expert_replay_p4v0s1().state_at_turn(33).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    let play_clue = Action::Clue {
+        target: PlayerId::new(3),
+        clue: Clue::Rank(Rank::Four),
+    };
+    let save = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Rank(Rank::Four),
+    };
+    let candidate = |action| {
+        analysis
+            .planner
+            .root_actions
+            .iter()
+            .find(|value| value.action == action)
+            .unwrap()
+    };
+    let play_rotation = candidate(play_clue).symbolic_line.first_rotation.unwrap();
+    let save_rotation = candidate(save).symbolic_line.first_rotation.unwrap();
+    assert_eq!(play_rotation.value.score, save_rotation.value.score + 2);
+    assert!(play_rotation.value.clues >= play_rotation.value.clue_demand);
+    let comparison = analysis
+        .planner
+        .comparisons
+        .iter()
+        .find(|value| {
+            (value.left == play_clue && value.right == save)
+                || (value.left == save && value.right == play_clue)
+        })
+        .unwrap();
+    assert_eq!(comparison.preferred, play_clue, "{comparison:?}");
+    assert_eq!(analysis.planner.best_action, play_clue);
+}
+
+#[test]
 fn first_seed_chop_safety_survives_later_token_exhaustion() {
     // User-reviewed p4v0s1 turn 38: Alice's earlier declined protection
     // rules out y3/g3 on Bob's chop. Her turn-37 zero-token play does not

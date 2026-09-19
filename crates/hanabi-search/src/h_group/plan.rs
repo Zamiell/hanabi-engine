@@ -134,8 +134,14 @@ impl ResourceSchedule {
         true
     }
 
-    pub(crate) fn reserve(critical_saves: u8, mandatory_clues: u8, consecutive_saves: bool) -> u8 {
-        1_u8.saturating_add(critical_saves)
+    pub(crate) fn reserve(
+        critical_saves: u8,
+        mandatory_clues: u8,
+        consecutive_saves: bool,
+        productive_clue: bool,
+    ) -> u8 {
+        u8::from(productive_clue)
+            .saturating_add(critical_saves)
             .saturating_add(mandatory_clues)
             .saturating_add(if consecutive_saves { 2 } else { 0 })
     }

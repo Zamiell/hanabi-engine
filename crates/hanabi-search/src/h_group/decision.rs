@@ -2385,6 +2385,7 @@ pub(super) fn can_park_surplus_five(source: &PlayerView, inferred: &HGroupInfere
         u8::try_from(critical_saves).unwrap_or(u8::MAX),
         u8::try_from(inferred.must_clue.len()).unwrap_or(u8::MAX),
         false,
+        true,
     );
     source.clue_tokens >= reserve
         && !inferred.playable_now.is_empty()

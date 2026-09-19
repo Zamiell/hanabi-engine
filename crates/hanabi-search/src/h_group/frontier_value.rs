@@ -256,10 +256,21 @@ pub(super) fn evaluate(
         }
     }
     add_root_opportunities(source, profile, root, &mut value)?;
+    // Reserve a productive clue only for an evidenced opportunity, not an
+    // invented identity on a future draw. Saves/repairs are reserved separately.
+    let productive_clue = value.conditional_successors > 0
+        || frontier.hands.iter().flatten().any(|card| {
+            card.identity.is_some_and(|identity| {
+                is_eventually_useful(frontier, identity)
+                    && !committed.contains(identity)
+                    && can_play_soon(frontier, IdentitySet::singleton(identity), secured)
+            })
+        });
     value.clue_demand = super::ResourceSchedule::reserve(
         value.exposed_critical_chops,
         mandatory_clues,
         value.save_pressure > 0,
+        productive_clue,
     );
     Some(value)
 }

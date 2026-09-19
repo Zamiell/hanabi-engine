@@ -1472,19 +1472,37 @@ impl ReplayReducer {
                         && identity.rank == Rank::Five
                         && is_playable_at(self.stack_heights, *identity)
                 });
-            let non_focus_trash_identities = completing_suit.map_or_else(Vec::new, |_| {
-                non_focus_identities
-                    .iter()
-                    .filter_map(|(card, good_touch)| {
-                        let direct = historical.identity(*card).map_or_else(
-                            || IdentitySet::from_mask(self.facts[card.index()].identity_mask()),
-                            IdentitySet::singleton,
+            let non_focus_trash_identities = non_focus_identities
+                .iter()
+                .filter_map(|(card, good_touch)| {
+                    let direct = historical.identity(*card).map_or_else(
+                        || IdentitySet::from_mask(self.facts[card.index()].identity_mask()),
+                        IdentitySet::singleton,
+                    );
+                    let trash = if completing_suit.is_some() {
+                        direct.without(focus_identities).without(*good_touch)
+                    } else if good_touch.is_empty() {
+                        // Every useful identity is already accounted for
+                        // (including the exact focus). Collateral can be
+                        // known trash, not an impossible Good-Touch promise
+                        // that falls back to the full literal domain.
+                        // https://hanabi.github.io/level-1/#good-touch-principle
+                        let useful = snapshot_good_touch_identities(
+                            *card,
+                            direct,
+                            view,
+                            &[],
+                            &CardSet::default(),
+                            self.stack_heights,
+                            self.public_removed,
                         );
-                        let trash = direct.without(focus_identities).without(*good_touch);
-                        (!trash.is_empty()).then_some((*card, trash))
-                    })
-                    .collect()
-            });
+                        direct.without(useful)
+                    } else {
+                        IdentitySet::default()
+                    };
+                    (!trash.is_empty()).then_some((*card, trash))
+                })
+                .collect();
             self.clues.push(HGroupClueInterpretation {
                 turn: entry.turn,
                 giver: *giver,

@@ -1,5 +1,24 @@
 [
   {
+    "id": "t40-declined-play-clue-during-critical-save",
+    "turn": 40,
+    "positionKey": "7ed723c172c65a68d32fa1c90a23dc5f032ef96a9dd5b551d4308b8417c79aa3",
+    "status": "unresolved",
+    "perspective": "Donald; #23's actual red 1 remains hidden",
+    "source": {
+      "conversation": "2026-09-19, continuation after the turn-38 Save Principle correction",
+      "quote": "Assistant investigation, not a user ruling."
+    },
+    "explanation": {
+      "actions": "Fixture discards #23; engine gives 5s to Bob.",
+      "reason": "The engine retains y3/g3 in Donald's discard-risk domain. Its 5s line instead obtains Alice's known-trash discard and then a Trash Chop Move to Cathy. Bottom-deck-risk comparison, not the raw 500-versus-400 scores alone, favors 5s.",
+      "newCondition": "Unlike Bob's turn-38 historical ordinary-play witness, Cathy has just given a critical rank-4 Save to Alice on turn 39. Donald has a token and a productive 5 Save to give, so he is not forced to discard now. Save Principle forbids losing the needed 3, but its text does not specify whether this competing Save establishes the next player's chop as safe despite the available clue alternative.",
+      "question": "Does Cathy's choice to save Alice instead of play-cluing Donald still rule out y3/g3 on Donald's chop? Or should Donald retain those possibilities and give 5s while someone else arranges the next safe discard? Do not extend the historical exclusion or change the fixture without settling this condition."
+    },
+    "regressions": [],
+    "coverageNote": "No expected-action assertion added for this unresolved inference. Turn-39 collateral trash and the rejected yellow-line forecast Discharge have separate bug-reproduction tests."
+  },
+  {
     "id": "t38-save-principle-excludes-playable-threes",
     "turn": 38,
     "positionKey": "6cca9e7d7c24b0b9d1429d4796c04999516a3208cb544471dc5d9b2e97adb8c4",
@@ -17,8 +36,10 @@
       "boundary": "This ruling establishes zero BDR for the discard; it does not by itself establish the final preference against every competing Save Clue. No fixture edit."
     },
     "regressions": [
-      "h_group::tests::replay::first_seed_chop_safety_survives_later_token_exhaustion"
-    ]
+      "h_group::tests::replay::first_seed_chop_safety_survives_later_token_exhaustion",
+      "h_group::tests::replay::first_seed_missing_connectors_compare_both_drawers"
+    ],
+    "coverageNote": "Additional engine scheduling check (not a new user ruling): with the same rank-4 Save funded and its useful meaning preserved when Cathy gives it, drawing y3 in either seat reaches Alice's y4 at offset 7. Drawing g3 as Bob reaches Cathy's g4 at offset 5 instead of 9. No unseen 5 is assigned to Bob. This supports the existing fixture discard without guessing the draw or waiving Save Principle."
   },
   {
     "id": "t38-chop-uncertainty-versus-yellow-four-save",
@@ -65,9 +86,10 @@
       "implementationBoundary": "A conservative witness uses the immediately preceding ordinary clued play with a token available, the same exposed chop, and no recipient play/clue obligation. The absence of required protection excludes unique playable/2/last-copy possibilities for discard evaluation only. It does not infer the hidden face, change literal deductions, or mark all unclued cards trash. Handoff requires the same direct clue and scheduled outcome after every remaining discard identity."
     },
     "regressions": [
-      "h_group::tests::replay::first_seed_unloaded_hand_uses_declined_protection_to_draw_safely"
+      "h_group::tests::replay::first_seed_unloaded_hand_uses_declined_protection_to_draw_safely",
+      "h_group::tests::replay::first_seed_red_four_progress_beats_an_early_save"
     ],
-    "coverageNote": "Checks excluded needed identities, retained duplicate possibilities, unchanged literal domain, zero BDR and best discard; negative controls retain uncertainty without a token or for a fresh non-chop card."
+    "coverageNote": "Checks excluded needed identities, retained duplicate possibilities, unchanged literal domain, zero BDR and best discard; negative controls retain uncertainty without history or for a fresh non-chop card. The follow-up turn-34 regression verifies that Bob's r4 clue develops r4/r5 and beats the early y4 Save without reserving a fictional clue on unseen y3/g3."
   },
   {
     "id": "t11-immediate-versus-optional-discard",

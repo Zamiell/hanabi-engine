@@ -328,15 +328,14 @@ impl ProjectedPositionValue {
     /// This guards the development shortcut, not the general clue/play order:
     /// a clue can still win on safety, policy, or its longer observed line.
     fn developed_points_preference(self, other: Self) -> bool {
-        let reserve = self.clue_demand.max(other.clue_demand);
         self.score >= other.score
             && other
                 .exposed_chop_quality
                 .no_worse_than(self.exposed_chop_quality)
             && self.score.saturating_add(self.secured_future_plays)
                 > other.score.saturating_add(other.secured_future_plays)
-            && self.clues >= reserve
-            && other.clues >= reserve
+            && self.clues >= self.clue_demand
+            && other.clues >= other.clue_demand
             && self.exposed_critical_chops <= other.exposed_critical_chops
             && self.save_pressure <= other.save_pressure
             && self.foregone_touch_opportunities <= other.foregone_touch_opportunities
@@ -1210,13 +1209,17 @@ fn compare_endpoint_evidence(
         }
         Ordering::Equal => {}
     }
-    // This development comparison schedules a held play versus spending
-    // the turn on a clue. Clue-versus-clue comparisons retain their causal
-    // efficiency/Clarity ordering: positional access alone must not replace
-    // a 2-for-1 clue with a speculative 1-for-1.
+    // Positional-access development schedules a held play versus spending
+    // the turn on a clue. Clue-versus-clue comparisons below additionally
+    // require strictly more realized points: speculative access alone must
+    // not replace a 2-for-1 clue with a speculative 1-for-1.
     let schedules_play_and_clue = matches!(
         (left.action, right.action),
         (Action::Play(_), Action::Clue { .. }) | (Action::Clue { .. }, Action::Play(_))
+    );
+    let compares_clues = matches!(
+        (left.action, right.action),
+        (Action::Clue { .. }, Action::Clue { .. })
     );
     if let Some((a, b)) = left
         .symbolic_line
@@ -1278,12 +1281,16 @@ fn compare_endpoint_evidence(
                         .iter()
                         .all(|a| right_values.iter().all(|b| predicate(a.value, b.value)))
                 };
-            if schedules_play_and_clue
+            // Clue-versus-clue development requires strictly more *realized*
+            // points in every branch, not speculative access or a longer queue.
+            if (schedules_play_and_clue || (compares_clues && every_pair(|a, b| a.score > b.score)))
                 && every_pair(ProjectedPositionValue::developed_points_preference)
             {
                 return EndpointComparison::PreferLeft(ComparisonReason::RotationDevelopment);
             }
-            if schedules_play_and_clue && every_pair(|a, b| b.developed_points_preference(a)) {
+            if (schedules_play_and_clue || (compares_clues && every_pair(|a, b| b.score > a.score)))
+                && every_pair(|a, b| b.developed_points_preference(a))
+            {
                 return EndpointComparison::PreferRight(ComparisonReason::RotationDevelopment);
             }
             if every_pair(ProjectedPositionValue::dominates) {
@@ -1349,6 +1356,12 @@ fn compare_endpoint_evidence(
     }
     if b.protection_development_preference(a) {
         return EndpointComparison::PreferRight(ComparisonReason::ProtectedDevelopment);
+    }
+    if compares_clues && a.score > b.score && a.developed_points_preference(b) {
+        return EndpointComparison::PreferLeft(ComparisonReason::RotationDevelopment);
+    }
+    if compares_clues && b.score > a.score && b.developed_points_preference(a) {
+        return EndpointComparison::PreferRight(ComparisonReason::RotationDevelopment);
     }
     if let Some(prefers_left) = a.conditional_continuation_preference(b) {
         return if prefers_left {

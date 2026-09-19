@@ -4,10 +4,10 @@
 //! motivates comparing completion times, not counting cards in each hand.
 
 use super::{
-    Card, CardId, Clue, CluePurpose, CompiledClueAction, HGroupInferences, HGroupProfile,
-    HGroupRuleId, LogicalDeductions, PerspectiveDepth, PerspectiveProjector, ProspectiveTransition,
-    Rank, Suit, h_group_clue_candidates_from_replay, is_critical_save_identity,
-    is_eventually_useful, next_player, rule_enabled,
+    Card, CardId, CluePurpose, CompiledClueAction, HGroupInferences, HGroupProfile, HGroupRuleId,
+    LogicalDeductions, PerspectiveDepth, PerspectiveProjector, ProspectiveTransition, Rank, Suit,
+    h_group_clue_candidates_from_replay, is_critical_save_identity, is_eventually_useful,
+    next_player, rule_enabled,
 };
 
 /// Conservative preference over a non-urgent direct clue, never a mandatory
@@ -31,23 +31,27 @@ pub(super) fn discard_priority(
         || !inferred.playable_now.is_empty()
         || inferred.connection.is_some()
         || inferred.must_clue.contains(&view.observer)
-        || candidates
-            .iter()
-            .any(|candidate| candidate.is_urgent_save() || candidate.purpose() == CluePurpose::Fix)
+        || candidates.iter().any(|candidate| {
+            candidate.purpose() == CluePurpose::Fix
+                || (candidate.is_urgent_save()
+                    && candidate.target() == next_player(view.observer, view.hands.len()))
+        })
     {
         return None;
     }
     let best = candidates
         .iter()
         .max_by_key(|candidate| candidate.score())?;
-    if best.purpose() != CluePurpose::Play
-        || !best.immediate_play()
+    if !matches!(best.purpose(), CluePurpose::Play | CluePurpose::Save)
+        || (best.purpose() == CluePurpose::Play && !best.immediate_play())
         || best.connection_steps() != 0
-        || best.score() >= 425
     {
         return None;
     }
-    if unloaded_hand_handoff(deductions, inferred, profile, best, discard) {
+    if best.purpose() == CluePurpose::Play
+        && best.score() < 425
+        && unloaded_hand_handoff(deductions, inferred, profile, best, discard)
+    {
         return Some(101 + i32::from(best.score()));
     }
     let missing = Suit::ALL
@@ -67,20 +71,31 @@ pub(super) fn discard_priority(
             (!visible && !known_own && is_eventually_useful(view, identity)).then_some(identity)
         })
         .collect::<Vec<_>>();
-    let [connector] = missing.as_slice() else {
+    if missing.is_empty() {
         return None;
-    };
+    }
     let next = next_player(view.observer, view.hands.len());
     if best.target() == next {
         return None;
     }
-    let schedules = completion_times(deductions, inferred, profile, *connector)?;
-    if schedules.0 >= schedules.1 {
+    // No draw is predicted: prefer this drawer only if every missing
+    // connector is no slower here, and at least one is strictly faster.
+    let mut improved = false;
+    for connector in &missing {
+        let schedules = completion_times_after_clue(deductions, profile, best, *connector)?;
+        if schedules.0 > schedules.1 {
+            return None;
+        }
+        improved |= schedules.0 < schedules.1;
+    }
+    if !improved {
         return None;
     }
-    let identities = deductions.possible_identities(discard)?;
+    let identities = super::chop_safety::discard_domain(deductions, inferred, profile, discard)?;
     if identities.is_empty()
-        || identities.contains(*connector)
+        || missing
+            .iter()
+            .any(|connector| identities.contains(*connector))
         || identities.iter().any(|identity| {
             is_eventually_useful(view, identity)
                 && (identity.rank == Rank::Five || is_critical_save_identity(view, identity))
@@ -88,26 +103,11 @@ pub(super) fn discard_priority(
     {
         return None;
     }
-    for identity in identities.iter() {
-        let after = ProspectiveTransition::discard(view, view.observer, discard, identity);
-        let (next_deductions, next_replay) = PerspectiveProjector::new(&after, profile)
-            .project(next, PerspectiveDepth::NestedRecipients)?;
-        let next_inferred = super::decision::infer_h_group_from_replay(
-            &next_deductions,
-            next_replay.clone(),
-            profile,
-        );
-        if !super::ActionWindow::from_inferences(next_deductions.view(), &next_inferred)
-            .can_give_clue()
-            || !h_group_clue_candidates_from_replay(&next_deductions, profile, &next_replay)
-                .iter()
-                .any(|candidate| candidate.action == best.action && candidate.immediate_play())
-        {
-            return None;
-        }
+    if !equivalent_clue_handoff(deductions, profile, best, discard, identities) {
+        return None;
     }
-    // Stay below an ordinary guaranteed play (525). This only chooses who
-    // performs a deferrable clue, not whether playing promises is optional.
+    // No current play is available (guarded above). This chooses who gives
+    // the same funded clue before its recipient's turn, not whether to save.
     Some(101 + i32::from(best.score()))
 }
 
@@ -154,6 +154,18 @@ fn unloaded_hand_handoff(
     {
         return false;
     }
+    equivalent_clue_handoff(deductions, profile, best, discard, domain)
+}
+
+fn equivalent_clue_handoff(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+    best: &CompiledClueAction,
+    discard: CardId,
+    domain: crate::IdentitySet,
+) -> bool {
+    let view = deductions.view();
+    let next = next_player(view.observer, view.hands.len());
     let Some(outcome) = super::strategic_value::scheduled_clue_outcome(view, profile, best) else {
         return false;
     };
@@ -179,15 +191,54 @@ fn unloaded_hand_handoff(
         else {
             return false;
         };
+        // Known-trash collateral is not a protected future point. Discard
+        // elimination can identify that trash between the two clue timings;
+        // improved trash knowledge must not invalidate an otherwise identical
+        // Save. Unknown faces remain relevant to this comparison.
+        let useful_protection = |cards: &[CardId]| {
+            cards
+                .iter()
+                .copied()
+                .filter(|card| {
+                    super::identity_of(view, *card)
+                        .is_none_or(|identity| is_eventually_useful(view, identity))
+                })
+                .collect::<Vec<_>>()
+        };
         if later.public_actions != outcome.public_actions
             || later.owner_actions != outcome.owner_actions
-            || later.protected_cards != outcome.protected_cards
+            || useful_protection(&later.protected_cards)
+                != useful_protection(&outcome.protected_cards)
             || later.new_connections != outcome.new_connections
         {
             return false;
         }
     }
     true
+}
+
+pub(super) fn completion_times_after_clue(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+    clue_action: &CompiledClueAction,
+    connector: Card,
+) -> Option<(usize, usize)> {
+    let hanabi_core::Action::Clue { target, clue } = clue_action.action else {
+        return None;
+    };
+    let view = deductions.view();
+    let touched = view.hands[target.index()]
+        .iter()
+        .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
+        .map(|card| card.id)
+        .collect::<Vec<_>>();
+    let mut after = ProspectiveTransition::clue(view, target, clue, &touched);
+    // Both alternatives contain one discard and this clue. Their net token
+    // change is zero. The reserved offsets in completion_times are unchanged.
+    after.clue_tokens = view.clue_tokens;
+    let d = LogicalDeductions::new(after).ok()?;
+    let inferred = super::infer_h_group(&d, profile);
+    completion_times(&d, &inferred, profile, connector)
 }
 
 /// Conditional earliest completion offsets if the connector is drawn now or
@@ -215,6 +266,13 @@ pub(super) fn completion_times(
         }
     }
     let mut suffix = Vec::new();
+    let owner_notes = (0..players)
+        .map(|player| {
+            let actor = super::PlayerId::new(u8::try_from(player).ok()?);
+            let (d, replay) = projector.project(actor, PerspectiveDepth::NestedRecipients)?;
+            Some(super::infer_h_group_from_replay(&d, replay, profile))
+        })
+        .collect::<Option<Vec<_>>>()?;
     for rank in Rank::ALL.iter().skip(usize::from(connector.rank.number())) {
         let identity = Card::new(connector.suit, *rank);
         let mut owners = Vec::new();
@@ -227,8 +285,10 @@ pub(super) fn completion_times(
                             && note.identities.contains(identity)
                     });
                 if card.identity == Some(identity) || known_own {
-                    let exact_clue = card.clues.has_positive_clue(Clue::Suit(identity.suit))
-                        && card.clues.has_positive_clue(Clue::Rank(identity.rank));
+                    let exact_clue = owner_notes[player].cards.iter().any(|note| {
+                        note.card == card.id
+                            && note.identities == crate::IdentitySet::singleton(identity)
+                    });
                     owners.push(ScheduledCard {
                         seat: (player + players - view.observer.index()) % players,
                         needs_clue: !known_own && !exact_clue,

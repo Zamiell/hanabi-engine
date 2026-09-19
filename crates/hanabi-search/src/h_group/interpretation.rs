@@ -1810,6 +1810,34 @@ pub(super) fn advanced_clue_candidates(
             })
             .flatten();
 
+        if max_signal == Some(HGroupMoveKind::TrashPushDischarge) {
+            // Recognition from the blind player's perspective is not proof
+            // that the giver can safely discharge that card. In a forecast,
+            // the root observer's hidden hand must stay hidden to planning;
+            // a receiver's hypothetical y3 cannot supply its own evidence.
+            // https://hanabi.github.io/extras/discharges/#the-trash-push-discharge-tpd
+            let actor = next_player(view.observer, view.hands.len());
+            let safe = super::prospective::compiled_prospective_clue(
+                view, profile, target, clue, &touched,
+            )
+            .and_then(|compiled| compiled.projection(actor))
+            .is_some_and(|projection| {
+                projection.replay.signals.iter().any(|signal| {
+                    signal.turn == view.turn
+                        && signal.kind == HGroupMoveKind::TrashPushDischarge
+                        && signal.target == Some(actor)
+                        && signal
+                            .cards
+                            .first()
+                            .and_then(|card| identity_of(view, *card))
+                            .is_some_and(|identity| is_playable_now(view, identity))
+                })
+            });
+            if !safe {
+                continue;
+            }
+        }
+
         if max_signal == Some(HGroupMoveKind::LieComponentFinesse)
             && clue_focus
                 .and_then(|focus| identity_of(view, focus))

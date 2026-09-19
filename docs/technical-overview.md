@@ -125,12 +125,14 @@ scheduling, the development heuristic compares known progress, ready positional
 access, clue reserves, and exposure; it favors fewer discards when progress and
 required funding are preserved. Surplus tokens do not automatically outweigh
 development. This is a strategic preference, not an exhaustive proof of
-optimality. Clue-versus-clue comparisons retain their causal efficiency and
-Clarity ordering. At equal progress and tokens, additional protection of an
-endangered card can outweigh that newly secured card's waiting slot, but not
-unrelated hand congestion. These scheduling edges take precedence over cycles
-introduced by weaker policy fallbacks. No actual hidden hand or deck order is
-used to fill a projection's unknown cards.
+optimality. Clue-versus-clue comparisons can also prefer strictly greater
+realized progress at a shared horizon when both lines fund their own evidenced
+clue needs and safety does not worsen. Speculative positional access alone
+cannot override causal efficiency and Clarity. At equal progress and tokens,
+additional protection of an endangered card can outweigh that newly secured
+card's waiting slot, but not unrelated hand congestion. These scheduling edges
+take precedence over cycles introduced by weaker policy fallbacks. No actual
+hidden hand or deck order is used to fill a projection's unknown cards.
 
 When every remaining rank is visible or exactly known in the observer's hand,
 funded final-plan clues take precedence over surplus known-trash discards. This
