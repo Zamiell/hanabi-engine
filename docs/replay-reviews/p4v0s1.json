@@ -265,6 +265,52 @@
     "coverageNote": "Focused test checks Donald's p3 connection, the counterfactual immediate r1 response without the g2 promise, and Alice's subsequent r1 connection. Existing Bluff priority and eight connection lifecycle tests pass. Replay action parity passes through the current 24-turn review boundary; later full-game parity was not tested. Fast validation stages pass after correcting and rerunning Clippy."
   },
   {
+    "id": "t28-self-finesse-persists-in-donald-projection",
+    "turn": 28,
+    "positionKey": "415e04471f4b596908dd86a4d256e68ad981d130aa9c1381e1731776c3c2e597",
+    "status": "user-explained",
+    "perspective": "Donald's projection of Alice after the reviewed turn-23 rank-2 clue and turn-25 r1 Self-Finesse",
+    "source": {
+      "conversation": "2026-09-19, applying t24-knowledge-gated-recipient-self-finesse to the later projection",
+      "quote": "the only 2 left is a red 2, so the self finesse will work properly"
+    },
+    "explanation": {
+      "ruling": "Alice must retain r2 #26 as exactly red 2 after the publicly completed r1 Self-Finesse, including when Donald projects her hand without seeing his own r1 #23.",
+      "bug": "The recipient-side admission shortcut could only find an external connector. Hiding Donald's own hand caused it to forget the rank-2 clue's meaning, preventing Alice from playing her r2 and inventing later re-identification clues.",
+      "boundary": "This establishes persistent recipient knowledge, not a user ruling that Donald must choose p4 over purple at turn 28. A direct playable interpretation still blocks Self-Finesse admission."
+    },
+    "regressions": [
+      "h_group::tests::replay::first_seed_self_finesse_survives_nested_hidden_connector",
+      "h_group::tests::replay::first_seed_recipient_self_finesse_requires_no_direct_play_alternative"
+    ]
+  },
+  {
+    "id": "t33-unknown-chop-versus-direct-red-four",
+    "turn": 33,
+    "positionKey": "540ec0e8ce5d41d078c4b7ccb347dcd0b22a5a235dc84af014210619f69c4415",
+    "status": "unresolved",
+    "perspective": "Alice; neither her actual y1 chop nor her newly drawn r5 is visible to her",
+    "source": {
+      "kind": "Engine investigation, not a user ruling",
+      "conversation": "2026-09-19, replay continuation after Self-Finesse fixes"
+    },
+    "explanation": {
+      "agreement": "Fresh analysis agrees with fixture turns 1–32. Turn 33 fixture discards #1; engine gives 4 to Donald.",
+      "candidates": "4 to Donald: PlayClue, 432. Discard #1: 400. Blue to Cathy: TrashEjection, 309. 1 to Cathy: TrashEjection, 308. Other rules-legal clues are excluded by convention admission.",
+      "line": [
+        "Alice clues 4 to Donald",
+        "Bob discards r3 #16",
+        "Cathy clues 5 to Bob",
+        "Donald plays r4 #28"
+      ],
+      "selection": "The discard projection stops before executing Alice's unknown #1. Endpoint comparison is Incomparable, so 4 wins by ConventionPreference (432 versus 400), not a proven endpoint dominance or forced-discard risk comparison. Both Ejections are worse on conditional strikes.",
+      "question": "Should Alice take the risk of her unidentified chop so Bob can clue r4 instead, or clue r4 herself and let Bob discard the visibly useless r3? Is there contextual evidence establishing Alice's old chop as safe? The current interpretation still permits needed y3/g3 and critical cards; the actual y1 cannot justify her decision.",
+      "boundary": "No fixture change or preference exception was introduced. Prior Permission to Discard rulings concern Early Game, which ended earlier in this position. Unknown future draws and Alice's hidden r5 were not used to justify a continuation."
+    },
+    "regressions": [],
+    "coverageNote": "The nested Self-Finesse regression passes; this strategic preference awaits user review."
+  },
+  {
     "id": "t23-rank-two-new-ending",
     "turn": 23,
     "positionKey": "b1be5dcf8255e7cea47fdc8a373a7018c92eb2eedd91aa14de92e8795f3f02d7",

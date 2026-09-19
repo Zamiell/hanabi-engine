@@ -1876,7 +1876,7 @@ fn schedule_connection(
             // Otherwise the recipient may play immediately and the intervening
             // player must demonstrate the connection first.
             // https://hanabi.github.io/level-2/#the-self-finesse
-            let recipient_can_self_finesse = target != view.observer && !recipient_has_direct_play;
+            let recipient_can_self_finesse = !recipient_has_direct_play;
             // If several visible players have the same connector on Finesse
             // Position, the earlier player trusts that the clue is directed
             // at the later visible copy. The clue giver and recipient must

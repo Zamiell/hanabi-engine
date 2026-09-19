@@ -1333,6 +1333,15 @@ pub(in crate::h_group) fn snapshot_play_identities(
     // touched by the clue being interpreted cannot simultaneously serve as
     // lower connectors for its focus: a Prompt must have been clued already.
     // https://hanabi.github.io/level-1/#the-prompt
+    // A recipient with no direct-play alternative may supply the one missing
+    // connector from their own Finesse Position. This must also survive a
+    // nested perspective in which an external player's hand is hidden.
+    // https://hanabi.github.io/level-2/#the-self-finesse
+    let self_finesse_possible = target == view.observer
+        && rule_enabled(profile, HGroupRuleId::BasicMoves)
+        && !identities
+            .iter()
+            .any(|identity| identity.rank.number() == stack_heights[identity.suit.index()] + 1);
     let mask = identities
         .iter()
         .filter(|identity| {
@@ -1353,7 +1362,19 @@ pub(in crate::h_group) fn snapshot_play_identities(
                 stack_heights,
                 Some(HistoricalView::new(view, historical_turn)),
                 allow_blind_reverse_empathy,
-            )
+            ) || (self_finesse_possible
+                && identity.rank.number() == stack_heights[identity.suit.index()] + 2
+                && hands[target.index()]
+                    .iter()
+                    .rev()
+                    .copied()
+                    .find(|card| *card != focus && !gotten.contains(card))
+                    .is_some_and(|card| {
+                        facts[card.index()].allows(Card::new(
+                            identity.suit,
+                            Rank::ALL[usize::from(stack_heights[identity.suit.index()])],
+                        ))
+                    }))
         })
         .fold(0, |mask, identity| mask | (1 << identity.index()));
     IdentitySet::from_mask(mask)

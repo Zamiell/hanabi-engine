@@ -429,6 +429,29 @@ fn assert_first_seed_turn_eighteen_prefers_reviewed_line(analysis: &crate::Posit
 }
 
 #[test]
+fn first_seed_self_finesse_survives_nested_hidden_connector() {
+    // p4v0s1 turn 28: Donald cannot see his own r1, but Alice has publicly
+    // completed the r1 Self-Finesse. Her r2 must not become Unrecognized when
+    // Donald projects Alice's next turn with his own cards hidden.
+    let state = expert_replay_p4v0s1().state_at_turn(27).unwrap();
+    let view = state.view_for(PlayerId::new(3)).unwrap();
+    let (d, r) = PerspectiveProjector::new(&view, HGroupProfile::Max)
+        .project(PlayerId::new(0), PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    let inferred = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+    let note = inferred
+        .cards
+        .iter()
+        .find(|note| note.card == CardId::new(26))
+        .unwrap();
+    assert_eq!(
+        note.identities,
+        IdentitySet::singleton(Card::new(Suit::Red, Rank::Two))
+    );
+    assert!(inferred.playable_now.contains(&CardId::new(26)));
+}
+
+#[test]
 fn first_seed_recipient_self_finesse_requires_no_direct_play_alternative() {
     // User-reviewed p4v0s1 turn 24: the prior g2 Play Clue means Alice
     // cannot interpret 2s as a direct g2 play. Donald can leave r1 to her.
