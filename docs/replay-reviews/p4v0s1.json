@@ -36,14 +36,16 @@
     "explanation": {
       "ruling": "Retrieve the prior explanation before asking the user to repeat it. No new strategic ruling was provided by this message.",
       "warning": "The assistant claimed the general optional-discard principle settled this turn without identifying the exact earlier explanation. That claim is not user approval. The green projection currently reaches a zero-clue frontier, unlike the reviewed turn-11 case.",
-      "nextStep": "Search earlier conversation and Git history for this position and its preceding actions; do not blindly transplant the turn-11 ruling."
+      "recoveredEvidence": "Commit b7882f2 changes red to green at turn 14. Its complete position fingerprint matches the current fixture, confirming this is the same reviewed decision, not a different historical position.",
+      "projectionBoundary": "In Bob's turn-14 green forecast, Alice draws blank #24 on turn 17 and Cathy draws blank #22 on turn 15. At the actual reviewed turn 18, those are visible p2 and p5 respectively. The reviewed turn-18 purple line cannot be copied into turn-14 planning as if these future identities were known.",
+      "nextStep": "Preserve the reviewed green preference. Resolve its justification under blank future draws rather than re-asking whether the user previously chose green, or silently using the turn-18 draw identities."
     },
     "regressions": []
   },
   {
     "id": "historical-t18-purple-versus-red-lines",
     "turn": 18,
-    "positionKey": null,
+    "positionKey": "dc1cdf65965fad0244de9d42ee21ce30692fd37dddc9ef155b274df313abf7b3",
     "status": "user-explained",
     "perspective": "Bob's hypothetical, not omniscient replay truth",
     "source": {
@@ -74,9 +76,10 @@
         "Bob discards #5"
       ],
       "ruling": "User describes the first line as zero BDR and prefers it over the otherwise similar second line with #5 risk.",
-      "warning": "Historical fixture prefix has not been recovered and verified. Do not apply these lines to the current turn 18 without checking the position."
+      "positionVerification": "Recovered commit 8687afa and verified that all setup fields and actions preceding turn 18 match the current fixture. The stable entry ID retains its original historical prefix.",
+      "warning": "This is a turn-18 decision with newly visible draws. It does not authorize using those draw identities in a forecast rooted at turn 14."
     },
     "regressions": [],
-    "coverageNote": "Exact historical position and test linkage still need verification."
+    "coverageNote": "Position verified against commit 8687afa; exact test linkage still needs verification."
   }
 ]
