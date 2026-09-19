@@ -27,7 +27,8 @@
     "id": "t14-prior-explanation-retrieval-needed",
     "turn": 14,
     "positionKey": "e47c317e9665bac6ee75a4c52b35102adf11d16b8752f89d14e923b993434aa9",
-    "status": "unresolved",
+    "status": "superseded",
+    "supersededBy": "t14-green-preserves-purple-four",
     "perspective": "Bob; fixture green to Donald versus engine red to Donald",
     "source": {
       "conversation": "Current task, immediately before the request to create this ledger",
@@ -41,6 +42,31 @@
       "nextStep": "Preserve the reviewed green preference. Resolve its justification under blank future draws rather than re-asking whether the user previously chose green, or silently using the turn-18 draw identities."
     },
     "regressions": []
+  },
+  {
+    "id": "t14-green-preserves-purple-four",
+    "turn": 14,
+    "positionKey": "e47c317e9665bac6ee75a4c52b35102adf11d16b8752f89d14e923b993434aa9",
+    "status": "user-explained",
+    "perspective": "Bob, with all future draws blank",
+    "source": {
+      "conversation": "Current task, immediately before the request to fix turn 14",
+      "quote": "yes. green protects p4. future efficiency is 0.71 at this moment, so the 0 BDR line is most appopriate."
+    },
+    "explanation": {
+      "candidates": ["green to Donald", "red to Donald"],
+      "ruling": "Prefer green: Donald plays g1 instead of discarding needed p4 with zero clues. The extra red-connection efficiency is not worth that identified loss in this position.",
+      "conditions": [
+        "This does not depend on Alice drawing p2 or Cathy drawing p5.",
+        "A speculative later unknown discard does not erase the demonstrated protection of p4, even when that later forecast has zero clues.",
+        "Zero BDR describes the identified-card continuation, not a guarantee that every possible future draw is safe.",
+        "Future efficiency 0.71 is the user's position context, not a newly authorized universal cutoff."
+      ],
+      "implementation": "When aggregate shared-horizon risk counts tie, distinguish identified needed-card losses from optional unknown future losses. Keep required sacrifices, root discards, exposed chop liabilities and known losses beyond the cutoff guarded."
+    },
+    "regressions": [
+      "planner::tests::reviewed_turn_fourteen_preserves_known_card_over_speculative_discard"
+    ]
   },
   {
     "id": "historical-t18-purple-versus-red-lines",

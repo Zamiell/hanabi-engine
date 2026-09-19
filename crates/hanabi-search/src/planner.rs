@@ -1380,6 +1380,57 @@ fn compare_endpoint_evidence(
     }
 }
 
+fn compare_identified_losses(
+    left: &PlannerActionEvaluation,
+    right: &PlannerActionEvaluation,
+    horizon: usize,
+) -> Ordering {
+    // A possible loss at an unknown future discard is not the same evidence
+    // as discarding an identified needed card. When total risk counts tie,
+    // retain this distinction instead of letting speculative risk erase
+    // demonstrated protection. Do not credit merely delaying a known loss
+    // beyond the shared horizon, a required sacrifice, or a root discard.
+    // Reviewed example: p4v0s1 turn 14, green protects Donald's p4 while red
+    // discards it. This does not assume favorable future draws or claim that
+    // the protected line is risk-free forever.
+    let known_prefix = |candidate: &PlannerActionEvaluation| {
+        candidate
+            .projection
+            .steps
+            .iter()
+            .take(horizon)
+            .filter(|step| step.consequences.bottom_deck_risk.is_some())
+            .count()
+    };
+    let known = known_prefix(left).cmp(&known_prefix(right));
+    let preserves_protection = |candidate: &PlannerActionEvaluation| {
+        !candidate.projection.steps.is_empty()
+            && candidate
+                .projection
+                .unresolved_discard
+                .is_some_and(|discard| discard.bottom_deck_risk && !discard.required_protection)
+            && candidate.symbolic_line.position_value.is_some_and(|value| {
+                value.exposed_chop_quality == crate::SecuredCardQuality::default()
+            })
+    };
+    if known != Ordering::Equal
+        && known
+            == left
+                .projection
+                .maximum_bottom_deck_risks()
+                .cmp(&right.projection.maximum_bottom_deck_risks())
+        && match known {
+            Ordering::Less => preserves_protection(left),
+            Ordering::Greater => preserves_protection(right),
+            Ordering::Equal => false,
+        }
+    {
+        known
+    } else {
+        Ordering::Equal
+    }
+}
+
 fn compare_bottom_deck_risks(
     left: &PlannerActionEvaluation,
     right: &PlannerActionEvaluation,
@@ -1392,6 +1443,12 @@ fn compare_bottom_deck_risks(
     let left_prefix = left.projection.bottom_deck_risks_at(horizon);
     let right_prefix = right.projection.bottom_deck_risks_at(horizon);
     let prefix = left_prefix.cmp(&right_prefix);
+    if prefix == Ordering::Equal {
+        let identified = compare_identified_losses(left, right, horizon);
+        if identified != Ordering::Equal {
+            return identified;
+        }
+    }
     // A worsened chop remains a liability when a short projection stops
     // before discarding it. It cannot prove risk avoidance, but also must
     // not be counted as an executed loss.
@@ -2023,6 +2080,46 @@ impl std::error::Error for PlannerError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewed_turn_fourteen_preserves_known_card_over_speculative_discard() {
+        // User-reviewed p4v0s1 turn 14: green protects p4. At future
+        // efficiency 0.71 there is no need to sacrifice it for red's extra
+        // efficiency. Analyze only Bob's view, not future deck identities.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(13).unwrap();
+        let analysis = crate::analyze_position(
+            &state.view_for(state.current_player()).unwrap(),
+            SupportedConvention::HGroup(crate::HGroupProfile::Max),
+            PlannerConfig::default(),
+        )
+        .unwrap();
+        let clue = |suit| Action::Clue {
+            target: hanabi_core::PlayerId::new(3),
+            clue: hanabi_core::Clue::Suit(suit),
+        };
+        let candidate = |suit| {
+            analysis
+                .planner
+                .root_actions
+                .iter()
+                .find(|c| c.action == clue(suit))
+                .unwrap()
+        };
+        let red = candidate(hanabi_core::Suit::Red);
+        let green = candidate(hanabi_core::Suit::Green);
+        assert!(red.projection.steps.iter().any(|step| {
+            step.projected.action == Action::Discard(hanabi_core::CardId::new(12))
+                && step.consequences.bottom_deck_risk.is_some()
+        }));
+        assert_eq!(green.projection.maximum_bottom_deck_risks(), 0);
+        assert_eq!(compare_bottom_deck_risks(red, green), Ordering::Greater);
+        assert_eq!(compare_bottom_deck_risks(green, red), Ordering::Less);
+        assert_eq!(analysis.planner.best_action, clue(hanabi_core::Suit::Green));
+    }
 
     #[test]
     fn reviewed_turn_eleven_optional_future_discard_does_not_cancel_immediate_risk() {
