@@ -120,6 +120,56 @@
     ]
   },
   {
+    "id": "t20-green-versus-purple-scheduling-question",
+    "turn": 20,
+    "positionKey": "0d7a6a200e159308a030575cdf6f4da82fb68849b6cd16a921c9d94af18abe96",
+    "status": "unresolved",
+    "perspective": "Donald at turn 20; future draws remain blank",
+    "source": {
+      "kind": "Engine investigation, not a user-approved strategic ruling",
+      "conversation": "2026-09-19, replay scan after the turn-23 continuation rewrite"
+    },
+    "explanation": {
+      "established": "The current engine agrees through turn 19, then selects green to Cathy over the fixture's purple to Cathy. Green became admissible after removing the rejection of a new playable focus that also retouches an older delayed card.",
+      "greenLineFromTurn20": [
+        "green to Cathy",
+        "Alice plays p2 #24",
+        "Bob plays b5 #17",
+        "Cathy clues red to Alice",
+        "Donald plays p3 #14",
+        "Alice plays r1 #21",
+        "Bob discards p4 #5",
+        "Cathy plays g2 #25",
+        "Donald plays p4 #12",
+        "Alice clues red to Cathy",
+        "Bob discards r3 #16",
+        "Cathy plays r2 #18",
+        "Donald plays r3 #13",
+        "Alice clues purple to Cathy"
+      ],
+      "purpleLineFromTurn20": [
+        "purple to Cathy",
+        "Alice plays p2 #24",
+        "Bob plays b5 #17",
+        "Cathy clues red to Alice",
+        "Donald plays p3 #14",
+        "Alice Generation Discards y1 #1",
+        "Bob clues 2s to Cathy",
+        "Cathy plays g2 #25",
+        "Donald plays p4 #12",
+        "Alice plays r1 #21",
+        "Bob discards p4 #5",
+        "Cathy plays p5 #22",
+        "Donald clues 4s to Alice"
+      ],
+      "comparison": "Neither forecast records a strike or identified BDR loss. The green/purple endpoint comparison is Incomparable; the fallback prefers green's priority 393 over purple's 333. Green has base 333, opportunity penalty 40 and scheduling adjustment +100; purple has base 393, teamwork penalty 160 and scheduling adjustment +100. These scores are engine evidence, not proof of optimality. The global preference graph contains cycles.",
+      "question": "Is green first acceptable because Cathy can remain occupied until p5 is clued later, or should establishing p5 now take priority despite the additional Generation Discard and later g2 clue? The earlier reviewed comparison was purple versus 5s, not green versus purple.",
+      "boundary": "Do not copy the revised actual turn-23 rank-2 clue into this forecast: it touches Alice's future draw #26, which Donald cannot know at turn 20. The forecast's p4 and r3 duplication safety uses Donald's convention knowledge, not hidden actual identities. Pending unknown discards are optional forecasts, not inevitable losses."
+    },
+    "regressions": [],
+    "coverageNote": "Full replay comparison stopped at turn 20 (82.27s execution, plus 52.24s rebuild). No engine or fixture change was made for this unresolved comparison."
+  },
+  {
     "id": "t23-rank-two-new-ending",
     "turn": 23,
     "positionKey": "b1be5dcf8255e7cea47fdc8a373a7018c92eb2eedd91aa14de92e8795f3f02d7",
