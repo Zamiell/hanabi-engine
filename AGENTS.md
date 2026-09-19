@@ -146,6 +146,16 @@ inference to a user ruling. Before asking the user a convention question, check
 these records and accessible conversation history; explain any genuinely new
 condition instead of asking them to repeat an established explanation.
 
+Also read `docs/replay-reviews/principles.md` for cross-position rulings. An
+implementation guard is not itself a convention rule: before treating a changed
+actor, turn, or preceding action as a new exception, identify documentation or a
+user ruling that makes that distinction relevant. If the guard merely omits a
+case of an already-reviewed principle, fix the omission. For repeated mistakes,
+add a principle-level record and a table-driven regression across the reviewed
+positions, testing the inference and its downstream evaluation rather than only
+the final move. Include negative controls so the fix does not assume hidden
+identities or apply without its evidentiary conditions.
+
 After fixture edits, inspect affected review anchors. Do not silently refresh
 hashes or apply stale notes as current authority. Preserve historical reasoning,
 mark superseded decisions, and re-anchor only after verifying that the same

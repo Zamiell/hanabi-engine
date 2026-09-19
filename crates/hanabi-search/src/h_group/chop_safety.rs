@@ -50,19 +50,39 @@ pub(super) fn discard_domain(
         }) {
             break;
         }
-        if !matches!(entry.event, ObservedEvent::Played { player, successful: true, .. }
-            if next_player(player, view.hands.len()) == view.observer)
-        {
+        let actor = match entry.event {
+            ObservedEvent::Played {
+                player,
+                successful: true,
+                ..
+            } => player,
+            ObservedEvent::Clued { giver, .. } => giver,
+            _ => continue,
+        };
+        if next_player(actor, view.hands.len()) != view.observer {
             continue;
         }
-        let snapshot = after_historical_turn(view, entry.turn);
+        let snapshot = before_historical_turn(view, entry.turn + 1);
         if !snapshot.hands[view.observer.index()]
             .iter()
             .any(|held| held.id == card)
         {
             break;
         }
-        if let Some(before) = before_ordinary_play(&snapshot) {
+        let before = match entry.event {
+            // Giving a different clue is also a declined protection
+            // opportunity. Saving somebody else, or leaving this player a
+            // clue to give, does not waive Save Principle for their exposed
+            // chop. The same historical obligation guards apply below.
+            // https://hanabi.github.io/beginner/save-principle/
+            ObservedEvent::Clued { .. } => {
+                let mut before = before_historical_turn(view, entry.turn);
+                before.current_player = actor;
+                Some(before)
+            }
+            _ => before_ordinary_play(&snapshot),
+        };
+        if let Some(before) = before {
             allowed = declined_protection_domain(&before, profile, card, allowed);
         }
     }
@@ -120,7 +140,7 @@ fn declined_protection_domain(
 
 /// Reuse the historical observation constructor; never import future clues,
 /// draws, stack heights, or the observer's later-revealed card identities.
-fn after_historical_turn(source: &PlayerView, turn: u32) -> PlayerView {
+fn before_historical_turn(source: &PlayerView, turn: u32) -> PlayerView {
     let mut hands = source
         .hands
         .iter()
@@ -131,7 +151,7 @@ fn after_historical_turn(source: &PlayerView, turn: u32) -> PlayerView {
         .history
         .iter()
         .rev()
-        .take_while(|entry| entry.turn > turn)
+        .take_while(|entry| entry.turn >= turn)
     {
         match entry.event {
             ObservedEvent::Drew { player, card, .. } => {
@@ -146,7 +166,7 @@ fn after_historical_turn(source: &PlayerView, turn: u32) -> PlayerView {
     for hand in &mut hands {
         hand.sort_unstable();
     }
-    let end = source.history.partition_point(|entry| entry.turn <= turn);
+    let end = source.history.partition_point(|entry| entry.turn < turn);
     let history = &source.history[..end];
     let mut facts = vec![
         ClueFacts::default();

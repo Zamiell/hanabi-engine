@@ -1,9 +1,31 @@
 [
   {
+    "id": "t40-save-principle-applies-after-other-save",
+    "turn": 40,
+    "positionKey": "7ed723c172c65a68d32fa1c90a23dc5f032ef96a9dd5b551d4308b8417c79aa3",
+    "status": "user-explained",
+    "perspective": "Donald; his actual #23 face remains hidden",
+    "source": {
+      "conversation": "2026-09-19, correction of the repeated turn-40 Save Principle question",
+      "quote": "#23 cannot be y3/g3 because of Save Principal. Make sure that you update the engine to account for this.",
+      "url": "https://hanabi.github.io/beginner/save-principle"
+    },
+    "explanation": {
+      "supersedes": "t40-declined-play-clue-during-critical-save",
+      "reason": "The earlier Save Principle ruling also applies here. Cathy's preceding Save to Alice and Donald's available 5 Save are not exceptions allowing his exposed chop to retain unique playable y3/g3 possibilities.",
+      "implementation": "Historical declined-protection analysis accepts clue actions as well as ordinary plays, using the giver's actual historical turn and the same recipient-obligation guards. The reduced domain feeds discard risk without changing literal identity knowledge.",
+      "boundary": "This settles the inference and zero BDR, not a new unconditional rule that every unknown card is trash. No fixture changes."
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_save_principle_exclusions_apply_after_plays_and_clues",
+      "h_group::tests::replay::first_seed_donald_discard_does_not_invent_playable_three_risk"
+    ]
+  },
+  {
     "id": "t40-declined-play-clue-during-critical-save",
     "turn": 40,
     "positionKey": "7ed723c172c65a68d32fa1c90a23dc5f032ef96a9dd5b551d4308b8417c79aa3",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Donald; #23's actual red 1 remains hidden",
     "source": {
       "conversation": "2026-09-19, continuation after the turn-38 Save Principle correction",

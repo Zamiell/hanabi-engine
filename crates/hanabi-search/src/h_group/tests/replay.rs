@@ -1,6 +1,65 @@
 use super::*;
 
 #[test]
+fn reviewed_save_principle_exclusions_apply_after_plays_and_clues() {
+    // The user's p4v0s1 rulings at live turns 33, 38 and 40 establish
+    // the same inference, not three independent strategic exceptions.
+    for (turn, id) in [(33, 1), (38, 16), (40, 23)] {
+        let state = expert_replay_p4v0s1().state_at_turn(turn - 1).unwrap();
+        let view = state.view_for(state.current_player()).unwrap();
+        let d = LogicalDeductions::new(view.clone()).unwrap();
+        let notes = infer_h_group(&d, HGroupProfile::Max);
+        let card = CardId::new(id);
+        let literal = d.possible_identities(card).unwrap();
+        let domain =
+            super::super::chop_safety::discard_domain(&d, &notes, HGroupProfile::Max, card)
+                .unwrap();
+        for suit in [Suit::Yellow, Suit::Green] {
+            let identity = Card::new(suit, Rank::Three);
+            assert!(literal.contains(identity));
+            assert!(!domain.contains(identity), "turn {turn}: {identity:?}");
+        }
+        assert!(!domain.is_empty());
+        assert_eq!(d.possible_identities(card), Some(literal));
+        // This is historical convention evidence, not permission to assume
+        // every unclued card is safe without a protection opportunity.
+        let mut without_history = view;
+        without_history.history.clear();
+        let without_history = LogicalDeductions::new(without_history).unwrap();
+        assert_eq!(
+            super::super::chop_safety::discard_domain(
+                &without_history,
+                &notes,
+                HGroupProfile::Max,
+                card,
+            ),
+            without_history.possible_identities(card)
+        );
+    }
+}
+
+#[test]
+fn first_seed_donald_discard_does_not_invent_playable_three_risk() {
+    // User-reviewed live turn 40: an available 5 Save is not grounds to
+    // reintroduce excluded y3/g3 possibilities into Donald's BDR estimate.
+    let state = expert_replay_p4v0s1().state_at_turn(39).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    let discard = analysis
+        .planner
+        .root_actions
+        .iter()
+        .find(|action| action.action == Action::Discard(CardId::new(23)))
+        .unwrap();
+    assert_eq!(discard.projection.forecast_discard_risk(), Some(0));
+}
+
+#[test]
 fn first_seed_forecast_discharge_needs_giver_evidence() {
     // Bug-reproduction branch from reviewed turn 39, not an optimal line:
     // after yellow Save and trash discards, Bob cannot assume Cathy's
