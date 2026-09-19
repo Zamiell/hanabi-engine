@@ -1525,9 +1525,17 @@ fn compare_save_principle_risks(
             .min(right.projection.common_horizon()),
     )
     .max(1);
+    // A critical-card discard makes the corresponding score unattainable.
+    // Do not equate it with risking an otherwise recoverable copy merely
+    // because each line contains one Save Principle violation.
     left.projection
-        .save_violations_at(horizon)
-        .cmp(&right.projection.save_violations_at(horizon))
+        .critical_losses_at(horizon)
+        .cmp(&right.projection.critical_losses_at(horizon))
+        .then_with(|| {
+            left.projection
+                .save_violations_at(horizon)
+                .cmp(&right.projection.save_violations_at(horizon))
+        })
 }
 
 #[allow(clippy::too_many_lines)]

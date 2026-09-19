@@ -1253,6 +1253,22 @@ pub(super) fn emergency_discard_is_required(
     {
         return false;
     }
+    // Completing a known playable 5 generates the token without sacrificing
+    // a card. A Scream Discard is a last resort, not a mandatory substitute
+    // for that play. Leave both actions to ordinary planning instead of
+    // restricting the candidate set to discards. Use the actor's knowledge,
+    // never the hidden actual identity or an assumed successful blind play.
+    // https://hanabi.github.io/level-7/#the-scream-discard-chop-move-sdcm
+    if inferred.cards.iter().any(|card| {
+        inferred.playable_now.contains(&card.card)
+            && !card.identities.is_empty()
+            && card
+                .identities
+                .iter()
+                .all(|identity| identity.rank == Rank::Five && is_playable_now(view, identity))
+    }) {
+        return false;
+    }
     let target = next_player(view.current_player, view.hands.len());
     if target_is_occupied(view, replay, target) {
         return false;

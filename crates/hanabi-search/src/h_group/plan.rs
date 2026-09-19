@@ -252,6 +252,26 @@ impl ProjectionEvidence {
         self.save_violations_at(usize::MAX)
     }
 
+    /// Losing the last useful copy removes an attainable point; other Save
+    /// Principle violations can still leave a recoverable copy in the deck.
+    pub(crate) fn critical_losses_at(&self, horizon: usize) -> usize {
+        let prefix = self
+            .steps
+            .iter()
+            .take(horizon)
+            .filter(|step| {
+                step.consequences.save_principle_violation
+                    == Some(SavePrincipleViolation::CriticalCard)
+            })
+            .count();
+        self.clue_branches
+            .iter()
+            .map(|branch| branch.continuation.critical_losses_at(horizon))
+            .max()
+            .unwrap_or(0)
+            .max(prefix)
+    }
+
     /// Losses observed within a comparable prefix, not in a longer forecast's
     /// speculative tail. The full diagnostic count remains available above.
     pub(crate) fn save_violations_at(&self, horizon: usize) -> usize {
@@ -682,6 +702,13 @@ mod tests {
         assert_eq!(evidence.maximum_save_violations(), 1);
         assert_eq!(evidence.save_violations_at(1), 0);
         assert_eq!(evidence.save_violations_at(2), 1);
+        assert_eq!(evidence.critical_losses_at(2), 0);
+        let mut critical = evidence.clone();
+        critical.clue_branches[1].continuation.steps[1]
+            .consequences
+            .save_principle_violation = Some(SavePrincipleViolation::CriticalCard);
+        assert_eq!(critical.critical_losses_at(1), 0);
+        assert_eq!(critical.critical_losses_at(2), 1);
     }
 
     #[test]

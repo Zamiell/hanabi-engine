@@ -222,6 +222,62 @@ fn first_seed_demonstrated_reverse_layer_survives_nonadjacent_recipient() {
     assert!(inferred.demonstrated_connections.contains(&CardId::new(21)));
 }
 
+#[test]
+fn first_seed_fives_chop_move_prevents_critical_purple_five_loss() {
+    // Reviewed turn-18 continuation: Donald must save Cathy's p5 at turn
+    // 20, not give red and discard that critical card in the continuation.
+    let state = expert_replay_p4v0s1().state_at_turn(19).unwrap();
+    let analysis = crate::analyze_position(
+        &state.view_for(state.current_player()).unwrap(),
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    let five = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Rank(Rank::Five),
+    };
+    let red = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Suit(Suit::Red),
+    };
+    // This regression covers the identified critical-loss comparison, not
+    // the still-unresolved generation-discard continuation of other clues.
+    assert!(analysis.planner.comparisons.iter().any(|comparison| {
+        ((comparison.left == five && comparison.right == red)
+            || (comparison.left == red && comparison.right == five))
+            && comparison.preferred == five
+            && comparison.reason == crate::ComparisonReason::SavePrinciple
+    }));
+}
+
+#[test]
+fn first_seed_known_five_refund_does_not_force_scream_discard() {
+    // User-reviewed purple line from p4v0s1 turn 18: at turn 22 Bob plays
+    // b5, returning a clue. Level 7 forbids forcing the riskier Scream when
+    // a less dangerous way to provide the token is available.
+    let state = expert_replay_p4v0s1().state_at_turn(21).unwrap();
+    assert_eq!(
+        state.view_for(state.current_player()).unwrap().clue_tokens,
+        0
+    );
+    let analysis = crate::analyze_position(
+        &state.view_for(state.current_player()).unwrap(),
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    let expected = Action::Play(CardId::new(17));
+    assert!(
+        analysis
+            .planner
+            .root_actions
+            .iter()
+            .any(|c| c.action == expected)
+    );
+    assert_eq!(analysis.planner.best_action, expected);
+}
+
 fn assert_first_seed_turn_eighteen_prefers_reviewed_line(analysis: &crate::PositionAnalysis) {
     assert_eq!(
         analysis.planner.best_action,

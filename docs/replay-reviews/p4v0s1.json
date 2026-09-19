@@ -69,6 +69,26 @@
     ]
   },
   {
+    "id": "t20-generation-discard-continuation-question",
+    "turn": 20,
+    "positionKey": "0d7a6a200e159308a030575cdf6f4da82fb68849b6cd16a921c9d94af18abe96",
+    "status": "unresolved",
+    "perspective": "Donald at turn 20, not Bob at turn 18",
+    "source": {
+      "kind": "Engine investigation; not a user-approved interpretation",
+      "documentation": "https://hanabi.github.io/level-7/#the-generation-discard"
+    },
+    "explanation": {
+      "established": "The reviewed 5s clue protects p5; red to Cathy instead projects a critical p5 discard. Counting that as equivalent to risking a noncritical 2 was fixed. A known b5 token refund must also remain an alternative to a forced Scream Discard.",
+      "question": "After 5s or purple to Cathy, should Alice Generation Discard at turn 25 rather than play r1, to let Bob save Cathy's 2? Her chop #1 is y1 visible to Donald, not known trash to Alice. In the purple branch r2 would become playable only if Alice plays r1; the Generation Discard paragraph names critical/playable cards, unlike the Scream paragraph which explicitly includes needed 2s.",
+      "warning": "Do not interpret the engine's current purple selection as user approval; the pairwise comparisons cycle and the continuation remains under investigation."
+    },
+    "regressions": [
+      "h_group::tests::replay::first_seed_fives_chop_move_prevents_critical_purple_five_loss",
+      "h_group::tests::replay::first_seed_known_five_refund_does_not_force_scream_discard"
+    ]
+  },
+  {
     "id": "historical-t18-purple-versus-red-lines",
     "turn": 18,
     "positionKey": "dc1cdf65965fad0244de9d42ee21ce30692fd37dddc9ef155b274df313abf7b3",
@@ -105,7 +125,10 @@
       "positionVerification": "Recovered commit 8687afa and verified that all setup fields and actions preceding turn 18 match the current fixture. The stable entry ID retains its original historical prefix.",
       "warning": "This is a turn-18 decision with newly visible draws. It does not authorize using those draw identities in a forecast rooted at turn 14."
     },
-    "regressions": [],
-    "coverageNote": "Position verified against commit 8687afa; exact test linkage still needs verification."
+    "regressions": [
+      "h_group::tests::replay::first_seed_turn_eighteen_compares_reviewed_full_lines",
+      "h_group::tests::replay::first_seed_known_five_refund_does_not_force_scream_discard"
+    ],
+    "coverageNote": "Position verified against commit 8687afa. Full-line test covers the reviewed branch; the turn-22 test ensures the known b5 refund remains available instead of forcing a Scream Discard. Test links are not a claim that every linked test currently passes."
   }
 ]
