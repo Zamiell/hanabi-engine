@@ -158,6 +158,26 @@ impl ReplayReducer {
     ) -> HGroupState {
         let view = deductions.view();
         for (entry_index, entry) in view.history.iter().enumerate() {
+            // An ordinary clued play can decline a fresh blind response,
+            // unlike fulfilling an older Finesse. The connection manager uses
+            // this only for a knowledge-gated recipient Self-Finesse fallback.
+            let ordinary_clued_play = match &entry.event {
+                ObservedEvent::Played {
+                    player,
+                    card,
+                    successful: true,
+                    ..
+                } => {
+                    self.explicitly_clued.contains(card)
+                        && !self.pending_connections.iter().any(|connection| {
+                            connection.actor == *player
+                                && connection.cards.contains(card)
+                                && connection.kind == HGroupConnectionKind::Finesse
+                                && self.pending_connections.is_active(connection)
+                        })
+                }
+                _ => false,
+            };
             let played_obligation = match &entry.event {
                 ObservedEvent::Played { player, card, .. } => {
                     self.forced_playable.contains(card)
@@ -312,10 +332,14 @@ impl ReplayReducer {
                 }
                 _ => None,
             };
-            self.pending_connections.resolve_deferred_prompts(
+            self.pending_connections.resolve_deferred_connections(
                 entry.turn,
-                declined_actor.unwrap_or(view.observer),
+                declined_actor.unwrap_or(match entry.event {
+                    ObservedEvent::Played { player, .. } => player,
+                    _ => view.observer,
+                }),
                 declined_actor.is_some(),
+                ordinary_clued_play,
                 context.before.stack_heights,
                 self.stack_heights,
             );

@@ -1455,6 +1455,23 @@ fn schedule_connection(
         1
     };
     let mut actor_index = (giver.index() + 1) % hands.len();
+    // A Self-Finesse is a last resort. Public claims must predate this clue;
+    // neither a visible duplicate nor this clue's own interpretation rules
+    // out the recipient's direct-play alternative.
+    // https://hanabi.github.io/level-2/#the-self-finesse
+    let recipient_has_direct_play = Suit::ALL.into_iter().any(|suit| {
+        let Some(rank) = Rank::ALL.get(usize::from(stack_heights[suit.index()])) else {
+            return false;
+        };
+        let identity = Card::new(suit, *rank);
+        clue.matches(identity)
+            && facts[focus.index()].allows(identity)
+            && !hands.iter().flatten().any(|card| {
+                *card != focus
+                    && promptable_before_clue.contains(card)
+                    && convention_facts.known_identity_before(*card, turn) == Some(identity)
+            })
+    });
     let mut scheduled_cards = CardSet::default();
     let mut reverse_cycle_started = false;
     for offset in 0..connection_count {
@@ -1852,6 +1869,14 @@ fn schedule_connection(
             }
         }
         if found.is_none() {
+            // A visible recipient connector can resolve the ambiguity only
+            // when the recipient cannot mistake the focus for a direct play.
+            // Mere visibility of another copy is insufficient: require an
+            // established, clue-time identity claim on a physically clued card.
+            // Otherwise the recipient may play immediately and the intervening
+            // player must demonstrate the connection first.
+            // https://hanabi.github.io/level-2/#the-self-finesse
+            let recipient_can_self_finesse = target != view.observer && !recipient_has_direct_play;
             // If several visible players have the same connector on Finesse
             // Position, the earlier player trusts that the clue is directed
             // at the later visible copy. The clue giver and recipient must
@@ -1862,7 +1887,9 @@ fn schedule_connection(
             let visible_finesse_actors = (0..search_len)
                 .filter_map(|distance| {
                     let candidate_index = (actor_index + distance) % hands.len();
-                    if candidate_index == target.index() || candidate_index == giver.index() {
+                    if (candidate_index == target.index() && !recipient_can_self_finesse)
+                        || candidate_index == giver.index()
+                    {
                         return None;
                     }
                     let card = hands[candidate_index].iter().rev().copied().find(|card| {
@@ -1894,7 +1921,7 @@ fn schedule_connection(
                     u8::try_from(candidate_index)
                         .expect("standard Hanabi has at most five players"),
                 );
-                if target == actor || giver == actor {
+                if (target == actor && !recipient_can_self_finesse) || giver == actor {
                     continue;
                 }
                 let gotten = promptable_before_clue
@@ -2071,7 +2098,7 @@ fn schedule_connection(
             && visible_prompt_alternative.is_some_and(|(visible, _)| visible == actor)
         {
             if let Some((actor, cards)) = deferred_prompt {
-                pending.defer_prompt(
+                pending.defer_connection(
                     promise,
                     ConnectionObligation {
                         promise: PromiseId::UNASSIGNED,
@@ -2080,6 +2107,46 @@ fn schedule_connection(
                         expected,
                         focus_identity,
                         kind: HGroupConnectionKind::Prompt,
+                        focus,
+                        step: offset,
+                    },
+                );
+            }
+        }
+        if kind == HGroupConnectionKind::Finesse
+            && target == view.observer
+            && actor == next_player(giver, hands.len())
+            && actor != target
+            && !recipient_has_direct_play
+        {
+            // The recipient initially trusts the visible connector. If the
+            // immediately following player takes an ordinary clued play
+            // instead of showing the blind response, the recipient can infer
+            // the Self-Finesse. Keep this dormant until that evidence arrives.
+            let cards = hands[target.index()]
+                .iter()
+                .rev()
+                .copied()
+                .filter(|card| {
+                    *card != focus
+                        && !same_clue_touched.contains(card)
+                        && !promptable_before_clue.contains(card)
+                        && !invisibly_clued.contains(card)
+                        && !scheduled_cards.contains(card)
+                })
+                .take(1)
+                .filter(|card| facts[card.index()].allows(expected))
+                .collect::<Vec<_>>();
+            if !cards.is_empty() {
+                pending.defer_connection(
+                    promise,
+                    ConnectionObligation {
+                        promise: PromiseId::UNASSIGNED,
+                        actor: target,
+                        cards,
+                        expected,
+                        focus_identity,
+                        kind: HGroupConnectionKind::Finesse,
                         focus,
                         step: offset,
                     },

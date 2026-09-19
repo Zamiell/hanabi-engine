@@ -99,7 +99,7 @@ pub(super) struct ConnectionManager {
     transitions: Vec<ConnectionTransition>,
     provenance: Vec<PromiseProvenance>,
     next_promise: u32,
-    deferred_prompts: Vec<(PromiseId, ConnectionObligation)>,
+    deferred_connections: Vec<(PromiseId, ConnectionObligation)>,
 }
 
 /// Semantic relationship between a clue and an existing connection chain.
@@ -115,27 +115,34 @@ pub(super) enum ConnectionClueMatch {
 }
 
 impl ConnectionManager {
-    /// A possible own Prompt waits for the visible Finesse to be tried first.
+    /// A possible own connection waits for the visible Finesse to be tried first.
     /// <https://hanabi.github.io/level-5/#the-ambiguous-finesse>
-    pub(super) fn defer_prompt(&mut self, visible: PromiseId, fallback: ConnectionObligation) {
+    pub(super) fn defer_connection(&mut self, visible: PromiseId, fallback: ConnectionObligation) {
         if visible != PromiseId::UNASSIGNED
-            && !self.deferred_prompts.iter().any(|(id, _)| *id == visible)
+            && !self
+                .deferred_connections
+                .iter()
+                .any(|(id, _)| *id == visible)
         {
-            self.deferred_prompts.push((visible, fallback));
+            self.deferred_connections.push((visible, fallback));
         }
     }
 
     /// Only an actionable, unexcused decline transfers the obligation. Playing
     /// a prerequisite or taking an urgent action is not a failed opportunity.
-    pub(super) fn resolve_deferred_prompts(
+    /// A recipient Self-Finesse also resolves when the apparent blind player
+    /// chooses an ordinary clued play. That evidence does not transfer a
+    /// deferred Prompt, which follows its existing decline rule.
+    pub(super) fn resolve_deferred_connections(
         &mut self,
         turn: u32,
         actor: PlayerId,
         declined: bool,
+        ordinary_clued_play: bool,
         before_heights: [u8; 5],
         after_heights: [u8; 5],
     ) {
-        let deferred = core::mem::take(&mut self.deferred_prompts);
+        let deferred = core::mem::take(&mut self.deferred_connections);
         for (visible, fallback) in deferred {
             if after_heights[fallback.expected.suit.index()] >= fallback.expected.rank.number() {
                 continue;
@@ -143,7 +150,7 @@ impl ConnectionManager {
             let Some(connection) = self.active.iter().find(|item| item.promise == visible) else {
                 continue;
             };
-            if declined
+            if (declined || (ordinary_clued_play && fallback.kind == HGroupConnectionKind::Finesse))
                 && connection.actor == actor
                 && self.is_active(connection)
                 && before_heights[fallback.expected.suit.index()] + 1
@@ -156,7 +163,7 @@ impl ConnectionManager {
                 );
                 self.start(turn, fallback);
             } else {
-                self.deferred_prompts.push((visible, fallback));
+                self.deferred_connections.push((visible, fallback));
             }
         }
     }
@@ -789,23 +796,25 @@ mod tests {
         let promise = manager.start(3, visible);
         let mut fallback = obligation(vec![CardId::new(7)]);
         fallback.actor = PlayerId::new(2);
-        manager.defer_prompt(promise, fallback);
+        manager.defer_connection(promise, fallback);
         // A turn before the prerequisite plays is not an opportunity.
-        manager.resolve_deferred_prompts(4, PlayerId::new(1), true, [0; 5], [0; 5]);
+        manager.resolve_deferred_connections(4, PlayerId::new(1), true, false, [0; 5], [0; 5]);
         assert_eq!(manager.active[0].actor, PlayerId::new(1));
         // Nor is an excused turn, even after the prerequisite plays.
-        manager.resolve_deferred_prompts(
+        manager.resolve_deferred_connections(
             8,
             PlayerId::new(1),
+            false,
             false,
             [1, 0, 0, 0, 0],
             [1, 0, 0, 0, 0],
         );
         assert_eq!(manager.active[0].actor, PlayerId::new(1));
-        manager.resolve_deferred_prompts(
+        manager.resolve_deferred_connections(
             12,
             PlayerId::new(1),
             true,
+            false,
             [1, 0, 0, 0, 0],
             [1, 0, 0, 0, 0],
         );
@@ -820,7 +829,7 @@ mod tests {
         let promise = manager.start(3, obligation(vec![CardId::new(5)]));
         let mut fallback = obligation(vec![CardId::new(7)]);
         fallback.actor = PlayerId::new(2);
-        manager.defer_prompt(promise, fallback);
+        manager.defer_connection(promise, fallback);
         manager.advance_play(
             4,
             PlayerId::new(1),
@@ -828,14 +837,15 @@ mod tests {
             Card::new(Suit::Red, Rank::Two),
             true,
         );
-        manager.resolve_deferred_prompts(
+        manager.resolve_deferred_connections(
             4,
             PlayerId::new(1),
+            false,
             false,
             [1, 0, 0, 0, 0],
             [2, 0, 0, 0, 0],
         );
-        assert!(manager.deferred_prompts.is_empty());
+        assert!(manager.deferred_connections.is_empty());
         assert!(manager.active.is_empty());
     }
 

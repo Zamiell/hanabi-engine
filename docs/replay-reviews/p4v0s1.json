@@ -213,7 +213,7 @@
     "id": "t24-prompt-versus-new-red-connection",
     "turn": 24,
     "positionKey": "7e843dca2bf94946d6aa46a5af3dd784df7a311be7b221cd8b0a65a4583ad929",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Donald at actual turn 24, after Cathy's rank-2 clue to Alice",
     "source": {
       "kind": "Engine investigation; not a user-approved interpretation",
@@ -240,7 +240,29 @@
       "boundary": "Do not silently remove the fresh-Bluff priority behavior: first_seed_fresh_bluff_precedes_an_older_clued_prompt covers a historical rank-4 Bluff branch. This question concerns the current rank-2 clue. No code or fixture changes were made to force agreement."
     },
     "regressions": [],
-    "coverageNote": "fifth_expert_replay_matches_engine fails at turn 24 after agreeing through turn 23. A fresh explanation confirms the forced action and absence of pairwise comparisons."
+    "coverageNote": "Superseded by t24-knowledge-gated-recipient-self-finesse. This record preserves the original investigation, not the resolved convention meaning."
+  },
+  {
+    "id": "t24-knowledge-gated-recipient-self-finesse",
+    "turn": 24,
+    "positionKey": "7e843dca2bf94946d6aa46a5af3dd784df7a311be7b221cd8b0a65a4583ad929",
+    "status": "user-explained",
+    "perspective": "Donald's interpretation of Cathy's rank-2 clue to Alice; Alice's clue-time knowledge, not Donald's hidden r1",
+    "source": {
+      "conversation": "2026-09-19, correction of turn-24 connection priority",
+      "quote": "but here, since green 2 is globally known to already be given a play clue, the only 2 left is a red 2, so the self finesse will work properly, so donald does not have to blind play and should assume that it is on the other person."
+    },
+    "explanation": {
+      "ruling": "Donald defers to Alice's visible r1 on Finesse Position and plays his already-promised p3. Alice subsequently Self-Finesses r1.",
+      "knowledgeGate": "The prior green Play Clue establishes Cathy's g2. Good Touch excludes that direct-play interpretation for Alice's new 2. With no remaining direct playable identity, Alice can resolve the Self-Finesse after Donald takes his turn.",
+      "counterfactual": "Without the g2 promise, Alice could interpret the clue as a direct g2 play and misplay r2. Donald must then demonstrate the blind connection even though Alice has a visible r1. The regression branches from the reviewed position by replacing the earlier green clue with a 5 Save.",
+      "boundary": "Do not generally prefer an old Prompt over a fresh Bluff, use Donald's actual hidden card, or treat mere visibility of another g2 as a public identity promise. Use claims predating the clue, never its own inferred result."
+    },
+    "regressions": [
+      "h_group::tests::replay::first_seed_recipient_self_finesse_requires_no_direct_play_alternative",
+      "h_group::tests::replay::first_seed_fresh_bluff_precedes_an_older_clued_prompt"
+    ],
+    "coverageNote": "Focused test checks Donald's p3 connection, the counterfactual immediate r1 response without the g2 promise, and Alice's subsequent r1 connection. Existing Bluff priority and eight connection lifecycle tests pass. Replay action parity passes through the current 24-turn review boundary; later full-game parity was not tested. Fast validation stages pass after correcting and rerunning Clippy."
   },
   {
     "id": "t23-rank-two-new-ending",

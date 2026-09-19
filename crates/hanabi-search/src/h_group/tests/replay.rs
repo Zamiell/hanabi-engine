@@ -429,6 +429,44 @@ fn assert_first_seed_turn_eighteen_prefers_reviewed_line(analysis: &crate::Posit
 }
 
 #[test]
+fn first_seed_recipient_self_finesse_requires_no_direct_play_alternative() {
+    // User-reviewed p4v0s1 turn 24: the prior g2 Play Clue means Alice
+    // cannot interpret 2s as a direct g2 play. Donald can leave r1 to her.
+    let state = expert_replay_p4v0s1().state_at_turn(23).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let d = LogicalDeductions::new(view).unwrap();
+    let inferred = infer_h_group(&d, HGroupProfile::Max);
+    assert_eq!(inferred.connection.unwrap().card, CardId::new(14));
+
+    // Removing the earlier g2 promise (replacing green with a 5 Save)
+    // preserves the direct-play alternative described by the user. Donald
+    // must demonstrate r1, rather than let Alice bomb her r2 as g2.
+    let mut alternative = expert_replay_p4v0s1().state_at_turn(19).unwrap();
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Play(CardId::new(24)),
+        Action::Play(CardId::new(17)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Two),
+        },
+    ] {
+        alternative.apply(action).unwrap();
+    }
+    let d = LogicalDeductions::new(alternative.view_for(PlayerId::new(3)).unwrap()).unwrap();
+    let inferred = infer_h_group(&d, HGroupProfile::Max);
+    assert_eq!(inferred.connection.unwrap().card, CardId::new(23));
+
+    let state = expert_replay_p4v0s1().state_at_turn(24).unwrap();
+    let d = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let inferred = infer_h_group(&d, HGroupProfile::Max);
+    assert_eq!(inferred.connection.unwrap().card, CardId::new(21));
+}
+
+#[test]
 fn first_seed_fresh_bluff_precedes_an_older_clued_prompt() {
     // User-reviewed purple branch at p4v0s1 turn 24: Donald must show
     // the Bluff immediately; his clued p3 remains due afterwards.
