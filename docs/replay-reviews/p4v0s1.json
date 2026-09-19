@@ -174,7 +174,8 @@
     "id": "t20-green-approved-red-three-question",
     "turn": 20,
     "positionKey": "0d7a6a200e159308a030575cdf6f4da82fb68849b6cd16a921c9d94af18abe96",
-    "status": "user-explained",
+    "status": "superseded",
+    "supersededBy": "t20-green-projection-confirmed-safe",
     "perspective": "Donald-rooted turn-20 green hypothetical; revised actual fixture is separate",
     "source": {
       "conversation": "Current task, 2026-09-19, green continuation approval",
@@ -188,6 +189,25 @@
     },
     "regressions": [],
     "coverageNote": "Generated replay link validates complete replay legality and payload round-trip. Move parity and full checks were not run for this fixture update."
+  },
+  {
+    "id": "t20-green-projection-confirmed-safe",
+    "turn": 20,
+    "positionKey": "0d7a6a200e159308a030575cdf6f4da82fb68849b6cd16a921c9d94af18abe96",
+    "status": "user-explained",
+    "perspective": "Donald's turn-20 green-to-Cathy projection, with future draws unknown",
+    "source": {
+      "conversation": "Current task, 2026-09-19, confirmation after reviewing the full green projection",
+      "quote": "this projection is completely correct, i was confused earlier when I mentioned the scary r3 discard. thus, in conclusion, cluing greens on turn 20 seems correct and completely safe."
+    },
+    "explanation": {
+      "ruling": "Green to Cathy is approved. The reported projection through turn 33 is correct, including Alice's red clue to Cathy on turn 29 and Bob's r3 #16 discard on turn 30. Donald retains r3 #13 and plays it on turn 32; this does not lose the red stack or violate Save Principle.",
+      "reviewedLineReference": "The greenLineFromTurn20 array in t20-green-versus-purple-scheduling-question records the approved 14 actions exactly. Its former unresolved comparison is settled by this confirmation.",
+      "supersededClaim": "Do not implement the earlier requested turn-29 y1 discard as a correction to a supposed r3 loss. The user explicitly withdrew that concern.",
+      "boundary": "The turn-34 selected discard of newly drawn #27 remains unresolved because its identity is unknown. Approval of the known line does not assign that draw an identity or guarantee every subsequent continuation. The actual fixture's turn-23 2s clue uses a future draw unavailable to Donald at the projection root."
+    },
+    "regressions": [],
+    "coverageNote": "Human-reviewed projection recorded; no new executable regression added or replay scan run for this clarification. The fixture already contains green at turn 20."
   },
   {
     "id": "t23-rank-two-new-ending",
