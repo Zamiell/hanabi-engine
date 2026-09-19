@@ -1,5 +1,45 @@
 [
   {
+    "id": "t34-chop-move-protection-versus-red-stack-progress",
+    "turn": 34,
+    "positionKey": "da9d560cd40fb33cc2f83fe649403b82681b2322cb1470f02079afdcc7372b2b",
+    "status": "unresolved",
+    "perspective": "Bob; his hand and future draws remain unknown",
+    "source": {
+      "conversation": "2026-09-19, assistant investigation after implementing the user's turn-40 draw-allocation ruling"
+    },
+    "explanation": {
+      "fixtureLine": "34 Bob 4s to Donald; 35 Cathy red to Alice; 36 Donald r4; 37 Alice r5. Yellow 4 remains exposed but no discard is forced yet.",
+      "engineLine": "34 Bob blue to Alice (Trash Chop Move protecting y4 and r5); 35 Cathy 4s to Donald; 36 Donald r4; 37 Alice discards newly clued trash b4. Red 5 remains protected but unplayed.",
+      "comparison": "4s to Donald beats blue to Alice directly by ConventionPreference. However, blue beats the literal yellow Save through lower follow-up Save pressure; the full comparison graph cycles and ultimately selects blue. Both recorded roots reach a safe unknown Bob discard frontier. This is not a proof that blue strictly dominates 4s.",
+      "question": "Should immediate red-4/red-5 progress and arranging the later yellow-4 Save take precedence over immediately chop-moving both important cards and drawing an extra card? The general Save and Play-over-Save principles do not alone rank these two protected continuations. Do not change the fixture without review."
+    },
+    "regressions": [],
+    "coverageNote": "Latest from-start scan agrees through turn 33. No assertion freezes either turn-34 move as optimal."
+  },
+  {
+    "id": "t40-donald-draws-alice-saves",
+    "turn": 40,
+    "positionKey": "7ed723c172c65a68d32fa1c90a23dc5f032ef96a9dd5b551d4308b8417c79aa3",
+    "status": "user-explained",
+    "perspective": "Donald; unknown hand and future draws stay unknown",
+    "source": {
+      "conversation": "2026-09-19, draw-allocation explanation after turn-40 BDR correction",
+      "quote": "Since Alice has yellow 4, it would be bad if Alice drew the yellow 3, because then playing the y4 would be delayed. ... Alice has 1 known useful card in her hand, and Donald has 0. ... it makes sense for Donald to be the one discarding in order to satisfy Team Distribution Principle.",
+      "url": "https://hanabi.github.io/level-8/#team-distribution-principle"
+    },
+    "explanation": {
+      "action": "Donald discards #23; Alice gives the 5 Save to Bob before his turn.",
+      "conditionalDraw": "If y3 is drawn, putting it in Donald's hand lets Alice play her y4 sooner than if Alice has both cards. Do not assume y3 is actually drawn.",
+      "workload": "Donald has zero known useful cards and Alice has one. With the same Save available to either player and the discard already established safe, prefer drawing into Donald's unloaded hand.",
+      "transcription": "The sentence saying Alice should discard contradicts both surrounding explanations; interpreted as Donald discards, Alice clues, as announced to the user.",
+      "implementation": "Allow a semantically equivalent Save handoff in useful-workload scheduling. Compare the longest common funded visible chain prefix when a later successor requires an unavailable additional clue. Do not credit an unfunded tail."
+    },
+    "regressions": [
+      "h_group::tests::replay::first_seed_unloaded_donald_draws_and_hands_save_to_alice"
+    ]
+  },
+  {
     "id": "t40-save-principle-applies-after-other-save",
     "turn": 40,
     "positionKey": "7ed723c172c65a68d32fa1c90a23dc5f032ef96a9dd5b551d4308b8417c79aa3",

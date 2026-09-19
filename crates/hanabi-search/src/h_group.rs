@@ -1021,6 +1021,7 @@ fn clue_permits_direct_play_deferral(signals: &ConventionJournal, turn: u32) -> 
 struct DirectPlayDeclines<'a> {
     cards: &'a mut CardSet,
     turns: &'a mut Vec<(CardId, u32)>,
+    known_playable: CardSet,
 }
 
 fn record_declined_direct_plays(
@@ -1058,6 +1059,7 @@ fn record_declined_direct_plays(
             });
             (already_playing.contains(card) || has_direct_play_clue)
                 && !connection_cards.contains(card)
+                && !declines.known_playable.contains(card)
         })
         .collect::<Vec<_>>();
     for card in newly_declined {

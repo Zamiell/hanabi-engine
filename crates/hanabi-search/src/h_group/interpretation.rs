@@ -263,11 +263,16 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
     let convention_cards = convention_card_inferences(deductions, replay);
     let giver_inferred = infer_h_group_from_replay(deductions, replay.clone(), profile);
     let mut baseline_playing = replay.cards.already_playing.clone();
-    let promised_connection_cards = replay
+    let mut promised_play_cards = replay
         .pending_connections
         .iter()
         .flat_map(|connection| connection.cards.iter().copied())
         .collect::<CardSet>();
+    // Trash Pushes and Ignitions impose explicit play obligations without a
+    // pending Finesse connection. They also cannot be bought a second time
+    // by calling a direct clue on the same card a new Play Clue.
+    // https://hanabi.github.io/level-6/#the-tempo-clue
+    promised_play_cards.extend(replay.cards.forced_playable.iter().copied());
     let active_connection_cards = replay
         .pending_connections
         .iter()
@@ -654,22 +659,22 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             play_score = None;
         }
         if play_score.is_some()
-            && (baseline_playing.contains(&focus) || promised_connection_cards.contains(&focus))
+            && (baseline_playing.contains(&focus) || promised_play_cards.contains(&focus))
             && !continues_inactive_connection
             && !fixed_cards.contains(&focus)
             && !replay.cards.invalidated_focuses.contains(&focus)
             && newly_informed
                 .iter()
-                .all(|card| *card == focus || promised_connection_cards.contains(card))
-            && (newly_informed.is_empty() || promised_connection_cards.contains(&focus))
+                .all(|card| *card == focus || promised_play_cards.contains(card))
+            && (newly_informed.is_empty() || promised_play_cards.contains(&focus))
         {
             // A direct clue on a card already promised to play creates no new
             // action, regardless of whether that promise came from positive
             // information or an invisible connection. Touching only that
             // focus and other already-playing cards is merely extra identity
             // information and fails Minimum Clue Value. A newly touched focus
-            // is rejected here only when it is already an explicit active
-            // connection card; broader subjective playability must not erase
+            // is rejected here only when it already has an explicit play
+            // obligation; broader subjective playability must not erase
             // a new Elimination Finesse or other legitimate clue. Every card
             // in an active layered connection is already promised, not only
             // its immediately due member. Required Fixes are handled before
@@ -1557,6 +1562,15 @@ pub(super) fn advanced_clue_candidates(
             && super::prospective::compiled_prospective_clue(view, profile, target, clue, &touched)
                 .and_then(|compiled| compiled.signal_kinds(view.observer))
                 .is_some_and(|kinds| kinds.contains(&HGroupMoveKind::UnnecessaryIgnition));
+        if unnecessary_ignition
+            && super::prospective::compiled_prospective_clue(view, profile, target, clue, &touched)
+                .is_some_and(|compiled| compiled.unnecessary_ignition_duplicates_play(view))
+        {
+            // Recognition still describes what an illegal clue would promise.
+            // Admission must not use a forced duplicate as the efficiency
+            // benchmark against which safe clues are penalized.
+            continue;
+        }
         let discharge_playable = finesse_position(
             &view.hands[ejection_actor.index()],
             &replay.cards.explicitly_clued,

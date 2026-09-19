@@ -172,6 +172,43 @@ impl CompiledProspectiveClue {
         )
     }
 
+    /// An Unnecessary Trash Push must obtain distinct cards through its push
+    /// and Ignition, not force two owners to play the same identity.
+    /// Use only the giver's visible cards; unknown cards prove no collision.
+    /// <https://hanabi.github.io/level-24/#unnecessary-moves-with-known-trash--ignition>
+    /// <https://hanabi.github.io/beginner/good-touch-principle/>
+    pub(super) fn unnecessary_ignition_duplicates_play(&self, source: &PlayerView) -> bool {
+        let Some(projection) = self.projection(source.observer) else {
+            return false;
+        };
+        let mut promises = Vec::new();
+        for card in projection
+            .replay
+            .signals
+            .iter()
+            .filter(|signal| {
+                signal.turn == source.turn
+                    && matches!(
+                        signal.kind,
+                        HGroupMoveKind::UnnecessaryIgnition | HGroupMoveKind::UnnecessaryMove
+                    )
+            })
+            .flat_map(|signal| &signal.cards)
+        {
+            let Some(identity) = identity_of(source, *card) else {
+                continue;
+            };
+            if promises
+                .iter()
+                .any(|(prior, known)| *prior != *card && *known == identity)
+            {
+                return true;
+            }
+            promises.push((*card, identity));
+        }
+        false
+    }
+
     fn primary_interpretation(&self) -> Option<HGroupClueInterpretation> {
         let Action::Clue { target, .. } = self.action else {
             return None;

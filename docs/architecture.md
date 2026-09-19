@@ -286,11 +286,20 @@ card, and identity. The original legal `PlayerView` is never modified.
   every future clue need is funded.
 - Draw allocation compares each missing connector conditionally, without
   assigning an identity to the next draw. A drawer must be no slower for every
-  connector and faster for at least one. Deferring a Play or Save Clue requires
-  a funded, semantically equivalent handoff before the recipient's turn in every
-  remaining discard-identity case. Known-trash collateral does not count as lost
-  protection, and owner knowledge—not merely two literal clues—determines
-  whether a successor needs another clue.
+  connector and faster for at least one. Compare the longest jointly funded
+  visible chain prefix; an unfunded tail does not erase earlier progress.
+  Independently, an unloaded hand may take the draw instead of a teammate with
+  useful work queued. This handoff applies to Saves as well as Plays. Deferring
+  a Play or Save Clue requires a funded, semantically equivalent handoff before
+  the recipient's turn in every remaining discard-identity case. Known-trash
+  collateral does not count as lost protection, and owner knowledge—not merely
+  two literal clues—determines whether a successor needs another clue. Handoff
+  comparisons retain previously exact owner-known commitments whose domains
+  survive the clue. Comparing only each giver's new-action delta can otherwise
+  mistake a retained successor for lost progress.
+- Save-pressure fallback comparisons cannot reward leaving more current critical
+  chops exposed merely to avoid the possible follow-up cost of a Save. Such a
+  trade-off remains incomparable on pressure and uses the other evidence.
 - `hypothesis.rs` owns mutually exclusive whole-history interpretations. Each
   alternative retains its own connections, promises, and identity claims, so
   ordinary and empathy readings cannot be merged card-by-card.

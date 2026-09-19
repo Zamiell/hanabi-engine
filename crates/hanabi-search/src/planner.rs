@@ -1598,9 +1598,7 @@ fn symbolic_fallback_comparison(
             ComparisonReason::ConventionPlayOrder,
         ),
         (
-            resources.map_or(Ordering::Equal, |(a, b)| {
-                b.save_pressure.cmp(&a.save_pressure)
-            }),
+            resources.map_or(Ordering::Equal, |(a, b)| compare_save_pressure(a, b)),
             ComparisonReason::SavePressure,
         ),
         (
@@ -1678,6 +1676,20 @@ fn symbolic_fallback_comparison(
         .into_iter()
         .find(|(order, _)| *order != Ordering::Equal)
         .unwrap_or((Ordering::Equal, ComparisonReason::StableOrder))
+}
+
+fn compare_save_pressure(a: ProjectedPositionValue, b: ProjectedPositionValue) -> Ordering {
+    let preference = b.save_pressure.cmp(&a.save_pressure);
+    // Pressure measures possible follow-up Saves. Avoiding that prospective
+    // cost by leaving more *current critical chops* exposed is not an
+    // improvement. Incomparable positions must use the remaining evidence.
+    // Reproduced in p4v0s1 turn 23's rank-2 projection, at projected turn 34.
+    // https://hanabi.github.io/beginner/save-principle/
+    match preference {
+        Ordering::Greater if a.exposed_critical_chops > b.exposed_critical_chops => Ordering::Equal,
+        Ordering::Less if b.exposed_critical_chops > a.exposed_critical_chops => Ordering::Equal,
+        _ => preference,
+    }
 }
 
 fn stable_action_key(action: Action) -> (u8, usize, usize) {
@@ -2101,6 +2113,29 @@ impl std::error::Error for PlannerError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn save_pressure_cannot_reward_leaving_a_critical_chop_exposed() {
+        let saved = ProjectedPositionValue {
+            save_pressure: 1,
+            ..ProjectedPositionValue::default()
+        };
+        let exposed = ProjectedPositionValue {
+            exposed_critical_chops: 1,
+            ..ProjectedPositionValue::default()
+        };
+        assert_eq!(compare_save_pressure(saved, exposed), Ordering::Equal);
+        assert_eq!(compare_save_pressure(exposed, saved), Ordering::Equal);
+        let equally_protected = ProjectedPositionValue::default();
+        assert_eq!(
+            compare_save_pressure(equally_protected, saved),
+            Ordering::Greater
+        );
+        assert_eq!(
+            compare_save_pressure(saved, equally_protected),
+            Ordering::Less
+        );
+    }
 
     #[test]
     fn reviewed_turn_fourteen_preserves_known_card_over_speculative_discard() {

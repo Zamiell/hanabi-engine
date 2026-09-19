@@ -27,11 +27,35 @@ Regression contract:
 
 - `reviewed_save_principle_exclusions_apply_after_plays_and_clues` checks all
   three reviewed positions, unchanged literal knowledge, and the missing-history
-  negative control.
+  negative control. Its derived turn-42 case also covers a Save exposing a new
+  chop: evaluate the recipient's post-clue response position, not just the
+  pre-clue chop. Its turn-44 case covers a voluntary trash discard with a
+  protection token already available. These are implementation regressions, not
+  new user rulings; zero-token discards and useful-card transfers are not
+  treated as equivalent evidence.
 - `first_seed_donald_discard_does_not_invent_playable_three_risk` verifies that
   the turn-40 planner consumes the reduced risk domain, not the raw logical one.
 - Existing turn-33/38 tests cover fresh non-chop cards, visible replacements,
   delayed evidence, and planner risk evaluation.
+- `save_principle_does_not_infer_safe_chop_for_an_occupied_player` checks that
+  queued responses do not turn into permissions to discard instead.
 
 The former ordinary-play-only implementation was an incomplete implementation,
 not a user-approved boundary on the convention.
+
+## Team Distribution: who draws when a clue is interchangeable
+
+Source:
+[Team Distribution Principle](https://hanabi.github.io/level-8/#team-distribution-principle).
+Reviewed example: `p4v0s1.json`, live turn 40 (`t40-donald-draws-alice-saves`).
+
+When either player can give the same clue before its recipient acts, and the
+discard is safe, prefer the player with less known useful work to draw. This
+applies to Save Clues too, not only Play Clues. Also compare conditional draw
+schedules: drawing a predecessor into the hand already holding its successor can
+delay the stack. Unknown draws remain unknown; this is a conditional comparison,
+not a prediction of their identities.
+
+An unfunded later part of the chain must not erase an earlier funded advantage.
+Compare the same funded prefix on both sides. Preserve clue availability,
+recipient deadlines, interpretation, and protection when handing off the clue.

@@ -1,10 +1,212 @@
 use super::*;
 
 #[test]
+fn first_seed_known_own_copy_prevents_false_discard_elimination() {
+    // Bug-reproduction branch from p4v0s1 turn 29, Alice's perspective.
+    // Alice's exact r2 is hidden physically, but is already known. Cathy's
+    // later duplicate r2 discard must not claim another r2 in Cathy's hand.
+    let state = expert_replay_p4v0s1().state_at_turn(28).unwrap();
+    let mut view = state.view_for(state.current_player()).unwrap();
+    let actions = [
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Discard(CardId::new(16)),
+        Action::Play(CardId::new(22)),
+        Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Five),
+        },
+        Action::Clue {
+            target: PlayerId::new(3),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Discard(CardId::new(30)),
+        Action::Discard(CardId::new(18)),
+        Action::Discard(CardId::new(32)),
+    ];
+    for action in actions {
+        view = match action {
+            Action::Clue { target, clue } => {
+                let touched = view.hands[target.index()]
+                    .iter()
+                    .filter(|card| card.identity.is_some_and(|id| clue.matches(id)))
+                    .map(|card| card.id)
+                    .collect::<Vec<_>>();
+                prospective_clue_view(&view, target, clue, &touched)
+            }
+            Action::Play(card) => prospective_play_view(
+                &view,
+                view.current_player,
+                card,
+                identity_of(&view, card).unwrap(),
+            ),
+            Action::Discard(card) => ProspectiveTransition::discard(
+                &view,
+                view.current_player,
+                card,
+                identity_of(&view, card).unwrap(),
+            ),
+        };
+    }
+    let deductions = LogicalDeductions::new(view).unwrap();
+    let inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    assert!(!inferred.signals.iter().any(|signal| signal.turn == 34
+        && signal.kind == HGroupMoveKind::Elimination
+        && signal.target == Some(PlayerId::new(2))));
+    assert!(inferred.playable_now.contains(&CardId::new(26)));
+}
+
+#[test]
+fn first_seed_trash_push_does_not_need_a_second_play_clue() {
+    // Alternative branch from p4v0s1 turn 46: 2s to Alice pushes her g3
+    // and ignites Cathy's y3. The pushed g3 remains due after Cathy plays.
+    let state = expert_replay_p4v0s1().state_at_turn(45).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let after = prospective_clue_view(
+        &view,
+        PlayerId::new(0),
+        Clue::Rank(Rank::Two),
+        &[CardId::new(29)],
+    );
+    let after = prospective_play_view(
+        &after,
+        PlayerId::new(2),
+        CardId::new(42),
+        Card::new(Suit::Yellow, Rank::Three),
+    );
+    let (deductions, replay) = PerspectiveProjector::new(&after, HGroupProfile::Max)
+        .project(PlayerId::new(3), PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    assert!(replay.cards.forced_playable.contains(&CardId::new(44)));
+    let candidates = h_group_clue_candidates_from_replay(&deductions, HGroupProfile::Max, &replay);
+    assert!(!candidates.iter().any(|candidate| candidate.action
+        == Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Green),
+        }
+        && candidate.move_kind() == Some(HGroupMoveKind::PlayClue)));
+}
+
+#[test]
+fn first_seed_ignition_cannot_promise_both_copies_of_yellow_three() {
+    // Derived from p4v0s1 turn 46; this asserts Good Touch, not an optimal move.
+    // 1s pushes Donald's y3 and ignites Cathy's y3. Both cannot play.
+    // 2s to Alice instead obtains different identities (g3 and y3).
+    let state = expert_replay_p4v0s1().state_at_turn(45).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let deductions = LogicalDeductions::new(view).unwrap();
+    let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
+    assert!(!candidates.iter().any(|candidate| candidate.action
+        == Action::Clue {
+            target: PlayerId::new(3),
+            clue: Clue::Rank(Rank::One),
+        }));
+    assert!(candidates.iter().any(|candidate| candidate.action
+        == Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Two),
+        }));
+}
+
+#[test]
+fn first_seed_direct_clue_handoff_preserves_recipient_work() {
+    // Derived p4v0s1 turn-44 regression: Alice already knows her y4.
+    // It remains the same downstream play if she gives the y3 clue herself,
+    // even when that retained commitment is absent from her *new* effects.
+    let state = expert_replay_p4v0s1().state_at_turn(43).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let d = LogicalDeductions::new(view.clone()).unwrap();
+    let notes = infer_h_group(&d, HGroupProfile::Max);
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    let clue = candidates
+        .iter()
+        .find(|c| {
+            c.action
+                == Action::Clue {
+                    target: PlayerId::new(2),
+                    clue: Clue::Suit(Suit::Yellow),
+                }
+        })
+        .unwrap();
+    assert!(super::super::draw_distribution::unloaded_hand_handoff(
+        &d,
+        &notes,
+        HGroupProfile::Max,
+        clue,
+        CardId::new(32)
+    ));
+}
+
+#[test]
+fn first_seed_unloaded_donald_draws_and_hands_save_to_alice() {
+    // User-reviewed p4v0s1 live turn 40: Donald has no known useful
+    // cards, Alice has y4. Alice can give the same 5 Save before Bob acts.
+    // Conditional y3 belongs in Donald's hand rather than behind Alice's y4.
+    let state = expert_replay_p4v0s1().state_at_turn(39).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let d = LogicalDeductions::new(view.clone()).unwrap();
+    let inferred = infer_h_group(&d, HGroupProfile::Max);
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    let save = candidates
+        .iter()
+        .find(|c| {
+            c.action
+                == Action::Clue {
+                    target: PlayerId::new(1),
+                    clue: Clue::Rank(Rank::Five),
+                }
+        })
+        .unwrap();
+    let yellow = super::super::draw_distribution::completion_times_after_clue(
+        &d,
+        HGroupProfile::Max,
+        save,
+        Card::new(Suit::Yellow, Rank::Three),
+    );
+    let yellow = yellow.expect("the y3/y4 prefix is funded even if the y5 tail is not");
+    assert!(yellow.0 < yellow.1, "{yellow:?}");
+    assert!(
+        super::super::draw_distribution::unloaded_hand_handoff(
+            &d,
+            &inferred,
+            HGroupProfile::Max,
+            save,
+            CardId::new(23),
+        ),
+        "the useful-workload handoff independently supports Donald drawing"
+    );
+    assert!(
+        super::super::draw_distribution::discard_priority(
+            &d,
+            &inferred,
+            HGroupProfile::Max,
+            &candidates,
+            CardId::new(23),
+        )
+        .is_some()
+    );
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        analysis.planner.best_action,
+        Action::Discard(CardId::new(23))
+    );
+}
+
+#[test]
 fn reviewed_save_principle_exclusions_apply_after_plays_and_clues() {
     // The user's p4v0s1 rulings at live turns 33, 38 and 40 establish
     // the same inference, not three independent strategic exceptions.
-    for (turn, id) in [(33, 1), (38, 16), (40, 23)] {
+    // Turn 42 checks the same invariant when a Save exposes the next chop;
+    // it is a derived regression, not a separate human optimal-move ruling.
+    // Turn 44 covers a predecessor's voluntary trash discard with tokens.
+    for (turn, id) in [(33, 1), (38, 16), (40, 23), (42, 30), (44, 32)] {
         let state = expert_replay_p4v0s1().state_at_turn(turn - 1).unwrap();
         let view = state.view_for(state.current_player()).unwrap();
         let d = LogicalDeductions::new(view.clone()).unwrap();
@@ -57,6 +259,24 @@ fn first_seed_donald_discard_does_not_invent_playable_three_risk() {
         .find(|action| action.action == Action::Discard(CardId::new(23)))
         .unwrap();
     assert_eq!(discard.projection.forecast_discard_risk(), Some(0));
+}
+
+#[test]
+fn save_principle_does_not_infer_safe_chop_for_an_occupied_player() {
+    // Actual p4v0s1 positions with a queued response. A clue/play elsewhere
+    // is not evidence that this player should abandon that response to draw.
+    for turn in [6, 24, 36] {
+        let state = expert_replay_p4v0s1().state_at_turn(turn - 1).unwrap();
+        let d = LogicalDeductions::new(state.view_for(state.current_player()).unwrap()).unwrap();
+        let notes = infer_h_group(&d, HGroupProfile::Max);
+        assert!(!notes.playable_now.is_empty() || notes.connection.is_some());
+        let chop = notes.chops[d.view().observer.index()].unwrap();
+        assert_eq!(
+            super::super::chop_safety::discard_domain(&d, &notes, HGroupProfile::Max, chop),
+            d.possible_identities(chop),
+            "turn {turn}"
+        );
+    }
 }
 
 #[test]

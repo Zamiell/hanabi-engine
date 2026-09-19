@@ -363,6 +363,21 @@ impl ReplayReducer {
                             &mut DirectPlayDeclines {
                                 cards: &mut self.declined_direct_plays,
                                 turns: &mut self.declined_direct_play_turns,
+                                // Choosing a clue does not falsify an already
+                                // exact, playable identity. Preserve the known
+                                // play instead of requiring a redundant re-clue.
+                                known_playable: self.hands[actor.index()]
+                                    .iter()
+                                    .copied()
+                                    .filter(|card| {
+                                        self.signals
+                                            .facts()
+                                            .known_identity_before(*card, entry.turn)
+                                            .is_some_and(|identity| {
+                                                super::is_playable_at(self.stack_heights, identity)
+                                            })
+                                    })
+                                    .collect(),
                             },
                         );
                     }
@@ -2087,6 +2102,18 @@ impl ReplayReducer {
                 &mut DirectPlayDeclines {
                     cards: &mut self.declined_direct_plays,
                     turns: &mut self.declined_direct_play_turns,
+                    known_playable: self.hands[player.index()]
+                        .iter()
+                        .copied()
+                        .filter(|card| {
+                            self.signals
+                                .facts()
+                                .known_identity_before(*card, entry.turn)
+                                .is_some_and(|identity| {
+                                    super::is_playable_at(self.stack_heights, identity)
+                                })
+                        })
+                        .collect(),
                 },
             );
         }

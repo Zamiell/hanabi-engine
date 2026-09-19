@@ -31,9 +31,13 @@ pub(in crate::h_group) fn apply_elimination_effects(
             && another_copy_survives_discard(view, entry.turn, *identity)
             && !hands.iter().enumerate().any(|(owner, hand)| {
                 owner != player.index()
-                    && hand
-                        .iter()
-                        .any(|candidate| identity_of(view, *candidate) == Some(*identity))
+                    && hand.iter().any(|candidate| {
+                        identity_of(view, *candidate).or_else(|| {
+                            signals
+                                .facts()
+                                .known_identity_before(*candidate, entry.turn)
+                        }) == Some(*identity)
+                    })
             }) =>
         {
             push_signal(

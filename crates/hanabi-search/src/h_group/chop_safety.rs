@@ -55,7 +55,8 @@ pub(super) fn discard_domain(
                 player,
                 successful: true,
                 ..
-            } => player,
+            }
+            | ObservedEvent::Discarded { player, .. } => player,
             ObservedEvent::Clued { giver, .. } => giver,
             _ => continue,
         };
@@ -80,10 +81,31 @@ pub(super) fn discard_domain(
                 before.current_player = actor;
                 Some(before)
             }
+            ObservedEvent::Discarded { identity, .. } => {
+                let mut before = before_historical_turn(view, entry.turn);
+                before.current_player = actor;
+                // A voluntary trash discard with a token available also
+                // declines protection. Do not treat a zero-token discard
+                // or a useful-card transfer as the same evidence.
+                (before.clue_tokens > 0 && !is_eventually_useful(&before, identity))
+                    .then_some(before)
+            }
             _ => before_ordinary_play(&snapshot),
         };
         if let Some(before) = before {
-            allowed = declined_protection_domain(&before, profile, card, allowed);
+            // A Save can expose a different chop. The protection duty is
+            // about the recipient's actual response position, not only the
+            // card that was chop before the clue. Use pre-play state for
+            // plays so a newly advanced stack cannot invent prior evidence.
+            let recipient = if matches!(
+                entry.event,
+                ObservedEvent::Clued { .. } | ObservedEvent::Discarded { .. }
+            ) {
+                &snapshot
+            } else {
+                &before
+            };
+            allowed = declined_protection_domain(&before, recipient, profile, card, allowed);
         }
     }
     // Inconsistent observations must not make every discard vacuously safe.
@@ -92,12 +114,13 @@ pub(super) fn discard_domain(
 
 fn declined_protection_domain(
     before: &PlayerView,
+    recipient_position: &PlayerView,
     profile: HGroupProfile,
     card: CardId,
     domain: IdentitySet,
 ) -> IdentitySet {
     let player = before.current_player;
-    let Ok(prior_deductions) = LogicalDeductions::new(before.clone()) else {
+    let Ok(prior_deductions) = LogicalDeductions::new(recipient_position.clone()) else {
         return domain;
     };
     let prior = infer_h_group(&prior_deductions, profile);
