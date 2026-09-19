@@ -696,16 +696,6 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 }),
             )
             .is_some_and(|fix| fix.is_some());
-        let retouches_older_delayed_focus = is_playable_now(view, focus_identity)
-            && focus_identity.rank != Rank::One
-            && touched.iter().copied().any(|card| {
-                card != focus
-                    && promptable.contains(&card)
-                    && identity_of(view, card).is_some_and(|identity| {
-                        identity.suit == focus_identity.suit
-                            && identity.rank.number() > focus_identity.rank.number() + 1
-                    })
-            });
         let creates_false_non_focus_self_prompt = is_playable_now(view, focus_identity)
             && touched.iter().copied().any(|card| {
                 // Retouching an existing non-focus promise does not introduce
@@ -730,11 +720,12 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                     })
                 })
             });
-        if retouches_older_delayed_focus || creates_false_non_focus_self_prompt {
-            // Playing the direct focus would leave the older card as a fresh
-            // delayed focus, or a newly touched non-focus card would expose a
-            // false Self-Prompt. The recipient can then Prompt it even though
-            // the giver intended only the direct play.
+        if creates_false_non_focus_self_prompt {
+            // Newly touched non-focus cards can expose a false Self-Prompt.
+            // Merely retouching an older higher-rank card does not make it a
+            // fresh focus. Let recipient interpretation and connection safety
+            // below evaluate mixed old/new touches instead of rejecting them
+            // solely because there is a gap between the two ranks.
             continue;
         }
         let is_continuation_clue = rule_enabled(profile, HGroupRuleId::Extras)

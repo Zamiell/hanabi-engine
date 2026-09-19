@@ -223,6 +223,112 @@ fn first_seed_demonstrated_reverse_layer_survives_nonadjacent_recipient() {
 }
 
 #[test]
+fn first_seed_generation_discard_projects_reviewed_direct_green_line() {
+    // User-reviewed Donald perspective at turn 20, for both root clues.
+    // Future draws remain blank; #1 being y1 is visible to Donald, not Alice.
+    let state = expert_replay_p4v0s1().state_at_turn(19).unwrap();
+    let analysis = crate::analyze_position(
+        &state.view_for(state.current_player()).unwrap(),
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    let clue = |target, clue| Action::Clue {
+        target: PlayerId::new(target),
+        clue,
+    };
+    for root in [
+        clue(2, Clue::Suit(Suit::Purple)),
+        clue(2, Clue::Rank(Rank::Five)),
+    ] {
+        let candidate = analysis
+            .planner
+            .root_actions
+            .iter()
+            .find(|c| c.action == root)
+            .unwrap();
+        let actions = candidate
+            .projection
+            .steps
+            .iter()
+            .map(|s| s.projected.action)
+            .collect::<Vec<_>>();
+        let expected = [
+            root,
+            Action::Play(CardId::new(24)),
+            Action::Play(CardId::new(17)),
+            clue(0, Clue::Suit(Suit::Red)),
+            Action::Play(CardId::new(14)),
+            Action::Discard(CardId::new(1)),
+            clue(2, Clue::Suit(Suit::Green)),
+            Action::Play(CardId::new(25)),
+            Action::Play(CardId::new(12)),
+            Action::Play(CardId::new(21)),
+            Action::Discard(CardId::new(5)),
+            Action::Play(CardId::new(22)),
+        ];
+        assert!(
+            actions.starts_with(&expected[..6]),
+            "root {root:?}: {actions:?}"
+        );
+        // The user permits a finesse/bluff as well as a direct clue. Test
+        // the named direct-green branch explicitly, without requiring it to
+        // beat every other clue to g2 (e.g. a rank clue also touching r2).
+        let mut view = state.view_for(state.current_player()).unwrap();
+        for action in expected.iter().take(6) {
+            let (d, r) = PerspectiveProjector::new(&view, HGroupProfile::Max)
+                .project(view.current_player, PerspectiveDepth::NestedRecipients)
+                .unwrap();
+            let inferred = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+            view = super::super::symbolic_line::apply_symbolic_action(
+                &view,
+                &d,
+                &inferred,
+                view.current_player,
+                *action,
+            )
+            .unwrap()
+            .0;
+        }
+        let (d, r) = PerspectiveProjector::new(&view, HGroupProfile::Max)
+            .project(view.current_player, PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        assert!(
+            h_group_clue_candidates_from_replay(&d, HGroupProfile::Max, &r)
+                .iter()
+                .any(|candidate| candidate.action == expected[6]),
+            "the direct green clue must be admitted, not merely forced by the test"
+        );
+        let (_, branch) = super::super::symbolic_line::project_h_group_projection(
+            &view,
+            HGroupProfile::Max,
+            expected[6],
+            32,
+            &crate::AnalysisControl::default(),
+        )
+        .unwrap();
+        let actual = branch
+            .steps
+            .iter()
+            .map(|s| s.projected.action)
+            .collect::<Vec<_>>();
+        // The purple branch establishes p5. Rank 5 alone still leaves its
+        // suit ambiguous; do not force a blind 5 play to make the lines match.
+        // The requested subsequent red-to-Bob clue also needs clarification
+        // because Donald retains his clued r3. These tails are not frozen.
+        let through = if root == clue(2, Clue::Suit(Suit::Purple)) {
+            12
+        } else {
+            11
+        };
+        assert!(
+            actual.starts_with(&expected[6..through]),
+            "root {root:?}, green branch: {actual:?}"
+        );
+    }
+}
+
+#[test]
 fn first_seed_fives_chop_move_prevents_critical_purple_five_loss() {
     // Reviewed turn-18 continuation: Donald must save Cathy's p5 at turn
     // 20, not give red and discard that critical card in the continuation.

@@ -72,7 +72,8 @@
     "id": "t20-generation-discard-continuation-question",
     "turn": 20,
     "positionKey": "0d7a6a200e159308a030575cdf6f4da82fb68849b6cd16a921c9d94af18abe96",
-    "status": "unresolved",
+    "status": "superseded",
+    "supersededBy": "t20-reviewed-generation-and-purple",
     "perspective": "Donald at turn 20, not Bob at turn 18",
     "source": {
       "kind": "Engine investigation; not a user-approved interpretation",
@@ -86,6 +87,35 @@
     "regressions": [
       "h_group::tests::replay::first_seed_fives_chop_move_prevents_critical_purple_five_loss",
       "h_group::tests::replay::first_seed_known_five_refund_does_not_force_scream_discard"
+    ]
+  },
+  {
+    "id": "t20-reviewed-generation-and-purple",
+    "turn": 20,
+    "positionKey": "0d7a6a200e159308a030575cdf6f4da82fb68849b6cd16a921c9d94af18abe96",
+    "status": "user-explained",
+    "perspective": "Donald's turn-20 hypothetical; Alice's y1 is visible to Donald",
+    "source": {
+      "conversation": "Current task, 2026-09-19, request to implement the Generation Discard and change the fixture",
+      "quote": "alice would not play r1 on turn 25, alice would foresee that r2 would be discarded, so alice would perform a Generation Discard on y1, and then bob would finesse or bluff or direct play clue the green 2."
+    },
+    "explanation": {
+      "ruling": "Both root clues must project the Generation Discard. Bob should get g2 played. Change the fixture's turn 20 from 5s to purple to Cathy; the user now considers purple workable.",
+      "requestedDirectLineFromTurn26": [
+        "green to Cathy",
+        "g2 play",
+        "p4 play",
+        "r1 play",
+        "p4 discard",
+        "p5 play",
+        "red to Cathy",
+        "red to Bob"
+      ],
+      "implementation": "Added proactive Generation Discard admission through the next player. Removed the structural rejection of a playable focus merely because the clue also retouches an older higher-rank card; recipient safety checks remain.",
+      "verificationBoundary": "Tests cover Generation in both lines and the direct-green continuation through turn 30 in both, through p5 at turn 31 in the purple branch. Subsequent requested red clues remain unresolved; Donald retains clued r3 while Bob also holds r3. Rank-5-only branch does not yet establish p5's suit. These are engine findings, not user-approved changes to the requested tail."
+    },
+    "regressions": [
+      "h_group::tests::replay::first_seed_generation_discard_projects_reviewed_direct_green_line"
     ]
   },
   {
@@ -123,7 +153,7 @@
       ],
       "ruling": "User describes the first line as zero BDR and prefers it over the otherwise similar second line with #5 risk.",
       "positionVerification": "Recovered commit 8687afa and verified that all setup fields and actions preceding turn 18 match the current fixture. The stable entry ID retains its original historical prefix.",
-      "warning": "This is a turn-18 decision with newly visible draws. It does not authorize using those draw identities in a forecast rooted at turn 14."
+      "warning": "This is a turn-18 decision with newly visible draws. It does not authorize using those draw identities in a forecast rooted at turn 14. The old continuation's turn-20 5s preference is superseded by t20-reviewed-generation-and-purple; retain this older record as provenance, not an instruction to restore 5s."
     },
     "regressions": [
       "h_group::tests::replay::first_seed_turn_eighteen_compares_reviewed_full_lines",

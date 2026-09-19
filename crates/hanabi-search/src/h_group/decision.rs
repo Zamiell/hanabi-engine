@@ -1270,6 +1270,38 @@ pub(super) fn emergency_discard_is_required(
         return false;
     }
     let target = next_player(view.current_player, view.hands.len());
+    if emergency_chop_needs_protection(view, inferred, replay, profile, target) {
+        return true;
+    }
+    // Generation Discard: provide the token BEFORE the next player's turn,
+    // so they can protect the player after them rather than merely discard
+    // to generate a token too late. This also protects a needed 2 whose
+    // predecessor would have been played by the action we are deferring.
+    // https://hanabi.github.io/level-7/#the-generation-discard
+    // User-reviewed p4v0s1 turn-20 projections: Alice generates for Bob to
+    // clue Cathy instead of playing r1 and leaving Cathy to discard a 2.
+    !target_is_occupied(view, replay, target)
+        && projected_h_group_replay(view, profile, target).is_some_and(|(d, r)| {
+            super::infer_h_group_from_replay(&d, r, profile)
+                .playable_now
+                .is_empty()
+        })
+        && emergency_chop_needs_protection(
+            view,
+            inferred,
+            replay,
+            profile,
+            next_player(target, view.hands.len()),
+        )
+}
+
+fn emergency_chop_needs_protection(
+    view: &PlayerView,
+    inferred: &HGroupInferences,
+    replay: &HGroupState,
+    profile: HGroupProfile,
+    target: PlayerId,
+) -> bool {
     if target_is_occupied(view, replay, target) {
         return false;
     }
