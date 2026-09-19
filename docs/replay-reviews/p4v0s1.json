@@ -1,9 +1,28 @@
 [
   {
+    "id": "t34-four-to-alice-continuation-through-52",
+    "turn": 34,
+    "positionKey": "da9d560cd40fb33cc2f83fe649403b82681b2322cb1470f02079afdcc7372b2b",
+    "status": "user-explained",
+    "perspective": "User-specified fixture continuation; no new strategic rationale supplied",
+    "source": {
+      "conversation": "2026-09-19, fixture continuation and request for the replay at the clarification point",
+      "quote": "change the fixture to clue number 4 to alice. ... just give me the replay at the point of the question"
+    },
+    "explanation": {
+      "supersedes": "t34-chop-move-protection-versus-red-stack-progress",
+      "action": "Replace turn 34 onward with the user's sequence through turn 52, ending after two consecutive green clues to Alice.",
+      "boundary": "Turn 53 is Alice's turn; the requested third green-to-Alice clue would be a self-clue. Stop before that action for review; do not substitute a move or include the unconfirmed remainder.",
+      "historicalAnchors": "Later records retain their old position keys and reasoning; their continuations have been superseded by this fixture edit. They are not re-anchored to the new history."
+    },
+    "regressions": [],
+    "coverageNote": "Replay legality and link round-trip validation only; engine move agreement was not rechecked."
+  },
+  {
     "id": "t34-chop-move-protection-versus-red-stack-progress",
     "turn": 34,
     "positionKey": "da9d560cd40fb33cc2f83fe649403b82681b2322cb1470f02079afdcc7372b2b",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Bob; his hand and future draws remain unknown",
     "source": {
       "conversation": "2026-09-19, assistant investigation after implementing the user's turn-40 draw-allocation ruling"
