@@ -1,9 +1,30 @@
 [
   {
+    "id": "t38-save-principle-excludes-playable-threes",
+    "turn": 38,
+    "positionKey": "6cca9e7d7c24b0b9d1429d4796c04999516a3208cb544471dc5d9b2e97adb8c4",
+    "status": "user-explained",
+    "perspective": "Bob; #16's face remains hidden",
+    "source": {
+      "conversation": "2026-09-19, correction of t38-chop-uncertainty-versus-yellow-four-save",
+      "quote": "it is obviously impossible for it to be y3 or g3, because then Save Principle would be violated",
+      "url": "https://hanabi.github.io/beginner/save-principle"
+    },
+    "explanation": {
+      "supersedes": "t38-chop-uncertainty-versus-yellow-four-save",
+      "reason": "Earlier declined protection opportunities remain evidence for the same chop card. Looking only at Alice's last zero-token play incorrectly forgets that evidence. An unplayable clued 5 does not occupy Bob's turn or prevent his chop from needing protection.",
+      "implementation": "Reconstruct earlier predecessor play positions using public history, historical tokens, stacks, hands and clue facts. Require the same chop and no queued response at the protection opportunity. Exclusions affect discard-risk evaluation, not literal knowledge or permission to play the hidden card.",
+      "boundary": "This ruling establishes zero BDR for the discard; it does not by itself establish the final preference against every competing Save Clue. No fixture edit."
+    },
+    "regressions": [
+      "h_group::tests::replay::first_seed_chop_safety_survives_later_token_exhaustion"
+    ]
+  },
+  {
     "id": "t38-chop-uncertainty-versus-yellow-four-save",
     "turn": 38,
     "positionKey": "6cca9e7d7c24b0b9d1429d4796c04999516a3208cb544471dc5d9b2e97adb8c4",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Bob; #16's actual red 3 and future draws are hidden",
     "source": {
       "conversation": "2026-09-19, continuation after implementing the user's turn-33 chop-safety explanation",

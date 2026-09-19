@@ -1,6 +1,38 @@
 use super::*;
 
 #[test]
+fn first_seed_chop_safety_survives_later_token_exhaustion() {
+    // User-reviewed p4v0s1 turn 38: Alice's earlier declined protection
+    // rules out y3/g3 on Bob's chop. Her turn-37 zero-token play does not
+    // erase that evidence, nor does Bob's unplayable clued 5.
+    let state = expert_replay_p4v0s1().state_at_turn(37).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let d = LogicalDeductions::new(view.clone()).unwrap();
+    let notes = infer_h_group(&d, HGroupProfile::Max);
+    let card = CardId::new(16);
+    let domain =
+        super::super::chop_safety::discard_domain(&d, &notes, HGroupProfile::Max, card).unwrap();
+    for suit in [Suit::Yellow, Suit::Green] {
+        let identity = Card::new(suit, Rank::Three);
+        assert!(d.possible_identities(card).unwrap().contains(identity));
+        assert!(!domain.contains(identity), "{identity:?}: {domain:?}");
+    }
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig::default(),
+    )
+    .unwrap();
+    let discard = analysis
+        .planner
+        .root_actions
+        .iter()
+        .find(|action| action.action == Action::Discard(card))
+        .unwrap();
+    assert_eq!(discard.projection.forecast_discard_risk(), Some(0));
+}
+
+#[test]
 fn first_seed_known_purple_trash_does_not_invent_a_discharge() {
     // Counterfactual from p4v0s1 turn 34: Save Alice's critical y4. Purple
     // is complete, so purple to Donald is not an *unknown* trash discharge.
@@ -77,8 +109,8 @@ fn first_seed_unloaded_hand_uses_declined_protection_to_draw_safely() {
     }
     assert!(domain.contains(Card::new(Suit::Red, Rank::Four)));
     assert!(domain.contains(Card::new(Suit::Green, Rank::Four)));
-    // An unprotected newly drawn card is not the old chop, and a teammate
-    // without a clue token did not decline a protection opportunity.
+    // An unprotected newly drawn card is not the old chop. Missing history
+    // cannot establish a declined protection opportunity.
     let fresh = CardId::new(33);
     assert_eq!(
         super::super::chop_safety::discard_domain(&deductions, &notes, HGroupProfile::Max, fresh),
@@ -86,6 +118,7 @@ fn first_seed_unloaded_hand_uses_declined_protection_to_draw_safely() {
     );
     let mut no_token = view.clone();
     no_token.clue_tokens = 0;
+    no_token.history.clear();
     let no_token = LogicalDeductions::new(no_token).unwrap();
     assert_eq!(
         super::super::chop_safety::discard_domain(&no_token, &notes, HGroupProfile::Max, card),
