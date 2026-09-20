@@ -241,6 +241,35 @@ pub struct ProjectedPositionValue {
 }
 
 impl ProjectedPositionValue {
+    /// At the same elapsed turn, realized points and executable commitments
+    /// outrank manufacturing surplus tokens. Protected cards and speculative
+    /// connections are deliberately not counted as executable points.
+    fn productive_preference(self, other: Self) -> bool {
+        self.preserves_funded_progress(other)
+            && (self.score > other.score
+                || self.committed_future_plays > other.committed_future_plays)
+    }
+
+    fn preserves_funded_progress(self, other: Self) -> bool {
+        self.clues >= self.clue_demand
+            && other.clues >= other.clue_demand
+            && self.score >= other.score
+            && self.score.saturating_add(self.committed_future_plays)
+                >= other.score.saturating_add(other.committed_future_plays)
+            // The reserve already charges every pending critical Save.
+            // Do not charge the same fully funded obligation again merely
+            // because one line reaches the exposed chop earlier (reviewed
+            // p4v0s1 turn 35). Actual losses are compared independently.
+            && self.clue_demand >= self.exposed_critical_chops
+            && other.clue_demand >= other.exposed_critical_chops
+            && other
+                .exposed_chop_quality
+                .no_worse_than(self.exposed_chop_quality)
+            && self.protected_bottom_deck_risks >= other.protected_bottom_deck_risks
+            && self.score.saturating_add(self.secured_future_plays)
+                >= other.score.saturating_add(other.secured_future_plays)
+            && self.save_pressure <= other.save_pressure
+    }
     fn funded_completion_reserve(self, rotation: u8) -> Option<u8> {
         if rotation == 0
             || self.score.saturating_add(self.secured_future_plays) != 25
@@ -469,6 +498,8 @@ pub enum ComparisonReason {
     BottomDeckRisk,
     ForecastBottomDeckRisk,
     RotationDevelopment,
+    FundedProgress,
+    ClueEfficiency,
     ProtectedDevelopment,
     PolicyTier,
     TerminalProgress,
@@ -520,6 +551,8 @@ pub struct ComparisonBasis {
     pub horizon: usize,
     pub left: Vec<RotationCheckpoint>,
     pub right: Vec<RotationCheckpoint>,
+    pub clue_cost_bounds: Option<((u8, u8), (u8, u8))>,
+    pub scheduled_refunds: Option<(u8, u8)>,
 }
 
 fn retain_comparison_basis(
@@ -535,6 +568,8 @@ fn retain_comparison_basis(
             horizon,
             left: left(),
             right: right(),
+            clue_cost_bounds: None,
+            scheduled_refunds: None,
         });
     }
 }
@@ -1049,6 +1084,8 @@ fn compare_symbolic_candidates(
             match endpoint {
                 EndpointComparison::PreferLeft(
                     ComparisonReason::RotationDevelopment
+                    | ComparisonReason::FundedProgress
+                    | ComparisonReason::ClueEfficiency
                     | ComparisonReason::ProtectedDevelopment
                     | ComparisonReason::BottomDeckRisk,
                 ) => {
@@ -1056,6 +1093,8 @@ fn compare_symbolic_candidates(
                 }
                 EndpointComparison::PreferRight(
                     ComparisonReason::RotationDevelopment
+                    | ComparisonReason::FundedProgress
+                    | ComparisonReason::ClueEfficiency
                     | ComparisonReason::ProtectedDevelopment
                     | ComparisonReason::BottomDeckRisk,
                 ) => {
@@ -1145,22 +1184,22 @@ fn compare_endpoints_with_basis(
         .max(1);
     let risk = left
         .projection
-        .bottom_deck_risks_at(horizon)
-        .cmp(&right.projection.bottom_deck_risks_at(horizon));
-    // A resource snapshot cannot dominate by trimming away its next risky
-    // discard. Keep the converse comparison available: a safer endpoint can
-    // still be better on resources, without claiming permanent risk avoidance.
+        .recorded_bottom_deck_risks_at(horizon)
+        .cmp(&right.projection.recorded_bottom_deck_risks_at(horizon));
+    // A resource snapshot cannot dominate by trimming away a recorded loss.
+    // Unexecuted discard possibilities belong to the assessed-risk comparison,
+    // not this guard: reaching equal uncertainty earlier is not itself a loss.
     let guarded = match comparison {
-        EndpointComparison::PreferLeft(ComparisonReason::EndpointResources)
-            if risk == Ordering::Greater =>
-        {
-            EndpointComparison::Incomparable
-        }
-        EndpointComparison::PreferRight(ComparisonReason::EndpointResources)
-            if risk == Ordering::Less =>
-        {
-            EndpointComparison::Incomparable
-        }
+        EndpointComparison::PreferLeft(
+            ComparisonReason::EndpointResources
+            | ComparisonReason::FundedProgress
+            | ComparisonReason::ClueEfficiency,
+        ) if risk == Ordering::Greater => EndpointComparison::Incomparable,
+        EndpointComparison::PreferRight(
+            ComparisonReason::EndpointResources
+            | ComparisonReason::FundedProgress
+            | ComparisonReason::ClueEfficiency,
+        ) if risk == Ordering::Less => EndpointComparison::Incomparable,
         _ => comparison,
     };
     if guarded != comparison {
@@ -1209,6 +1248,96 @@ fn compare_endpoint_evidence(
         }
         Ordering::Equal => {}
     }
+    let horizon = left
+        .projection
+        .common_horizon()
+        .min(right.projection.common_horizon());
+    let left_values = left.projection.checkpoints_at(horizon);
+    let right_values = right.projection.checkpoints_at(horizon);
+    if horizon > 0 && !left_values.is_empty() && !right_values.is_empty() {
+        let refunds = (
+            left.projection.play_refunds_after(horizon),
+            right.projection.play_refunds_after(horizon),
+        );
+        let funded = |mut value: ProjectedPositionValue, refund: u8| {
+            // A future 5 refund can fund discretionary follow-up work, but
+            // cannot excuse an exposed critical card or an immediate Save.
+            if value.exposed_critical_chops == 0 && value.save_pressure == 0 {
+                value.clues = value.clues.saturating_add(refund);
+            }
+            value
+        };
+        let wins = |a: &[RotationCheckpoint], b: &[RotationCheckpoint], refunds: (u8, u8)| {
+            a.iter().all(|a| {
+                b.iter().all(|b| {
+                    funded(a.value, refunds.0).productive_preference(funded(b.value, refunds.1))
+                })
+            })
+        };
+        let reason = if wins(&left_values, &right_values, refunds) {
+            Some(EndpointComparison::PreferLeft(
+                ComparisonReason::FundedProgress,
+            ))
+        } else if wins(&right_values, &left_values, (refunds.1, refunds.0)) {
+            Some(EndpointComparison::PreferRight(
+                ComparisonReason::FundedProgress,
+            ))
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            retain_comparison_basis(
+                basis,
+                "fundedProgress",
+                usize::from(horizon),
+                || left_values,
+                || right_values,
+            );
+            if let Some(basis) = basis {
+                basis.scheduled_refunds = Some(refunds);
+            }
+            return reason;
+        }
+        if let Some((a_cost, b_cost)) = left
+            .projection
+            .clue_cost_at(horizon)
+            .zip(right.projection.clue_cost_at(horizon))
+        {
+            let efficient = |a: &[RotationCheckpoint], b: &[RotationCheckpoint]| {
+                a.iter().all(|a| {
+                    b.iter().all(|b| {
+                        a.value.score == b.value.score
+                            && a.value.committed_future_plays == b.value.committed_future_plays
+                            && a.value.preserves_funded_progress(b.value)
+                    })
+                })
+            };
+            let preference = if a_cost.1 < b_cost.0 && efficient(&left_values, &right_values) {
+                Some(EndpointComparison::PreferLeft(
+                    ComparisonReason::ClueEfficiency,
+                ))
+            } else if b_cost.1 < a_cost.0 && efficient(&right_values, &left_values) {
+                Some(EndpointComparison::PreferRight(
+                    ComparisonReason::ClueEfficiency,
+                ))
+            } else {
+                None
+            };
+            if let Some(preference) = preference {
+                retain_comparison_basis(
+                    basis,
+                    "clueEfficiency",
+                    usize::from(horizon),
+                    || left_values,
+                    || right_values,
+                );
+                if let Some(basis) = basis {
+                    basis.clue_cost_bounds = Some((a_cost, b_cost));
+                }
+                return preference;
+            }
+        }
+    }
     // Positional-access development schedules a held play versus spending
     // the turn on a clue. Clue-versus-clue comparisons below additionally
     // require strictly more realized points: speculative access alone must
@@ -1256,8 +1385,8 @@ fn compare_endpoint_evidence(
         }
     }
     if left.symbolic_line.actions != right.symbolic_line.actions
-        || !left.projection.clue_branches.is_empty()
-        || !right.projection.clue_branches.is_empty()
+        || left.projection.has_branches()
+        || right.projection.has_branches()
     {
         // Compare at the latest shared elapsed turn, retaining both tails.
         // A later observed strike is checked above and cannot be trimmed away.
@@ -1448,13 +1577,40 @@ fn compare_bottom_deck_risks(
     left: &PlannerActionEvaluation,
     right: &PlannerActionEvaluation,
 ) -> Ordering {
+    fn assessed_tail(evidence: &crate::ProjectionEvidence, immediate_discard_risk: bool) -> usize {
+        let local = evidence
+            .unresolved_discard
+            .filter(|discard| {
+                discard.required_protection
+                    || evidence.steps.is_empty()
+                    || (discard.strategically_selected
+                        && (!immediate_discard_risk || evidence.resources.tokens == 0))
+            })
+            .and_then(|_| evidence.forecast_discard_risk())
+            .unwrap_or(0);
+        evidence
+            .branches()
+            .map(|branch| assessed_tail(branch, immediate_discard_risk))
+            .max()
+            .unwrap_or(0)
+            .max(local)
+    }
     let horizon = left
         .projection
         .risk_horizon()
         .min(right.projection.risk_horizon())
         .max(1);
-    let left_prefix = left.projection.bottom_deck_risks_at(horizon);
-    let right_prefix = right.projection.bottom_deck_risks_at(horizon);
+    // Optional unknown discards at different forecast frontiers are not
+    // like-for-like decisions. One line may still clue instead; reaching
+    // uncertainty sooner does not demonstrate an avoidable card loss.
+    // Immediate root risk and convention-required discards remain relevant.
+    let aligned_risk_frontiers = left.projection.risk_horizon() == right.projection.risk_horizon();
+    let left_prefix = left
+        .projection
+        .comparable_bottom_deck_risks_at(horizon, aligned_risk_frontiers);
+    let right_prefix = right
+        .projection
+        .comparable_bottom_deck_risks_at(horizon, aligned_risk_frontiers);
     let prefix = left_prefix.cmp(&right_prefix);
     if prefix == Ordering::Equal {
         let identified = compare_identified_losses(left, right, horizon);
@@ -1493,29 +1649,16 @@ fn compare_bottom_deck_risks(
         matches!(candidate.action, Action::Discard(_))
             && candidate.projection.bottom_deck_risks_at(1) > 0
     });
-    let assessed_tail = |candidate: &PlannerActionEvaluation| {
-        candidate
-            .projection
-            .unresolved_discard
-            .filter(|discard| {
-                discard.required_protection
-                    || candidate.projection.steps.is_empty()
-                    || (discard.strategically_selected
-                        && (!immediate_discard_risk || candidate.projection.resources.tokens == 0))
-            })
-            .and_then(|_| candidate.projection.forecast_discard_risk())
-            .unwrap_or(0)
-    };
     let complete = left
         .projection
         .maximum_bottom_deck_risks()
-        .max(assessed_tail(left))
+        .max(assessed_tail(&left.projection, immediate_discard_risk))
         .max(left_prefix)
         .cmp(
             &right
                 .projection
                 .maximum_bottom_deck_risks()
-                .max(assessed_tail(right))
+                .max(assessed_tail(&right.projection, immediate_discard_risk))
                 .max(right_prefix),
         );
     if prefix == complete {
@@ -1620,7 +1763,7 @@ fn symbolic_fallback_comparison(
                 // rewards stopping early at an unknown card. Keep full-tail
                 // diagnostics without using them to bypass that cutoff.
                 (Some(a), Some(b))
-                    if left.projection.steps.len() == right.projection.steps.len() =>
+                    if left.projection.risk_horizon() == right.projection.risk_horizon() =>
                 {
                     b.cmp(&a)
                 }
@@ -2115,6 +2258,79 @@ mod tests {
     use super::*;
 
     #[test]
+    fn funded_progress_precedes_surplus_tokens_but_not_required_funding() {
+        let productive = ProjectedPositionValue {
+            score: 19,
+            clues: 2,
+            clue_demand: 1,
+            ..ProjectedPositionValue::default()
+        };
+        let discard = ProjectedPositionValue {
+            score: 17,
+            clues: 4,
+            clue_demand: 1,
+            ..ProjectedPositionValue::default()
+        };
+        assert!(productive.productive_preference(discard));
+        assert!(
+            ProjectedPositionValue {
+                clues: 0,
+                clue_demand: 0,
+                ..productive
+            }
+            .productive_preference(discard)
+        );
+        assert!(!discard.productive_preference(productive));
+        assert!(!productive.productive_preference(ProjectedPositionValue {
+            protected_bottom_deck_risks: 1,
+            ..discard
+        }));
+        assert!(
+            !ProjectedPositionValue {
+                clues: 0,
+                ..productive
+            }
+            .productive_preference(discard)
+        );
+        assert!(
+            ProjectedPositionValue {
+                exposed_critical_chops: 1,
+                ..productive
+            }
+            .productive_preference(discard)
+        );
+        assert!(
+            !ProjectedPositionValue {
+                exposed_critical_chops: 1,
+                clues: 0,
+                ..productive
+            }
+            .productive_preference(discard)
+        );
+        assert!(
+            !ProjectedPositionValue {
+                exposed_critical_chops: 2,
+                ..productive
+            }
+            .productive_preference(discard)
+        );
+        assert!(
+            !ProjectedPositionValue {
+                secured_future_plays: 2,
+                ..discard
+            }
+            .productive_preference(discard)
+        );
+        assert!(
+            !ProjectedPositionValue {
+                finesse_opportunities: 2,
+                ..discard
+            }
+            .productive_preference(discard)
+        );
+    }
+
+    #[test]
     fn save_pressure_cannot_reward_leaving_a_critical_chop_exposed() {
         let saved = ProjectedPositionValue {
             save_pressure: 1,
@@ -2351,7 +2567,7 @@ mod tests {
         );
         assert_eq!(
             compare_endpoint_evidence(&resource_rich, &safer_prefix, &mut None),
-            EndpointComparison::PreferLeft(ComparisonReason::EndpointResources)
+            EndpointComparison::PreferLeft(ComparisonReason::FundedProgress)
         );
         assert_eq!(
             compare_endpoints(&resource_rich, &safer_prefix),
@@ -2360,6 +2576,32 @@ mod tests {
         assert_eq!(
             compare_endpoints(&safer_prefix, &resource_rich),
             EndpointComparison::Incomparable
+        );
+        // Reaching an unresolved discard sooner is not a recorded loss.
+        // Both continuations assess the same possible BDR; its later arrival
+        // must not erase already demonstrated progress (p4v0s1 turn 23).
+        let mut uncertain_early = resource_rich.clone();
+        let mut uncertain_later = safer_prefix.clone();
+        let (_, unknown) = crate::h_group::symbolic_line::project_leaf_projection(
+            d.view(),
+            crate::HGroupProfile::Max,
+            early.action,
+            &crate::AnalysisControl::default(),
+        )
+        .unwrap();
+        for candidate in [&mut uncertain_early, &mut uncertain_later] {
+            for step in &mut candidate.projection.steps {
+                step.consequences.bottom_deck_risk = None;
+            }
+            candidate.projection.unresolved_discard = unknown.unresolved_discard;
+            let discard = candidate.projection.unresolved_discard.as_mut().unwrap();
+            discard.bottom_deck_risk = true;
+            discard.required_protection = false;
+            discard.strategically_selected = true;
+        }
+        assert_eq!(
+            compare_endpoints(&uncertain_early, &uncertain_later),
+            EndpointComparison::PreferLeft(ComparisonReason::FundedProgress)
         );
         delayed.projection.steps[1].consequences.bottom_deck_risk = None;
         delayed.projection.checkpoints[0].value.exposed_chop_quality =
@@ -2393,13 +2635,6 @@ mod tests {
             Ordering::Equal,
             "a longer speculative tail alone must not penalize a candidate"
         );
-        let (_, unknown) = crate::h_group::symbolic_line::project_leaf_projection(
-            d.view(),
-            crate::HGroupProfile::Max,
-            early.action,
-            &crate::AnalysisControl::default(),
-        )
-        .unwrap();
         assert!(
             unknown
                 .unresolved_discard
@@ -2730,10 +2965,10 @@ mod tests {
     #[test]
     fn every_reviewed_root_is_projected_despite_unequal_priorities() {
         fn check_branches(evidence: &crate::ProjectionEvidence) {
-            for branch in &evidence.clue_branches {
-                assert!(branch.continuation.steps.starts_with(&evidence.steps));
-                assert!(branch.continuation.resources.unfunded_turn.is_none());
-                check_branches(&branch.continuation);
+            for branch in evidence.branches() {
+                assert!(branch.steps.starts_with(&evidence.steps));
+                assert!(branch.resources.unfunded_turn.is_none());
+                check_branches(branch);
             }
         }
 

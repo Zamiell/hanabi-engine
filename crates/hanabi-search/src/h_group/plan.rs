@@ -178,6 +178,9 @@ pub struct ProjectionEvidence {
     /// Exhaustive clue-touch alternatives. These are mutually exclusive,
     /// not extra actions appended to the unconditional prefix.
     pub clue_branches: Vec<ClueTouchBranch>,
+    /// Exhaustive alternatives for a safe discard's unknown revealed face.
+    /// Each branch keeps its own history/counts and blank subsequent draws.
+    pub discard_branches: Vec<DiscardRevealBranch>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -200,18 +203,51 @@ pub struct ClueTouchBranch {
     pub continuation: ProjectionEvidence,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiscardRevealBranch {
+    pub turn: u32,
+    pub card: CardId,
+    pub identity: Card,
+    pub continuation: ProjectionEvidence,
+}
+
 impl ProjectionEvidence {
+    pub(crate) fn branches(&self) -> impl Iterator<Item = &Self> {
+        self.clue_branches
+            .iter()
+            .map(|branch| &branch.continuation)
+            .chain(
+                self.discard_branches
+                    .iter()
+                    .map(|branch| &branch.continuation),
+            )
+    }
+
+    pub(crate) fn has_branches(&self) -> bool {
+        !self.clue_branches.is_empty() || !self.discard_branches.is_empty()
+    }
     /// Unbranched risk up to an assessed discard frontier. If a forecast stops
     /// on an unresolved clue/play, absence of a recorded loss is not evidence
     /// of safety. A zero-risk unknown discard is a usable local alternative,
     /// but does not certify anything after that discard or its unknown draw.
     pub(crate) fn forecast_discard_risk(&self) -> Option<usize> {
+        if self.has_branches() {
+            return self
+                .branches()
+                .map(Self::forecast_discard_risk)
+                .collect::<Option<Vec<_>>>()?
+                .into_iter()
+                .max();
+        }
         let known = self
             .steps
             .iter()
             .filter(|step| step.consequences.bottom_deck_risk.is_some())
             .count();
         match self.unresolved_discard {
+            Some(discard) if !discard.strategically_selected && !discard.required_protection => {
+                None
+            }
             Some(discard) => Some(known + usize::from(discard.bottom_deck_risk)),
             None if known > 0
                 || matches!(
@@ -226,14 +262,20 @@ impl ProjectionEvidence {
     }
 
     pub(crate) fn maximum_bottom_deck_risks(&self) -> usize {
+        self.recorded_bottom_deck_risks_at(usize::MAX)
+    }
+
+    /// Executed modeled losses only. An unresolved discard's possible loss
+    /// belongs to the assessed-risk comparison, not a known-loss cutoff guard.
+    pub(crate) fn recorded_bottom_deck_risks_at(&self, horizon: usize) -> usize {
         let prefix = self
             .steps
             .iter()
+            .take(horizon)
             .filter(|step| step.consequences.bottom_deck_risk.is_some())
             .count();
-        self.clue_branches
-            .iter()
-            .map(|branch| branch.continuation.maximum_bottom_deck_risks())
+        self.branches()
+            .map(|branch| branch.recorded_bottom_deck_risks_at(horizon))
             .max()
             .unwrap_or(0)
             .max(prefix)
@@ -244,6 +286,14 @@ impl ProjectionEvidence {
     /// forecast avoids it. Full tail evidence remains available to diagnostics;
     /// immediate Save Principle violations are assessed independently.
     pub(crate) fn bottom_deck_risks_at(&self, horizon: usize) -> usize {
+        self.comparable_bottom_deck_risks_at(horizon, true)
+    }
+
+    pub(crate) fn comparable_bottom_deck_risks_at(
+        &self,
+        horizon: usize,
+        include_optional_tail: bool,
+    ) -> usize {
         let prefix = self
             .steps
             .iter()
@@ -252,11 +302,13 @@ impl ProjectionEvidence {
             .count()
             // The unexecuted discard would be the next action, not the last
             // completed action in this prefix.
-            + usize::from(self.unresolved_discard.is_some_and(|discard| discard.bottom_deck_risk)
+            + usize::from(self.unresolved_discard.is_some_and(|discard| {
+                discard.bottom_deck_risk
+                    && (include_optional_tail || discard.required_protection || self.steps.is_empty())
+            })
                 && self.steps.len() < horizon);
-        self.clue_branches
-            .iter()
-            .map(|branch| branch.continuation.bottom_deck_risks_at(horizon))
+        self.branches()
+            .map(|branch| branch.comparable_bottom_deck_risks_at(horizon, include_optional_tail))
             .max()
             .unwrap_or(0)
             .max(prefix)
@@ -280,9 +332,8 @@ impl ProjectionEvidence {
                     == Some(SavePrincipleViolation::CriticalCard)
             })
             .count();
-        self.clue_branches
-            .iter()
-            .map(|branch| branch.continuation.critical_losses_at(horizon))
+        self.branches()
+            .map(|branch| branch.critical_losses_at(horizon))
             .max()
             .unwrap_or(0)
             .max(prefix)
@@ -297,24 +348,19 @@ impl ProjectionEvidence {
             .take(horizon)
             .filter(|step| step.consequences.save_principle_violation.is_some())
             .count();
-        self.clue_branches
-            .iter()
-            .map(|branch| branch.continuation.save_violations_at(horizon))
+        self.branches()
+            .map(|branch| branch.save_violations_at(horizon))
             .max()
             .unwrap_or(0)
             .max(prefix)
     }
     pub(crate) fn common_horizon(&self) -> u8 {
-        if self.clue_branches.is_empty() {
+        if self.has_branches() {
+            self.branches().map(Self::common_horizon).min().unwrap_or(0)
+        } else {
             self.checkpoints
                 .last()
                 .map_or(0, |checkpoint| checkpoint.actions)
-        } else {
-            self.clue_branches
-                .iter()
-                .map(|branch| branch.continuation.common_horizon())
-                .min()
-                .unwrap_or(0)
         }
     }
 
@@ -325,41 +371,83 @@ impl ProjectionEvidence {
     /// remain diagnostic risks but do not extend the comparable horizon,
     /// unless convention obligations make that discard necessary.
     pub(crate) fn risk_horizon(&self) -> usize {
-        if self.clue_branches.is_empty() {
+        if self.has_branches() {
+            self.branches().map(Self::risk_horizon).min().unwrap_or(0)
+        } else {
             self.steps.len()
                 + usize::from(self.unresolved_discard.is_some_and(|discard| {
                     discard.required_protection || discard.strategically_selected
                 }))
-        } else {
-            self.clue_branches
-                .iter()
-                .map(|branch| branch.continuation.risk_horizon())
-                .min()
-                .unwrap_or(0)
         }
     }
 
     pub(crate) fn checkpoints_at(&self, actions: u8) -> Vec<crate::RotationCheckpoint> {
-        if self.clue_branches.is_empty() {
+        if self.has_branches() {
+            self.branches()
+                .flat_map(|branch| branch.checkpoints_at(actions))
+                .collect()
+        } else {
             self.checkpoints
                 .iter()
                 .filter(|checkpoint| checkpoint.actions == actions)
                 .copied()
                 .collect()
-        } else {
-            self.clue_branches
+        }
+    }
+
+    /// Bounds over mutually exclusive branches, not a sum across worlds.
+    pub(crate) fn clue_cost_at(&self, actions: u8) -> Option<(u8, u8)> {
+        if self.has_branches() {
+            let costs = self
+                .branches()
+                .map(|branch| branch.clue_cost_at(actions))
+                .collect::<Option<Vec<_>>>()?;
+            Some((
+                costs.iter().map(|cost| cost.0).min()?,
+                costs.iter().map(|cost| cost.1).max()?,
+            ))
+        } else if self.steps.len() >= usize::from(actions) {
+            let cost = self
+                .steps
                 .iter()
-                .flat_map(|branch| branch.continuation.checkpoints_at(actions))
-                .collect()
+                .take(usize::from(actions))
+                .fold(0_u8, |sum, step| {
+                    sum.saturating_add(step.consequences.clues_spent)
+                });
+            Some((cost, cost))
+        } else {
+            None
+        }
+    }
+
+    /// Refunds in the already-recorded uninterrupted play continuation.
+    /// No new clue/discard is borrowed to fund an earlier comparison, and
+    /// every retained branch must deliver the refund. Unknown tails earn none.
+    pub(crate) fn play_refunds_after(&self, actions: u8) -> u8 {
+        if self.has_branches() {
+            self.branches()
+                .map(|branch| branch.play_refunds_after(actions))
+                .min()
+                .unwrap_or(0)
+        } else {
+            self.steps
+                .iter()
+                .skip(usize::from(actions))
+                .take_while(|step| {
+                    matches!(step.projected.action, Action::Play(_))
+                        && step.consequences.strikes == 0
+                })
+                .fold(0_u8, |sum, step| {
+                    sum.saturating_add(step.consequences.clues_gained)
+                })
         }
     }
 
     /// Worst modeled branch, not a claim that a conditional strike occurs in
     /// every world. A common-horizon comparison must never hide this tail.
     pub(crate) fn maximum_strikes(&self) -> u8 {
-        self.clue_branches
-            .iter()
-            .map(|branch| branch.continuation.maximum_strikes())
+        self.branches()
+            .map(Self::maximum_strikes)
             .max()
             .unwrap_or_else(|| {
                 self.steps.iter().fold(0_u8, |sum, step| {
@@ -418,8 +506,57 @@ impl ConditionalPlan {
         }
     }
 
-    pub(super) fn into_evidence(self) -> ProjectionEvidence {
+    pub(super) fn into_evidence(mut self) -> ProjectionEvidence {
+        if self.evidence.has_branches() {
+            let terminal = self.summarize().stop_reason == SymbolicStopReason::Terminal;
+            self.evidence.steps = self.shared_steps();
+            self.evidence.resources = ResourceSchedule::new(self.evidence.resources.initial_tokens);
+            for step in &self.evidence.steps {
+                assert!(self.evidence.resources.apply(
+                    step.turn,
+                    step.consequences.clues_spent,
+                    step.consequences.clues_gained
+                ));
+            }
+            self.evidence.frontier = if terminal {
+                PlanFrontier::Terminal
+            } else {
+                PlanFrontier::IdentityBranch
+            };
+        }
         self.evidence
+    }
+
+    fn shared_steps(&self) -> Vec<PlanStep> {
+        let mut branches = self.evidence.branches();
+        let Some(first) = branches.next() else {
+            return self.evidence.steps.clone();
+        };
+        let mut steps = first.steps.clone();
+        for branch in branches {
+            let common = steps
+                .iter()
+                .zip(&branch.steps)
+                .take_while(|(a, b)| a == b)
+                .count();
+            steps.truncate(common);
+        }
+        steps
+    }
+
+    pub(super) fn add_discard_branch(
+        &mut self,
+        turn: u32,
+        card: CardId,
+        identity: Card,
+        plan: Self,
+    ) {
+        self.evidence.discard_branches.push(DiscardRevealBranch {
+            turn,
+            card,
+            identity,
+            continuation: plan.into_evidence(),
+        });
     }
 
     pub(super) fn add_alternative(&mut self, mut alternative: ConditionalAlternative) {
@@ -438,6 +575,15 @@ impl ConditionalPlan {
             discards: summary.discards,
             value,
         });
+    }
+    pub(super) fn record_branch_rotation(&mut self, actions: u8) {
+        if self.first_rotation.is_none() && self.evidence.common_horizon() >= actions {
+            let checkpoints = self.evidence.checkpoints_at(actions);
+            self.first_rotation = checkpoints
+                .first()
+                .filter(|first| checkpoints.iter().all(|other| other == *first))
+                .copied();
+        }
     }
     pub(super) fn record_checkpoint(&mut self, value: Option<crate::ProjectedPositionValue>) {
         let summary = self.summarize();
@@ -512,7 +658,7 @@ impl ConditionalPlan {
     }
 
     pub(super) fn summarize(&self) -> SymbolicLineOutcome {
-        if !self.evidence.clue_branches.is_empty() {
+        if self.evidence.has_branches() {
             return self.summarize_branches();
         }
         let mut outcome = SymbolicLineOutcome {
@@ -553,19 +699,11 @@ impl ConditionalPlan {
     }
 
     fn summarize_branches(&self) -> SymbolicLineOutcome {
-        let branches = &self.evidence.clue_branches;
+        let branches: Vec<_> = self.evidence.branches().collect();
         let mut shared = self.clone();
         shared.evidence.clue_branches.clear();
-        let mut steps = branches[0].continuation.steps.clone();
-        for branch in &branches[1..] {
-            let common = steps
-                .iter()
-                .zip(&branch.continuation.steps)
-                .take_while(|(a, b)| a == b)
-                .count();
-            steps.truncate(common);
-        }
-        shared.evidence.steps = steps;
+        shared.evidence.discard_branches.clear();
+        shared.evidence.steps = self.shared_steps();
         let actions = u8::try_from(shared.len()).unwrap_or(u8::MAX);
         // Different branch states must not be advertised as one exact state.
         // Keep an endpoint only when all branches agree on its full value.
@@ -573,7 +711,6 @@ impl ConditionalPlan {
             .iter()
             .map(|branch| {
                 branch
-                    .continuation
                     .checkpoints
                     .iter()
                     .find(|checkpoint| checkpoint.actions == actions)
@@ -582,10 +719,8 @@ impl ConditionalPlan {
             .collect::<Vec<_>>();
         shared.position_value =
             values[0].filter(|value| values.iter().all(|other| *other == Some(*value)));
-        shared.first_rotation = None;
         shared.evidence.frontier = if branches.iter().all(|branch| {
-            branch.outcome.stop_reason == SymbolicStopReason::Terminal
-                && branch.outcome.actions == actions
+            branch.frontier == PlanFrontier::Terminal && branch.steps.len() == usize::from(actions)
         }) {
             PlanFrontier::Terminal
         } else {
@@ -606,6 +741,8 @@ mod tests {
         let mut unknown = ConditionalPlan::new(2);
         assert_eq!(unknown.evidence.forecast_discard_risk(), None);
         unknown.record_unresolved_discard(CardId::new(5), false, false, false);
+        assert_eq!(unknown.evidence.forecast_discard_risk(), None);
+        unknown.record_unresolved_discard(CardId::new(5), false, false, true);
         assert_eq!(unknown.evidence.forecast_discard_risk(), Some(0));
         let mut plan = ConditionalPlan::new(2);
         plan.push(
@@ -632,13 +769,22 @@ mod tests {
             .unwrap()
             .required_protection = false;
         assert_eq!(speculative.risk_horizon(), 1);
+        assert_eq!(speculative.forecast_discard_risk(), None);
         speculative
             .unresolved_discard
             .as_mut()
             .unwrap()
             .strategically_selected = true;
         assert_eq!(speculative.risk_horizon(), 2);
+        assert_eq!(speculative.comparable_bottom_deck_risks_at(2, false), 1);
+        assert_eq!(speculative.comparable_bottom_deck_risks_at(2, true), 2);
+        assert_eq!(evidence.comparable_bottom_deck_risks_at(2, false), 2);
+        let mut immediate = speculative.clone();
+        immediate.steps.clear();
+        assert_eq!(immediate.comparable_bottom_deck_risks_at(1, false), 1);
         assert_eq!(evidence.maximum_bottom_deck_risks(), 1);
+        assert_eq!(evidence.recorded_bottom_deck_risks_at(0), 0);
+        assert_eq!(evidence.recorded_bottom_deck_risks_at(2), 1);
         assert_eq!(evidence.forecast_discard_risk(), Some(2));
         assert_eq!(
             evidence.bottom_deck_risks_at(0),
@@ -716,6 +862,8 @@ mod tests {
         let evidence = prefix.into_evidence();
         assert_eq!(evidence.common_horizon(), 1);
         assert_eq!(evidence.checkpoints_at(1).len(), 2);
+        assert_eq!(evidence.clue_cost_at(1), Some((1, 1)));
+        assert_eq!(evidence.clue_cost_at(2), None);
         assert_eq!(evidence.maximum_strikes(), 1);
         assert_eq!(evidence.maximum_save_violations(), 1);
         assert_eq!(evidence.save_violations_at(1), 0);
@@ -745,6 +893,36 @@ mod tests {
         assert_eq!(ResourceSchedule::discard_then_clue(0, 4).unwrap().tokens, 0);
         assert!(!ResourceSchedule::funds_final_fives(0, 2, 1));
         assert!(ResourceSchedule::funds_final_fives(1, 2, 2));
+    }
+
+    #[test]
+    fn future_refund_requires_an_uninterrupted_play_in_every_branch() {
+        let mut plan = ConditionalPlan::new(0);
+        plan.push(
+            0,
+            ProjectedAction {
+                actor: PlayerId::new(0),
+                action: Action::Play(CardId::new(0)),
+            },
+            ProjectedConsequences {
+                clues_gained: 1,
+                score_gain: 1,
+                ..Default::default()
+            },
+        );
+        let evidence = plan.clone().into_evidence();
+        assert_eq!(evidence.play_refunds_after(0), 1);
+        assert_eq!(evidence.play_refunds_after(1), 0);
+        let mut discard = evidence.clone();
+        discard.steps[0].projected.action = Action::Discard(CardId::new(0));
+        assert_eq!(discard.play_refunds_after(0), 0);
+        let mut strike = evidence;
+        strike.steps[0].consequences.strikes = 1;
+        assert_eq!(strike.play_refunds_after(0), 0);
+        let mut branches = ConditionalPlan::new(0);
+        branches.add_clue_branch(0, vec![CardId::new(0)], plan);
+        branches.add_clue_branch(0, vec![CardId::new(1)], ConditionalPlan::new(0));
+        assert_eq!(branches.into_evidence().play_refunds_after(0), 0);
     }
 
     #[test]

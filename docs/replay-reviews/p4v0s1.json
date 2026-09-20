@@ -1,5 +1,23 @@
 [
   {
+    "id": "t28-early-purple-setup-versus-playing-purple-four",
+    "turn": 28,
+    "positionKey": "415e04471f4b596908dd86a4d256e68ad981d130aa9c1381e1731776c3c2e597",
+    "status": "unresolved",
+    "perspective": "Donald; his own unpromised faces and future draws remain unknown",
+    "source": {
+      "conversation": "2026-09-19, assistant investigation after safe-discard branch and funded-progress implementation"
+    },
+    "explanation": {
+      "fixture": "Play promised p4 #12; Alice plays r2; Bob clues purple to Cathy; Cathy plays p5. Bob's y5 is still behind his r3 chop.",
+      "engine": "Purple to Cathy; Alice plays r2; Bob discards r3; Cathy gives 5s to Bob, protecting y5; Donald plays p4; Alice discards y1; Bob gives 4s to Alice; Cathy plays p5.",
+      "comparison": "p4 directly beats purple by ordinary convention priority (525 versus 493), but a comparison cycle selects purple: blue TCM to Cathy beats p4 on later protected-card development; purple beats blue on equal-progress clue efficiency. At their shared checkpoint the TCM line protects one additional future card, including the earlier y5 Save. This is not proof that the fixture is suboptimal.",
+      "question": "Should earlier p4/p5 progress and arranging y5 protection later take precedence over the earlier 5 Save and draw in the purple-first line? The existing turn-28 ruling establishes Alice's persistent r2 knowledge, not this scheduling preference. Do not change the fixture or add a preferred-action assertion without review."
+    },
+    "regressions": [],
+    "coverageNote": "Latest from-start scan agrees through turn 27. Existing self-finesse regressions remain separate; this question concerns scheduling, not connector inference."
+  },
+  {
     "id": "t35-eliminated-trash-and-productive-discharge",
     "turn": 35,
     "positionKey": "093387f19e1437a70c5c5b36eaa4b965e98f748c893ded31eafb5bca0fe55926",
@@ -13,10 +31,16 @@
       "ruling": "Do not penalize the line merely because the face of #18 is unknown. Prefer yellow's productive zero-BDR 2-for-1 over manufacturing a discard token here.",
       "verifiedEvidence": "The existing Save Principle discard domain already excludes unreplaced useful faces. Remaining faces are obsolete or visibly replaceable; this is discard-safety knowledge, not proof of a particular identity or a literal trash note on an unclued card.",
       "implementation": "Record the safe discard, its refund, and its assessed identity domain as a projected action. Stop at a typed SafeDiscardReveal frontier without fabricating the revealed face, a drawn face, or a concrete post-discard endpoint. Risky unknown cards still stop before executing.",
-      "remainingWork": "Continuation across the unknown reveal needs domain-valued state or exhaustive equivalent branches. The broader ranking redesign is proposed, not implemented: comparable guaranteed progress and required resource funding should precede static convention scores. This regression does not assert final move parity."
+      "followupImplementation": "Strategic projections now retain exhaustive safe-discard reveal branches within a bounded budget. Checkpoints, risk horizons, and conditional tails traverse all branches. Funded realized/executable progress and equal-progress clue efficiency precede static convention scores; protected cards and each line's own clue funding must be preserved. Leaf forecasts retain immediate reveal checkpoints rather than expanding more continuations; exhausted budgets retain the conservative safe-reveal frontier. Already-projected uninterrupted play refunds can fund optional future work, but cannot excuse an immediate critical/save obligation.",
+      "boundary": "An unsearched leaf discard does not supply strategic evidence, and unequal assessed discard horizons cannot be compared as equal-length risk totals. Branch-specific unknown draws remain blank. The root regression asserts yellow over discard, not over every other admitted clue: the user ruling did not compare those other clues. Full replay parity is a separate check.",
+      "fundingCorrection": "The reserve already charges pending critical Saves. Do not veto funded progress a second time merely because one line still has an exposed critical chop. The reserve must cover every such chop, available tokens must cover the reserve, and recorded losses remain independently guarded."
     },
     "regressions": [
-      "h_group::symbolic_line::tests::first_seed_turn_35_eliminates_discard_risk_without_an_exact_face"
+      "h_group::symbolic_line::tests::first_seed_turn_35_eliminates_discard_risk_without_an_exact_face",
+      "h_group::tests::replay::first_seed_safe_discharge_beats_surplus_discard",
+      "h_group::symbolic_line::tests::first_seed_projected_follow_up_preserves_the_reviewed_discharge",
+      "h_group::symbolic_line::tests::first_seed_projected_save_is_not_penalized_for_an_extra_unknown_turn",
+      "planner::tests::funded_progress_precedes_surplus_tokens_but_not_required_funding"
     ]
   },
   {
@@ -85,7 +109,7 @@
       "historicalAnchors": "Later records retain their old position keys and reasoning; their continuations have been superseded by this fixture edit. They are not re-anchored to the new history."
     },
     "regressions": [],
-    "coverageNote": "Replay legality and link round-trip validation only; engine move agreement was not rechecked."
+    "coverageNote": "The later UTD clarification supersedes the old first_seed_red_four_progress_beats_an_early_save expectation. Its replacement, first_seed_four_save_projects_the_reviewed_discharge, checks both projected red plays and retained protection instead of asserting that the obsolete direct-clue choice wins."
   },
   {
     "id": "t34-chop-move-protection-versus-red-stack-progress",
@@ -237,9 +261,9 @@
     },
     "regressions": [
       "h_group::tests::replay::first_seed_unloaded_hand_uses_declined_protection_to_draw_safely",
-      "h_group::tests::replay::first_seed_red_four_progress_beats_an_early_save"
+      "h_group::tests::replay::first_seed_four_save_projects_the_reviewed_discharge"
     ],
-    "coverageNote": "Checks excluded needed identities, retained duplicate possibilities, unchanged literal domain, zero BDR and best discard; negative controls retain uncertainty without history or for a fresh non-chop card. The follow-up turn-34 regression verifies that Bob's r4 clue develops r4/r5 and beats the early y4 Save without reserving a fictional clue on unseen y3/g3."
+    "coverageNote": "Checks excluded needed identities, retained duplicate possibilities, unchanged literal domain, zero BDR and best discard; negative controls retain uncertainty without history or for a fresh non-chop card. The follow-up turn-34 regression now follows the later 4-to-Alice and UTD clarification; the former assertion preferring 4 to Donald is superseded, not a current strategic ruling."
   },
   {
     "id": "t11-immediate-versus-optional-discard",

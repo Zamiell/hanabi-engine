@@ -5,6 +5,71 @@ an individual convention regression. Entries describe the problem, the boundary
 introduced to solve it, and the property that future changes should preserve.
 Commit hashes refer to this repository's Git history.
 
+## 2026-09-19: safe-discard reveal branches and funded progress
+
+The reviewed p4v0s1 turn 35 exposed two distinct problems: an unknown but safe
+discard stopped before its certain resource effect, and an incomparable endpoint
+restored a static discard priority above a productive Discharge.
+
+- Extend the existing conditional plan with exhaustive discard-reveal branches,
+  preserving separate counts/history and blank draws. Summaries share only equal
+  steps; risk and aligned checkpoints visit every branch. A bounded reveal
+  budget stops explicitly rather than picking a representative hidden face.
+- Leaf policy retains one safe reveal's immediate checkpoints; inverse reasoning
+  retains the unexpanded frontier. Do not turn conditional Save Principle
+  exclusions into literal card notes or silently reveal hidden draws.
+- Extend the September 16 aligned-checkpoint boundary with funded progress for
+  every action pairing. Require no loss of protected/secured cards or safety,
+  and preserve the required clue reserve. Static convention scores and
+  speculative opportunities cannot overturn demonstrated progress under those
+  conditions. Retain deterministic cycle handling and expose the comparison
+  operands; this is a constrained forecast preference, not an exact proof.
+
+This extends the existing projection/evidence architecture, not a second
+simulator, sampled-world search, or a turn-specific clue bonus.
+
+The resumed replay scan also exposed a connection-consistency bug: Bluff
+recognition ignored a Prompt selected by the very same clue, appended a phantom
+blind play, then rejected the real direct clue as redundant. The shared Bluff
+predicate now respects that Prompt. The turn-29 counterfactual regression checks
+recipient meaning, safety, and candidate admission without asserting that this
+counterfactual is strategically optimal.
+
+The nested turn-35 regression additionally prevents the cheaper follow-up search
+from falling back to discard merely because it omitted the safe-discard
+checkpoint. Funding is checked against each line's own unmet clue demand, not
+the demand of a competing line whose work has already been accomplished.
+Already-recorded uninterrupted play refunds can fund optional future work when
+no immediate critical/save obligation intervenes; diagnostics retain the credit
+separately from actual clue tokens. Extending leaf reveal continuations for a
+rotation was tested and rejected: it multiplied nested search costs and changed
+the reviewed Discharge preference. Do not reintroduce that expansion as a cheap
+way to make incomplete endpoints comparable.
+
+The from-start scan exposed a cutoff interaction at turn 23: both lines reached
+an uncertain discard, but the earlier uncertainty suppressed the more efficient
+line. The cutoff guard now checks recorded modeled losses; unresolved risks
+remain in the separate assessed-risk comparison. Tests retain both controls: do
+not trim away a known loss, and do not treat delaying equal uncertainty as
+avoiding a loss. No fixture actions were changed.
+
+The root turn-35 comparison also charged a critical Save twice: once in its
+required token reserve and again as an absolute exposed-chop count veto. Funded
+progress now requires that all critical chops are included in the funded
+reserve, rather than demanding that pending Saves already have happened.
+Unfunded reserves and recorded losses still block that preference. The reviewed
+regression compares yellow with discard; it does not assert an unreviewed
+ordering over every other admitted clue.
+
+Validation checkpoint: the from-start p4v0s1 scan agrees through turn 27, then
+stops at the unresolved turn-28 play-p4 versus purple-clue scheduling comparison
+(recorded in the review ledger). Full validation took 552.02 seconds: 381
+ordinary tests passed, 53 failed, and 30 were skipped; all other check stages
+passed. The reviewed turn-35 discharge and its nested follow-up regressions
+passed. This is not full convention stabilization. Branch expansion also adds
+material runtime: the focused root discharge test alone took 84.09 seconds in an
+isolated release run. No performance-neutrality claim is made.
+
 ## 2026-09-18: net chop exposure in projected comparisons
 
 The reviewed p4v0s1 turn-4 alternative exposed a one-sided protection value: the

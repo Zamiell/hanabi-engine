@@ -411,6 +411,11 @@ pub(crate) fn projection_evidence_json(
             "turn": branch.turn + 1, "touched": branch.touched.iter().map(|card| card.index()).collect::<Vec<_>>(),
             "projection": projection_evidence_json(table_id, &branch.continuation),
         })).collect::<Vec<_>>(),
+        "discardBranches": evidence.discard_branches.iter().map(|branch| json!({
+            "turn": branch.turn + 1, "card": branch.card.index(),
+            "identity": identity_json(branch.identity),
+            "projection": projection_evidence_json(table_id, &branch.continuation),
+        })).collect::<Vec<_>>(),
         "assumptions": evidence.assumptions.iter().map(|assumption| json!({
             "turn": assumption.turn + 1,
             "sourceObserver": assumption.source_observer.index(),

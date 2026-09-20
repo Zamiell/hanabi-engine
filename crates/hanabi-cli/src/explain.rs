@@ -322,6 +322,8 @@ fn comparisons(
             endpoint:format!("{:?}",comparison.endpoint), in_cycle:comparison.in_cycle,
             evidence:json!({"leftEndpoint":endpoint(left),"rightEndpoint":endpoint(right),"latestSharedCheckpoint":shared,
                 "actualBasis": comparison.basis.as_ref().map(|basis|json!({"stage":basis.stage,"horizon":basis.horizon,
+                    "clueCostBounds": basis.clue_cost_bounds,
+                    "scheduledRefunds": basis.scheduled_refunds,
                     "left":basis.left.iter().map(|c|crate::live_action::position_value_json(c.value)).collect::<Vec<_>>(),
                     "right":basis.right.iter().map(|c|crate::live_action::position_value_json(c.value)).collect::<Vec<_>>() })),
                 "note":"Shared checkpoint is context, not necessarily the comparator's decisive checkpoint; reason identifies the rule actually used."}) }
@@ -715,6 +717,15 @@ fn print_projection(
         println!(
             "{indent}Conditional touches {:?} at T{}:",
             branch.touched,
+            branch.turn + 1
+        );
+        print_projection(&branch.continuation, players, &format!("{indent}  "));
+    }
+    for branch in &projection.discard_branches {
+        println!(
+            "{indent}Conditional discard #{} reveals {:?} at T{}:",
+            branch.card.index(),
+            branch.identity,
             branch.turn + 1
         );
         print_projection(&branch.continuation, players, &format!("{indent}  "));

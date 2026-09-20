@@ -1,6 +1,40 @@
 use super::*;
 
 #[test]
+fn first_seed_safe_discharge_beats_surplus_discard() {
+    // Human-reviewed turn 35: yellow obtains r4 + r5 for one clue with
+    // no BDR; Cathy's face-unknown #18 is a safe discard, not a better plan.
+    let state = expert_replay_p4v0s1().state_at_turn(34).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let analysis = crate::analyze_position(
+        &view,
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig {
+            objective: crate::PlanningObjective::PerfectScore,
+            ..crate::PlannerConfig::default()
+        },
+    )
+    .unwrap();
+    let yellow = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Suit(Suit::Yellow),
+    };
+    let discard = Action::Discard(CardId::new(18));
+    let comparison = analysis
+        .planner
+        .comparisons
+        .iter()
+        .find(|comparison| {
+            (comparison.left == yellow && comparison.right == discard)
+                || (comparison.left == discard && comparison.right == yellow)
+        })
+        .unwrap();
+    // The reviewed ruling compares yellow with discard; it does not rank
+    // every other clue that a longer forecast might consider.
+    assert_eq!(comparison.preferred, yellow, "{comparison:?}");
+}
+
+#[test]
 fn first_seed_unknown_trash_discharge_and_unnecessary_push() {
     // User-reviewed p4v0s1 turns 35–37: yellow focuses trash #29,
     // Donald discharges #28, then Alice pushes #33 because r4 was directly
@@ -552,10 +586,10 @@ fn first_seed_missing_connectors_compare_both_drawers() {
 }
 
 #[test]
-fn first_seed_red_four_progress_beats_an_early_save() {
-    // p4v0s1 turn 34: the reviewed r4 clue enables Cathy's r5 clue, then
-    // both cards play. Saving y4 first must not win on a fictitious reserve
-    // for unseen g3/y3, or merely because both root actions are clues.
+fn first_seed_four_save_projects_the_reviewed_discharge() {
+    // The user replaced the old turn-34 direct r4 clue with 4s to Alice.
+    // That Save enables the reviewed yellow UTD and Unnecessary Trash Push:
+    // it is no longer an inert Early Save while the direct line gets two plays.
     let state = expert_replay_p4v0s1().state_at_turn(33).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let analysis = crate::analyze_position(
@@ -582,19 +616,11 @@ fn first_seed_red_four_progress_beats_an_early_save() {
     };
     let play_rotation = candidate(play_clue).symbolic_line.first_rotation.unwrap();
     let save_rotation = candidate(save).symbolic_line.first_rotation.unwrap();
-    assert_eq!(play_rotation.value.score, save_rotation.value.score + 2);
+    assert_eq!(play_rotation.value.score, state.score() + 2);
+    assert_eq!(save_rotation.value.score, play_rotation.value.score);
     assert!(play_rotation.value.clues >= play_rotation.value.clue_demand);
-    let comparison = analysis
-        .planner
-        .comparisons
-        .iter()
-        .find(|value| {
-            (value.left == play_clue && value.right == save)
-                || (value.left == save && value.right == play_clue)
-        })
-        .unwrap();
-    assert_eq!(comparison.preferred, play_clue, "{comparison:?}");
-    assert_eq!(analysis.planner.best_action, play_clue);
+    assert!(save_rotation.value.clues >= save_rotation.value.clue_demand);
+    assert!(save_rotation.value.secured_future_plays > play_rotation.value.secured_future_plays);
 }
 
 #[test]

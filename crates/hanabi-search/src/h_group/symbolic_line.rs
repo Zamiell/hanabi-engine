@@ -8,6 +8,10 @@ use super::{
     infer_h_group_from_replay, is_playable_now, select_h_group_action,
 };
 
+// Bound exhaustive reveal work, not convention alternatives: when this budget
+// cannot cover a domain, retain an explicit frontier rather than sampling it.
+const MAX_REVEAL_LEAVES: usize = 16;
+
 #[test]
 fn reviewed_turn_thirty_compares_equal_elapsed_time() {
     let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
@@ -136,6 +140,7 @@ fn project_h_group_plan_with_control<const REUSE_SELECTED: bool>(
         // convention policy. Asking that proof to run strategic forecasts
         // again would multiply historical proof work and change its model.
         !super::inverse_planning::is_active(),
+        MAX_REVEAL_LEAVES,
     )
 }
 
@@ -155,6 +160,7 @@ pub(crate) fn project_leaf_projection(
         control,
         ConditionalPlan::new(source.clue_tokens),
         false,
+        MAX_REVEAL_LEAVES,
     )?;
     Ok((plan.summarize(), plan.into_evidence()))
 }
@@ -170,6 +176,7 @@ fn continue_plan<const REUSE_SELECTED: bool>(
     control: &crate::AnalysisControl,
     mut plan: ConditionalPlan,
     strategic: bool,
+    reveal_budget: usize,
 ) -> Result<ConditionalPlan, crate::AnalysisStopped> {
     #[cfg(test)]
     let _profile = crate::test_profile::span("symbolic_projection");
@@ -235,6 +242,92 @@ fn continue_plan<const REUSE_SELECTED: bool>(
             let frontier = PlanFrontier::IdentityBranch;
             if let Action::Discard(card) = current {
                 if let Some(domain) = safe_discard_domain(&public, profile, card) {
+                    if domain.len() <= reveal_budget && !super::inverse_planning::is_active() {
+                        let prefix = plan.clone();
+                        for identity in domain.iter() {
+                            control.checkpoint()?;
+                            let after =
+                                ProspectiveTransition::discard(&public, actor, card, identity);
+                            let mut branch = prefix.clone();
+                            branch.push(
+                                public.turn,
+                                ProjectedAction {
+                                    actor,
+                                    action: current,
+                                },
+                                ProjectedConsequences {
+                                    discards: 1,
+                                    clues_gained: u8::from(
+                                        public.clue_tokens < hanabi_core::MAX_CLUE_TOKENS,
+                                    ),
+                                    ..ProjectedConsequences::default()
+                                },
+                            );
+                            branch.record_interpretation(Some(domain));
+                            branch.record_checkpoint(super::frontier_value::evaluate(
+                                source, &after, profile, root,
+                            ));
+                            if branch.len() == source.hands.len() {
+                                branch.record_rotation(super::frontier_value::evaluate(
+                                    source, &after, profile, root,
+                                ));
+                            }
+                            // Leaf comparisons need the known post-discard
+                            // resources, not another tree of policy searches.
+                            // Retain every possible checkpoint at this work
+                            // boundary. Strategic callers continue the line.
+                            if !strategic {
+                                branch.stop_at(PlanFrontier::Limit);
+                                plan.add_discard_branch(public.turn, card, identity, branch);
+                                continue;
+                            }
+                            let next = if branch.len() < usize::from(limit)
+                                && after.status == hanabi_core::GameStatus::InProgress
+                            {
+                                PerspectiveProjector::new(&after, profile)
+                                    .project(
+                                        after.current_player,
+                                        PerspectiveDepth::NestedRecipients,
+                                    )
+                                    .map(|(d, _)| {
+                                        crate::planner::choose_projected_follow_up(
+                                            &d, profile, control,
+                                        )
+                                    })
+                                    .transpose()?
+                                    .flatten()
+                            } else {
+                                branch.stop_at(
+                                    if after.status == hanabi_core::GameStatus::InProgress {
+                                        PlanFrontier::Limit
+                                    } else {
+                                        PlanFrontier::Terminal
+                                    },
+                                );
+                                None
+                            };
+                            branch = continue_plan::<REUSE_SELECTED>(
+                                source,
+                                after,
+                                profile,
+                                next,
+                                root,
+                                limit,
+                                control,
+                                branch,
+                                strategic,
+                                reveal_budget / domain.len(),
+                            )?;
+                            plan.add_discard_branch(public.turn, card, identity, branch);
+                        }
+                        // Branch histories are alternatives, not a fabricated
+                        // common public state. Keep every branch for aligned
+                        // comparison and expose only their common action prefix.
+                        plan.record_branch_rotation(
+                            u8::try_from(source.hands.len()).expect("standard player count"),
+                        );
+                        return Ok(plan);
+                    }
                     // The face is unknown, but the discard's resource effect
                     // and lack of card loss are established. Record that
                     // action, not an unexecuted hazardous frontier. Revealing
@@ -624,10 +717,170 @@ fn touched_cards(source: &PlayerView, target: PlayerId, clue: Clue) -> Option<Ve
 
 #[cfg(test)]
 mod tests {
-    use crate::SymbolicStopReason;
+    use crate::{IdentitySet, SymbolicStopReason};
     use hanabi_core::{FullState, PlayerId, standard_deck};
 
     use super::*;
+
+    #[test]
+    fn first_seed_projected_follow_up_preserves_the_reviewed_discharge() {
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(33).unwrap();
+        let source = state.view_for(PlayerId::new(1)).unwrap();
+        let d = LogicalDeductions::new(source.clone()).unwrap();
+        let inferred = super::super::infer_h_group(&d, HGroupProfile::Max);
+        let after = apply_symbolic_action(
+            &source,
+            &d,
+            &inferred,
+            source.current_player,
+            Action::Clue {
+                target: PlayerId::new(0),
+                clue: Clue::Rank(hanabi_core::Rank::Four),
+            },
+        )
+        .unwrap()
+        .0;
+        let (d, _) = PerspectiveProjector::new(&after, HGroupProfile::Max)
+            .project(after.current_player, PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        let action = crate::planner::choose_projected_follow_up(
+            &d,
+            HGroupProfile::Max,
+            &crate::AnalysisControl::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            action,
+            Some(Action::Clue {
+                target: PlayerId::new(0),
+                clue: Clue::Suit(hanabi_core::Suit::Yellow),
+            })
+        );
+    }
+
+    #[test]
+    fn first_seed_projected_purple_five_keeps_its_direct_clue() {
+        // Counterfactual from reviewed p4v0s1 turn 29, not a new optimal-move
+        // oracle: playing r2 and then cluing r4 Prompts Donald's clued r3.
+        // That Prompt must not also manufacture a Bluff on Cathy's p5.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(28).unwrap();
+        let mut view = state.view_for(PlayerId::new(0)).unwrap();
+        for action in [
+            Action::Play(CardId::new(26)),
+            Action::Clue {
+                target: PlayerId::new(3),
+                clue: Clue::Rank(hanabi_core::Rank::Four),
+            },
+            Action::Discard(CardId::new(18)),
+            Action::Play(CardId::new(13)),
+        ] {
+            let (d, replay) = PerspectiveProjector::new(&view, HGroupProfile::Max)
+                .project(view.current_player, PerspectiveDepth::NestedRecipients)
+                .unwrap();
+            let inferred = infer_h_group_from_replay(&d, replay, HGroupProfile::Max);
+            view = apply_symbolic_action(&view, &d, &inferred, view.current_player, action)
+                .unwrap()
+                .0;
+        }
+        let d = LogicalDeductions::new(view).unwrap();
+        let action = Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(hanabi_core::Suit::Purple),
+        };
+        let touched = [CardId::new(22)];
+        let primary = super::super::prospective_clue_primary_interpretation(
+            d.view(),
+            HGroupProfile::Max,
+            PlayerId::new(2),
+            Clue::Suit(hanabi_core::Suit::Purple),
+            &touched,
+        );
+        let hazard = super::super::prospective_clue_hazard(
+            d.view(),
+            HGroupProfile::Max,
+            PlayerId::new(2),
+            CardId::new(22),
+            Clue::Suit(hanabi_core::Suit::Purple),
+            &touched,
+            true,
+        );
+        assert!(hazard.is_none());
+        assert_eq!(
+            primary.as_ref().unwrap().play_identities,
+            IdentitySet::singleton(Card::new(
+                hanabi_core::Suit::Purple,
+                hanabi_core::Rank::Five
+            ))
+        );
+        assert!(
+            super::super::h_group_clue_candidates(&d, HGroupProfile::Max)
+                .iter()
+                .any(|c| c.action == action),
+            "primary={primary:#?}; hazard={hazard:#?}"
+        );
+    }
+
+    #[test]
+    fn first_seed_projected_save_is_not_penalized_for_an_extra_unknown_turn() {
+        // Real turn-23 alternative: the rank-2 line reaches Bob's turn 34
+        // with Alice's critical y4 exposed. Do not treat a possible discard
+        // later in the Save line as worse than a shorter unknown frontier.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(22).unwrap();
+        let mut view = state.view_for(PlayerId::new(2)).unwrap();
+        let actions = [
+            Action::Clue {
+                target: PlayerId::new(0),
+                clue: Clue::Rank(hanabi_core::Rank::Two),
+            },
+            Action::Play(CardId::new(14)),
+            Action::Play(CardId::new(21)),
+            Action::Discard(CardId::new(5)),
+            Action::Play(CardId::new(25)),
+            Action::Play(CardId::new(12)),
+            Action::Play(CardId::new(26)),
+            Action::Discard(CardId::new(16)),
+            Action::Clue {
+                target: PlayerId::new(1),
+                clue: Clue::Rank(hanabi_core::Rank::Five),
+            },
+            Action::Play(CardId::new(13)),
+            Action::Discard(CardId::new(1)),
+        ];
+        for action in actions {
+            let (d, replay) = PerspectiveProjector::new(&view, HGroupProfile::Max)
+                .project(view.current_player, PerspectiveDepth::NestedRecipients)
+                .unwrap();
+            let inferred = infer_h_group_from_replay(&d, replay, HGroupProfile::Max);
+            view = apply_symbolic_action(&view, &d, &inferred, view.current_player, action)
+                .unwrap()
+                .0;
+        }
+        let (d, _) = PerspectiveProjector::new(&view, HGroupProfile::Max)
+            .project(view.current_player, PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        let selected = crate::planner::choose_projected_follow_up(
+            &d,
+            HGroupProfile::Max,
+            &crate::AnalysisControl::default(),
+        )
+        .unwrap();
+        assert!(
+            matches!(selected, Some(Action::Clue { target, .. }) if target == PlayerId::new(0)),
+            "{selected:?}"
+        );
+    }
 
     #[test]
     fn first_seed_turn_35_eliminates_discard_risk_without_an_exact_face() {
@@ -666,12 +919,30 @@ mod tests {
         );
         assert_eq!(plan.summarize().discards, 1);
         assert_eq!(plan.summarize().clues_gained, 1);
-        assert!(plan.summarize().position_value.is_none());
         let evidence = plan.into_evidence();
-        assert_eq!(evidence.frontier, PlanFrontier::SafeDiscardReveal);
-        assert_eq!(evidence.resources.tokens, 2);
-        assert_eq!(evidence.forecast_discard_risk(), Some(0));
-        assert_eq!(evidence.steps[0].interpreted_identities, Some(domain));
+        assert_eq!(evidence.discard_branches.len(), domain.len());
+        for branch in &evidence.discard_branches {
+            assert!(domain.contains(branch.identity));
+            assert_eq!(branch.continuation.resources.tokens, 2);
+            assert_eq!(
+                branch.continuation.steps[0].interpreted_identities,
+                Some(domain)
+            );
+            assert_eq!(branch.continuation.frontier, PlanFrontier::Limit);
+            assert_eq!(branch.continuation.checkpoints[0].actions, 1);
+        }
+        let (_, leaf) = project_leaf_projection(
+            &view,
+            HGroupProfile::Max,
+            Action::Discard(CardId::new(18)),
+            &crate::AnalysisControl::default(),
+        )
+        .unwrap();
+        assert_eq!(leaf.discard_branches.len(), domain.len());
+        for branch in &leaf.discard_branches {
+            assert_eq!(branch.continuation.checkpoints[0].value.clues, 2);
+            assert!(branch.continuation.steps.len() <= view.hands.len());
+        }
         assert!(evidence.unresolved_discard.is_none());
         // An ordinary unknown card with genuinely useful possibilities is
         // not certified trash by the absence of an observed misplay/loss.
@@ -947,6 +1218,7 @@ mod tests {
             &crate::AnalysisControl::default(),
             ConditionalPlan::new(public.clue_tokens),
             false,
+            0,
         )
         .unwrap();
         let evidence = plan.into_evidence();

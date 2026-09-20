@@ -21,7 +21,13 @@ pub(super) fn bluff_connector_is_promised(
         .flatten()
         .any(|card| already_playing.contains(card) && identity_of(view, *card) == Some(connector))
         || pending.iter().any(|connection| {
-            Some(connection.focus) != current_focus
+            // A Prompt selected by this clue also supplies the truthful
+            // connector. Excluding every same-focus connection lets Bluff
+            // recognition append an unrelated blind play to a normal Prompt.
+            // Same-clue speculative Finesses remain excluded: those are the
+            // interpretations whose bluff alternative is being considered.
+            (Some(connection.focus) != current_focus
+                || connection.kind == HGroupConnectionKind::Prompt)
                 && connection.expected == connector
                 && pending.is_active(connection)
         })

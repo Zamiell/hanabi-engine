@@ -602,8 +602,8 @@ fn substitution_witness(
             || b.actions != common
             // A substitution certificate currently proves one identical
             // continuation, not equivalence between conditional branch trees.
-            || !a_line.clue_branches.is_empty()
-            || !b_line.clue_branches.is_empty()
+            || a_line.has_branches()
+            || b_line.has_branches()
             || a.strikes != 0
             || b.strikes != 0
             || a_line.maximum_save_violations() != 0

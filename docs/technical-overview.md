@@ -83,10 +83,28 @@ updated from the demonstrated connection; the connector's physical slot remains
 subject to normal layered-play resolution. Ambiguous attributions and
 already-explained blind plays do not trigger this recovery.
 
-For lines with the same action horizon and stopping reason, the planner compares
-resource dominance within the same policy tier. Otherwise it uses the stable
-heuristic ranking, with predicted strikes and the existing root-action costs
-(consecutive-Save pressure and foregone useful-touch opportunities) taking
+The planner first compares funded progress at the latest shared elapsed-turn
+checkpoint, including every retained reveal branch. Additional realized points
+and executable commitments precede static convention scores when required clue
+funding, protected cards, and safety are preserved. Protected-but-unplayable
+cards and speculative finesse opportunities are not executable points. Surplus
+tokens cannot by themselves defeat that progress; unfunded continuations cannot
+claim it. This applies to clue/discard comparisons too.
+
+Critical Saves must be covered by the required reserve; an already-funded Save
+is not charged a second time solely for remaining pending at the cutoff.
+
+At equal realized progress and executable commitments, a line that spends fewer
+clues in every retained branch can win on clue efficiency, provided protection
+and required funding do not worsen. Complexity and speculative opportunities
+remain later preferences. Full-tail discard-risk totals are comparable only when
+their assessed horizons match; an unsearched leaf discard does not supply
+strategic evidence against a longer line.
+
+For lines with the same action horizon and stopping reason, the planner also
+compares resource dominance within the same policy tier. Otherwise it uses the
+stable heuristic ranking, with predicted strikes and the existing root-action
+costs (consecutive-Save pressure and foregone useful-touch opportunities) taking
 precedence. These costs apply in both endpoint and fallback comparisons rather
 than vanishing at an incomparable forecast horizon. These comparisons can
 conflict: A can beat B on endpoint resources, B can beat C on heuristics, and C
@@ -133,6 +151,21 @@ additional protection of an endangered card can outweigh that newly secured
 card's waiting slot, but not unrelated hand congestion. These scheduling edges
 take precedence over cycles introduced by weaker policy fallbacks. No actual
 hidden hand or deck order is used to fill a projection's unknown cards.
+
+When a selected unknown discard is safe under every remaining identity, its
+action and token refund are known even though its face is not. Strategic
+projections enumerate the possible revealed faces (at most 16 leaves per root),
+preserving separate histories and blank subsequent draws. Common actions are
+shared in diagnostics; checkpoint comparisons must hold across every branch.
+This is exhaustive within the retained domain, not random sampling. If the
+branch budget is insufficient, the projection records the safe action and stops
+at `SafeDiscardReveal`, without inventing an endpoint. Leaf-policy forecasts
+retain each possible immediate post-discard checkpoint without extending another
+reveal tree. Inverse-planning certificates retain the conservative frontier. The
+bounded leaf horizon is reported; it is not a proof about all future play.
+Funding comparisons may count refunds from an already-recorded uninterrupted
+play continuation, but not a future clue/discard or a refund beyond an immediate
+critical-card/save obligation. Explanations record this separate funding credit.
 
 When every remaining rank is visible or exactly known in the observer's hand,
 funded final-plan clues take precedence over surplus known-trash discards. This

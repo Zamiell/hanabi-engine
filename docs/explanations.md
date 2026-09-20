@@ -44,6 +44,13 @@ remains unchanged.
 
 The report contains:
 
+- `discardBranches` retains each possible safe-discard reveal and its separate
+  continuation. Shared actions do not imply a known discarded face. An exhausted
+  reveal budget is shown as `SafeDiscardReveal`; its refund is recorded, but no
+  concrete post-discard endpoint is invented. `FundedProgress` comparisons name
+  the shared horizon and retain all branch operands. `ClueEfficiency` also
+  retains the minimum/maximum clue cost over the mutually exclusive branches.
+
 - All rules-legal actions, their admission status, conventional interpretation,
   priority, available rejection reason, and clue score components. A separate
   scheduling adjustment reconciles the compiled clue score with final priority.

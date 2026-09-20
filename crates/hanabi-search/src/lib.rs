@@ -27,13 +27,13 @@ pub use convention::{
 };
 pub use h_group::{
     ActionPreference, ActionWindow, ClueTouchBranch, ConditionalAlternative, DependencyAssessment,
-    DependencyStatus, H_GROUP_LEVELS, HGroupCardInference, HGroupClueInterpretation,
-    HGroupClueKind, HGroupConnection, HGroupConnectionKind, HGroupConnectionPromise,
-    HGroupIdentityStatus, HGroupInferences, HGroupLevelDescriptor, HGroupMoveKind, HGroupPhase,
-    HGroupPlayObligation, HGroupSaveKind, HGroupSignal, HiddenCardCondition, PerspectiveAssumption,
-    PlanFrontier, PlanStep, ProjectedAction, ProjectedConsequences, ProjectionEvidence,
-    ProjectionRequirement, ProjectionRequirementKind, ResourceSchedule, SavePrincipleViolation,
-    TokenTransition, TurnCommitment, infer_h_group,
+    DependencyStatus, DiscardRevealBranch, H_GROUP_LEVELS, HGroupCardInference,
+    HGroupClueInterpretation, HGroupClueKind, HGroupConnection, HGroupConnectionKind,
+    HGroupConnectionPromise, HGroupIdentityStatus, HGroupInferences, HGroupLevelDescriptor,
+    HGroupMoveKind, HGroupPhase, HGroupPlayObligation, HGroupSaveKind, HGroupSignal,
+    HiddenCardCondition, PerspectiveAssumption, PlanFrontier, PlanStep, ProjectedAction,
+    ProjectedConsequences, ProjectionEvidence, ProjectionRequirement, ProjectionRequirementKind,
+    ResourceSchedule, SavePrincipleViolation, TokenTransition, TurnCommitment, infer_h_group,
 };
 pub use information_set::{
     BeliefConstraints, EnumerateWorldsError, IdentitySet, InformationSet, InformationSetError,

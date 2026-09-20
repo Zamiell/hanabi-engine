@@ -139,9 +139,9 @@ use outcome::{
 use perspective::{PerspectiveProjector, ProspectiveTransition};
 use plan::ConditionalPlan;
 pub use plan::{
-    ClueTouchBranch, ConditionalAlternative, HiddenCardCondition, PerspectiveAssumption,
-    PlanFrontier, PlanStep, ProjectedAction, ProjectedConsequences, ProjectionEvidence,
-    ResourceSchedule, SavePrincipleViolation, TokenTransition,
+    ClueTouchBranch, ConditionalAlternative, DiscardRevealBranch, HiddenCardCondition,
+    PerspectiveAssumption, PlanFrontier, PlanStep, ProjectedAction, ProjectedConsequences,
+    ProjectionEvidence, ResourceSchedule, SavePrincipleViolation, TokenTransition,
 };
 use play_order::ordered_playable_cards;
 use primary::{ClueInterpretationPlan, PrimaryClueInputs};
