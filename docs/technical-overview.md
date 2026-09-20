@@ -92,7 +92,13 @@ tokens cannot by themselves defeat that progress; unfunded continuations cannot
 claim it. This applies to clue/discard comparisons too.
 
 Critical Saves must be covered by the required reserve; an already-funded Save
-is not charged a second time solely for remaining pending at the cutoff.
+is not charged a second time solely for remaining pending at the cutoff. For
+comparison only, an excess funded pending critical Save can account for an equal
+protection deficit; it never creates executable points or changes the reported
+secured-card count. Clue-cost comparisons include these outstanding Saves, so
+delaying protection is not counted as free efficiency. At equal endpoint
+progress and no greater completed/pending clue cost, achieving points earlier
+without ever falling behind across the shared checkpoints is preferred.
 
 At equal realized progress and executable commitments, a line that spends fewer
 clues in every retained branch can win on clue efficiency, provided protection

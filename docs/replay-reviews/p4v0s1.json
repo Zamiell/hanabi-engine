@@ -1,9 +1,55 @@
 [
   {
+    "id": "t29-alice-projection-rank-four-ambiguity",
+    "turn": 29,
+    "positionKey": "9fd9d53294eaadcbab9ca983e801e34e8d57fe6a53e7cca66ae67d39bf8a2cbc",
+    "status": "unresolved",
+    "perspective": "Alice, who sees Donald's r4 but not her own unclued cards",
+    "source": {
+      "conversation": "2026-09-20, assistant investigation after the reviewed turn-28 fix"
+    },
+    "explanation": {
+      "fixture": "Play r2 #26. The projection then chooses 4s to Donald, Cathy discards r2 #18, Donald plays r3 #13, Alice clues purple to Cathy, Bob discards r3 #16, Cathy plays p5, Donald saves Bob's 5s.",
+      "engine": "Purple to Cathy, Bob discards r3 #16, Cathy saves Bob's 5s, Donald discards r1 #23, Alice plays r2, Bob clues red to Donald, Cathy plays p5, Donald plays r3.",
+      "comparison": "At the shared eight-action checkpoint both have score 17 and one token. Purple has one executable future play (Donald's r4); the r2-first branch leaves #28 as r4/y4 and has zero executable future plays. No modeled loss occurs in those prefixes. This is not the earlier timing/early-Save comparison.",
+      "question": "Should rank 4 to Donald become exactly r4 in this Alice-rooted hypothetical, or does the already-scheduled r3 play fail to disambiguate it? If ambiguous, should Bob choose purple to Cathy rather than that rank clue? Donald's preceding root forecast cannot see his own r4 and is a different information set. Do not force this move into the fixture."
+    },
+    "regressions": [],
+    "coverageNote": "From-start scan agrees through turn 28. The eight-action Donald-rooted regression passes; no new interpretation or optimal-move assertion has been invented for Alice's perspective."
+  },
+  {
+    "id": "t28-reviewed-purple-four-progress",
+    "turn": 28,
+    "positionKey": "415e04471f4b596908dd86a4d256e68ad981d130aa9c1381e1731776c3c2e597",
+    "status": "user-explained",
+    "perspective": "Donald; hidden hand faces and future draws remain unknown",
+    "source": {
+      "conversation": "2026-09-20, user resolves t28-early-purple-setup-versus-playing-purple-four",
+      "quote": "That projection looks extremely good to me, it has 0 BDR and everyone is doing productive things"
+    },
+    "explanation": {
+      "line": [
+        "play p4 #12",
+        "play r2 #26",
+        "purple to Cathy",
+        "play p5 #22",
+        "play r3 #13",
+        "discard y1 #1",
+        "4s to Alice",
+        "discard r2 #18"
+      ],
+      "ruling": "Prefer the p4 play unless a competing line demonstrates a compelling benefit. Saving earlier is not a benefit by itself when the productive line can fund the pending Save and no loss is projected. Do not erase earlier productive progress merely because a slower line catches up at a later checkpoint.",
+      "boundary": "Verify all eight actions from Donald's perspective and zero BDR through that prefix; this does not certify unsearched tails or assume Donald's hidden r4. Unfunded protection, actual losses, or superior realized outcomes remain reasons to choose another line."
+    },
+    "regressions": [
+      "h_group::tests::replay::first_seed_purple_four_progress_precedes_premature_protection"
+    ]
+  },
+  {
     "id": "t28-early-purple-setup-versus-playing-purple-four",
     "turn": 28,
     "positionKey": "415e04471f4b596908dd86a4d256e68ad981d130aa9c1381e1731776c3c2e597",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Donald; his own unpromised faces and future draws remain unknown",
     "source": {
       "conversation": "2026-09-19, assistant investigation after safe-discard branch and funded-progress implementation"

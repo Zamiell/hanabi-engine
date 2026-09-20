@@ -1,6 +1,63 @@
 use super::*;
 
 #[test]
+fn first_seed_purple_four_progress_precedes_premature_protection() {
+    // User-reviewed 2026-09-20, p4v0s1 turn 28, Donald's perspective.
+    // The unseen r4 in Donald's hand and future draws must not enter this line.
+    let state = expert_replay_p4v0s1().state_at_turn(27).unwrap();
+    let analysis = crate::analyze_position(
+        &state.view_for(PlayerId::new(3)).unwrap(),
+        crate::SupportedConvention::HGroup(HGroupProfile::Max),
+        crate::PlannerConfig {
+            objective: crate::PlanningObjective::PerfectScore,
+            ..crate::PlannerConfig::default()
+        },
+    )
+    .unwrap();
+    let play = Action::Play(CardId::new(12));
+    let forecast = analysis
+        .planner
+        .root_actions
+        .iter()
+        .find(|e| e.action == play)
+        .unwrap();
+    let expected = [
+        play,
+        Action::Play(CardId::new(26)),
+        Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Purple),
+        },
+        Action::Play(CardId::new(22)),
+        Action::Play(CardId::new(13)),
+        Action::Discard(CardId::new(1)),
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Rank(Rank::Four),
+        },
+        Action::Discard(CardId::new(18)),
+    ];
+    assert_eq!(
+        forecast
+            .projection
+            .steps
+            .iter()
+            .take(expected.len())
+            .map(|s| s.projected.action)
+            .collect::<Vec<_>>(),
+        expected
+    );
+    assert_eq!(
+        forecast
+            .projection
+            .recorded_bottom_deck_risks_at(expected.len()),
+        0
+    );
+    assert_eq!(forecast.projection.bottom_deck_risks_at(expected.len()), 0);
+    assert_eq!(analysis.planner.best_action, play);
+}
+
+#[test]
 fn first_seed_safe_discharge_beats_surplus_discard() {
     // Human-reviewed turn 35: yellow obtains r4 + r5 for one clue with
     // no BDR; Cathy's face-unknown #18 is a safe discard, not a better plan.

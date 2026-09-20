@@ -49,7 +49,11 @@ The report contains:
   reveal budget is shown as `SafeDiscardReveal`; its refund is recorded, but no
   concrete post-discard endpoint is invented. `FundedProgress` comparisons name
   the shared horizon and retain all branch operands. `ClueEfficiency` also
-  retains the minimum/maximum clue cost over the mutually exclusive branches.
+  retains the minimum/maximum clue cost over the mutually exclusive branches,
+  including outstanding critical Saves. `ProgressTiming` requires equal endpoint
+  progress, no greater completed/pending clue cost, and an earlier score lead
+  without falling behind at any shared checkpoint. It retains the final
+  comparison operands; earlier checkpoints remain in each projection.
 
 - All rules-legal actions, their admission status, conventional interpretation,
   priority, available rejection reason, and clue score components. A separate

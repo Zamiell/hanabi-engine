@@ -43,6 +43,20 @@ Regression contract:
 The former ordinary-play-only implementation was an incomplete implementation,
 not a user-approved boundary on the convention.
 
+## Funded protection does not erase earlier productive progress
+
+Reviewed example: `p4v0s1.json`, live turn 28
+(`t28-reviewed-purple-four-progress`).
+
+The reviewed Donald-rooted p4 line plays p4, r2, p5, and r3 with no BDR through
+its eight-action prefix. An alternative completing a Save earlier needs a real
+benefit to outweigh that progress; a later snapshot must not forget when the
+points were earned. Count a pending critical Save's funding obligation once,
+including it in the compared clue bill. Do not turn the obligation into a
+secured or playable card, ignore unfunded Saves, or trade away ready successors
+and hand quality merely for earlier points. This is not authority to assume
+Donald's unknown r4 in his own forecast or to freeze other observers' lines.
+
 ## Team Distribution: who draws when a clue is interchangeable
 
 Source:

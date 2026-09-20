@@ -5,6 +5,35 @@ an individual convention regression. Entries describe the problem, the boundary
 introduced to solve it, and the property that future changes should preserve.
 Commit hashes refer to this repository's Git history.
 
+## 2026-09-20: compare pending protection and progress timing consistently
+
+The reviewed p4v0s1 turn-28 p4 continuation was already correct and zero-BDR,
+but a later snapshot credited a competing line for completing a funded Save
+earlier. A third candidate transmitted that preference through the existing
+comparison graph, overriding the direct p4-versus-purple preference.
+
+Extend the September 19 comparison boundary rather than changing the graph's
+cycle resolution or adding an action-specific bonus. Funded excess pending
+critical Saves can account for a protection deficit in comparison only; they
+never become executable points. Include outstanding Saves in clue-cost bounds so
+delaying one is not artificial efficiency. With otherwise preserved endpoint
+progress and no greater clue bill, prefer a line that earns points earlier and
+never trails at any shared checkpoint. Known-loss guards remain in force.
+
+The reviewed regression asserts Donald's eight-action continuation, zero BDR
+through that prefix, and the p4 selection. Arithmetic negative controls retain
+unfunded Saves, additional missing protection, Save pressure, and executable
+point differences. No fixture actions were changed.
+
+The from-start scan now agrees through turn 28. Turn 29 is recorded separately:
+Alice can see Donald's r4, unlike Donald in the preceding root forecast; her
+projection leaves a later rank-4 clue ambiguous and requires convention review.
+The isolated turn-28 regression took 14.24 seconds before and 14.20 seconds
+after the fix, excluding compilation (single runs, not a performance claim).
+Full validation took 562.06 seconds and reported no newly failing tests against
+the explicit preceding baseline; the same 53 failures remain. All other check
+stages passed.
+
 ## 2026-09-19: safe-discard reveal branches and funded progress
 
 The reviewed p4v0s1 turn 35 exposed two distinct problems: an unknown but safe

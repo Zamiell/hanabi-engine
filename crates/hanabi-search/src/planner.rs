@@ -251,6 +251,12 @@ impl ProjectedPositionValue {
     }
 
     fn preserves_funded_progress(self, other: Self) -> bool {
+        // A funded pending critical Save is an obligation, not a lost card.
+        // Allow only the excess pending Saves to account for a protection
+        // deficit. This never adds executable points or changes reported facts.
+        let pending = self
+            .exposed_critical_chops
+            .saturating_sub(other.exposed_critical_chops);
         self.clues >= self.clue_demand
             && other.clues >= other.clue_demand
             && self.score >= other.score
@@ -265,8 +271,8 @@ impl ProjectedPositionValue {
             && other
                 .exposed_chop_quality
                 .no_worse_than(self.exposed_chop_quality)
-            && self.protected_bottom_deck_risks >= other.protected_bottom_deck_risks
-            && self.score.saturating_add(self.secured_future_plays)
+            && self.protected_bottom_deck_risks.saturating_add(pending) >= other.protected_bottom_deck_risks
+            && self.score.saturating_add(self.secured_future_plays).saturating_add(pending)
                 >= other.score.saturating_add(other.secured_future_plays)
             && self.save_pressure <= other.save_pressure
     }
@@ -500,6 +506,7 @@ pub enum ComparisonReason {
     RotationDevelopment,
     FundedProgress,
     ClueEfficiency,
+    ProgressTiming,
     ProtectedDevelopment,
     PolicyTier,
     TerminalProgress,
@@ -1086,6 +1093,7 @@ fn compare_symbolic_candidates(
                     ComparisonReason::RotationDevelopment
                     | ComparisonReason::FundedProgress
                     | ComparisonReason::ClueEfficiency
+                    | ComparisonReason::ProgressTiming
                     | ComparisonReason::ProtectedDevelopment
                     | ComparisonReason::BottomDeckRisk,
                 ) => {
@@ -1095,6 +1103,7 @@ fn compare_symbolic_candidates(
                     ComparisonReason::RotationDevelopment
                     | ComparisonReason::FundedProgress
                     | ComparisonReason::ClueEfficiency
+                    | ComparisonReason::ProgressTiming
                     | ComparisonReason::ProtectedDevelopment
                     | ComparisonReason::BottomDeckRisk,
                 ) => {
@@ -1193,12 +1202,14 @@ fn compare_endpoints_with_basis(
         EndpointComparison::PreferLeft(
             ComparisonReason::EndpointResources
             | ComparisonReason::FundedProgress
-            | ComparisonReason::ClueEfficiency,
+            | ComparisonReason::ClueEfficiency
+            | ComparisonReason::ProgressTiming,
         ) if risk == Ordering::Greater => EndpointComparison::Incomparable,
         EndpointComparison::PreferRight(
             ComparisonReason::EndpointResources
             | ComparisonReason::FundedProgress
-            | ComparisonReason::ClueEfficiency,
+            | ComparisonReason::ClueEfficiency
+            | ComparisonReason::ProgressTiming,
         ) if risk == Ordering::Less => EndpointComparison::Incomparable,
         _ => comparison,
     };
@@ -1312,6 +1323,28 @@ fn compare_endpoint_evidence(
                     })
                 })
             };
+            // Include outstanding critical Saves in the clue bill. Deferring
+            // a funded Save is not losing protection, but neither is it free
+            // efficiency: compare completed plus still-required work.
+            let costs = |values: &[RotationCheckpoint], bounds: (u8, u8)| {
+                (
+                    bounds.0.saturating_add(
+                        values
+                            .iter()
+                            .map(|v| v.value.exposed_critical_chops)
+                            .min()
+                            .unwrap_or(0),
+                    ),
+                    bounds.1.saturating_add(
+                        values
+                            .iter()
+                            .map(|v| v.value.exposed_critical_chops)
+                            .max()
+                            .unwrap_or(0),
+                    ),
+                )
+            };
+            let (a_cost, b_cost) = (costs(&left_values, a_cost), costs(&right_values, b_cost));
             let preference = if a_cost.1 < b_cost.0 && efficient(&left_values, &right_values) {
                 Some(EndpointComparison::PreferLeft(
                     ComparisonReason::ClueEfficiency,
@@ -1327,6 +1360,70 @@ fn compare_endpoint_evidence(
                 retain_comparison_basis(
                     basis,
                     "clueEfficiency",
+                    usize::from(horizon),
+                    || left_values,
+                    || right_values,
+                );
+                if let Some(basis) = basis {
+                    basis.clue_cost_bounds = Some((a_cost, b_cost));
+                }
+                return preference;
+            }
+            // A later equal score must not erase an earlier lead. Require
+            // no score deficit at ANY shared checkpoint, strictly earlier
+            // progress somewhere, and no extra completed/pending clue cost.
+            let timing = |a: &PlannerActionEvaluation, b: &PlannerActionEvaluation| {
+                // Earlier points are a scheduling preference, not permission
+                // to replace an endpoint's ready successors with blocked work.
+                if !a.projection.checkpoints_at(horizon).iter().all(|a| {
+                    b.projection.checkpoints_at(horizon).iter().all(|b| {
+                        a.value.blocked_clued_cards <= b.value.blocked_clued_cards
+                            && a.value.visible_successors >= b.value.visible_successors
+                            && (a.value.secured_future_plays != b.value.secured_future_plays
+                                || a.value
+                                    .secured_card_quality
+                                    .no_worse_than(b.value.secured_card_quality))
+                    })
+                }) {
+                    return false;
+                }
+                let mut ahead = false;
+                for turn in 1..=horizon {
+                    let a = a.projection.checkpoints_at(turn);
+                    let b = b.projection.checkpoints_at(turn);
+                    if a.is_empty() || b.is_empty() {
+                        return false;
+                    }
+                    let minimum = a.iter().map(|v| v.value.score).min().unwrap();
+                    let maximum = b.iter().map(|v| v.value.score).max().unwrap();
+                    if minimum < maximum {
+                        return false;
+                    }
+                    ahead |= minimum > maximum;
+                }
+                ahead
+            };
+            let preference = if a_cost.1 <= b_cost.0
+                && efficient(&left_values, &right_values)
+                && timing(left, right)
+            {
+                Some(EndpointComparison::PreferLeft(
+                    ComparisonReason::ProgressTiming,
+                ))
+            } else if b_cost.1 <= a_cost.0
+                && efficient(&right_values, &left_values)
+                && timing(right, left)
+            {
+                Some(EndpointComparison::PreferRight(
+                    ComparisonReason::ProgressTiming,
+                ))
+            } else {
+                None
+            };
+            if let Some(preference) = preference {
+                retain_comparison_basis(
+                    basis,
+                    "progressTiming",
                     usize::from(horizon),
                     || left_values,
                     || right_values,
@@ -2256,6 +2353,55 @@ impl std::error::Error for PlannerError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_save_credit_requires_funding_and_never_creates_playable_points() {
+        // Arithmetic invariant, not a synthetic convention position.
+        let saved = ProjectedPositionValue {
+            score: 17,
+            secured_future_plays: 4,
+            protected_bottom_deck_risks: 6,
+            clues: 3,
+            ..ProjectedPositionValue::default()
+        };
+        let deferred = ProjectedPositionValue {
+            secured_future_plays: 3,
+            protected_bottom_deck_risks: 5,
+            exposed_critical_chops: 1,
+            clue_demand: 1,
+            ..saved
+        };
+        assert!(deferred.preserves_funded_progress(saved));
+        assert!(!deferred.productive_preference(saved));
+        for invalid in [
+            ProjectedPositionValue {
+                clues: 0,
+                ..deferred
+            },
+            ProjectedPositionValue {
+                clue_demand: 0,
+                ..deferred
+            },
+            ProjectedPositionValue {
+                exposed_critical_chops: 0,
+                ..deferred
+            },
+            ProjectedPositionValue {
+                secured_future_plays: 2,
+                ..deferred
+            },
+            ProjectedPositionValue {
+                save_pressure: 1,
+                ..deferred
+            },
+        ] {
+            assert!(!invalid.preserves_funded_progress(saved), "{invalid:?}");
+        }
+        assert!(!deferred.preserves_funded_progress(ProjectedPositionValue {
+            committed_future_plays: 1,
+            ..saved
+        }));
+    }
 
     #[test]
     fn funded_progress_precedes_surplus_tokens_but_not_required_funding() {
