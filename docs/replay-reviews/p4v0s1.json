@@ -1,9 +1,80 @@
 [
   {
+    "id": "t19-user-replaces-continuation-with-four-bluff",
+    "turn": 19,
+    "positionKey": "ee5daa8560702db2a691291ccb787b74716f8efd14342bba307fd68132253c71",
+    "status": "user-explained",
+    "perspective": "User-supplied recorded continuation, not an omniscient engine forecast or a new rule for weighting alternative strategies.",
+    "source": {
+      "conversation": "2026-09-23, current task, turn-19 replacement and explicit correction confirmations",
+      "quote": "Change the fixture to clue 4s on turn 19. Then:",
+      "firstCorrection": "discarding p4 is correct on that turn.",
+      "secondCorrection": "err i mean y4",
+      "clarificationContext": "4s means to Alice, followed by Donald playing r1. User reviewed links at turn 26 and turn 49: confirmed removing the early extra purple-to-Alice clue so Bob discards p4 at turn 26, and adding Alice’s y4 play at turn 49 before Bob clues green to Cathy."
+    },
+    "explanation": {
+      "ruling": "Preserve turns 1–18. Replace turns 19–58 with the user sequence and both confirmed transcription corrections. No additional strategic rationale was supplied.",
+      "line": [
+        "4s to Alice",
+        "play r1",
+        "purple to Donald",
+        "play g2",
+        "discard p1",
+        "red to Cathy",
+        "discard y1",
+        "discard p4",
+        "play r2",
+        "purple to Alice",
+        "play p2",
+        "purple to Cathy",
+        "discard b2",
+        "play r3",
+        "discard r1",
+        "discard r3",
+        "play r4",
+        "play p3",
+        "5s to Bob",
+        "red to Cathy",
+        "play r5",
+        "play p4",
+        "discard y2",
+        "discard p3",
+        "play p5",
+        "discard r2",
+        "3s to Cathy",
+        "3s to Donald",
+        "play y3",
+        "play g3",
+        "play y4",
+        "green to Cathy",
+        "play g4",
+        "yellow to Bob",
+        "green to Bob",
+        "play y5",
+        "discard g1",
+        "discard g1",
+        "discard p2",
+        "play g5"
+      ],
+      "corrections": {
+        "turn26": "Bob discards p4 #5; omit the first purple-to-Alice entry between the y1 and p4 discards. The later purple-to-Alice clue is Donald’s turn 28.",
+        "turn49": "Alice plays y4 #2 before Bob clues green to Cathy on turn 50. The user corrected their initial p4 typo to y4."
+      },
+      "anchorAudit": "Turns 18 and 19 retain exactly the same setup and preceding actions, so their position keys and focused inference tests remain applicable. Old later-turn reviews retain their historical fixture anchors and are not refreshed. The prior turn-19 strategic choice is marked superseded.",
+      "validation": "Protocol replay checks every prefix and all 58 actions: legal, terminal score 25, zero strikes, six remaining clues.",
+      "supersedes": "t19-bluff-reactor-consistency-and-purple-distribution"
+    },
+    "regressions": [
+      "planner::tests::reviewed_turn_eighteen_leaves_the_clue_to_a_teammate",
+      "h_group::tests::replay::current_turn_nineteen_bluff_requires_the_reactors_response"
+    ],
+    "coverageNote": "These regressions cover unchanged turn-18 scheduling and turn-19 Bluff interpretation, not action parity for the replacement continuation. The expert manifest retains legality-only coverage for p4v0s1; no optimal-move or full parity assertion has been added."
+  },
+  {
     "id": "t19-bluff-reactor-consistency-and-purple-distribution",
     "turn": 19,
     "positionKey": "ee5daa8560702db2a691291ccb787b74716f8efd14342bba307fd68132253c71",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Cathy’s root forecast after Bob plays b5. Her own hand and future draws remain unknown. This is the current replacement fixture, not the archived continuation.",
     "source": {
       "conversation": "2026-09-23, current task, user continuation and autonomous replay investigation",
@@ -49,7 +120,9 @@
     "regressions": [
       "h_group::tests::replay::current_turn_nineteen_bluff_requires_the_reactors_response"
     ],
-    "coverageNote": "The regression enforces the documented immediate-reactor condition and a genuine-Bluff control. It does not assert an unreviewed optimal turn-19 move. No fixture move was changed."
+    "coverageNote": "The regression enforces the documented immediate-reactor condition and a genuine-Bluff control. It does not assert an unreviewed optimal turn-19 move. No fixture move was changed.",
+    "supersededBy": "t19-user-replaces-continuation-with-four-bluff",
+    "fixtureRevisionNote": "The user replaced the purple-to-Donald root with 4s to Alice and a new continuation. The unchanged turn-19 position key and documented Bluff consistency regression remain valid; the prior purple-distribution strategy question is no longer the requested fixture choice."
   },
   {
     "id": "t18-user-replaces-continuation-with-blue-five",
@@ -120,7 +193,9 @@
         "conversation": "2026-09-23, current task",
         "quote": "delete those focused tests, then give me analysis for turn 18"
       }
-    }
+    },
+    "continuationSupersededBy": "t19-user-replaces-continuation-with-four-bluff",
+    "fixtureRevisionNote": "Turn 18 remains b5. The sequence from turn 19 onward was subsequently replaced; retain this original sequence as historical provenance."
   },
   {
     "id": "t18-play-and-leave-the-clue-to-cathy",
