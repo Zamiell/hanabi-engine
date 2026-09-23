@@ -1,6 +1,55 @@
 use super::*;
 
 #[test]
+fn current_turn_nineteen_bluff_requires_the_reactors_response() {
+    // Current user-reviewed p4v0s1 turn 19, branching only the proposed clue.
+    // Bob's Truth Principle: Donald sees Alice's p2 and waits for the truthful
+    // connection after 4s to Donald. A teammate's imagined Self-Bluff cannot
+    // replace that reading. 4s to Alice really does get Donald's r1 immediately.
+    let replay = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .unwrap();
+    let state = replay.state_at_turn(18).unwrap();
+    let d = LogicalDeductions::new(state.view_for(state.current_player()).unwrap()).unwrap();
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    for (target, reacts) in [(PlayerId::new(3), false), (PlayerId::new(0), true)] {
+        let clue = Clue::Rank(Rank::Four);
+        let action = Action::Clue { target, clue };
+        let touched = d.view().hands[target.index()]
+            .iter()
+            .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
+            .map(|card| card.id)
+            .collect::<Vec<_>>();
+        let compiled = super::super::prospective::compiled_prospective_clue(
+            d.view(),
+            HGroupProfile::Max,
+            target,
+            clue,
+            &touched,
+        )
+        .unwrap();
+        let donald = compiled.projection(PlayerId::new(3)).unwrap();
+        let blind = CardId::new(23);
+        let response = donald.inferred.playable_now.contains(&blind)
+            || donald
+                .inferred
+                .connection
+                .is_some_and(|connection| connection.card == blind);
+        assert_eq!(response, reacts, "{target:?}");
+        let candidate = candidates
+            .iter()
+            .find(|candidate| candidate.action == action)
+            .unwrap();
+        assert_eq!(
+            candidate.move_kind() == Some(HGroupMoveKind::Bluff),
+            reacts,
+            "{candidate:?}"
+        );
+    }
+}
+
+#[test]
 fn first_seed_purple_four_progress_precedes_premature_protection() {
     // User-reviewed 2026-09-20, p4v0s1 turn 28, Donald's perspective.
     // The unseen r4 in Donald's hand and future draws must not enter this line.

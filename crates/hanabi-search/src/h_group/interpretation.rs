@@ -1709,13 +1709,29 @@ pub(super) fn advanced_clue_candidates(
                 } else {
                     return None;
                 };
-                view.hands[actor.index()]
+                let blind = view.hands[actor.index()]
                     .iter()
                     .rev()
-                    .find(|candidate| !gotten.contains(&candidate.id))
-                    .and_then(|candidate| candidate.identity)
-                    .filter(|actual| is_playable_now(view, *actual))
-                    .filter(|actual| !bluff_play_connects(clue, *actual))
+                    .find(|candidate| !gotten.contains(&candidate.id))?;
+                let actual = blind.identity?;
+                if !is_playable_now(view, actual) || bluff_play_connects(clue, actual) {
+                    return None;
+                }
+                // The reactor assumes a truthful connection when they can
+                // see one. Another teammate's provisional Bluff reading
+                // cannot promise a blind play that the reactor will not make.
+                // The reactor need not call it a Bluff: a Finesse obligation
+                // on the same immediate card is the intended deception.
+                // https://hanabi.github.io/level-11/#bobs-truth-principle-part-1
+                super::prospective::compiled_prospective_clue(view, profile, target, clue, &touched)
+                    .and_then(|compiled| compiled.projection(actor))
+                    .filter(|projection| {
+                        projection.inferred.playable_now.contains(&blind.id)
+                            || projection.inferred.connection.is_some_and(|connection| {
+                                connection.card == blind.id
+                                    && is_playable_now(view, connection.identity)
+                            })
+                    })
                     .map(|_| kind)
             });
         let distinct_touched_identities = identity_set(identities.iter().copied());

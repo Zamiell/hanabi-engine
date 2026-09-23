@@ -1,5 +1,57 @@
 [
   {
+    "id": "t19-bluff-reactor-consistency-and-purple-distribution",
+    "turn": 19,
+    "positionKey": "ee5daa8560702db2a691291ccb787b74716f8efd14342bba307fd68132253c71",
+    "status": "unresolved",
+    "perspective": "Cathy’s root forecast after Bob plays b5. Her own hand and future draws remain unknown. This is the current replacement fixture, not the archived continuation.",
+    "source": {
+      "conversation": "2026-09-23, current task, user continuation and autonomous replay investigation",
+      "quote": "Continue to autonomously go through the replay and find disagreements. Do a deep analysis for each disagreement. If there are obvious bugs, then fix them autonomously. Otherwise, ask me about the correct strategy or convention.",
+      "fixtureExcerpt": "play b5; purple to donald; red to cathy; play p2; discard p4",
+      "documentation": [
+        "https://hanabi.github.io/level-11/#bobs-truth-principle-part-1",
+        "https://hanabi.github.io/level-11/#lie-principle"
+      ]
+    },
+    "explanation": {
+      "reviewBoundary": "The user supplied purple to Donald as the recorded move but has not yet explained the turn-19 distribution tradeoff. The diagnosis below is assistant analysis, not a new user ruling.",
+      "fixedBug": "A visible playable finesse-position card was enough for giver-side Bluff classification even when the next player’s own inference did not tell them to play it. Thus 4s to Donald was scored as a Self-Bluff even though Donald sees Alice’s truthful p2 connection and instead clues. Require the reactor’s own immediate play or playable connection obligation on the candidate blind card before crediting an ordinary Bluff. The reactor may read a Finesse; they need not recognize the deception as a Bluff. Preserve other valid clue interpretations.",
+      "regressionControl": "At the same reviewed root, 4s to Donald has no immediate Donald r1 response and must not be classified Bluff; 4s to Alice does get that response and remains Bluff.",
+      "beforeFix": "Engine chose 4s to Donald (354). Purple to Donald (473) beat it directly, but the cyclic fallback comparisons selected 4s. No strict optimality claim follows from that choice.",
+      "afterFix": "Engine chooses purple to Bob (473); fixture purple to Donald scores 393. Both have base 373 and scheduling +100. Purple to Donald receives an additional -80 team-coverage penalty.",
+      "coverageEvidence": "Temporary diagnostics confirmed both clues count three acquired actions at efficiency three. Purple to Bob assigns p2 #24 to Alice, p3 #14 to Donald, p4 #5 to Bob: three players. Purple to Donald assigns p2 #24 to Alice and p3 #14 plus p4 #12 to Donald: two players. The 80 difference is the distinct-player coverage heuristic, not a saved clue or additional acquired card.",
+      "candidateClues": {
+        "purple:Bob": 473,
+        "4:Bob": 472,
+        "4:Alice": 434,
+        "purple:Donald": 393,
+        "4:Donald": 392,
+        "purple:Alice": 233,
+        "green:Bob": 229,
+        "1:Donald": 192,
+        "2:Bob": 148
+      },
+      "otherCandidate": "Discard Cathy’s unknown #9, actual p1 in the fixture, priority 400. 3s to Donald is no longer admitted after the Bluff consistency fix.",
+      "projectedSharedLine": [
+        "19 Cathy gives the candidate purple clue",
+        "20 Donald clues green to Bob",
+        "21 Alice plays p2 #24",
+        "22 Bob plays g2 #25",
+        "23 projection stops at Cathy’s unknown #9 discard, with possible bottom-deck risk"
+      ],
+      "uncertainty": "Both lines stop at the same uncertainty, score 11 with zero clues, zero modeled strikes and no executed loss. The fixture’s red-to-Cathy follow-up is not generated in this forecast because her own cards remain unknown; do not insert the hidden r2 or unseen draws.",
+      "endpointEvidence": "At the actual normalized four-action horizon, purple to Donald has two committed future plays versus zero and three blocked clued cards versus four. All other reported resource operands match. It wins the direct EndpointResources comparison against purple to Bob.",
+      "cycle": "Purple-to-Donald beats purple-to-Bob on endpoint resources; purple-to-Bob beats 4s-to-Bob by raw preference; 4s-to-Bob beats purple-to-Donald by raw preference with incomparable endpoints. EndpointResources is deliberately not one of the cycle-protected evidence categories, unlike funded progress. The existing partial_endpoint_pruning_preserves_the_reviewed_yellow_clue test documents that endpoint preference need not win a global comparison cycle. Do not globally promote all endpoint edges without resolving that strategy boundary.",
+      "question": "Is the intended principle to favor keeping p3/p4 in Donald’s hand and leaving Bob free to discard his duplicate p4 and draw, over the nominal advantage of spreading the purple chain across three players? The turn-18 play-and-handoff ruling does not answer this: Cathy has no known play. The historical Team Distribution ruling concerns an interchangeable clue, rather than choosing which p4 to obtain.",
+      "validation": "Reran current replay from turn 1 after the fix: turns 1–18 agree, first disagreement remains turn 19. New regression and Clippy pass. Related Bluff tests: 19 pass, eight fail; the same eight fail at unchanged HEAD 7759332. check.sh --fast passes Prettier but is incomplete: missing Python dev environment and GNU-stat ownership incompatibilities on macOS."
+    },
+    "regressions": [
+      "h_group::tests::replay::current_turn_nineteen_bluff_requires_the_reactors_response"
+    ],
+    "coverageNote": "The regression enforces the documented immediate-reactor condition and a genuine-Bluff control. It does not assert an unreviewed optimal turn-19 move. No fixture move was changed."
+  },
+  {
     "id": "t18-user-replaces-continuation-with-blue-five",
     "turn": 18,
     "positionKey": "dc1cdf65965fad0244de9d42ee21ce30692fd37dddc9ef155b274df313abf7b3",
