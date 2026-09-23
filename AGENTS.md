@@ -224,12 +224,20 @@ sending. If using the comparison tool's URL directly, copy that URL verbatim.
 
 ### Candidate Clues
 
-When reporting a disagreement, enumerate the candidate clues considered.
+Do not enumerate all valid or considered clues when reporting a disagreement.
+Focus on the fixture move and the engine's preferred move; mention another
+candidate only when it is needed to explain the disagreement.
 
 ### Move Reasoning
 
-Explain the full reasoning of why the engine chose one canditate clue over the
-others.
+Whenever the engine disagrees with a fixture, include the projected lines for
+both the fixture move and the engine's preferred move. Identify the players and
+actions in each line, and clearly mark conditional assumptions and where the
+projection stops. If a move was rejected or has no available projection, explain
+that limitation rather than inventing a line.
+
+Explain why the engine prefers its move over the fixture move, using the actual
+comparison evidence and both projected lines.
 
 Use the built-in explanation before adding temporary diagnostics:
 
