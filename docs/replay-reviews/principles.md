@@ -1,5 +1,10 @@
 # Cross-position user rulings
 
+The p4v0s1 positions below refer to the preserved
+[historical fixture](../../crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json),
+not the replacement continuation supplied on 2026-09-23. Their original review
+anchors and regression assertions are retained.
+
 These are human-reviewed principles, not additional engine configuration. Read
 the linked position records for evidence and boundaries; do not introduce
 fixture IDs or turn numbers into production decision logic.

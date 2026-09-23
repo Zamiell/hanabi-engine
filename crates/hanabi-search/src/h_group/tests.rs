@@ -48,9 +48,11 @@ fn expert_replay_p4v0s3() -> HanabiLiveReplay {
     .expect("fourth expert replay fixture is valid")
 }
 
-fn expert_replay_p4v0s1() -> HanabiLiveReplay {
+// Historical positions retain their reviewed regression assertions after the
+// user replaced the active continuation from turn 18 on 2026-09-23.
+fn historical_replay_p4v0s1() -> HanabiLiveReplay {
     HanabiLiveReplay::from_json(include_str!(
-        "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        "tests/fixtures/game-p4v0s1-before-turn18-revision.json"
     ))
     .expect("fifth expert replay fixture is valid")
 }

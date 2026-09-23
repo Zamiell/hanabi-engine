@@ -4,7 +4,7 @@ use super::*;
 fn first_seed_purple_four_progress_precedes_premature_protection() {
     // User-reviewed 2026-09-20, p4v0s1 turn 28, Donald's perspective.
     // The unseen r4 in Donald's hand and future draws must not enter this line.
-    let state = expert_replay_p4v0s1().state_at_turn(27).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(27).unwrap();
     let analysis = crate::analyze_position(
         &state.view_for(PlayerId::new(3)).unwrap(),
         crate::SupportedConvention::HGroup(HGroupProfile::Max),
@@ -61,7 +61,7 @@ fn first_seed_purple_four_progress_precedes_premature_protection() {
 fn first_seed_safe_discharge_beats_surplus_discard() {
     // Human-reviewed turn 35: yellow obtains r4 + r5 for one clue with
     // no BDR; Cathy's face-unknown #18 is a safe discard, not a better plan.
-    let state = expert_replay_p4v0s1().state_at_turn(34).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(34).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let analysis = crate::analyze_position(
         &view,
@@ -96,7 +96,7 @@ fn first_seed_unknown_trash_discharge_and_unnecessary_push() {
     // User-reviewed p4v0s1 turns 35–37: yellow focuses trash #29,
     // Donald discharges #28, then Alice pushes #33 because r4 was directly
     // clueable. The older y4 already has a 4 clue; it is not a new benefit.
-    let replay = expert_replay_p4v0s1();
+    let replay = historical_replay_p4v0s1();
     let state = replay.state_at_turn(34).unwrap();
     let d = LogicalDeductions::new(state.view_for(PlayerId::new(2)).unwrap()).unwrap();
     let action = Action::Clue {
@@ -162,7 +162,7 @@ fn first_seed_unknown_trash_discharge_and_unnecessary_push() {
 fn first_seed_discharge_response_survives_bobs_projection() {
     // Same reviewed line, but Bob's hand is unavailable to the forecast.
     // Perspective changes must not lose the third-position demonstration.
-    let state = expert_replay_p4v0s1().state_at_turn(33).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(33).unwrap();
     let view = state.view_for(PlayerId::new(1)).unwrap();
     let after_four = prospective_clue_view(
         &view,
@@ -203,7 +203,7 @@ fn first_seed_known_own_copy_prevents_false_discard_elimination() {
     // Bug-reproduction branch from p4v0s1 turn 29, Alice's perspective.
     // Alice's exact r2 is hidden physically, but is already known. Cathy's
     // later duplicate r2 discard must not claim another r2 in Cathy's hand.
-    let state = expert_replay_p4v0s1().state_at_turn(28).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(28).unwrap();
     let mut view = state.view_for(state.current_player()).unwrap();
     let actions = [
         Action::Clue {
@@ -260,7 +260,7 @@ fn first_seed_known_own_copy_prevents_false_discard_elimination() {
 fn first_seed_trash_push_does_not_need_a_second_play_clue() {
     // Alternative branch from p4v0s1 turn 46: 2s to Alice pushes her g3
     // and ignites Cathy's y3. The pushed g3 remains due after Cathy plays.
-    let state = expert_replay_p4v0s1().state_at_turn(45).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(45).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let after = prospective_clue_view(
         &view,
@@ -292,7 +292,7 @@ fn first_seed_ignition_cannot_promise_both_copies_of_yellow_three() {
     // Derived from p4v0s1 turn 46; this asserts Good Touch, not an optimal move.
     // 1s pushes Donald's y3 and ignites Cathy's y3. Both cannot play.
     // 2s to Alice instead obtains different identities (g3 and y3).
-    let state = expert_replay_p4v0s1().state_at_turn(45).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(45).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let deductions = LogicalDeductions::new(view).unwrap();
     let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
@@ -313,7 +313,7 @@ fn first_seed_direct_clue_handoff_preserves_recipient_work() {
     // Derived p4v0s1 turn-44 regression: Alice already knows her y4.
     // It remains the same downstream play if she gives the y3 clue herself,
     // even when that retained commitment is absent from her *new* effects.
-    let state = expert_replay_p4v0s1().state_at_turn(43).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(43).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let d = LogicalDeductions::new(view.clone()).unwrap();
     let notes = infer_h_group(&d, HGroupProfile::Max);
@@ -342,7 +342,7 @@ fn first_seed_unloaded_donald_draws_and_hands_save_to_alice() {
     // User-reviewed p4v0s1 live turn 40: Donald has no known useful
     // cards, Alice has y4. Alice can give the same 5 Save before Bob acts.
     // Conditional y3 belongs in Donald's hand rather than behind Alice's y4.
-    let state = expert_replay_p4v0s1().state_at_turn(39).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(39).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let d = LogicalDeductions::new(view.clone()).unwrap();
     let inferred = infer_h_group(&d, HGroupProfile::Max);
@@ -405,7 +405,7 @@ fn reviewed_save_principle_exclusions_apply_after_plays_and_clues() {
     // it is a derived regression, not a separate human optimal-move ruling.
     // Turn 44 covers a predecessor's voluntary trash discard with tokens.
     for (turn, id) in [(33, 1), (38, 16), (40, 23), (42, 30), (44, 32)] {
-        let state = expert_replay_p4v0s1().state_at_turn(turn - 1).unwrap();
+        let state = historical_replay_p4v0s1().state_at_turn(turn - 1).unwrap();
         let view = state.view_for(state.current_player()).unwrap();
         let d = LogicalDeductions::new(view.clone()).unwrap();
         let notes = infer_h_group(&d, HGroupProfile::Max);
@@ -442,7 +442,7 @@ fn reviewed_save_principle_exclusions_apply_after_plays_and_clues() {
 fn first_seed_donald_discard_does_not_invent_playable_three_risk() {
     // User-reviewed live turn 40: an available 5 Save is not grounds to
     // reintroduce excluded y3/g3 possibilities into Donald's BDR estimate.
-    let state = expert_replay_p4v0s1().state_at_turn(39).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(39).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let analysis = crate::analyze_position(
         &view,
@@ -464,7 +464,7 @@ fn save_principle_does_not_infer_safe_chop_for_an_occupied_player() {
     // Actual p4v0s1 positions with a queued response. A clue/play elsewhere
     // is not evidence that this player should abandon that response to draw.
     for turn in [6, 24, 36] {
-        let state = expert_replay_p4v0s1().state_at_turn(turn - 1).unwrap();
+        let state = historical_replay_p4v0s1().state_at_turn(turn - 1).unwrap();
         let d = LogicalDeductions::new(state.view_for(state.current_player()).unwrap()).unwrap();
         let notes = infer_h_group(&d, HGroupProfile::Max);
         assert!(!notes.playable_now.is_empty() || notes.connection.is_some());
@@ -482,7 +482,7 @@ fn first_seed_forecast_discharge_needs_giver_evidence() {
     // Bug-reproduction branch from reviewed turn 39, not an optimal line:
     // after yellow Save and trash discards, Bob cannot assume Cathy's
     // hidden chop is y3 simply because a Discharge would promise y3.
-    let state = expert_replay_p4v0s1().state_at_turn(38).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(38).unwrap();
     let mut view = state.view_for(PlayerId::new(2)).unwrap();
     let actions = [
         Action::Clue {
@@ -546,7 +546,7 @@ fn first_seed_four_save_accounts_for_collateral_trash() {
     // p4v0s1 turn 39: y4 is the exact critical focus, g4 is already clued
     // in Cathy, and the other suits are complete. Alice's other touched
     // 4s cannot be useful, even though literal rank information permits it.
-    let mut state = expert_replay_p4v0s1().state_at_turn(38).unwrap();
+    let mut state = historical_replay_p4v0s1().state_at_turn(38).unwrap();
     state
         .apply(Action::Clue {
             target: PlayerId::new(0),
@@ -585,7 +585,7 @@ fn first_seed_missing_connectors_compare_both_drawers() {
     // Reviewed p4v0s1 turn 38: Bob's discard has zero BDR. Compare who
     // draws, conditional on each missing 3, with the same y4 Save funded.
     // Never use the actual r3 on Bob's chop or assign an unseen 5 to him.
-    let state = expert_replay_p4v0s1().state_at_turn(37).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(37).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let d = LogicalDeductions::new(view.clone()).unwrap();
     let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
@@ -647,7 +647,7 @@ fn first_seed_four_save_projects_the_reviewed_discharge() {
     // The user replaced the old turn-34 direct r4 clue with 4s to Alice.
     // That Save enables the reviewed yellow UTD and Unnecessary Trash Push:
     // it is no longer an inert Early Save while the direct line gets two plays.
-    let state = expert_replay_p4v0s1().state_at_turn(33).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(33).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let analysis = crate::analyze_position(
         &view,
@@ -685,7 +685,7 @@ fn first_seed_chop_safety_survives_later_token_exhaustion() {
     // User-reviewed p4v0s1 turn 38: Alice's earlier declined protection
     // rules out y3/g3 on Bob's chop. Her turn-37 zero-token play does not
     // erase that evidence, nor does Bob's unplayable clued 5.
-    let state = expert_replay_p4v0s1().state_at_turn(37).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(37).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let d = LogicalDeductions::new(view.clone()).unwrap();
     let notes = infer_h_group(&d, HGroupProfile::Max);
@@ -716,7 +716,7 @@ fn first_seed_chop_safety_survives_later_token_exhaustion() {
 fn first_seed_known_purple_trash_does_not_invent_a_discharge() {
     // Counterfactual from p4v0s1 turn 34: Save Alice's critical y4. Purple
     // is complete, so purple to Donald is not an *unknown* trash discharge.
-    let mut state = expert_replay_p4v0s1().state_at_turn(33).unwrap();
+    let mut state = historical_replay_p4v0s1().state_at_turn(33).unwrap();
     state
         .apply(Action::Clue {
             target: PlayerId::new(0),
@@ -750,7 +750,7 @@ fn first_seed_known_purple_trash_does_not_invent_a_discharge() {
 fn first_seed_red_four_enables_red_five_instead_of_a_scream() {
     // Fixture turn 36: Cathy has just clued Alice's r5. Donald should play
     // his known r4, not Scream to protect Alice's y4 and prevent r5 playing.
-    let state = expert_replay_p4v0s1().state_at_turn(35).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(35).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let d = LogicalDeductions::new(view).unwrap();
     let replay = replay_h_group(&d, HGroupProfile::Max);
@@ -771,7 +771,7 @@ fn first_seed_red_four_enables_red_five_instead_of_a_scream() {
 fn first_seed_unloaded_hand_uses_declined_protection_to_draw_safely() {
     // User-reviewed p4v0s1 turn 33: Alice has no work queued; Bob can give
     // the same r4 clue. Do not use Alice's actual y1 or her hidden new r5.
-    let state = expert_replay_p4v0s1().state_at_turn(32).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(32).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let deductions = LogicalDeductions::new(view.clone()).unwrap();
     let notes = infer_h_group(&deductions, HGroupProfile::Max);
@@ -837,7 +837,7 @@ fn first_seed_unloaded_hand_uses_declined_protection_to_draw_safely() {
 fn first_seed_two_for_one_survives_unresolved_discard_comparison() {
     // User-reviewed turn 4: neither 1s nor 4s proves avoidance of BDR;
     // retain the stronger 2-for-1 instead of awarding an unfinished line zero.
-    let state = expert_replay_p4v0s1().state_at_turn(3).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(3).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let analysis = crate::analyze_position(
         &view,
@@ -856,7 +856,7 @@ fn first_seed_two_for_one_survives_unresolved_discard_comparison() {
 
 #[test]
 fn first_seed_critical_five_is_not_zero_value_in_a_chop_exchange() {
-    let state = expert_replay_p4v0s1().state_at_turn(17).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(17).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     assert_eq!(
         super::super::symbolic_line::important_discard(&view, HGroupProfile::Max, CardId::new(22))
@@ -879,7 +879,7 @@ fn first_seed_critical_five_is_not_zero_value_in_a_chop_exchange() {
 fn first_seed_tempo_does_not_exchange_purple_four_for_red_three() {
     // User-reviewed alternative from Donald's turn 4. His unknown 3s are
     // not replacements for Bob's visible r3. Draws remain blank.
-    let state = expert_replay_p4v0s1().state_at_turn(3).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(3).unwrap();
     let mut view = state.view_for(state.current_player()).unwrap();
     for action in [
         Action::Clue {
@@ -968,7 +968,7 @@ fn first_seed_projected_bob_plays_blue_one_before_queueing_yellow_two() {
     // User-reviewed hypothetical from p4v0s1 turn 3. At turn 6 Bob has
     // b1 to play; merely counting another held card must not force him to
     // spend a clue on Donald's y2 instead. Cathy's hidden cards stay hidden.
-    let state = expert_replay_p4v0s1().state_at_turn(2).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(2).unwrap();
     let mut view = state.view_for(state.current_player()).unwrap();
     for action in [
         Action::Clue {
@@ -1013,7 +1013,7 @@ fn first_seed_projected_bob_plays_blue_one_before_queueing_yellow_two() {
 fn first_seed_demonstrated_reverse_layer_survives_nonadjacent_recipient() {
     // User-reviewed red branch, p4v0s1 turn 25: Alice's p2 blind play
     // demonstrated the red connection to Cathy, with Bob between them.
-    let state = expert_replay_p4v0s1().state_at_turn(17).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(17).unwrap();
     let mut view = state.view_for(state.current_player()).unwrap();
     for action in [
         Action::Clue {
@@ -1059,7 +1059,7 @@ fn first_seed_demonstrated_reverse_layer_survives_nonadjacent_recipient() {
 fn first_seed_generation_discard_projects_reviewed_direct_green_line() {
     // User-reviewed Donald perspective at turn 20, for both root clues.
     // Future draws remain blank; #1 being y1 is visible to Donald, not Alice.
-    let state = expert_replay_p4v0s1().state_at_turn(19).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(19).unwrap();
     let analysis = crate::analyze_position(
         &state.view_for(state.current_player()).unwrap(),
         crate::SupportedConvention::HGroup(HGroupProfile::Max),
@@ -1165,7 +1165,7 @@ fn first_seed_generation_discard_projects_reviewed_direct_green_line() {
 fn first_seed_fives_chop_move_prevents_critical_purple_five_loss() {
     // Reviewed turn-18 continuation: Donald must save Cathy's p5 at turn
     // 20, not give red and discard that critical card in the continuation.
-    let state = expert_replay_p4v0s1().state_at_turn(19).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(19).unwrap();
     let analysis = crate::analyze_position(
         &state.view_for(state.current_player()).unwrap(),
         crate::SupportedConvention::HGroup(HGroupProfile::Max),
@@ -1195,7 +1195,7 @@ fn first_seed_known_five_refund_does_not_force_scream_discard() {
     // User-reviewed purple line from p4v0s1 turn 18: at turn 22 Bob plays
     // b5, returning a clue. Level 7 forbids forcing the riskier Scream when
     // a less dangerous way to provide the token is available.
-    let state = expert_replay_p4v0s1().state_at_turn(21).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(21).unwrap();
     assert_eq!(
         state.view_for(state.current_player()).unwrap().clue_tokens,
         0
@@ -1266,7 +1266,7 @@ fn first_seed_self_finesse_survives_nested_hidden_connector() {
     // p4v0s1 turn 28: Donald cannot see his own r1, but Alice has publicly
     // completed the r1 Self-Finesse. Her r2 must not become Unrecognized when
     // Donald projects Alice's next turn with his own cards hidden.
-    let state = expert_replay_p4v0s1().state_at_turn(27).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(27).unwrap();
     let view = state.view_for(PlayerId::new(3)).unwrap();
     let (d, r) = PerspectiveProjector::new(&view, HGroupProfile::Max)
         .project(PlayerId::new(0), PerspectiveDepth::NestedRecipients)
@@ -1288,7 +1288,7 @@ fn first_seed_self_finesse_survives_nested_hidden_connector() {
 fn first_seed_recipient_self_finesse_requires_no_direct_play_alternative() {
     // User-reviewed p4v0s1 turn 24: the prior g2 Play Clue means Alice
     // cannot interpret 2s as a direct g2 play. Donald can leave r1 to her.
-    let state = expert_replay_p4v0s1().state_at_turn(23).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(23).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let d = LogicalDeductions::new(view).unwrap();
     let inferred = infer_h_group(&d, HGroupProfile::Max);
@@ -1297,7 +1297,7 @@ fn first_seed_recipient_self_finesse_requires_no_direct_play_alternative() {
     // Removing the earlier g2 promise (replacing green with a 5 Save)
     // preserves the direct-play alternative described by the user. Donald
     // must demonstrate r1, rather than let Alice bomb her r2 as g2.
-    let mut alternative = expert_replay_p4v0s1().state_at_turn(19).unwrap();
+    let mut alternative = historical_replay_p4v0s1().state_at_turn(19).unwrap();
     for action in [
         Action::Clue {
             target: PlayerId::new(2),
@@ -1316,7 +1316,7 @@ fn first_seed_recipient_self_finesse_requires_no_direct_play_alternative() {
     let inferred = infer_h_group(&d, HGroupProfile::Max);
     assert_eq!(inferred.connection.unwrap().card, CardId::new(23));
 
-    let state = expert_replay_p4v0s1().state_at_turn(24).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(24).unwrap();
     let d = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
     let inferred = infer_h_group(&d, HGroupProfile::Max);
     assert_eq!(inferred.connection.unwrap().card, CardId::new(21));
@@ -1326,7 +1326,7 @@ fn first_seed_recipient_self_finesse_requires_no_direct_play_alternative() {
 fn first_seed_fresh_bluff_precedes_an_older_clued_prompt() {
     // User-reviewed purple branch at p4v0s1 turn 24: Donald must show
     // the Bluff immediately; his clued p3 remains due afterwards.
-    let state = expert_replay_p4v0s1().state_at_turn(17).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(17).unwrap();
     let mut view = state.view_for(state.current_player()).unwrap();
     for action in [
         Action::Clue {
@@ -1374,7 +1374,7 @@ fn first_seed_fresh_bluff_precedes_an_older_clued_prompt() {
 
 #[test]
 fn first_seed_turn_eighteen_compares_reviewed_full_lines() {
-    let state = expert_replay_p4v0s1().state_at_turn(17).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(17).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let analysis = crate::analyze_position(
         &view,
@@ -1461,7 +1461,7 @@ fn first_seed_turn_eighteen_compares_reviewed_full_lines() {
 fn first_seed_purple_line_uses_fives_chop_move() {
     // Reviewed p4v0s1 branch, turns 14-22. This does not change the fixture:
     // green to Donald, b4, g1, discard y4, then purple to Donald.
-    let mut state = expert_replay_p4v0s1().state_at_turn(14).unwrap();
+    let mut state = historical_replay_p4v0s1().state_at_turn(14).unwrap();
     for action in [
         Action::Play(CardId::new(11)),
         Action::Play(CardId::new(20)),
@@ -1565,7 +1565,7 @@ fn first_seed_purple_line_uses_fives_chop_move() {
 fn first_seed_red_line_protects_the_five_before_the_next_play() {
     // User-reviewed p4v0s1 branch: green to Donald at 14, b4, g1,
     // discard y4. Red to Cathy at 18 must not let her p5 be discarded.
-    let mut state = expert_replay_p4v0s1().state_at_turn(14).unwrap();
+    let mut state = historical_replay_p4v0s1().state_at_turn(14).unwrap();
     for action in [
         Action::Play(CardId::new(11)),
         Action::Play(CardId::new(20)),
@@ -1609,7 +1609,7 @@ fn first_seed_play_is_not_penalized_for_a_longer_discard_forecast() {
     // Human-reviewed p4v0s1 turn 12: play the promised y2. Both lines
     // eventually reach Donald's unknown chop; the longer line is not more
     // dangerous merely because its forecast sees more intervening turns.
-    let state = expert_replay_p4v0s1().state_at_turn(11).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(11).unwrap();
     let analysis = crate::analyze_position(
         &state.view_for(state.current_player()).unwrap(),
         crate::SupportedConvention::HGroup(HGroupProfile::Max),
@@ -1628,7 +1628,7 @@ fn first_seed_play_is_not_penalized_for_a_longer_discard_forecast() {
 fn first_seed_blank_draw_does_not_enable_an_unsafe_double_bluff() {
     // Reviewed p4v0s1 turn 7 counterfactual. Unknown draws must not add
     // purple touches; Cathy cannot bluff Donald's unplayable finesse card.
-    let state = expert_replay_p4v0s1().state_at_turn(6).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(6).unwrap();
     let view = state.view_for(PlayerId::new(2)).unwrap();
     let (outcome, evidence) = super::super::symbolic_line::project_h_group_projection(
         &view,
@@ -1697,7 +1697,7 @@ fn first_seed_four_charm_does_not_secure_visibly_false_connectors() {
     // Reviewed p4v0s1 opening comparison: the 4 Charm saves g4 and b4.
     // Recipient connector assumptions that disagree with Alice's visible
     // cards cannot count as additional saved cards or protected BDR.
-    let state = expert_replay_p4v0s1().state_at_turn(0).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(0).unwrap();
     let view = state.view_for(PlayerId::new(0)).unwrap();
     let (outcome, _) = super::super::symbolic_line::project_h_group_projection(
         &view,
@@ -2479,7 +2479,7 @@ fn first_replay_playable_five_save_does_not_eject() {
 fn fifth_replay_burn_preserves_the_final_playing_clock() {
     // p4v0s1 turn 48: y5, g4 and g5 are known; all needed cards are held.
     // https://hanabi.github.io/level-8/#burning-end-game-stalling
-    let state = expert_replay_p4v0s1().state_at_turn(47).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(47).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let analysis = crate::analyze_position(
         &view,
@@ -2508,7 +2508,7 @@ fn fifth_replay_burn_preserves_the_final_playing_clock() {
 fn fifth_replay_fully_clued_endgame_clues_are_all_burns() {
     // Human-reviewed p4v0s1 turn 48: even a new collateral touch cannot
     // communicate another needed play after every remaining play is clued.
-    let state = expert_replay_p4v0s1().state_at_turn(47).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(47).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let clues = view
         .legal_actions()
@@ -2561,7 +2561,7 @@ fn fifth_replay_fully_clued_endgame_clues_are_all_burns() {
 fn fifth_replay_clues_the_last_missing_connector_before_surplus_discard() {
     // Reviewed p4v0s1 turn 46: g3/g4 are visible; Bob knows his own g5.
     // Seven tokens already fund the remaining clues. No draw is required.
-    let state = expert_replay_p4v0s1().state_at_turn(45).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(45).unwrap();
     let source = state.view_for(state.current_player()).unwrap();
     let analysis = crate::analyze_position(
         &source,
@@ -2582,7 +2582,7 @@ fn fifth_replay_clues_the_last_missing_connector_before_surplus_discard() {
 fn fifth_replay_bluffs_through_the_givers_known_green_four() {
     // p4v0s1 turn 35: green to Bob goes through Cathy's already-known g4.
     // https://hanabi.github.io/level-11/#bluffs-through-already-clued-cards
-    let state = expert_replay_p4v0s1().state_at_turn(34).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(34).unwrap();
     let d = LogicalDeductions::new(state.view_for(state.current_player()).unwrap()).unwrap();
     let green = Action::Clue {
         target: PlayerId::new(1),
@@ -2610,7 +2610,7 @@ fn fifth_replay_bluffs_through_the_givers_known_green_four() {
         &crate::AnalysisControl::default(),
     )
     .unwrap();
-    let after = expert_replay_p4v0s1().state_at_turn(36).unwrap();
+    let after = historical_replay_p4v0s1().state_at_turn(36).unwrap();
     let bob = LogicalDeductions::new(after.view_for(PlayerId::new(1)).unwrap()).unwrap();
     let bob = infer_h_group(&bob, HGroupProfile::Max);
     assert_eq!(
@@ -2647,7 +2647,7 @@ fn fifth_replay_bluffs_through_the_givers_known_green_four() {
 /// <https://hanabi.github.io/level-11/#the-bluff>
 #[test]
 fn fifth_replay_bluff_interrupts_an_ordinary_clued_play() {
-    let fixture = expert_replay_p4v0s1();
+    let fixture = historical_replay_p4v0s1();
     let state = fixture.state_at_turn(21).unwrap();
     let d = LogicalDeductions::new(state.view_for(state.current_player()).unwrap()).unwrap();
     let action = Action::Clue {
@@ -2748,7 +2748,7 @@ fn fifth_replay_bluff_interrupts_an_ordinary_clued_play() {
 fn fifth_replay_demonstrated_bluff_eliminates_older_good_touch_duplicates() {
     // p4v0s1 turn 24, after the reviewed g2 Bluff: Cathy's saved 2
     // cannot duplicate it. This is Good Touch, not physical card counting.
-    let resolved = expert_replay_p4v0s1().state_at_turn(23).unwrap();
+    let resolved = historical_replay_p4v0s1().state_at_turn(23).unwrap();
     let cathy = LogicalDeductions::new(resolved.view_for(PlayerId::new(2)).unwrap()).unwrap();
     let inferred = infer_h_group(&cathy, HGroupProfile::Max);
     assert_eq!(
@@ -2782,7 +2782,7 @@ fn reviewed_pending_finesse_still_blocks_a_queued_bluff() {
 /// <https://hanabi.github.io/level-15/#the-double-bluff>
 #[test]
 fn fifth_replay_purple_double_bluff_is_admitted() {
-    let fixture = expert_replay_p4v0s1();
+    let fixture = historical_replay_p4v0s1();
     let state = fixture.state_at_turn(13).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let deductions = LogicalDeductions::new(view.clone()).unwrap();
@@ -2887,7 +2887,7 @@ fn fifth_replay_purple_double_bluff_is_admitted() {
 /// source observer rather than exporting Alice's perfect-information note.
 #[test]
 fn fifth_replay_double_bluff_keeps_observer_relative_focus_domains() {
-    let state = expert_replay_p4v0s1().state_at_turn(16).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(16).unwrap();
     for (player, ranks) in [
         (0, vec![Rank::Five]),
         (1, vec![Rank::Four, Rank::Five]),
@@ -2978,7 +2978,7 @@ fn demonstrated_yellow_layer_is_shared_across_observer_projections() {
 /// projection uncertainty, not the optimality of an invented continuation.
 #[test]
 fn fifth_opening_charm_projection_excludes_the_clue_givers_hand() {
-    let state = expert_replay_p4v0s1().state_at_turn(0).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(0).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let d = LogicalDeductions::new(view.clone()).unwrap();
     let action = Action::Clue {
@@ -3706,12 +3706,16 @@ fn fourth_expert_replay_matches_engine() {
 
 #[test]
 fn fifth_expert_replay_matches_engine() {
-    assert_expert_replay_matches_engine("p4v0s1", &expert_replay_p4v0s1());
+    let replay = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .expect("current fifth expert replay fixture is valid");
+    assert_expert_replay_matches_engine("p4v0s1", &replay);
 }
 
 #[test]
 fn fifth_replay_move_one_prefers_protecting_bottom_deck_risk() {
-    let fixture = expert_replay_p4v0s1();
+    let fixture = historical_replay_p4v0s1();
     let state = fixture.state_at_turn(0).expect("initial position is legal");
     let view = state
         .view_for(state.current_player())
@@ -3746,7 +3750,7 @@ fn fifth_replay_move_one_prefers_protecting_bottom_deck_risk() {
 
 #[test]
 fn fifth_replay_move_four_recognizes_the_visible_blue_continuation() {
-    let fixture = expert_replay_p4v0s1();
+    let fixture = historical_replay_p4v0s1();
     let state = fixture.state_at_turn(3).expect("fixture prefix is legal");
     let view = state
         .view_for(state.current_player())
@@ -3799,7 +3803,7 @@ fn fifth_replay_move_four_recognizes_the_visible_blue_continuation() {
 
 #[test]
 fn fifth_replay_move_five_keeps_the_existing_prompt_ahead_of_a_four_charm() {
-    let fixture = expert_replay_p4v0s1();
+    let fixture = historical_replay_p4v0s1();
     let state = fixture.state_at_turn(4).expect("fixture prefix is legal");
     let view = state
         .view_for(state.current_player())
@@ -3827,7 +3831,7 @@ fn fifth_replay_move_five_keeps_the_existing_prompt_ahead_of_a_four_charm() {
 
 #[test]
 fn fifth_replay_move_eleven_rejects_an_unconnected_yellow_four() {
-    let fixture = expert_replay_p4v0s1();
+    let fixture = historical_replay_p4v0s1();
     let state = fixture.state_at_turn(10).expect("fixture prefix is legal");
     let view = state
         .view_for(state.current_player())
@@ -3848,7 +3852,7 @@ fn fifth_replay_move_eleven_rejects_an_unconnected_yellow_four() {
 
 #[test]
 fn fifth_replay_move_eleven_permits_discarding() {
-    let fixture = expert_replay_p4v0s1();
+    let fixture = historical_replay_p4v0s1();
     let state = fixture.state_at_turn(10).expect("fixture prefix is legal");
     let view = state
         .view_for(state.current_player())
@@ -5551,7 +5555,7 @@ fn first_seed_projected_purple_retains_critical_save_alternative() {
     // Reviewed p4v0s1 turn-11 Stall hypothetical: after y2, b3, and
     // Bob's p4 discard, Cathy's purple clue must retain the critical p4
     // alternative, not force Donald to play it as p2. Future draws stay blank.
-    let state = expert_replay_p4v0s1().state_at_turn(10).unwrap();
+    let state = historical_replay_p4v0s1().state_at_turn(10).unwrap();
     let mut view = state.view_for(state.current_player()).unwrap();
     for action in [
         Action::Clue {

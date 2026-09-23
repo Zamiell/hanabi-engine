@@ -576,7 +576,7 @@ mod tests {
     #[test]
     fn reviewed_opening_distinguishes_the_saved_threes_and_fours() {
         let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
-            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+            "tests/fixtures/game-p4v0s1-before-turn18-revision.json"
         ))
         .unwrap();
         let root = replay.state_at_turn(0).unwrap();

@@ -15,7 +15,7 @@ const MAX_REVEAL_LEAVES: usize = 16;
 #[test]
 fn reviewed_turn_thirty_compares_equal_elapsed_time() {
     let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
-        "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        "tests/fixtures/game-p4v0s1-before-turn18-revision.json"
     ))
     .unwrap();
     let state = replay.state_at_turn(29).unwrap();
@@ -725,7 +725,7 @@ mod tests {
     #[test]
     fn first_seed_projected_follow_up_preserves_the_reviewed_discharge() {
         let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
-            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+            "tests/fixtures/game-p4v0s1-before-turn18-revision.json"
         ))
         .unwrap();
         let state = replay.state_at_turn(33).unwrap();
@@ -768,7 +768,7 @@ mod tests {
         // oracle: playing r2 and then cluing r4 Prompts Donald's clued r3.
         // That Prompt must not also manufacture a Bluff on Cathy's p5.
         let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
-            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+            "tests/fixtures/game-p4v0s1-before-turn18-revision.json"
         ))
         .unwrap();
         let state = replay.state_at_turn(28).unwrap();
@@ -834,7 +834,7 @@ mod tests {
         // with Alice's critical y4 exposed. Do not treat a possible discard
         // later in the Save line as worse than a shorter unknown frontier.
         let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
-            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+            "tests/fixtures/game-p4v0s1-before-turn18-revision.json"
         ))
         .unwrap();
         let state = replay.state_at_turn(22).unwrap();
@@ -885,7 +885,7 @@ mod tests {
     #[test]
     fn first_seed_turn_35_eliminates_discard_risk_without_an_exact_face() {
         let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
-            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+            "tests/fixtures/game-p4v0s1-before-turn18-revision.json"
         ))
         .unwrap();
         let state = replay.state_at_turn(34).unwrap();
@@ -1313,7 +1313,7 @@ mod tests {
     #[test]
     fn clue_givers_blank_hand_does_not_create_a_charm_branch() {
         let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
-            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+            "tests/fixtures/game-p4v0s1-before-turn18-revision.json"
         ))
         .unwrap();
         let state = replay.state_at_turn(0).unwrap();

@@ -2505,7 +2505,7 @@ mod tests {
         // efficiency 0.71 there is no need to sacrifice it for red's extra
         // efficiency. Analyze only Bob's view, not future deck identities.
         let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
-            "../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+            "h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json"
         ))
         .unwrap();
         let state = replay.state_at_turn(13).unwrap();
@@ -2545,7 +2545,7 @@ mod tests {
         // Donald's later unknown discard remains optional with a clue left.
         // No hidden hand identity or deck order is supplied to planning.
         let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
-            "../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+            "h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json"
         ))
         .unwrap();
         let state = replay.state_at_turn(10).unwrap();
@@ -3056,7 +3056,7 @@ mod tests {
         // User-reviewed p4v0s1 turn 3: blue to Bob is a 2-for-1;
         // 1s to Alice is a 1-for-1 with a speculative future y2 finesse.
         let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
-            "../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+            "h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json"
         ))
         .unwrap();
         let state = replay.state_at_turn(2).unwrap();

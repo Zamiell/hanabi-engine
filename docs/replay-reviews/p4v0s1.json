@@ -1,5 +1,71 @@
 [
   {
+    "id": "t18-user-replaces-continuation-with-blue-five",
+    "turn": 18,
+    "positionKey": "dc1cdf65965fad0244de9d42ee21ce30692fd37dddc9ef155b274df313abf7b3",
+    "status": "user-explained",
+    "perspective": "User-supplied recorded continuation; not an omniscient forecast or a new inference rule.",
+    "source": {
+      "conversation": "2026-09-23, current task, replacement continuation and subsequent confirmation",
+      "quote": "Actually, I think turn 18 is wrong. Let's redo the fixture. Starting at turn 18:",
+      "correctionQuestion": "Did you mean play p4 instead of r4 on turn 32?",
+      "correctionReply": "yes"
+    },
+    "explanation": {
+      "ruling": "Replace turns 18\u201358 with the user-supplied sequence, preserving turns 1\u201317. The user confirmed p4 at turn 32. No additional strategic rationale was supplied.",
+      "line": [
+        "play b5",
+        "purple to donald",
+        "red to cathy",
+        "play p2",
+        "discard p4",
+        "green to bob",
+        "play p3",
+        "play r1",
+        "play g2",
+        "play r2",
+        "play r3",
+        "discard y1",
+        "4s to alice",
+        "discard p1",
+        "play p4",
+        "purple to cathy",
+        "r3 discard",
+        "p5 play",
+        "r1 discard",
+        "5s to bob",
+        "5's to alice",
+        "b2 discard",
+        "r4 play",
+        "r5 play",
+        "p3 discard",
+        "yellow to bob",
+        "r4 discard",
+        "r2 discard",
+        "y3 play",
+        "green to alice",
+        "4s to alice",
+        "y4 play",
+        "y5 play",
+        "3's to alice",
+        "blue to alice",
+        "g3 play",
+        "green to cathy",
+        "g4 play",
+        "p2 discard",
+        "b3 discard",
+        "g5 play"
+      ],
+      "physicalCopyResolution": "At turn 40 Donald holds r4 #28 and #38. Use the older #28 for the requested play and #38 for the turn-44 discard; this is an implementation mapping, not a user ruling on slot preference.",
+      "supersedes": "historical-t18-purple-versus-red-lines",
+      "validation": "The protocol reducer replays all 58 actions legally to a terminal score of 25 with zero strikes."
+    },
+    "regressions": [
+      "h_group::tests::replay::fifth_expert_replay_matches_engine"
+    ],
+    "coverageNote": "The parity contract now covers the full user-supplied replay. The focused parity test on 2026-09-23 matches turns 1–17 and fails at turn 18: the fixture plays b5 #17 while the engine selects purple to Donald. Historical position-specific tests retain their previous fixture and assertions."
+  },
+  {
     "id": "t29-alice-projection-rank-four-ambiguity",
     "turn": 29,
     "positionKey": "9fd9d53294eaadcbab9ca983e801e34e8d57fe6a53e7cca66ae67d39bf8a2cbc",
@@ -15,7 +81,9 @@
       "question": "Should rank 4 to Donald become exactly r4 in this Alice-rooted hypothetical, or does the already-scheduled r3 play fail to disambiguate it? If ambiguous, should Bob choose purple to Cathy rather than that rank clue? Donald's preceding root forecast cannot see his own r4 and is a different information set. Do not force this move into the fixture."
     },
     "regressions": [],
-    "coverageNote": "From-start scan agrees through turn 28. The eight-action Donald-rooted regression passes; no new interpretation or optimal-move assertion has been invented for Alice's perspective."
+    "coverageNote": "From-start scan agrees through turn 28. The eight-action Donald-rooted regression passes; no new interpretation or optimal-move assertion has been invented for Alice's perspective.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t28-reviewed-purple-four-progress",
@@ -43,7 +111,9 @@
     },
     "regressions": [
       "h_group::tests::replay::first_seed_purple_four_progress_precedes_premature_protection"
-    ]
+    ],
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t28-early-purple-setup-versus-playing-purple-four",
@@ -61,7 +131,9 @@
       "question": "Should earlier p4/p5 progress and arranging y5 protection later take precedence over the earlier 5 Save and draw in the purple-first line? The existing turn-28 ruling establishes Alice's persistent r2 knowledge, not this scheduling preference. Do not change the fixture or add a preferred-action assertion without review."
     },
     "regressions": [],
-    "coverageNote": "Latest from-start scan agrees through turn 27. Existing self-finesse regressions remain separate; this question concerns scheduling, not connector inference."
+    "coverageNote": "Latest from-start scan agrees through turn 27. Existing self-finesse regressions remain separate; this question concerns scheduling, not connector inference.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t35-eliminated-trash-and-productive-discharge",
@@ -87,7 +159,9 @@
       "h_group::symbolic_line::tests::first_seed_projected_follow_up_preserves_the_reviewed_discharge",
       "h_group::symbolic_line::tests::first_seed_projected_save_is_not_penalized_for_an_extra_unknown_turn",
       "planner::tests::funded_progress_precedes_surplus_tokens_but_not_required_funding"
-    ]
+    ],
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t35-unknown-trash-discharge-unnecessary-push",
@@ -114,7 +188,9 @@
     "regressions": [
       "h_group::tests::replay::first_seed_unknown_trash_discharge_and_unnecessary_push",
       "h_group::tests::replay::first_seed_discharge_response_survives_bobs_projection"
-    ]
+    ],
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t34-four-save-followup-meaning-question",
@@ -123,7 +199,7 @@
     "status": "superseded",
     "perspective": "Bob's projection; follow-up interpretation also checked from Cathy's and Donald's actual fixture perspectives",
     "source": {
-      "conversation": "2026-09-19, from-start scan after the user completed turns 53–58; assistant investigation, not a user ruling"
+      "conversation": "2026-09-19, from-start scan after the user completed turns 53\u201358; assistant investigation, not a user ruling"
     },
     "explanation": {
       "agreement": "Current replay agrees through turn 33. Turn 34 selects blue to Alice rather than the user's 4 to Alice.",
@@ -135,7 +211,9 @@
       "question": "What convention in the 4-to-Alice then yellow-to-Alice sequence establishes Donald's r4 and Alice's r5? Neither card is touched, and the inspected Save, Tempo, and Elimination rules do not establish that particular sequence. Need the intended interpretation before changing admission or ranking; do not assume actual card faces supply the missing promises."
     },
     "regressions": [],
-    "coverageNote": "From-start CLI comparison and focused turn-35/36 explanations; no engine edits or full suite run. Existing later review anchors remain historical."
+    "coverageNote": "From-start CLI comparison and focused turn-35/36 explanations; no engine edits or full suite run. Existing later review anchors remain historical.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t34-four-to-alice-continuation-through-52",
@@ -151,11 +229,13 @@
       "supersedes": "t34-chop-move-protection-versus-red-stack-progress",
       "action": "Replace turn 34 onward with the user's sequence through turn 52, ending after two consecutive green clues to Alice.",
       "boundary": "Initially stopped before turn 53 because the requested third green-to-Alice clue would be a self-clue. The user subsequently supplied the six final actions explicitly.",
-      "completion": "User follow-up: g3 play; green to Cathy; g4 play; green to Bob; g4 discard; g5 play. Appended as turns 53–58: Alice plays #44, Bob clues green to Cathy, Cathy plays #10, Donald clues green to Bob, Alice discards #41, Bob plays #19.",
+      "completion": "User follow-up: g3 play; green to Cathy; g4 play; green to Bob; g4 discard; g5 play. Appended as turns 53\u201358: Alice plays #44, Bob clues green to Cathy, Cathy plays #10, Donald clues green to Bob, Alice discards #41, Bob plays #19.",
       "historicalAnchors": "Later records retain their old position keys and reasoning; their continuations have been superseded by this fixture edit. They are not re-anchored to the new history."
     },
     "regressions": [],
-    "coverageNote": "The later UTD clarification supersedes the old first_seed_red_four_progress_beats_an_early_save expectation. Its replacement, first_seed_four_save_projects_the_reviewed_discharge, checks both projected red plays and retained protection instead of asserting that the obsolete direct-clue choice wins."
+    "coverageNote": "The later UTD clarification supersedes the old first_seed_red_four_progress_beats_an_early_save expectation. Its replacement, first_seed_four_save_projects_the_reviewed_discharge, checks both projected red plays and retained protection instead of asserting that the obsolete direct-clue choice wins.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t34-chop-move-protection-versus-red-stack-progress",
@@ -173,7 +253,9 @@
       "question": "Should immediate red-4/red-5 progress and arranging the later yellow-4 Save take precedence over immediately chop-moving both important cards and drawing an extra card? The general Save and Play-over-Save principles do not alone rank these two protected continuations. Do not change the fixture without review."
     },
     "regressions": [],
-    "coverageNote": "Latest from-start scan agrees through turn 33. No assertion freezes either turn-34 move as optimal."
+    "coverageNote": "Latest from-start scan agrees through turn 33. No assertion freezes either turn-34 move as optimal.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t40-donald-draws-alice-saves",
@@ -195,7 +277,9 @@
     },
     "regressions": [
       "h_group::tests::replay::first_seed_unloaded_donald_draws_and_hands_save_to_alice"
-    ]
+    ],
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t40-save-principle-applies-after-other-save",
@@ -217,7 +301,9 @@
     "regressions": [
       "h_group::tests::replay::reviewed_save_principle_exclusions_apply_after_plays_and_clues",
       "h_group::tests::replay::first_seed_donald_discard_does_not_invent_playable_three_risk"
-    ]
+    ],
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t40-declined-play-clue-during-critical-save",
@@ -236,7 +322,9 @@
       "question": "Does Cathy's choice to save Alice instead of play-cluing Donald still rule out y3/g3 on Donald's chop? Or should Donald retain those possibilities and give 5s while someone else arranges the next safe discard? Do not extend the historical exclusion or change the fixture without settling this condition."
     },
     "regressions": [],
-    "coverageNote": "No expected-action assertion added for this unresolved inference. Turn-39 collateral trash and the rejected yellow-line forecast Discharge have separate bug-reproduction tests."
+    "coverageNote": "No expected-action assertion added for this unresolved inference. Turn-39 collateral trash and the rejected yellow-line forecast Discharge have separate bug-reproduction tests.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t38-save-principle-excludes-playable-threes",
@@ -259,7 +347,9 @@
       "h_group::tests::replay::first_seed_chop_safety_survives_later_token_exhaustion",
       "h_group::tests::replay::first_seed_missing_connectors_compare_both_drawers"
     ],
-    "coverageNote": "Additional engine scheduling check (not a new user ruling): with the same rank-4 Save funded and its useful meaning preserved when Cathy gives it, drawing y3 in either seat reaches Alice's y4 at offset 7. Drawing g3 as Bob reaches Cathy's g4 at offset 5 instead of 9. No unseen 5 is assigned to Bob. This supports the existing fixture discard without guessing the draw or waiving Save Principle."
+    "coverageNote": "Additional engine scheduling check (not a new user ruling): with the same rank-4 Save funded and its useful meaning preserved when Cathy gives it, drawing y3 in either seat reaches Alice's y4 at offset 7. Drawing g3 as Bob reaches Cathy's g4 at offset 5 instead of 9. No unseen 5 is assigned to Bob. This supports the existing fixture discard without guessing the draw or waiving Save Principle.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t38-chop-uncertainty-versus-yellow-four-save",
@@ -278,7 +368,9 @@
       "question": "Can Bob nevertheless exclude yellow 3 and green 3 through earlier public history, or should he accept possible BDR to draw while leaving Cathy the yellow-4 Save? Identify the inference or strategic trade-off before changing the fixture or ranking."
     },
     "regressions": [],
-    "coverageNote": "No preferred-move assertion added for this unresolved judgment. Fresh comparison agrees through turns 1-37."
+    "coverageNote": "No preferred-move assertion added for this unresolved judgment. Fresh comparison agrees through turns 1-37.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t33-contextual-chop-safety-and-draw-allocation",
@@ -309,7 +401,9 @@
       "h_group::tests::replay::first_seed_unloaded_hand_uses_declined_protection_to_draw_safely",
       "h_group::tests::replay::first_seed_four_save_projects_the_reviewed_discharge"
     ],
-    "coverageNote": "Checks excluded needed identities, retained duplicate possibilities, unchanged literal domain, zero BDR and best discard; negative controls retain uncertainty without history or for a fresh non-chop card. The follow-up turn-34 regression now follows the later 4-to-Alice and UTD clarification; the former assertion preferring 4 to Donald is superseded, not a current strategic ruling."
+    "coverageNote": "Checks excluded needed identities, retained duplicate possibilities, unchanged literal domain, zero BDR and best discard; negative controls retain uncertainty without history or for a fresh non-chop card. The follow-up turn-34 regression now follows the later 4-to-Alice and UTD clarification; the former assertion preferring 4 to Donald is superseded, not a current strategic ruling.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t11-immediate-versus-optional-discard",
@@ -399,7 +493,9 @@
     "regressions": [
       "h_group::tests::replay::first_seed_fives_chop_move_prevents_critical_purple_five_loss",
       "h_group::tests::replay::first_seed_known_five_refund_does_not_force_scream_discard"
-    ]
+    ],
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t20-reviewed-generation-and-purple",
@@ -429,7 +525,9 @@
     },
     "regressions": [
       "h_group::tests::replay::first_seed_generation_discard_projects_reviewed_direct_green_line"
-    ]
+    ],
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t20-green-versus-purple-scheduling-question",
@@ -480,7 +578,9 @@
       "boundary": "Do not copy the revised actual turn-23 rank-2 clue into this forecast: it touches Alice's future draw #26, which Donald cannot know at turn 20. The forecast's p4 and r3 duplication safety uses Donald's convention knowledge, not hidden actual identities. Pending unknown discards are optional forecasts, not inevitable losses."
     },
     "regressions": [],
-    "coverageNote": "Full replay comparison stopped at turn 20 (82.27s execution, plus 52.24s rebuild). No engine or fixture change was made for this unresolved comparison."
+    "coverageNote": "Full replay comparison stopped at turn 20 (82.27s execution, plus 52.24s rebuild). No engine or fixture change was made for this unresolved comparison.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t20-green-approved-red-three-question",
@@ -500,7 +600,9 @@
       "scope": "Fixture update and legality are complete. No engine change to force the disputed projection was made pending clarification. Earlier turn-20 purple-versus-5s hypothetical reviews remain historical; they are not instructions to undo the newly approved green clue. The turn-23 review anchor is now stale because turn 20 changed."
     },
     "regressions": [],
-    "coverageNote": "Generated replay link validates complete replay legality and payload round-trip. Move parity and full checks were not run for this fixture update."
+    "coverageNote": "Generated replay link validates complete replay legality and payload round-trip. Move parity and full checks were not run for this fixture update.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t20-green-projection-confirmed-safe",
@@ -519,7 +621,9 @@
       "boundary": "The turn-34 selected discard of newly drawn #27 remains unresolved because its identity is unknown. Approval of the known line does not assign that draw an identity or guarantee every subsequent continuation. The actual fixture's turn-23 2s clue uses a future draw unavailable to Donald at the projection root."
     },
     "regressions": [],
-    "coverageNote": "Human-reviewed projection recorded; no new executable regression added or replay scan run for this clarification. The fixture already contains green at turn 20."
+    "coverageNote": "Human-reviewed projection recorded; no new executable regression added or replay scan run for this clarification. The fixture already contains green at turn 20.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t24-prompt-versus-new-red-connection",
@@ -552,7 +656,9 @@
       "boundary": "Do not silently remove the fresh-Bluff priority behavior: first_seed_fresh_bluff_precedes_an_older_clued_prompt covers a historical rank-4 Bluff branch. This question concerns the current rank-2 clue. No code or fixture changes were made to force agreement."
     },
     "regressions": [],
-    "coverageNote": "Superseded by t24-knowledge-gated-recipient-self-finesse. This record preserves the original investigation, not the resolved convention meaning."
+    "coverageNote": "Superseded by t24-knowledge-gated-recipient-self-finesse. This record preserves the original investigation, not the resolved convention meaning.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t24-knowledge-gated-recipient-self-finesse",
@@ -574,7 +680,9 @@
       "h_group::tests::replay::first_seed_recipient_self_finesse_requires_no_direct_play_alternative",
       "h_group::tests::replay::first_seed_fresh_bluff_precedes_an_older_clued_prompt"
     ],
-    "coverageNote": "Focused test checks Donald's p3 connection, the counterfactual immediate r1 response without the g2 promise, and Alice's subsequent r1 connection. Existing Bluff priority and eight connection lifecycle tests pass. Replay action parity passes through the current 24-turn review boundary; later full-game parity was not tested. Fast validation stages pass after correcting and rerunning Clippy."
+    "coverageNote": "Focused test checks Donald's p3 connection, the counterfactual immediate r1 response without the g2 promise, and Alice's subsequent r1 connection. Existing Bluff priority and eight connection lifecycle tests pass. Replay action parity passes through the current 24-turn review boundary; later full-game parity was not tested. Fast validation stages pass after correcting and rerunning Clippy.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t28-self-finesse-persists-in-donald-projection",
@@ -594,7 +702,9 @@
     "regressions": [
       "h_group::tests::replay::first_seed_self_finesse_survives_nested_hidden_connector",
       "h_group::tests::replay::first_seed_recipient_self_finesse_requires_no_direct_play_alternative"
-    ]
+    ],
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t33-unknown-chop-versus-direct-red-four",
@@ -607,7 +717,7 @@
       "conversation": "2026-09-19, replay continuation after Self-Finesse fixes"
     },
     "explanation": {
-      "agreement": "Fresh analysis agrees with fixture turns 1–32. Turn 33 fixture discards #1; engine gives 4 to Donald.",
+      "agreement": "Fresh analysis agrees with fixture turns 1\u201332. Turn 33 fixture discards #1; engine gives 4 to Donald.",
       "candidates": "4 to Donald: PlayClue, 432. Discard #1: 400. Blue to Cathy: TrashEjection, 309. 1 to Cathy: TrashEjection, 308. Other rules-legal clues are excluded by convention admission.",
       "line": [
         "Alice clues 4 to Donald",
@@ -620,7 +730,9 @@
       "boundary": "No fixture change or preference exception was introduced. Prior Permission to Discard rulings concern Early Game, which ended earlier in this position. Unknown future draws and Alice's hidden r5 were not used to justify a continuation."
     },
     "regressions": [],
-    "coverageNote": "The nested Self-Finesse regression passes; this strategic preference awaits user review."
+    "coverageNote": "The nested Self-Finesse regression passes; this strategic preference awaits user review.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "t23-rank-two-new-ending",
@@ -633,18 +745,20 @@
       "quote": "change the fixture to clue 2 to Alice on turn 23."
     },
     "explanation": {
-      "ruling": "Replace turns 23 onward with the supplied sequence, ending at turn 58 with Bob playing g5. Preserve turns 1–22.",
+      "ruling": "Replace turns 23 onward with the supplied sequence, ending at turn 58 with Bob playing g5. Preserve turns 1\u201322.",
       "reasoning": "No additional strategic justification was supplied; this fixture edit does not resolve the earlier hypothetical convention questions or establish engine move parity.",
       "validation": "All named card targets resolved uniquely in the acting player's hand. The replay-link generator validated game-rule legality and payload round-trip. Earlier review anchors are unchanged because all recorded roots precede turn 23; their later hypothetical tails remain separate from this revised actual ending."
     },
     "regressions": [],
-    "coverageNote": "Replay legality checked; engine choice agreement and the full suite were not run for this fixture-only update."
+    "coverageNote": "Replay legality checked; engine choice agreement and the full suite were not run for this fixture-only update.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
   },
   {
     "id": "historical-t18-purple-versus-red-lines",
     "turn": 18,
     "positionKey": "dc1cdf65965fad0244de9d42ee21ce30692fd37dddc9ef155b274df313abf7b3",
-    "status": "user-explained",
+    "status": "superseded",
     "perspective": "Bob's hypothetical, not omniscient replay truth",
     "source": {
       "conversation": "Earlier in current task; user requested purple to Donald at turn 18 and supplied two lines",
@@ -681,6 +795,9 @@
       "h_group::tests::replay::first_seed_turn_eighteen_compares_reviewed_full_lines",
       "h_group::tests::replay::first_seed_known_five_refund_does_not_force_scream_discard"
     ],
-    "coverageNote": "Position verified against commit 8687afa. Full-line test covers the reviewed branch; the turn-22 test ensures the known b5 refund remains available instead of forcing a Scream Discard. Test links are not a claim that every linked test currently passes."
+    "coverageNote": "Position verified against commit 8687afa. Full-line test covers the reviewed branch; the turn-22 test ensures the known b5 refund remains available instead of forcing a Scream Discard. Test links are not a claim that every linked test currently passes.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay.",
+    "supersededBy": "t18-user-replaces-continuation-with-blue-five"
   }
 ]

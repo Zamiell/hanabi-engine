@@ -137,14 +137,14 @@ from the ordinary suite; the reviewed inverse-planning regression still runs
 normally. Perspective selection/execution reuse also has an ordinary
 differential test covering several projection horizons.
 
-| Category                        | Evidence and permitted assertions                                                                                                                                                                                                                                            |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Reviewed expert replays         | `game-p4v0s415`: approved actions through move 36; `game-p4v0s1`: reviewed actions through move 24, with an engine-generated suffix awaiting review; `game-p4v0s9`, `game-p4v0s2`, and `game-p4v0s3`: full action parity. All retain focused, reviewed interpretation tests. |
-| Replay-based hypotheses         | Alternative clues and hidden-world branches from identified reviewed positions; these are comparisons, not permission to rewrite the fixture.                                                                                                                                |
-| Superpositions and architecture | Reviewed snapshot expectations; incremental/replayed equivalence, perspective isolation, causal bookkeeping, and consistency invariants.                                                                                                                                     |
-| Recorded self-play failures     | Specific established-rule failures and legality/consistency checks. Earlier moves and whole-game strategy are not certified.                                                                                                                                                 |
-| Ordinary unit tests             | Game rules, seed generation, codecs, exact-search algorithms, identity sets, focus ordering, and data structures may use artificial inputs with independently defined expectations.                                                                                          |
-| Completion smoke tests          | Generated games check legal actions and bounded completion across profiles; they do not prescribe moves, identities, or a target score.                                                                                                                                      |
+| Category                        | Evidence and permitted assertions                                                                                                                                                                                                                                                                        |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Reviewed expert replays         | `game-p4v0s415`: approved actions through move 36; `game-p4v0s1`: full user-supplied continuation revised from turn 18 on 2026-09-23; action parity remains a regression target; `game-p4v0s9`, `game-p4v0s2`, and `game-p4v0s3`: full action parity. All retain focused, reviewed interpretation tests. |
+| Replay-based hypotheses         | Alternative clues and hidden-world branches from identified reviewed positions; these are comparisons, not permission to rewrite the fixture.                                                                                                                                                            |
+| Superpositions and architecture | Reviewed snapshot expectations; incremental/replayed equivalence, perspective isolation, causal bookkeeping, and consistency invariants.                                                                                                                                                                 |
+| Recorded self-play failures     | Specific established-rule failures and legality/consistency checks. Earlier moves and whole-game strategy are not certified.                                                                                                                                                                             |
+| Ordinary unit tests             | Game rules, seed generation, codecs, exact-search algorithms, identity sets, focus ordering, and data structures may use artificial inputs with independently defined expectations.                                                                                                                      |
+| Completion smoke tests          | Generated games check legal actions and bounded completion across profiles; they do not prescribe moves, identities, or a target score.                                                                                                                                                                  |
 
 The expensive `h_group_max_self_play_200` benchmark remains separate from
 `check.sh`. Its scores measure performance, not convention correctness.
@@ -239,3 +239,14 @@ turn, observer, and the reviewed reason. Use the replay-link generator when
 requesting human review. If no reviewed position establishes an expected move or
 identity, retain it as a question rather than inventing an answer to make the
 suite pass.
+
+## Historical p4v0s1 positions
+
+The active fixture preserves turns 1–17 and uses the user-supplied replacement
+through turn 58, including the confirmed p4 play at turn 32. The earlier replay
+is retained in
+`crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json`
+for position-specific regressions. Those tests keep their original assertions;
+the full action-parity test uses the active fixture. Original ledger hashes are
+not re-anchored to the changed positions. A legal 25-point replay does not imply
+that the engine currently agrees with all of its moves.

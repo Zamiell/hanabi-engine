@@ -1424,7 +1424,7 @@ mod tests {
         // Current reviewed fixture, turn 35: Donald's r4 will play before
         // Alice acts. A red clue gives Alice r5 to play, protecting y4 on chop.
         let replay = HanabiLiveReplay::from_json(include_str!(
-            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+            "tests/fixtures/game-p4v0s1-before-turn18-revision.json"
         ))
         .unwrap();
         let state = replay.state_at_turn(34).unwrap();
@@ -1557,7 +1557,7 @@ mod tests {
         // Bluff saving p3/r3. Blue plays b1 and draws over that position;
         // playing p1 first leaves both blue cards available for a later clue.
         let replay = HanabiLiveReplay::from_json(include_str!(
-            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+            "tests/fixtures/game-p4v0s1-before-turn18-revision.json"
         ))
         .unwrap();
         let state = replay.state_at_turn(0).unwrap();
@@ -1742,7 +1742,7 @@ mod tests {
         // Human-reviewed p4v0s1 turn 14: Cathy plays, rather than discards;
         // Alice or Bob has time to arrange the red-2 clue afterwards.
         let replay = HanabiLiveReplay::from_json(include_str!(
-            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+            "tests/fixtures/game-p4v0s1-before-turn18-revision.json"
         ))
         .unwrap();
         let state = replay.state_at_turn(13).unwrap();

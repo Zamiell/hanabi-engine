@@ -146,7 +146,7 @@ mod tests {
     #[test]
     fn tracing_preserves_reviewed_position_decision_and_hidden_information() {
         let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
-            "../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+            "h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json"
         ))
         .unwrap();
         let state = replay.state_at_turn(2).unwrap();
