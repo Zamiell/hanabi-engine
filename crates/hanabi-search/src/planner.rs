@@ -518,6 +518,7 @@ pub enum ComparisonReason {
     SpeculativeFinesse,
     SavePressure,
     WaitingOpportunity,
+    TeammateClueHandoff,
     ConventionPreference,
     PreferredAction,
     LineProgress,
@@ -1791,6 +1792,56 @@ fn compare_save_principle_risks(
         })
 }
 
+/// Prefer taking a certain play when the next teammate can spend their turn
+/// on a funded clue with a demonstrated scoring response. This is only a
+/// scheduling fallback: endpoint evidence, safety, and urgent policy tiers
+/// still take precedence. An unknown or merely promised response earns nothing.
+fn has_productive_teammate_handoff(candidate: &PlannerActionEvaluation) -> bool {
+    if !candidate.certainly_playable || !matches!(candidate.action, Action::Play(_)) {
+        return false;
+    }
+    let [play, clue, response, ..] = candidate.projection.steps.as_slice() else {
+        return false;
+    };
+    play.projected.action == candidate.action
+        && play.consequences.score_gain == 1
+        && clue.projected.actor != play.projected.actor
+        && matches!(clue.projected.action, Action::Clue { .. })
+        && clue.turn == play.turn + 1
+        && response.turn == clue.turn + 1
+        && response.projected.actor != play.projected.actor
+        && matches!(response.projected.action, Action::Play(_))
+        && response.consequences.score_gain == 1
+        && [play, clue, response].iter().all(|step| {
+            step.consequences.strikes == 0
+                && step.consequences.bottom_deck_risk.is_none()
+                && step.consequences.save_principle_violation.is_none()
+        })
+        && candidate
+            .projection
+            .resources
+            .transitions
+            .iter()
+            .any(|transition| {
+                transition.turn == clue.turn && transition.spent == 1 && transition.before >= 1
+            })
+}
+
+fn compare_teammate_handoff(
+    left: &PlannerActionEvaluation,
+    right: &PlannerActionEvaluation,
+) -> Ordering {
+    match (left.action, right.action) {
+        (Action::Play(_), Action::Clue { .. }) if has_productive_teammate_handoff(left) => {
+            Ordering::Greater
+        }
+        (Action::Clue { .. }, Action::Play(_)) if has_productive_teammate_handoff(right) => {
+            Ordering::Less
+        }
+        _ => Ordering::Equal,
+    }
+}
+
 #[allow(clippy::too_many_lines)]
 fn symbolic_fallback_comparison(
     left: &PlannerActionEvaluation,
@@ -1867,6 +1918,10 @@ fn symbolic_fallback_comparison(
                 _ => Ordering::Equal,
             },
             ComparisonReason::ForecastBottomDeckRisk,
+        ),
+        (
+            compare_teammate_handoff(left, right),
+            ComparisonReason::TeammateClueHandoff,
         ),
         (
             left.preference
@@ -2353,6 +2408,116 @@ impl std::error::Error for PlannerError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewed_turn_eighteen_leaves_the_clue_to_a_teammate() {
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(17).unwrap();
+        let view = state.view_for(state.current_player()).unwrap();
+        let analysis = crate::analyze_position(
+            &view,
+            SupportedConvention::HGroup(crate::HGroupProfile::Max),
+            PlannerConfig {
+                objective: PlanningObjective::PerfectScore,
+                ..PlannerConfig::default()
+            },
+        )
+        .unwrap();
+        let play = Action::Play(hanabi_core::CardId::new(17));
+        let candidate = analysis
+            .planner
+            .root_actions
+            .iter()
+            .find(|candidate| candidate.action == play)
+            .unwrap();
+        // User-reviewed p4v0s1 turn 18: Bob plays b5; Cathy's funded
+        // 4s-to-Alice bluff gets Donald's r1 played without using hidden draws.
+        assert!(candidate.certainly_playable);
+        assert_eq!(
+            candidate.projection.steps[1].projected.actor,
+            hanabi_core::PlayerId::new(2)
+        );
+        assert_eq!(
+            candidate.projection.steps[1].projected.action,
+            Action::Clue {
+                target: hanabi_core::PlayerId::new(0),
+                clue: Clue::Rank(Rank::Four),
+            }
+        );
+        assert_eq!(
+            candidate.projection.steps[2].projected.action,
+            Action::Play(hanabi_core::CardId::new(23))
+        );
+        assert_eq!(candidate.projection.steps[2].consequences.score_gain, 1);
+        let purple = analysis
+            .planner
+            .root_actions
+            .iter()
+            .find(|candidate| {
+                candidate.action
+                    == Action::Clue {
+                        target: hanabi_core::PlayerId::new(3),
+                        clue: Clue::Suit(Suit::Purple),
+                    }
+            })
+            .unwrap();
+        assert_eq!(
+            symbolic_fallback_comparison(candidate, purple, None),
+            (Ordering::Greater, ComparisonReason::TeammateClueHandoff)
+        );
+        assert_eq!(
+            symbolic_fallback_comparison(purple, candidate, None),
+            (Ordering::Less, ComparisonReason::TeammateClueHandoff)
+        );
+        assert_eq!(
+            best_symbolic_index(&[purple.clone(), candidate.clone()], None),
+            Some(1)
+        );
+
+        // Evidence ablations of this reviewed position, not invented histories.
+        // Unknown cards and unfunded/unfinished continuations cannot justify
+        // handing off a clue. Nor does an ordinary discard earn this preference.
+        for missing in [
+            "certainty",
+            "clue",
+            "response",
+            "funding",
+            "scoring",
+            "safety",
+        ] {
+            let mut incomplete = candidate.clone();
+            match missing {
+                "certainty" => incomplete.certainly_playable = false,
+                "clue" => {
+                    incomplete.projection.steps[1].projected.action =
+                        Action::Discard(hanabi_core::CardId::new(9));
+                }
+                "response" => incomplete.projection.steps.truncate(2),
+                "funding" => incomplete.projection.resources.transitions.clear(),
+                "scoring" => incomplete.projection.steps[2].consequences.score_gain = 0,
+                "safety" => incomplete.projection.steps[2].consequences.strikes = 1,
+                _ => unreachable!(),
+            }
+            assert!(!has_productive_teammate_handoff(&incomplete), "{missing}");
+            assert_eq!(
+                compare_teammate_handoff(&incomplete, purple),
+                Ordering::Equal,
+                "{missing}"
+            );
+        }
+        let mut urgent = purple.clone();
+        urgent.preference = urgent
+            .preference
+            .with_policy_tier(ConventionPolicyTier::Required);
+        assert_eq!(
+            symbolic_fallback_comparison(candidate, &urgent, None),
+            (Ordering::Less, ComparisonReason::PolicyTier)
+        );
+        assert_eq!(analysis.planner.best_action, play);
+    }
 
     #[test]
     fn pending_save_credit_requires_funding_and_never_creates_playable_points() {

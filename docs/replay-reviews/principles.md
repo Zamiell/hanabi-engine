@@ -1,6 +1,7 @@
 # Cross-position user rulings
 
-The p4v0s1 positions below refer to the preserved
+Except for the current turn-18 teammate-clue ruling, the p4v0s1 positions below
+refer to the preserved
 [historical fixture](../../crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json),
 not the replacement continuation supplied on 2026-09-23. Their original review
 anchors and regression assertions are retained.
@@ -8,6 +9,28 @@ anchors and regression assertions are retained.
 These are human-reviewed principles, not additional engine configuration. Read
 the linked position records for evidence and boundaries; do not introduce
 fixture IDs or turn numbers into production decision logic.
+
+## Play and leave a productive clue to a teammate
+
+Current fixture `p4v0s1`, live turn 18, record
+`t18-play-and-leave-the-clue-to-cathy`: the user explains that a player with a
+card to play should usually play it and let a teammate give the clue. Bob should
+play b5 instead of taking Cathy's clue-giving turn. His projection already has
+Cathy clue 4s to Alice to bluff Donald's r1.
+
+This is a scheduling preference, not an absolute prohibition on cluing while
+holding a play. Evidence of a better outcome, urgent obligations, and safety
+still take precedence. Do not require the teammate to give the identical clue,
+assume unseen cards or draws, or treat an unfinished forecast as successful. The
+current implementation credits a certain play followed by a funded teammate clue
+and an explicit immediate scoring response before the original player acts
+again. Longer or uncertain handoffs remain outside this conservative rule.
+
+Regression: `reviewed_turn_eighteen_leaves_the_clue_to_a_teammate` verifies the
+bluff projection, scheduling comparison and chosen action, with
+evidence-ablation and urgent-policy controls. Historical
+`reviewed_turn_thirty_compares_equal_elapsed_time` retains a reviewed case where
+endpoint evidence favors a clue over b5.
 
 ## Save Principle: declined protection constrains discard risk
 

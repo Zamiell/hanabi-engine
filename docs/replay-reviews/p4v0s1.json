@@ -12,7 +12,7 @@
       "correctionReply": "yes"
     },
     "explanation": {
-      "ruling": "Replace turns 18–58 with the user-supplied sequence, preserving turns 1–17. The user confirmed p4 at turn 32. No additional strategic rationale was supplied.",
+      "ruling": "Replace turns 18–58 with the user-supplied sequence, preserving turns 1–17. The user confirmed p4 at turn 32. The later teammate-clue scheduling rationale is recorded in t18-play-and-leave-the-clue-to-cathy.",
       "line": [
         "play b5",
         "purple to donald",
@@ -71,10 +71,53 @@
     }
   },
   {
+    "id": "t18-play-and-leave-the-clue-to-cathy",
+    "turn": 18,
+    "positionKey": "dc1cdf65965fad0244de9d42ee21ce30692fd37dddc9ef155b274df313abf7b3",
+    "status": "user-explained",
+    "perspective": "Bob knows b5 is playable. Project teammates from Bob’s available information, leaving his hidden hand and future draws unknown.",
+    "source": {
+      "conversation": "2026-09-23, current task, teammate-clue discussion and implementation authorization",
+      "quote": "First, in Hanabi, when one player has a card to play, it is usually better for them to play that card and let a teammate give the clue. In this game state, Bob is being selfish by \"stealing\" the clue from Cathy.",
+      "followUp": "Second, Bob should project that if he plays the b5, then Cathy will clue 4s to Alice to bluff the red 1 from Donald, is that the case?",
+      "authorization": "ok, fix that bug / make sure the engine values not being selfish."
+    },
+    "explanation": {
+      "ruling": "Prefer Bob playing b5 to giving purple to Donald when Cathy can give a productive clue. This is a usual scheduling preference, not an unconditional command to play before every clue.",
+      "projectedLine": [
+        "Bob plays b5",
+        "Cathy clues 4s to Alice",
+        "Donald plays r1"
+      ],
+      "candidates": [
+        "play b5",
+        "purple to Donald",
+        "4s to Donald",
+        "red to Cathy",
+        "2s to Cathy",
+        "discard p4 (identity unknown to Bob)",
+        "purple to Alice",
+        "2s to Alice",
+        "1s to Donald",
+        "red to Alice"
+      ],
+      "implementation": "When endpoint comparisons are equivalent or incomparable, a certain scoring play followed by a funded teammate clue and a demonstrated scoring response gets preference over a root clue’s raw convention score. Existing safety, policy urgency, and endpoint evidence take precedence. Only explicit projected steps count; unknown responses earn no handoff credit.",
+      "boundary": "The implementation conservatively recognizes an immediate next-teammate clue followed by an immediate successful response before the original player acts again. More distant or uncertain handoffs are not credited. It does not require Cathy to give the same clue Bob considered.",
+      "previousEvidence": "Before this fix the forecast already contained Cathy’s 4s-to-Alice bluff and Donald’s r1. Purple to Donald won 551 versus 525 solely by ConventionPreference with incomparable endpoints; the projection was not missing the bluff.",
+      "uncertainty": "Cathy’s nested purple-to-Donald alternative remains subject to conservative duplicate-touch uncertainty. No hidden p4 or future g2 identity is supplied to force the recorded continuation.",
+      "supersedes": "t18-blue-five-conditional-cathy-purple"
+    },
+    "regressions": [
+      "planner::tests::reviewed_turn_eighteen_leaves_the_clue_to_a_teammate",
+      "h_group::symbolic_line::reviewed_turn_thirty_compares_equal_elapsed_time"
+    ],
+    "coverageNote": "Focused current-turn coverage verifies certainty, the projected bluff and r1, comparison reason, downstream root choice, missing-evidence negative controls, and urgent-policy precedence. Historical turn 30 retains a reviewed case where the clue beats a playable b5 on endpoint evidence. Full active replay parity coverage remains intentionally removed at the user’s request. Validation limitation: the historical turn-30 test currently fails before its assertions, in PerspectiveProjector::project; reproduced on unchanged HEAD 898b3c1 as well as this fix. It is retained but cannot currently establish passing endpoint-precedence coverage."
+  },
+  {
     "id": "t18-blue-five-conditional-cathy-purple",
     "turn": 18,
     "positionKey": "dc1cdf65965fad0244de9d42ee21ce30692fd37dddc9ef155b274df313abf7b3",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Bob-rooted symbolic projection; Bob’s own unclued cards and future draws remain unknown.",
     "source": {
       "conversation": "2026-09-23, assistant analysis requested after removing two failing tests"
@@ -109,7 +152,8 @@
       "question": "How should the planner value b5 when Cathy’s intended purple continuation depends on information she can see but Bob cannot? The user supplied the preferred line, but no general policy for weighting these conditional teammate choices. Do not assume the hidden p4 or conclude that a short uncertain forecast proves b5 inferior."
     },
     "regressions": [],
-    "coverageNote": "Diagnostic evidence only. The two removed tests remain deleted at the user’s explicit request. No new strategic expectation or production-code change was introduced."
+    "coverageNote": "Diagnostic evidence only. The two removed tests remain deleted at the user’s explicit request. No new strategic expectation or production-code change was introduced.",
+    "supersededBy": "t18-play-and-leave-the-clue-to-cathy"
   },
   {
     "id": "t29-alice-projection-rank-four-ambiguity",
