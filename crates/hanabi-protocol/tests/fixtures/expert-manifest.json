@@ -37,6 +37,6 @@
     "continuation": "human-reviewed",
     "profile": "max",
     "objective": "perfect-score",
-    "checks": ["legality", "reviewed-action-parity"]
+    "checks": ["legality"]
   }
 ]

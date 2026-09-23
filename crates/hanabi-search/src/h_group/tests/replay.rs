@@ -1217,50 +1217,6 @@ fn first_seed_known_five_refund_does_not_force_scream_discard() {
     assert_eq!(analysis.planner.best_action, expected);
 }
 
-fn assert_first_seed_turn_eighteen_prefers_reviewed_line(analysis: &crate::PositionAnalysis) {
-    assert_eq!(
-        analysis.planner.best_action,
-        Action::Clue {
-            target: PlayerId::new(3),
-            clue: Clue::Suit(Suit::Purple)
-        },
-        "{:#?}",
-        analysis.planner.comparisons
-    );
-    let purple = Action::Clue {
-        target: PlayerId::new(3),
-        clue: Clue::Suit(Suit::Purple),
-    };
-    let red = Action::Clue {
-        target: PlayerId::new(2),
-        clue: Clue::Suit(Suit::Red),
-    };
-    // The reviewed nine-action prefix avoids the red line's discard, tested
-    // below. A longer purple forecast can still reach BDR, so do not require
-    // the comparator to claim permanent risk avoidance as its reason.
-    assert!(
-        analysis.planner.comparisons.iter().any(|comparison| {
-            ((comparison.left == purple && comparison.right == red)
-                || (comparison.right == purple && comparison.left == red))
-                && comparison.preferred == purple
-        }),
-        "{:#?}",
-        analysis.planner.comparisons
-    );
-    // The 4s forecast ends at a required risky discard. Its earlier resource
-    // snapshot must not dominate purple by omitting that pending obligation.
-    let four = Action::Clue {
-        target: PlayerId::new(3),
-        clue: Clue::Rank(Rank::Four),
-    };
-    assert!(analysis.planner.comparisons.iter().any(|comparison| {
-        ((comparison.left == purple && comparison.right == four)
-            || (comparison.right == purple && comparison.left == four))
-            && comparison.preferred == purple
-            && comparison.reason != crate::ComparisonReason::EndpointResources
-    }));
-}
-
 #[test]
 fn first_seed_self_finesse_survives_nested_hidden_connector() {
     // p4v0s1 turn 28: Donald cannot see his own r1, but Alice has publicly
@@ -1370,91 +1326,6 @@ fn first_seed_fresh_bluff_precedes_an_older_clued_prompt() {
     );
     let inferred = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
     assert_eq!(inferred.connection.unwrap().card, CardId::new(23));
-}
-
-#[test]
-fn first_seed_turn_eighteen_compares_reviewed_full_lines() {
-    let state = historical_replay_p4v0s1().state_at_turn(17).unwrap();
-    let view = state.view_for(state.current_player()).unwrap();
-    let analysis = crate::analyze_position(
-        &view,
-        crate::SupportedConvention::HGroup(HGroupProfile::Max),
-        crate::PlannerConfig {
-            objective: crate::PlanningObjective::PerfectScore,
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    assert_first_seed_turn_eighteen_prefers_reviewed_line(&analysis);
-    let purple = Action::Clue {
-        target: PlayerId::new(3),
-        clue: Clue::Suit(Suit::Purple),
-    };
-    let red = Action::Clue {
-        target: PlayerId::new(2),
-        clue: Clue::Suit(Suit::Red),
-    };
-    let five = Action::Clue {
-        target: PlayerId::new(2),
-        clue: Clue::Rank(Rank::Five),
-    };
-    let four = Action::Clue {
-        target: PlayerId::new(0),
-        clue: Clue::Rank(Rank::Four),
-    };
-    for (root, expected) in [
-        (
-            purple,
-            vec![
-                purple,
-                Action::Discard(CardId::new(9)),
-                five,
-                Action::Play(CardId::new(24)),
-                Action::Play(CardId::new(17)),
-                four,
-                Action::Play(CardId::new(23)),
-                Action::Discard(CardId::new(1)),
-                red,
-            ],
-        ),
-        (
-            red,
-            vec![
-                red,
-                Action::Discard(CardId::new(9)),
-                five,
-                Action::Play(CardId::new(24)),
-                Action::Play(CardId::new(17)),
-                purple,
-                Action::Play(CardId::new(14)),
-                Action::Play(CardId::new(21)),
-            ],
-        ),
-    ] {
-        let projection = &analysis
-            .planner
-            .root_actions
-            .iter()
-            .find(|candidate| candidate.action == root)
-            .unwrap()
-            .projection;
-        let actual = projection
-            .steps
-            .iter()
-            .take(9)
-            .map(|s| s.projected.action)
-            .collect::<Vec<_>>();
-        assert_eq!(actual, expected, "root {root:?}");
-        if root == purple {
-            assert_eq!(projection.bottom_deck_risks_at(9), 0);
-        } else {
-            assert_eq!(projection.bottom_deck_risks_at(9), 1);
-            let discard = projection.unresolved_discard.unwrap();
-            assert_eq!(discard.card, CardId::new(5));
-            assert!(discard.bottom_deck_risk);
-            assert!(discard.strategically_selected);
-        }
-    }
 }
 
 #[test]
@@ -3702,15 +3573,6 @@ fn third_replay_two_new_duplicate_fours_still_violate_good_touch() {
 #[test]
 fn fourth_expert_replay_matches_engine() {
     assert_expert_replay_matches_engine("p4v0s3", &expert_replay_p4v0s3());
-}
-
-#[test]
-fn fifth_expert_replay_matches_engine() {
-    let replay = HanabiLiveReplay::from_json(include_str!(
-        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
-    ))
-    .expect("current fifth expert replay fixture is valid");
-    assert_expert_replay_matches_engine("p4v0s1", &replay);
 }
 
 #[test]

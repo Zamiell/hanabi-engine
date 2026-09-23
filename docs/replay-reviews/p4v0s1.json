@@ -12,7 +12,7 @@
       "correctionReply": "yes"
     },
     "explanation": {
-      "ruling": "Replace turns 18\u201358 with the user-supplied sequence, preserving turns 1\u201317. The user confirmed p4 at turn 32. No additional strategic rationale was supplied.",
+      "ruling": "Replace turns 18–58 with the user-supplied sequence, preserving turns 1–17. The user confirmed p4 at turn 32. No additional strategic rationale was supplied.",
       "line": [
         "play b5",
         "purple to donald",
@@ -60,10 +60,56 @@
       "supersedes": "historical-t18-purple-versus-red-lines",
       "validation": "The protocol reducer replays all 58 actions legally to a terminal score of 25 with zero strikes."
     },
-    "regressions": [
-      "h_group::tests::replay::fifth_expert_replay_matches_engine"
-    ],
-    "coverageNote": "The parity contract now covers the full user-supplied replay. The focused parity test on 2026-09-23 matches turns 1–17 and fails at turn 18: the fixture plays b5 #17 while the engine selects purple to Donald. Historical position-specific tests retain their previous fixture and assertions."
+    "regressions": [],
+    "coverageNote": "The user explicitly requested deletion of the failing focused test(s) listed in removedRegressions. Their previous outcomes remain historical evidence, not current test coverage. No automated full-replay action-parity test remains for p4v0s1.",
+    "removedRegressions": {
+      "tests": ["h_group::tests::replay::fifth_expert_replay_matches_engine"],
+      "source": {
+        "conversation": "2026-09-23, current task",
+        "quote": "delete those focused tests, then give me analysis for turn 18"
+      }
+    }
+  },
+  {
+    "id": "t18-blue-five-conditional-cathy-purple",
+    "turn": 18,
+    "positionKey": "dc1cdf65965fad0244de9d42ee21ce30692fd37dddc9ef155b274df313abf7b3",
+    "status": "unresolved",
+    "perspective": "Bob-rooted symbolic projection; Bob’s own unclued cards and future draws remain unknown.",
+    "source": {
+      "conversation": "2026-09-23, assistant analysis requested after removing two failing tests"
+    },
+    "explanation": {
+      "competingActions": "User fixture plays b5 #17; engine clues purple to Donald.",
+      "selection": "The recorded comparison is Incomparable with ConventionPreference fallback: purple priority 551, b5 priority 525. No actualBasis resource comparison selects purple over b5.",
+      "blueFiveForecast": [
+        "b5 #17",
+        "4s to Alice",
+        "Donald plays r1 #23",
+        "Alice clues red to Cathy",
+        "pending Bob discard #5 with possible BDR"
+      ],
+      "purpleForecast": [
+        "purple to Donald",
+        "Cathy discards p1 #9",
+        "Donald clues purple to Cathy",
+        "Alice plays p2 #24",
+        "Bob plays b5 #17",
+        "Cathy clues 4s to Alice",
+        "Donald plays r1 #23",
+        "Alice discards y1 #1",
+        "Bob clues red to Cathy",
+        "Cathy plays r2 #18",
+        "Donald plays p3 #14",
+        "Alice discards r1 #21",
+        "pending Bob discard #5 with possible BDR"
+      ],
+      "admissionEvidence": "In the b5-rooted turn-19 decision, Cathy’s clued #10 has r4/g4/p4 possibilities. Temporary tracing identifies the duplicates_existing_good_touch rejection in candidate generation for purple to Donald. Its p3 collateral is already clued and does not provide a new non-focus touch. In the actual turn-19 position, Cathy sees p4 #5 in Bob’s hand and p4 #12 in Donald’s, so her #10 domain is r4/g4 and purple is admitted.",
+      "boundary": "Bob cannot know the hidden p4 #5 or future g2 #25. The actual turn-19 analysis also prefers 4s to Donald to purple, so admitting purple alone is not proof it will be selected. The root forecast does not evaluate the user-supplied continuation as a conditional branch.",
+      "question": "How should the planner value b5 when Cathy’s intended purple continuation depends on information she can see but Bob cannot? The user supplied the preferred line, but no general policy for weighting these conditional teammate choices. Do not assume the hidden p4 or conclude that a short uncertain forecast proves b5 inferior."
+    },
+    "regressions": [],
+    "coverageNote": "Diagnostic evidence only. The two removed tests remain deleted at the user’s explicit request. No new strategic expectation or production-code change was introduced."
   },
   {
     "id": "t29-alice-projection-rank-four-ambiguity",
@@ -199,7 +245,7 @@
     "status": "superseded",
     "perspective": "Bob's projection; follow-up interpretation also checked from Cathy's and Donald's actual fixture perspectives",
     "source": {
-      "conversation": "2026-09-19, from-start scan after the user completed turns 53\u201358; assistant investigation, not a user ruling"
+      "conversation": "2026-09-19, from-start scan after the user completed turns 53–58; assistant investigation, not a user ruling"
     },
     "explanation": {
       "agreement": "Current replay agrees through turn 33. Turn 34 selects blue to Alice rather than the user's 4 to Alice.",
@@ -229,7 +275,7 @@
       "supersedes": "t34-chop-move-protection-versus-red-stack-progress",
       "action": "Replace turn 34 onward with the user's sequence through turn 52, ending after two consecutive green clues to Alice.",
       "boundary": "Initially stopped before turn 53 because the requested third green-to-Alice clue would be a self-clue. The user subsequently supplied the six final actions explicitly.",
-      "completion": "User follow-up: g3 play; green to Cathy; g4 play; green to Bob; g4 discard; g5 play. Appended as turns 53\u201358: Alice plays #44, Bob clues green to Cathy, Cathy plays #10, Donald clues green to Bob, Alice discards #41, Bob plays #19.",
+      "completion": "User follow-up: g3 play; green to Cathy; g4 play; green to Bob; g4 discard; g5 play. Appended as turns 53–58: Alice plays #44, Bob clues green to Cathy, Cathy plays #10, Donald clues green to Bob, Alice discards #41, Bob plays #19.",
       "historicalAnchors": "Later records retain their old position keys and reasoning; their continuations have been superseded by this fixture edit. They are not re-anchored to the new history."
     },
     "regressions": [],
@@ -717,7 +763,7 @@
       "conversation": "2026-09-19, replay continuation after Self-Finesse fixes"
     },
     "explanation": {
-      "agreement": "Fresh analysis agrees with fixture turns 1\u201332. Turn 33 fixture discards #1; engine gives 4 to Donald.",
+      "agreement": "Fresh analysis agrees with fixture turns 1–32. Turn 33 fixture discards #1; engine gives 4 to Donald.",
       "candidates": "4 to Donald: PlayClue, 432. Discard #1: 400. Blue to Cathy: TrashEjection, 309. 1 to Cathy: TrashEjection, 308. Other rules-legal clues are excluded by convention admission.",
       "line": [
         "Alice clues 4 to Donald",
@@ -745,7 +791,7 @@
       "quote": "change the fixture to clue 2 to Alice on turn 23."
     },
     "explanation": {
-      "ruling": "Replace turns 23 onward with the supplied sequence, ending at turn 58 with Bob playing g5. Preserve turns 1\u201322.",
+      "ruling": "Replace turns 23 onward with the supplied sequence, ending at turn 58 with Bob playing g5. Preserve turns 1–22.",
       "reasoning": "No additional strategic justification was supplied; this fixture edit does not resolve the earlier hypothetical convention questions or establish engine move parity.",
       "validation": "All named card targets resolved uniquely in the acting player's hand. The replay-link generator validated game-rule legality and payload round-trip. Earlier review anchors are unchanged because all recorded roots precede turn 23; their later hypothetical tails remain separate from this revised actual ending."
     },
@@ -792,12 +838,20 @@
       "warning": "This is a turn-18 decision with newly visible draws. It does not authorize using those draw identities in a forecast rooted at turn 14. The old continuation's turn-20 5s preference is superseded by t20-reviewed-generation-and-purple; retain this older record as provenance, not an instruction to restore 5s."
     },
     "regressions": [
-      "h_group::tests::replay::first_seed_turn_eighteen_compares_reviewed_full_lines",
       "h_group::tests::replay::first_seed_known_five_refund_does_not_force_scream_discard"
     ],
-    "coverageNote": "Position verified against commit 8687afa. Full-line test covers the reviewed branch; the turn-22 test ensures the known b5 refund remains available instead of forcing a Scream Discard. Test links are not a claim that every linked test currently passes.",
+    "coverageNote": "The user explicitly requested deletion of the failing focused test(s) listed in removedRegressions. Their previous outcomes remain historical evidence, not current test coverage. The remaining listed regression is retained; the deleted full-line expectation is no longer enforced.",
     "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
     "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay.",
-    "supersededBy": "t18-user-replaces-continuation-with-blue-five"
+    "supersededBy": "t18-user-replaces-continuation-with-blue-five",
+    "removedRegressions": {
+      "tests": [
+        "h_group::tests::replay::first_seed_turn_eighteen_compares_reviewed_full_lines"
+      ],
+      "source": {
+        "conversation": "2026-09-23, current task",
+        "quote": "delete those focused tests, then give me analysis for turn 18"
+      }
+    }
   }
 ]
