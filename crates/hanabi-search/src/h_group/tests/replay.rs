@@ -5547,3 +5547,52 @@ fn first_seed_projected_purple_retains_critical_save_alternative() {
         None
     );
 }
+
+#[test]
+fn current_turn_twenty_one_purple_bluffs_bobs_green_two() {
+    // User-reviewed current p4v0s1 turns 21–22: purple to Donald gets Bob's
+    // g2 through Donald's already-clued p3. The fictitious p2 connection
+    // need not be truthful: Bob immediately demonstrates the Bluff.
+    // https://hanabi.github.io/level-11/#bluffs-through-already-clued-cards
+    let replay = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .unwrap();
+    let state = replay.state_at_turn(20).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    assert!(view.hands[0].iter().all(|card| card.identity.is_none()));
+    let action = Action::Clue {
+        target: PlayerId::new(3),
+        clue: Clue::Suit(Suit::Purple),
+    };
+    for (rank, admits_bluff) in [(Rank::Two, true), (Rank::Three, false)] {
+        let mut branch = view.clone();
+        branch.hands[1]
+            .iter_mut()
+            .find(|card| card.id == CardId::new(25))
+            .unwrap()
+            .identity = Some(Card::new(Suit::Green, rank));
+        let d = LogicalDeductions::new(branch).unwrap();
+        let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+        assert_eq!(
+            candidates.iter().any(|candidate| {
+                candidate.action == action && candidate.move_kind() == Some(HGroupMoveKind::Bluff)
+            }),
+            admits_bluff,
+            "{rank:?}: {candidates:?}"
+        );
+    }
+    let (line, evidence) = super::super::symbolic_line::project_h_group_projection(
+        &view,
+        HGroupProfile::Max,
+        action,
+        2,
+        &crate::AnalysisControl::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        evidence.steps.get(1).map(|step| step.projected.action),
+        Some(Action::Play(CardId::new(25)))
+    );
+    assert_eq!(line.strikes, 0);
+}

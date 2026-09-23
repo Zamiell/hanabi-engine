@@ -60,7 +60,11 @@ pub(super) fn candidate_replaces(
 pub(super) const fn named_interpretation_replaces_ordinary(kind: HGroupMoveKind) -> bool {
     matches!(
         kind,
-        HGroupMoveKind::DoubleBluff
+        // A validated Bluff resolves its false connection on the next turn.
+        // Do not demand that its provisional truthful chain also succeed.
+        // https://hanabi.github.io/level-11/#lie-principle
+        HGroupMoveKind::Bluff
+            | HGroupMoveKind::DoubleBluff
             | HGroupMoveKind::Ejection
             | HGroupMoveKind::DistributionClue
             | HGroupMoveKind::UnnecessaryIgnition

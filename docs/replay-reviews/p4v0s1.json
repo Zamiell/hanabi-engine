@@ -1,5 +1,83 @@
 [
   {
+    "id": "t21-bluff-admission-must-not-require-truthful-chain",
+    "turn": 21,
+    "positionKey": "d0938e3f6f961d09d2d598ed3c946606a3c727ca31aa5fdcff8aa837f0d35ea5",
+    "status": "user-explained",
+    "perspective": "Alice at current turn 21, with her own cards unknown; investigated as a continuation of Cathy’s turn-19 decision.",
+    "source": {
+      "conversation": "2026-09-23 current task, user-supplied turn-19 continuation",
+      "quote": "- purple to donald\n- g2 play",
+      "documentation": "https://hanabi.github.io/level-11/#bluffs-through-already-clued-cards"
+    },
+    "explanation": {
+      "reviewedExpectation": "Alice clues purple to Donald; Bob blind-plays g2 through Donald’s already-clued p3. The user supplied these actions, not an additional verbal strategy rationale.",
+      "bug": "Bluff admission validated Bob’s immediate safe response, then rejected the clue for an unsafe provisional truthful connection. Bluff was missing from named_interpretation_replaces_ordinary despite DoubleBluff being present.",
+      "fix": "Include validated Bluff among named meanings replacing the ordinary connection. Preserve actual-reactor admission, visible-trash safety and next-recipient safety guards. No fixture-specific condition.",
+      "boundary": "This corrects admission, not a claim that Cathy can know her own p5 at turn 19 or forecast the full actual continuation. Her forecast retains a conditional p2 interpretation of her hidden card #22."
+    },
+    "regressions": [
+      "h_group::tests::replay::current_turn_twenty_one_purple_bluffs_bobs_green_two",
+      "h_group::tests::replay::current_turn_nineteen_bluff_requires_the_reactors_response"
+    ],
+    "coverage": "Admission as Bluff with Alice’s hand hidden; derived nonplayable-g3 negative control; two-action projection plays Bob #25 with no strike. Turn-19 regression retains truthful-connection and valid-bluff controls."
+  },
+  {
+    "id": "t19-four-bluff-versus-purple-bob-strategy",
+    "turn": 19,
+    "positionKey": "ee5daa8560702db2a691291ccb787b74716f8efd14342bba307fd68132253c71",
+    "status": "unresolved",
+    "perspective": "Cathy, current fixture; own hand and future draws unknown.",
+    "source": {
+      "conversation": "2026-09-23 current task, autonomous replay investigation after confirmed fixture update",
+      "quote": "Continue to autonomously go through the replay and find disagreements. Do a deep analysis for each disagreement. If there are obvious bugs, then fix them autonomously. Otherwise, ask me about the correct strategy or convention."
+    },
+    "explanation": {
+      "established": "Rerun from beginning agrees through turn 18 after the turn-21 Bluff admission fix. Turn 19 still selects purple to Bob; user preference for 4s to Alice is already established, not being re-asked.",
+      "candidatePriorities": {
+        "purple:Bob": 473,
+        "4:Bob": 472,
+        "4:Alice": 434,
+        "purple:Donald": 393,
+        "4:Donald": 392,
+        "purple:Alice": 233,
+        "green:Bob": 229,
+        "1:Donald": 192,
+        "2:Bob": 148,
+        "discard:9": 400
+      },
+      "rejectedClues": "red/yellow/1/2 to Alice, red/3 to Bob, red to Donald: NoConventionMeaning (generic exclusion, not a detailed semantic proof). 5 to Bob and 3 to Donald: NoNewInformation.",
+      "purpleBobLine": [
+        "Cathy purple to Bob",
+        "Donald green to Bob",
+        "Alice p2 #24",
+        "Bob g2 #25",
+        "pending Cathy discard #9: unknown identity"
+      ],
+      "fourAliceLine": [
+        "Cathy 4s to Alice",
+        "Donald r1 #23",
+        "Alice purple to Donald",
+        "Bob discards p4 #5",
+        "Cathy conditionally plays p2 #22",
+        "Donald p3 #14",
+        "Alice green to Bob",
+        "Bob g2 #25",
+        "unknown frontier"
+      ],
+      "uncertainty": "The 4s line assumes Cathy #22 is p2 when modeling Bob at turn 22. It is a recorded identity branch, not the actual p5 and not a prediction of the reviewed g2 response. In this truthful alternative Bob waits for Cathy. Do not inject Cathy’s actual hidden p5 or report this conditional continuation as inevitable.",
+      "comparison": "Purple to Bob versus 4s to Alice: endpoint Incomparable, ConventionPreference, within a comparison cycle. At shared four-action checkpoint: purple score11 clues0 securedFuture4 committedFuture0; 4s score10 clues1 securedFuture6 committedFuture3. These are context, not a decisive resource dominance.",
+      "heuristic": "Purple to Bob: base373 + scheduling100. 4s to Alice: base334 + protection80 - teamwork80 + scheduling100 =434. Purple setup distributes p2/p3/p4 across Alice/Donald/Bob; 4s gets r1 and protects y4 but receives fewer-player coverage penalty. No proven optimality.",
+      "question": "What is the general strategic reason for preferring 4s here: securing Alice’s last y4, playing Donald’s r1 before developing purple, preserving Bob’s duplicate p4 as a discard, or a combination? Existing handoff ruling concerns Bob playing b5 instead of taking Cathy’s clue; it does not specify this Cathy-root clue tradeoff.",
+      "validation": "New regression and actual-reactor regression pass. Bluff-filter suite21 pass7 pre-existing failures (previously19 pass8 failures; first_replay_move_thirty_bluff_must_not_touch_played_purple_one now passes). Clippy and formatting pass. check.sh --fast stops at missing Python development dependencies and reports macOS ownership-script incompatibility; no full pass claimed."
+    },
+    "regressions": [
+      "h_group::tests::replay::current_turn_twenty_one_purple_bluffs_bobs_green_two",
+      "h_group::tests::replay::current_turn_nineteen_bluff_requires_the_reactors_response"
+    ],
+    "coverage": "No turn-19 optimal-action assertion: strategy weighting unresolved."
+  },
+  {
     "id": "t19-user-replaces-continuation-with-four-bluff",
     "turn": 19,
     "positionKey": "ee5daa8560702db2a691291ccb787b74716f8efd14342bba307fd68132253c71",
