@@ -20,7 +20,9 @@ use super::{
 pub(super) struct PerspectiveProjector<'a> {
     source: &'a PlayerView,
     profile: HGroupProfile,
-    source_known_cards: OnceLock<HashMap<CardId, Card>>,
+    // Separate the immediate reactor from other observers: provisional
+    // Finesse identities must not determine their own triggering response.
+    source_known_cards: [OnceLock<HashMap<CardId, Card>>; 2],
 }
 
 /// A conditional reasoning input, deliberately not a `PlayerView`. The
@@ -36,7 +38,7 @@ impl<'a> PerspectiveProjector<'a> {
         Self {
             source,
             profile,
-            source_known_cards: OnceLock::new(),
+            source_known_cards: [OnceLock::new(), OnceLock::new()],
         }
     }
 
@@ -47,6 +49,59 @@ impl<'a> PerspectiveProjector<'a> {
     ) -> Option<(LogicalDeductions, HGroupState)> {
         let projected = self.project_with_evidence(observer, depth)?;
         Some((projected.deductions, projected.replay))
+    }
+
+    fn inferred_source_cards(&self, immediate_reactor: bool) -> HashMap<CardId, Card> {
+        // Hypothesize what another player sees if our convention
+        // promises are right. This map must not become observed truth.
+        let mut source_observation = self.source.clone();
+        for card in &mut source_observation.hands[self.source.observer.index()] {
+            card.identity = None;
+        }
+        let Some(source_deductions) = LogicalDeductions::new(source_observation).ok() else {
+            return HashMap::new();
+        };
+        let source_replay = replay_h_group_inner(
+            &source_deductions,
+            self.profile,
+            PerspectiveDepth::ObserverOnly,
+            false,
+        );
+        convention_card_inferences(&source_deductions, &source_replay)
+            .into_iter()
+            .filter(|note| {
+                // A later player's fresh Finesse reading depends on
+                // the immediate reactor not demonstrating a Bluff.
+                // Exporting it as a visible card to that reactor makes
+                // this premise prove itself via Bob's Truth Principle.
+                // Literal knowledge is independent of this reading.
+                !immediate_reactor
+                    || source_deductions
+                        .possible_identities(note.card)
+                        .is_some_and(|identities| identities.len() == 1)
+                    || !source_replay.pending_connections.iter().any(|connection| {
+                        connection.actor != self.source.current_player
+                            && connection.kind == super::HGroupConnectionKind::Finesse
+                            && connection.cards.contains(&note.card)
+                            && source_replay
+                                .pending_connections
+                                .provenance(connection.promise)
+                                .is_some_and(|origin| {
+                                    origin.created_turn.saturating_add(1) == self.source.turn
+                                })
+                    })
+            })
+            .filter_map(|note| {
+                (note.identities.len() == 1)
+                    .then(|| {
+                        note.identities
+                            .iter()
+                            .next()
+                            .map(|identity| (note.card, identity))
+                    })
+                    .flatten()
+            })
+            .collect::<HashMap<_, _>>()
     }
 
     pub(super) fn project_with_evidence(
@@ -61,37 +116,9 @@ impl<'a> PerspectiveProjector<'a> {
             && observer != self.source.observer
             && !source_hand_is_resolved
         {
-            self.source_known_cards.get_or_init(|| {
-                // Hypothesize what another player sees if our convention
-                // promises are right. This map must not become observed truth.
-                let mut source_observation = self.source.clone();
-                for card in &mut source_observation.hands[self.source.observer.index()] {
-                    card.identity = None;
-                }
-                let Some(source_deductions) = LogicalDeductions::new(source_observation).ok()
-                else {
-                    return HashMap::new();
-                };
-                let source_replay = replay_h_group_inner(
-                    &source_deductions,
-                    self.profile,
-                    PerspectiveDepth::ObserverOnly,
-                    false,
-                );
-                convention_card_inferences(&source_deductions, &source_replay)
-                    .into_iter()
-                    .filter_map(|note| {
-                        (note.identities.len() == 1)
-                            .then(|| {
-                                note.identities
-                                    .iter()
-                                    .next()
-                                    .map(|identity| (note.card, identity))
-                            })
-                            .flatten()
-                    })
-                    .collect::<HashMap<_, _>>()
-            })
+            let immediate_reactor = observer == self.source.current_player;
+            self.source_known_cards[usize::from(immediate_reactor)]
+                .get_or_init(|| self.inferred_source_cards(immediate_reactor))
         } else {
             static EMPTY: OnceLock<HashMap<CardId, Card>> = OnceLock::new();
             EMPTY.get_or_init(HashMap::new)
@@ -448,6 +475,84 @@ mod tests {
 
     use super::*;
     use crate::{HGroupLevel, HGroupProfile};
+
+    #[test]
+    fn reviewed_bluff_does_not_export_its_alternative_finesse_as_a_visible_card() {
+        let fixture = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let state = fixture.state_at_turn(18).unwrap();
+        let source = state.view_for(PlayerId::new(2)).unwrap();
+        let source = ProspectiveTransition::clue_by(
+            &source,
+            PlayerId::new(2),
+            PlayerId::new(0),
+            Clue::Rank(Rank::Four),
+            &[CardId::new(2)],
+        );
+        let source = ProspectiveTransition::successful_play(
+            &source,
+            PlayerId::new(3),
+            CardId::new(23),
+            Card::new(hanabi_core::Suit::Red, Rank::One),
+        );
+        let source = ProspectiveTransition::clue_by(
+            &source,
+            PlayerId::new(0),
+            PlayerId::new(3),
+            Clue::Suit(hanabi_core::Suit::Purple),
+            &[CardId::new(12), CardId::new(14)],
+        );
+        // Prime the other-observer cache first; it must not contaminate Bob.
+        let projector = PerspectiveProjector::new(&source, HGroupProfile::Max);
+        projector
+            .project_with_evidence(PlayerId::new(3), PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        let projected = projector
+            .project_with_evidence(PlayerId::new(1), PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        assert_eq!(
+            identity_of(projected.deductions.view(), CardId::new(22)),
+            None
+        );
+        assert!(
+            !projected
+                .assumptions
+                .iter()
+                .any(|a| a.card == CardId::new(22)),
+            "{:?}",
+            projected.assumptions
+        );
+        let inferred = super::super::infer_h_group_from_replay(
+            &projected.deductions,
+            projected.replay,
+            HGroupProfile::Max,
+        );
+        assert!(inferred.playable_now.contains(&CardId::new(25)));
+        assert_eq!(
+            super::super::select_h_group_action(&projected.deductions, HGroupProfile::Max),
+            Some(Action::Play(CardId::new(25)))
+        );
+        // A genuinely visible p2 still supplies a truthful connection.
+        let mut visible = source.clone();
+        visible.hands[2]
+            .iter_mut()
+            .find(|c| c.id == CardId::new(22))
+            .unwrap()
+            .identity = Some(Card::new(hanabi_core::Suit::Purple, Rank::Two));
+        let projected = PerspectiveProjector::new(&visible, HGroupProfile::Max)
+            .project_with_evidence(PlayerId::new(1), PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        assert_eq!(
+            identity_of(projected.deductions.view(), CardId::new(22)),
+            Some(Card::new(hanabi_core::Suit::Purple, Rank::Two))
+        );
+        assert_ne!(
+            super::super::select_h_group_action(&projected.deductions, HGroupProfile::Max),
+            Some(Action::Play(CardId::new(25)))
+        );
+    }
 
     #[test]
     fn reviewed_false_promise_is_labeled_as_a_projection_assumption() {

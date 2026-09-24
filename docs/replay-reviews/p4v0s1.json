@@ -1,5 +1,45 @@
 [
   {
+    "id": "t19-projected-bluff-cannot-prove-its-own-alternative",
+    "turn": 19,
+    "positionKey": "ee5daa8560702db2a691291ccb787b74716f8efd14342bba307fd68132253c71",
+    "status": "user-explained",
+    "perspective": "Cathy’s turn-19 projection after 4s to Alice, Donald r1, Alice purple to Donald; Bob’s prospective turn 22, with Cathy’s hand still hidden to the root.",
+    "source": {
+      "conversation": "2026-09-24 current task, user rejects projected Bob discard",
+      "quote": "the 4s to alice line is incorrect.\nwhy does bob discard p4 instead of blind-playing p2 as a bluff into the play clue on purple 4?"
+    },
+    "explanation": {
+      "ruling": "Bob should blind-play his newest card as p2, demonstrating the Bluff with its actual g2 identity; do not substitute an early p4 discard.",
+      "cause": "Observer-only replay provisionally assigns Cathy #22 the missing p2. PerspectiveProjector exports that freshly imagined Finesse identity as visible to Bob before Bob responds. Bob then applies Truth Principle to the manufactured connector and waits, circularly confirming the premise that made Cathy look Finessed. The old report labeled the assumption but should not have accepted it as the reason for the bluff response to disappear.",
+      "fix": "When projecting the current reactor, do not export a later actor’s fresh Finesse identity established by the immediately preceding clue. Retain literal singleton knowledge, actually visible faces and older promises. Cache current-reactor and other-observer assumptions separately. Unknown Cathy cards remain unknown.",
+      "boundary": "This fixes the reported response projection, not all later strategy choices or replay-wide agreement.",
+      "verifiedLines": {
+        "fixture": [
+          "19 Cathy 4s to Alice",
+          "20 Donald plays r1",
+          "21 Alice purple to Donald",
+          "22 Bob blind-plays #25 as p2; actual g2",
+          "23 pending Cathy discard #9, unknown"
+        ],
+        "engine": [
+          "19 Cathy purple to Bob",
+          "20 Donald green to Bob",
+          "21 Alice plays p2",
+          "22 Bob plays g2",
+          "23 pending Cathy discard #9, unknown"
+        ]
+      },
+      "result": "Both full root forecasts have no perspective identity assumptions. Root choice remains purple to Bob; no replay-wide scan was requested for this localized fix.",
+      "validation": "Seven perspective tests pass; related bluff tests22 pass7 previously recorded failures. Clippy, Rust formatting and review-ledger tests pass. Fast check remains incomplete due missing Python development dependencies; ownership check also emits macOS GNU-stat incompatibility errors."
+    },
+    "regressions": [
+      "h_group::perspective::tests::reviewed_bluff_does_not_export_its_alternative_finesse_as_a_visible_card",
+      "h_group::perspective::tests::reviewed_false_promise_is_labeled_as_a_projection_assumption"
+    ],
+    "coverage": "Reconstructs the reviewed prefix with blank future draws. Asserts no imagined visible Cathy p2, Bob’s playable inference and actual selected blind play. Primes another observer’s cache first and controls with a genuinely visible p2, where Bob must wait. Existing false-promise test preserves other conditional projections."
+  },
+  {
     "id": "t21-bluff-admission-must-not-require-truthful-chain",
     "turn": 21,
     "positionKey": "d0938e3f6f961d09d2d598ed3c946606a3c727ca31aa5fdcff8aa837f0d35ea5",
@@ -69,7 +109,8 @@
       "comparison": "Purple to Bob versus 4s to Alice: endpoint Incomparable, ConventionPreference, within a comparison cycle. At shared four-action checkpoint: purple score11 clues0 securedFuture4 committedFuture0; 4s score10 clues1 securedFuture6 committedFuture3. These are context, not a decisive resource dominance.",
       "heuristic": "Purple to Bob: base373 + scheduling100. 4s to Alice: base334 + protection80 - teamwork80 + scheduling100 =434. Purple setup distributes p2/p3/p4 across Alice/Donald/Bob; 4s gets r1 and protects y4 but receives fewer-player coverage penalty. No proven optimality.",
       "question": "What is the general strategic reason for preferring 4s here: securing Alice’s last y4, playing Donald’s r1 before developing purple, preserving Bob’s duplicate p4 as a discard, or a combination? Existing handoff ruling concerns Bob playing b5 instead of taking Cathy’s clue; it does not specify this Cathy-root clue tradeoff.",
-      "validation": "New regression and actual-reactor regression pass. Bluff-filter suite21 pass7 pre-existing failures (previously19 pass8 failures; first_replay_move_thirty_bluff_must_not_touch_played_purple_one now passes). Clippy and formatting pass. check.sh --fast stops at missing Python development dependencies and reports macOS ownership-script incompatibility; no full pass claimed."
+      "validation": "New regression and actual-reactor regression pass. Bluff-filter suite21 pass7 pre-existing failures (previously19 pass8 failures; first_replay_move_thirty_bluff_must_not_touch_played_purple_one now passes). Clippy and formatting pass. check.sh --fast stops at missing Python development dependencies and reports macOS ownership-script incompatibility; no full pass claimed.",
+      "projectionCorrection": "The user subsequently rejected the conditional Cathy-p2 branch as an explanation for Bob’s discard. See t19-projected-bluff-cannot-prove-its-own-alternative: the provisional identity was circular evidence, now fixed. Preserve this record’s old lines as diagnostic history, not current engine output."
     },
     "regressions": [
       "h_group::tests::replay::current_turn_twenty_one_purple_bluffs_bobs_green_two",
