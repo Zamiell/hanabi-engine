@@ -67,26 +67,6 @@ fn accounts_for_one_new_copy(context: GoodTouchContext<'_>, identity: Card) -> b
     })
 }
 
-/// Duplication Responsibility permits risking an ambiguous matching card, not
-/// knowingly touching a useful duplicate. Apply this to Save collateral too.
-/// Source: <https://hanabi.github.io/level-12/#duplication-responsibility>
-pub(super) fn duplicates_known_good_touch(context: GoodTouchContext<'_>) -> bool {
-    context.newly_touched.iter().copied().any(|card| {
-        let Some(identity) = known_identity(context, card) else {
-            return false;
-        };
-        is_eventually_useful(context.view, identity)
-            && !accounts_for_one_new_copy(context, identity)
-            && context.view.hands.iter().flatten().any(|other| {
-                other.id != card
-                    && (context.explicitly_clued.contains(&other.id)
-                        || context.newly_touched.contains(&other.id))
-                    && !context.fixed_cards.contains(&other.id)
-                    && known_identity(context, other.id) == Some(identity)
-            })
-    })
-}
-
 /// Compiles the behavioral consequences relevant to Good Touch and admits the
 /// clue only when no recipient would acquire an impossible duplicate play
 /// obligation.

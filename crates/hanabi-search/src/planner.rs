@@ -512,6 +512,7 @@ pub enum ExactSearchStatus {
     WorldLimit,
     SingleCandidate,
     PreflightLimit,
+    ConditionalAdmission,
     NodeLimit,
     DepthLimit,
 }
@@ -550,6 +551,36 @@ pub enum ComparisonReason {
     StableOrder,
 }
 
+/// Authority of an ordering edge. Heuristics never establish forecast dominance.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ComparisonAuthority {
+    Policy,
+    Forecast,
+    Heuristic,
+}
+
+impl ComparisonReason {
+    #[must_use]
+    pub const fn authority(self) -> ComparisonAuthority {
+        match self {
+            Self::SavePrinciple | Self::PolicyTier | Self::ConventionPlayOrder => {
+                ComparisonAuthority::Policy
+            }
+            Self::BottomDeckRisk
+            | Self::ForecastBottomDeckRisk
+            | Self::FundedProgress
+            | Self::ClueEfficiency
+            | Self::ProgressTiming
+            | Self::KnownStrikes
+            | Self::ConditionalStrikes
+            | Self::EndpointResources
+            | Self::LineProgress
+            | Self::TerminalProgress => ComparisonAuthority::Forecast,
+            _ => ComparisonAuthority::Heuristic,
+        }
+    }
+}
+
 /// Partial endpoint order. Incomparable does not mean equivalent or inferior.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EndpointComparison {
@@ -561,6 +592,7 @@ pub enum EndpointComparison {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CandidateComparison {
+    pub authority: ComparisonAuthority,
     /// Exact checkpoint operands retained only when diagnostic tracing is enabled.
     pub basis: Option<ComparisonBasis>,
     pub left: Action,
@@ -570,6 +602,30 @@ pub struct CandidateComparison {
     pub reason: ComparisonReason,
     /// The preference graph contains a path back across this edge.
     pub in_cycle: bool,
+}
+
+fn exact_skip_status(
+    count: WorldCount,
+    analysis: &ConventionAnalysis,
+    candidates: usize,
+) -> ExactSearchStatus {
+    if !count.is_exact() {
+        ExactSearchStatus::WorldLimit
+    } else if has_conditional_clues(analysis) {
+        ExactSearchStatus::ConditionalAdmission
+    } else if candidates == 1 {
+        ExactSearchStatus::SingleCandidate
+    } else {
+        ExactSearchStatus::PreflightLimit
+    }
+}
+
+fn has_conditional_clues(analysis: &ConventionAnalysis) -> bool {
+    analysis.clue_explanations.iter().any(|clue| {
+        clue.validation
+            .iter()
+            .any(|check| check.verdict == crate::PrincipleVerdict::Unresolved)
+    })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -674,6 +730,7 @@ pub(crate) fn plan_move_with_control(
     }
 
     if count.is_exact()
+        && !has_conditional_clues(analysis)
         && counted_worlds > 0
         && objective == PlanningObjective::PerfectScore
         && information_set
@@ -709,6 +766,7 @@ pub(crate) fn plan_move_with_control(
     // the choice. Still validate current beliefs and retain terminal proofs
     // above; only omit the otherwise unnecessary exhaustive continuation.
     let full_exact_search = candidates.len() > 1
+        && !has_conditional_clues(analysis)
         && count.is_exact()
         && counted_worlds > 0
         && exact_preflight(
@@ -718,13 +776,7 @@ pub(crate) fn plan_move_with_control(
             config.exact_node_limit,
         );
     let mut exact_nodes = 0;
-    let mut exact_status = if !count.is_exact() {
-        ExactSearchStatus::WorldLimit
-    } else if candidates.len() == 1 {
-        ExactSearchStatus::SingleCandidate
-    } else {
-        ExactSearchStatus::PreflightLimit
-    };
+    let mut exact_status = exact_skip_status(count, analysis, candidates.len());
     if full_exact_search {
         let (best, nodes, status) = run_exact_search(
             information_set,
@@ -1110,21 +1162,17 @@ fn compare_symbolic_candidates(
             let (endpoint, basis) = compare_endpoints_with_basis(a, b);
             match endpoint {
                 EndpointComparison::PreferLeft(
-                    ComparisonReason::RotationDevelopment
-                    | ComparisonReason::FundedProgress
+                    ComparisonReason::FundedProgress
                     | ComparisonReason::ClueEfficiency
                     | ComparisonReason::ProgressTiming
-                    | ComparisonReason::ProtectedDevelopment
                     | ComparisonReason::BottomDeckRisk,
                 ) => {
                     evidence_reaches[left][right] = true;
                 }
                 EndpointComparison::PreferRight(
-                    ComparisonReason::RotationDevelopment
-                    | ComparisonReason::FundedProgress
+                    ComparisonReason::FundedProgress
                     | ComparisonReason::ClueEfficiency
                     | ComparisonReason::ProgressTiming
-                    | ComparisonReason::ProtectedDevelopment
                     | ComparisonReason::BottomDeckRisk,
                 ) => {
                     evidence_reaches[right][left] = true;
@@ -1141,6 +1189,7 @@ fn compare_symbolic_candidates(
             reaches[left][right] = ordering.is_gt();
             reaches[right][left] = !ordering.is_gt();
             comparisons.push(CandidateComparison {
+                authority: reason.authority(),
                 basis,
                 left: a.action,
                 right: b.action,

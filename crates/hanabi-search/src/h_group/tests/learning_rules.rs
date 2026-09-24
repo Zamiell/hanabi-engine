@@ -393,7 +393,7 @@ fn second_replay_rank_four_preserves_the_givers_connector() {
         clue: Clue::Rank(Rank::Four),
     };
     let candidate = candidates.iter().find(|candidate| candidate.action == action).unwrap();
-    let outcome = super::strategic_value::scheduled_clue_outcome(
+    let outcome = super::clue_outcome::scheduled_clue_outcome(
         &view, HGroupProfile::Max, candidate,
     ).unwrap();
     assert!(outcome.public_actions.iter().any(|action| {

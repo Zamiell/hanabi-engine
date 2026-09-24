@@ -4,31 +4,27 @@
 //! generation of convention-admissible clue candidates. Public-history
 //! reduction and level-specific event recognition live in sibling modules.
 
-use super::admission::{
-    GoodTouchContext, clue_accounts_for_every_copy, duplicates_known_good_touch, good_touch,
-};
+use super::admission::{GoodTouchContext, clue_accounts_for_every_copy, good_touch};
 use super::decision::{analysis_clue_candidates, build_h_group_analysis};
-use super::interpretation_resolution::{
-    candidate_replaces, named_interpretation_replaces_ordinary,
-};
+use super::interpretation_resolution::named_interpretation_replaces_ordinary;
 use super::{
-    Action, BluffTargetKind, Card, CardId, CardSet, Clue, ClueFacts, CluePurpose, ClueRecognition,
-    ClueSchedule, ClueValue, CompiledClueAction, ConnectionClueMatch, ConnectionManager,
+    Action, BluffTargetKind, Card, CardId, CardSet, Clue, ClueFacts, ClueProposal, CluePurpose,
+    ClueRecognition, ClueSchedule, ClueValue, ConnectionClueMatch, ConnectionManager,
     ConventionFacts, ConventionKnowledge, ConventionRejectionReason, FixCondition,
     HGroupCardInference, HGroupClueInterpretation, HGroupClueKind, HGroupConnection,
     HGroupConnectionKind, HGroupInferences, HGroupMoveKind, HGroupPlayObligation, HGroupProfile,
     HGroupRuleId, HGroupState, HistoricalView, IdentityClaims, IdentitySet,
     KNOWN_TRASH_COLLATERAL_BONUS, LogicalDeductions, MAX_CLUE_TOKENS, MaterializedCardFact,
     ObservedCard, ObservedEvent, PlayerId, PlayerSet, PlayerView, Rank, RejectedConventionAction,
-    RequiredFix, SemanticallyAdmittedCandidates, StackTimeline, bluff_play_connects,
-    bluff_target_order_is_legal, card_is_trash, chop, convention_information_value,
-    finesse_position, five_chop_moved_card, five_pulled_card, focus, identity_of, identity_set,
-    infer_h_group_from_replay, is_convention_trash, is_critical_save_identity,
-    is_eventually_useful, is_playable_at, is_playable_now, next_player, ordered_playable_cards,
-    pending_card_allows_identity, preferred_due_play_card, projected_h_group_replay,
-    prospective_clue_has_unsafe_connection, prospective_clue_marks_focus_saved,
-    prospective_clue_primary_interpretation, prospective_clue_signal_kinds, prospective_clue_view,
-    prospective_play_view, prospective_stacked_ejection_card, prospective_team_clue_signal_kinds,
+    RequiredFix, StackTimeline, bluff_play_connects, bluff_target_order_is_legal, card_is_trash,
+    chop, convention_information_value, finesse_position, five_chop_moved_card, five_pulled_card,
+    focus, identity_of, identity_set, infer_h_group_from_replay, is_convention_trash,
+    is_critical_save_identity, is_eventually_useful, is_playable_at, is_playable_now, next_player,
+    ordered_playable_cards, pending_card_allows_identity, preferred_due_play_card,
+    projected_h_group_replay, prospective_clue_has_unsafe_connection,
+    prospective_clue_marks_focus_saved, prospective_clue_primary_interpretation,
+    prospective_clue_signal_kinds, prospective_clue_view, prospective_play_view,
+    prospective_stacked_ejection_card, prospective_team_clue_signal_kinds,
     replay_identity_is_queued, rule_enabled, subjective_convention_cards,
     subjective_playable_cards, was_clued_before, with_prospective_analysis_cache,
 };
@@ -49,7 +45,7 @@ pub(super) use knowledge::{
 pub(super) fn h_group_clue_candidates(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
-) -> Vec<CompiledClueAction> {
+) -> Vec<super::CompiledClueAction> {
     let analysis = build_h_group_analysis(deductions, profile);
     analysis_clue_candidates(deductions, profile, &analysis).to_vec()
 }
@@ -59,9 +55,9 @@ pub(super) fn h_group_clue_candidates_from_replay(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
     replay: &HGroupState,
-) -> Vec<CompiledClueAction> {
+) -> Vec<super::CompiledClueAction> {
     with_prospective_analysis_cache(deductions.view(), profile, || {
-        h_group_clue_candidates_from_replay_inner(deductions, profile, replay)
+        super::candidate_pipeline::compile(deductions, profile, replay).admitted
     })
 }
 
@@ -70,7 +66,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
     replay: &HGroupState,
-) -> Vec<CompiledClueAction> {
+) -> Vec<ClueProposal> {
     let view = deductions.view();
     if view.clue_tokens == 0 {
         return Vec::new();
@@ -114,7 +110,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                             clue.matches(identity) && is_playable_now(view, identity)
                         })
                 });
-                Some(CompiledClueAction::new(
+                Some(ClueProposal::new(
                     action,
                     Some(HGroupMoveKind::Burn),
                     // No information is being communicated, so the ordinary
@@ -190,7 +186,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                     let information =
                         convention_information_value(view, profile, replay, target, clue, &touched);
                     (
-                        CompiledClueAction::new(
+                        ClueProposal::new(
                             action,
                             Some(HGroupMoveKind::FixClue),
                             ClueValue::new(600),
@@ -440,7 +436,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             // for creating a brand-new Play Clue: successor fill-in,
             // self-prompt, and anxiety checks answer different questions and
             // can incorrectly erase the mandatory repair.
-            candidates.push(CompiledClueAction::new(
+            candidates.push(ClueProposal::new(
                 action,
                 Some(HGroupMoveKind::FixClue),
                 ClueValue::new(650),
@@ -582,16 +578,6 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             && !gotten.contains(&focus);
         if play_score.is_none()
             && save_score.is_none()
-            // Recipient recognition can recover a connection, but cannot
-            // waive Good Touch for known useful duplicates.
-            && !duplicates_known_good_touch(GoodTouchContext {
-                view,
-                newly_touched: &newly_informed,
-                clue: Some((clue, &touched)),
-                explicitly_clued: &promptable,
-                fixed_cards,
-                convention_cards: &convention_cards,
-            })
             && (recipient_focus_inversion || mixed_touch_continuation)
             && prospective_clue_primary_interpretation(view, profile, target, clue, &touched)
                 .is_some_and(|interpretation| {
@@ -619,8 +605,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                                 && interpretation
                                     .hypotheses
                                     .iter()
-                                    .any(|hypothesis| !hypothesis.connection_steps.is_empty()))
-                            )
+                                    .any(|hypothesis| !hypothesis.connection_steps.is_empty())))
                 })
         {
             // Recipient replay is the canonical semantic compiler. It can
@@ -790,7 +775,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 // Level-25 "leads another play" priority rule.
                 score += 85;
             }
-            candidates.push(CompiledClueAction::new(
+            candidates.push(ClueProposal::new(
                 action,
                 Some(HGroupMoveKind::PlayClue),
                 ClueValue::new(score),
@@ -816,21 +801,13 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             && hand
                 .iter()
                 .all(|card| gotten.contains(&card.id) || touched.contains(&card.id))
-            && !duplicates_known_good_touch(GoodTouchContext {
-                view,
-                newly_touched: &newly_informed,
-                clue: Some((clue, &touched)),
-                explicitly_clued: &promptable,
-                fixed_cards,
-                convention_cards: &convention_cards,
-            })
             && super::prospective::prospective_anxiety_play(view, profile, target, clue, &touched)
                 .is_some()
         {
             // The play comes from the locked hand, not necessarily a touched
             // card. Do not manufacture a focus identity or a Finesse promise.
             // https://hanabi.github.io/level-9/#the-anxiety-play-forcing-a-locked-player-to-play
-            candidates.push(CompiledClueAction::new(
+            candidates.push(ClueProposal::new(
                 action,
                 Some(HGroupMoveKind::AnxietyPlay),
                 // Same base as one directly established play; let projected
@@ -841,18 +818,11 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 0,
             ));
         } else if let Some(score) = save_score {
-            if !duplicates_known_good_touch(GoodTouchContext {
-                view,
-                newly_touched: &newly_informed,
-                clue: Some((clue, &touched)),
-                explicitly_clued: &promptable,
-                fixed_cards,
-                convention_cards: &convention_cards,
-            }) && !prospective_clue_has_unsafe_connection(
+            if !prospective_clue_has_unsafe_connection(
                 view, profile, target, focus, clue, &touched, false,
             ) && prospective_clue_marks_focus_saved(view, profile, target, focus, clue, &touched)
             {
-                candidates.push(CompiledClueAction::new(
+                candidates.push(ClueProposal::new(
                     action,
                     Some(HGroupMoveKind::SaveClue),
                     ClueValue::new(score),
@@ -909,41 +879,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             &convention_cards,
             profile,
         ) {
-            if let Some(existing) = candidates
-                .iter()
-                .position(|existing| existing.action == candidate.action)
-            {
-                // One physical clue can have several convention roles. Basic
-                // Play/Save interpretation normally keeps precedence over
-                // optional advanced labels. A Fix replaces it because it
-                // repairs an active false promise. A Bluff also replaces a
-                // delayed Play interpretation: from Bluff Seat, H-Group gives
-                // the Bluff precedence over a Layered Finesse, so retaining
-                // the latter would score connection steps the clue does not
-                // promise.
-                // Sources:
-                // - https://hanabi.github.io/level-3/#the-fix-clue
-                // - https://hanabi.github.io/level-11/#mistaking-a-layered-finesse-for-a-bluff
-                let bluff_has_precedence = if candidate.purpose() == CluePurpose::Advanced {
-                    let Action::Clue { target, clue } = candidate.action else {
-                        unreachable!("clue candidates always contain clues");
-                    };
-                    let touched = view.hands[target.index()]
-                        .iter()
-                        .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
-                        .map(|card| card.id)
-                        .collect::<Vec<_>>();
-                    prospective_team_clue_signal_kinds(view, profile, target, clue, &touched)
-                        .contains(&HGroupMoveKind::Bluff)
-                } else {
-                    false
-                };
-                if candidate_replaces(candidates[existing], candidate, bluff_has_precedence) {
-                    candidates[existing] = candidate;
-                }
-            } else {
-                candidates.push(candidate);
-            }
+            candidates.push(candidate);
         }
     }
     if rule_enabled(profile, HGroupRuleId::FiveTech)
@@ -965,42 +901,25 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
         candidate.purpose() == CluePurpose::Fix
             || !stomps_unresolved_visible_prefix(view, replay, candidate.action)
     });
-    // Ordinary Play/Save labels must not bypass MCVP by filling in a
-    // previously secured card. Named Fix, valuable Tempo, chop-move and
-    // Stall interpretations keep their own documented admission conditions.
-    candidates.retain(|candidate| {
-        !matches!(candidate.purpose(), CluePurpose::Play | CluePurpose::Save)
-            || super::strategic_value::scheduled_clue_outcome(view, profile, candidate)
-                .is_none_or(|outcome| outcome.clue_efficiency > 0)
-    });
-    let observer_chop = chop(&replay.hands[view.observer.index()], &gotten);
-    if candidates.is_empty()
-        && (observer_chop.is_none()
-            || view.clue_tokens == MAX_CLUE_TOKENS
-            || has_out_of_order_prompt(view, &gotten))
+
+    candidates
+}
+
+pub(super) fn fallback_clue_proposals(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+    replay: &HGroupState,
+) -> Vec<ClueProposal> {
+    let view = deductions.view();
+    let gotten = replay.gotten_from(&replay.promptable());
+    if chop(&replay.hands[view.observer.index()], &gotten).is_none()
+        || view.clue_tokens == MAX_CLUE_TOKENS
+        || has_out_of_order_prompt(view, &gotten)
     {
-        candidates.extend(tempo_clue_candidates(view, replay, &gotten, profile));
+        tempo_clue_candidates(view, replay, &gotten, profile)
+    } else {
+        Vec::new()
     }
-    if rule_enabled(profile, HGroupRuleId::Stalling) && view.clue_tokens == 1 {
-        // Every clue source, including the fallback Tempo path above, must
-        // respect the promise made by deliberately leaving the next player
-        // locked at zero clues.
-        candidates.retain(|candidate| {
-            candidate.purpose() == CluePurpose::Fix
-                || (!creates_false_anxiety(view, profile, &gotten, candidate)
-                    && !creates_false_anxiety_after_forced_play(view, profile, candidate))
-        });
-    }
-    // Hard Burns have the lowest stall precedence: do not offer one while
-    // another convention-valid clue is available.
-    // <https://hanabi.github.io/level-9/#stalling>
-    if candidates
-        .iter()
-        .any(|candidate| candidate.move_kind() != Some(HGroupMoveKind::Burn))
-    {
-        candidates.retain(|candidate| candidate.move_kind() != Some(HGroupMoveKind::Burn));
-    }
-    SemanticallyAdmittedCandidates::new(candidates).finalize(deductions, profile)
 }
 
 /// A later clue cannot take credit for naming an existing visible Finesse
@@ -1062,7 +981,7 @@ fn fix_condition_is_live(view: &PlayerView, condition: FixCondition) -> bool {
 pub(super) fn creates_false_anxiety_after_forced_play(
     view: &PlayerView,
     profile: HGroupProfile,
-    candidate: &CompiledClueAction,
+    candidate: &ClueProposal,
 ) -> bool {
     let Action::Clue { target, clue } = candidate.action else {
         return false;
@@ -1113,7 +1032,7 @@ pub(super) fn creates_false_anxiety(
     view: &PlayerView,
     profile: HGroupProfile,
     gotten: &CardSet,
-    candidate: &CompiledClueAction,
+    candidate: &ClueProposal,
 ) -> bool {
     let Action::Clue { target, clue } = candidate.action else {
         return false;
@@ -1176,7 +1095,7 @@ pub(super) fn advanced_clue_candidates(
     giver_has_playable_now: bool,
     convention_cards: &[HGroupCardInference],
     profile: HGroupProfile,
-) -> Vec<CompiledClueAction> {
+) -> Vec<ClueProposal> {
     if view.clue_tokens == 0 {
         return Vec::new();
     }
@@ -1725,22 +1644,7 @@ pub(super) fn advanced_clue_candidates(
                 if !is_playable_now(view, actual) || bluff_play_connects(clue, actual) {
                     return None;
                 }
-                // The reactor assumes a truthful connection when they can
-                // see one. Another teammate's provisional Bluff reading
-                // cannot promise a blind play that the reactor will not make.
-                // The reactor need not call it a Bluff: a Finesse obligation
-                // on the same immediate card is the intended deception.
-                // https://hanabi.github.io/level-11/#bobs-truth-principle-part-1
-                super::prospective::compiled_prospective_clue(view, profile, target, clue, &touched)
-                    .and_then(|compiled| compiled.projection(actor))
-                    .filter(|projection| {
-                        projection.inferred.playable_now.contains(&blind.id)
-                            || projection.inferred.connection.is_some_and(|connection| {
-                                connection.card == blind.id
-                                    && is_playable_now(view, connection.identity)
-                            })
-                    })
-                    .map(|_| kind)
+                Some(kind)
             });
         let distinct_touched_identities = identity_set(identities.iter().copied());
         let every_touched_card_is_playable = identities.len() == touched.len()
@@ -1964,46 +1868,6 @@ pub(super) fn advanced_clue_candidates(
             Some((HGroupMoveKind::Ejection, 290))
         } else if rule_enabled(profile, HGroupRuleId::EjectionsAndDischarges) && unknown_discharge {
             Some((HGroupMoveKind::Discharge, 285))
-        } else if bluff_kind.is_some_and(|kind| {
-            rule_enabled(profile, HGroupRuleId::Bluffs)
-                && (kind == BluffTargetKind::Ordinary
-                    || rule_enabled(profile, HGroupRuleId::IntermediateBluffs))
-        }) {
-            let previously_secured = gotten
-                .iter()
-                .map(|card| {
-                    let identity = identity_of(view, *card).or_else(|| {
-                        convention_cards
-                            .iter()
-                            .find(|note| note.card == *card)
-                            .filter(|note| note.identities.len() == 1)
-                            .and_then(|note| note.identities.iter().next())
-                    });
-                    (*card, identity)
-                })
-                .collect::<Vec<_>>();
-            let actor = next_player(view.current_player, view.hands.len());
-            let blind = view.hands[actor.index()]
-                .iter()
-                .rev()
-                .find(|card| !gotten.contains(&card.id))
-                .map(|card| card.id);
-            let useful_cards = super::admission::minimum_clue_value(
-                view,
-                &previously_secured,
-                newly_touched.iter().copied().chain(blind),
-            );
-            // A Bluff also promises its newly touched collateral cards.
-            // Recognizing the blind play cannot waive Good Touch for those
-            // cards or fall through to a different, lower-priority meaning.
-            // https://hanabi.github.io/beginner/good-touch-principle/
-            // A recognizable Bluff is not automatically worth a clue. Reject
-            // zero-for-one outcomes here, without falling through to a new
-            // label that would bypass Minimum Clue Value.
-            (respects_good_touch && useful_cards > 0).then_some((
-                HGroupMoveKind::Bluff,
-                330 + 2 * u16::try_from(useful_cards).unwrap_or(u16::MAX),
-            ))
         } else if rule_enabled(profile, HGroupRuleId::Elimination) && elimination {
             Some((HGroupMoveKind::Elimination, 230))
         } else if rule_enabled(profile, HGroupRuleId::OutOfOrderPlay) && out_of_order {
@@ -2142,204 +2006,228 @@ pub(super) fn advanced_clue_candidates(
         } else {
             None
         };
-        let Some((kind, mut score)) = classification else {
-            continue;
-        };
-        let replaces_ordinary_play = named_interpretation_replaces_ordinary(kind);
-        if matches!(
-            kind,
-            HGroupMoveKind::OutOfPositionEjection | HGroupMoveKind::StackedEjection
-        ) && !super::prospective::prospective_ejection_is_demonstrable(
-            view, profile, target, clue, &touched, kind,
-        ) {
-            continue;
+        let mut classifications = Vec::new();
+        if bluff_kind.is_some_and(|kind| {
+            rule_enabled(profile, HGroupRuleId::Bluffs)
+                && (kind == BluffTargetKind::Ordinary
+                    || rule_enabled(profile, HGroupRuleId::IntermediateBluffs))
+        }) {
+            classifications.push((
+                HGroupMoveKind::Bluff,
+                330 + 2 * u16::try_from(newly_touched.len().saturating_add(1)).unwrap_or(u16::MAX),
+            ));
         }
-        // A reactor may infer a blind play because they cannot see its face.
-        // That is not evidence the giver can safely initiate the move. Named
-        // replacement meanings must still respect visible, completed stacks.
-        if replaces_ordinary_play
-            && super::prospective::prospective_clue_forces_visible_trash(
-                view, profile, target, clue, &touched,
-            )
-        {
-            continue;
-        }
-        let recognized_stacked_ejection = matches!(
-            max_signal,
-            Some(HGroupMoveKind::StackedEjection | HGroupMoveKind::StackedDischarge)
-        );
-        let stacked_ejection_card = recognized_stacked_ejection
-            .then(|| prospective_stacked_ejection_card(view, profile, target, clue, &touched))
-            .flatten();
-        let protects_critical_chop = clue_focus == chop(layout, gotten)
-            && clue_focus
-                .and_then(|focus| identity_of(view, focus))
-                .is_some_and(|identity| {
-                    identity.rank == Rank::Five || is_critical_save_identity(view, identity)
+        classifications.extend(classification);
+        for (kind, mut score) in classifications {
+            let replaces_ordinary_play = named_interpretation_replaces_ordinary(kind);
+            if matches!(
+                kind,
+                HGroupMoveKind::OutOfPositionEjection | HGroupMoveKind::StackedEjection
+            ) && !super::prospective::prospective_ejection_is_demonstrable(
+                view, profile, target, clue, &touched, kind,
+            ) {
+                continue;
+            }
+            // A reactor may infer a blind play because they cannot see its face.
+            // That is not evidence the giver can safely initiate the move. Named
+            // replacement meanings must still respect visible, completed stacks.
+            if replaces_ordinary_play
+                && super::prospective::prospective_clue_forces_visible_trash(
+                    view, profile, target, clue, &touched,
+                )
+            {
+                continue;
+            }
+            let recognized_stacked_ejection = matches!(
+                max_signal,
+                Some(HGroupMoveKind::StackedEjection | HGroupMoveKind::StackedDischarge)
+            );
+            let stacked_ejection_card = recognized_stacked_ejection
+                .then(|| prospective_stacked_ejection_card(view, profile, target, clue, &touched))
+                .flatten();
+            let protects_critical_chop = clue_focus == chop(layout, gotten)
+                && clue_focus
+                    .and_then(|focus| identity_of(view, focus))
+                    .is_some_and(|identity| {
+                        identity.rank == Rank::Five || is_critical_save_identity(view, identity)
+                    });
+            let target_already_has_a_play = subjective_playable_cards(view, profile, target)
+                .is_some_and(|cards| !cards.is_empty())
+                || replay.hands[target.index()].iter().any(|card| {
+                    (replay.cards.already_playing.contains(card)
+                        || replay.cards.forced_playable.contains(card)
+                        || replay.pending_connections.iter().any(|connection| {
+                            connection.actor == target
+                                && connection.cards.contains(card)
+                                && replay.pending_connections.is_active(connection)
+                        }))
+                        && identity_of(view, *card)
+                            .is_some_and(|identity| is_playable_now(view, identity))
                 });
-        let target_already_has_a_play = subjective_playable_cards(view, profile, target)
-            .is_some_and(|cards| !cards.is_empty())
-            || replay.hands[target.index()].iter().any(|card| {
-                (replay.cards.already_playing.contains(card)
-                    || replay.cards.forced_playable.contains(card)
-                    || replay.pending_connections.iter().any(|connection| {
-                        connection.actor == target
-                            && connection.cards.contains(card)
-                            && replay.pending_connections.is_active(connection)
-                    }))
-                    && identity_of(view, *card)
-                        .is_some_and(|identity| is_playable_now(view, identity))
+            let ejection_actor_already_has_a_play =
+                replay.hands[ejection_actor.index()].iter().any(|card| {
+                    (replay.cards.already_playing.contains(card)
+                        || replay.cards.forced_playable.contains(card)
+                        || replay.pending_connections.iter().any(|connection| {
+                            connection.actor == ejection_actor
+                                && connection.cards.contains(card)
+                                && replay.pending_connections.is_active(connection)
+                        }))
+                        && identity_of(view, *card)
+                            .is_some_and(|identity| is_playable_now(view, identity))
+                });
+            let urgently_protects_critical_chop =
+                protects_critical_chop && !target_already_has_a_play;
+            let stacked_ejection_adds_an_action = stacked_ejection_card.is_none_or(|ejected| {
+                replay
+                    .pending_connections
+                    .iter()
+                    .find_map(|connection| {
+                        let position = connection.cards.iter().position(|card| *card == ejected)?;
+                        if position == 0 {
+                            return Some(false);
+                        }
+                        Some(
+                            connection
+                                .cards
+                                .first()
+                                .and_then(|card| identity_of(view, *card))
+                                == Some(connection.expected),
+                        )
+                    })
+                    .unwrap_or(true)
             });
-        let ejection_actor_already_has_a_play =
-            replay.hands[ejection_actor.index()].iter().any(|card| {
-                (replay.cards.already_playing.contains(card)
-                    || replay.cards.forced_playable.contains(card)
-                    || replay.pending_connections.iter().any(|connection| {
-                        connection.actor == ejection_actor
-                            && connection.cards.contains(card)
-                            && replay.pending_connections.is_active(connection)
-                    }))
-                    && identity_of(view, *card)
-                        .is_some_and(|identity| is_playable_now(view, identity))
-            });
-        let urgently_protects_critical_chop = protects_critical_chop && !target_already_has_a_play;
-        let stacked_ejection_adds_an_action = stacked_ejection_card.is_none_or(|ejected| {
-            replay
-                .pending_connections
-                .iter()
-                .find_map(|connection| {
-                    let position = connection.cards.iter().position(|card| *card == ejected)?;
-                    if position == 0 {
-                        return Some(false);
-                    }
-                    Some(
-                        connection
-                            .cards
-                            .first()
-                            .and_then(|card| identity_of(view, *card))
-                            == Some(connection.expected),
+            let ejection_adds_an_action = if recognized_stacked_ejection {
+                // If the loaded connection's first candidate is the promised
+                // identity, that candidate would resolve the connection and the
+                // second card would never be played. Ejecting the second card
+                // therefore adds a real play. If the first candidate is merely a
+                // different playable card, ordinary connection continuation was
+                // already going to reach the second card, so the Ejection only
+                // reorders an existing line.
+                stacked_ejection_adds_an_action
+            } else {
+                !ejection_actor_already_has_a_play
+            };
+            if replaces_ordinary_play
+                && urgently_protects_critical_chop
+                && ejection_adds_an_action
+                && giver_has_playable_now
+            {
+                // Ejections and Discharges replace the clue's apparent Play
+                // connection. When that move also protects a critical chop from
+                // the recipient's next action, it has the urgency of a Save while
+                // retaining its advanced meaning. A generic Ejection does not add
+                // an action when its blind player was already scheduled to make
+                // that same play; in that case Clarity prefers the ordinary
+                // Save. A Stacked Ejection is the exception because it explicitly
+                // changes which loaded card is due first. This special boost is
+                // needed only when the clue must beat the giver's otherwise-due
+                // play; without that conflict, Clarity prefers an available
+                // ordinary Save over the more complicated Ejection line.
+                score = score.max(450);
+            }
+            let score_is_low = view.play_stacks.iter().map(Vec::len).sum::<usize>() < 10;
+            let unsafe_unsuppressed_play = (kind == HGroupMoveKind::ChopMove && !all_trash)
+                || matches!(
+                    kind,
+                    HGroupMoveKind::FixClue
+                        | HGroupMoveKind::Elimination
+                        | HGroupMoveKind::OccupiedPlay
+                        | HGroupMoveKind::TempoClue
+                        | HGroupMoveKind::TempoClueChopMove
+                        | HGroupMoveKind::Extra
+                        | HGroupMoveKind::Stall
+                        | HGroupMoveKind::FillInClue
+                        | HGroupMoveKind::Burn
+                )
+                || (kind == HGroupMoveKind::FiveStall && !replay.early_game && !score_is_low);
+            if !safe_generic_play && unsafe_unsuppressed_play {
+                // These moves do not replace a delayed Play interpretation. If
+                // the focused card can be read as a Play clue, its ordinary
+                // Prompt/Finesse chain must also be valid. Otherwise an advanced
+                // stall or chop move can manufacture a false layered finesse.
+                continue;
+            }
+            if (!replaces_ordinary_play
+                || target == next_player(view.current_player, view.hands.len()))
+                && clue_focus.is_some_and(|focus| {
+                    prospective_clue_has_unsafe_connection(
+                        view, profile, target, focus, clue, &touched, false,
                     )
                 })
-                .unwrap_or(true)
-        });
-        let ejection_adds_an_action = if recognized_stacked_ejection {
-            // If the loaded connection's first candidate is the promised
-            // identity, that candidate would resolve the connection and the
-            // second card would never be played. Ejecting the second card
-            // therefore adds a real play. If the first candidate is merely a
-            // different playable card, ordinary connection continuation was
-            // already going to reach the second card, so the Ejection only
-            // reorders an existing line.
-            stacked_ejection_adds_an_action
-        } else {
-            !ejection_actor_already_has_a_play
-        };
-        if replaces_ordinary_play
-            && urgently_protects_critical_chop
-            && ejection_adds_an_action
-            && giver_has_playable_now
-        {
-            // Ejections and Discharges replace the clue's apparent Play
-            // connection. When that move also protects a critical chop from
-            // the recipient's next action, it has the urgency of a Save while
-            // retaining its advanced meaning. A generic Ejection does not add
-            // an action when its blind player was already scheduled to make
-            // that same play; in that case Clarity prefers the ordinary
-            // Save. A Stacked Ejection is the exception because it explicitly
-            // changes which loaded card is due first. This special boost is
-            // needed only when the clue must beat the giver's otherwise-due
-            // play; without that conflict, Clarity prefers an available
-            // ordinary Save over the more complicated Ejection line.
-            score = score.max(450);
-        }
-        let score_is_low = view.play_stacks.iter().map(Vec::len).sum::<usize>() < 10;
-        let unsafe_unsuppressed_play = (kind == HGroupMoveKind::ChopMove && !all_trash)
-            || matches!(
+            {
+                // Advanced classifications can create indirect effects (for
+                // example, a same-clue chop move followed by a 2 Save on 5) that
+                // are not represented by the focused card's generic safety test.
+                // Validate the recipient's complete post-clue inference as well.
+                // Named blind-play lines can repair a recipient's provisional
+                // reading on an intervening turn. When the recipient acts next,
+                // no such intervening resolution exists: Ejection recognition by
+                // someone else cannot excuse the recipient's immediate misplay.
+                continue;
+            }
+            let efficiency = if matches!(
                 kind,
-                HGroupMoveKind::FixClue
-                    | HGroupMoveKind::Elimination
-                    | HGroupMoveKind::OccupiedPlay
-                    | HGroupMoveKind::TempoClue
-                    | HGroupMoveKind::TempoClueChopMove
-                    | HGroupMoveKind::Extra
-                    | HGroupMoveKind::Stall
-                    | HGroupMoveKind::FillInClue
-                    | HGroupMoveKind::Burn
-            )
-            || (kind == HGroupMoveKind::FiveStall && !replay.early_game && !score_is_low);
-        if !safe_generic_play && unsafe_unsuppressed_play {
-            // These moves do not replace a delayed Play interpretation. If
-            // the focused card can be read as a Play clue, its ordinary
-            // Prompt/Finesse chain must also be valid. Otherwise an advanced
-            // stall or chop move can manufacture a false layered finesse.
-            continue;
-        }
-        if (!replaces_ordinary_play || target == next_player(view.current_player, view.hands.len()))
-            && clue_focus.is_some_and(|focus| {
-                prospective_clue_has_unsafe_connection(
-                    view, profile, target, focus, clue, &touched, false,
-                )
-            })
-        {
-            // Advanced classifications can create indirect effects (for
-            // example, a same-clue chop move followed by a 2 Save on 5) that
-            // are not represented by the focused card's generic safety test.
-            // Validate the recipient's complete post-clue inference as well.
-            // Named blind-play lines can repair a recipient's provisional
-            // reading on an intervening turn. When the recipient acts next,
-            // no such intervening resolution exists: Ejection recognition by
-            // someone else cannot excuse the recipient's immediate misplay.
-            continue;
-        }
-        let efficiency = if matches!(
-            kind,
-            HGroupMoveKind::ReplayDoubleIgnition
-                | HGroupMoveKind::UnnecessaryIgnition
-                | HGroupMoveKind::TrashDoubleIgnition
-                | HGroupMoveKind::PokeDoubleIgnition
-                | HGroupMoveKind::ChopMoveIgnition
-                | HGroupMoveKind::BombDoubleIgnition
-                | HGroupMoveKind::BombTripleIgnition
-        ) {
-            2 * u16::try_from(newly_touched.len()).unwrap_or(0)
-        } else {
-            0
-        };
-        candidates.push(CompiledClueAction::new(
-            action,
-            Some(kind),
-            ClueValue::new(score + efficiency + u16::from(matches!(clue, Clue::Suit(_)))),
-            if matches!(kind, HGroupMoveKind::SaveClue | HGroupMoveKind::FakeSave) {
-                CluePurpose::Save
-            } else if kind == HGroupMoveKind::LieComponentFinesse {
-                CluePurpose::Play
-            } else {
-                CluePurpose::Advanced
-            },
-            ClueSchedule::new(
-                kind == HGroupMoveKind::FakeSave || urgently_protects_critical_chop,
-                // A Fill-In Stall may touch a playable card, but it does not
-                // acquire that play. Do not grant it scheduling credit.
-                playable > 0
-                    && !matches!(
-                        kind,
-                        HGroupMoveKind::Stall | HGroupMoveKind::FillInClue | HGroupMoveKind::Burn
-                    ),
-            ),
-            if kind == HGroupMoveKind::LieComponentFinesse {
-                clue_focus
-                    .and_then(|focus| identity_of(view, focus))
-                    .map_or(0, |identity| {
-                        u8::try_from(
-                            usize::from(identity.rank.number())
-                                .saturating_sub(view.play_stacks[identity.suit.index()].len() + 1),
-                        )
-                        .expect("a standard connection has at most four steps")
-                    })
+                HGroupMoveKind::ReplayDoubleIgnition
+                    | HGroupMoveKind::UnnecessaryIgnition
+                    | HGroupMoveKind::TrashDoubleIgnition
+                    | HGroupMoveKind::PokeDoubleIgnition
+                    | HGroupMoveKind::ChopMoveIgnition
+                    | HGroupMoveKind::BombDoubleIgnition
+                    | HGroupMoveKind::BombTripleIgnition
+            ) {
+                2 * u16::try_from(newly_touched.len()).unwrap_or(0)
             } else {
                 0
-            },
-        ));
+            };
+            let mut proposal =
+                ClueProposal::new(
+                    action,
+                    Some(kind),
+                    ClueValue::new(score + efficiency + u16::from(matches!(clue, Clue::Suit(_)))),
+                    if matches!(kind, HGroupMoveKind::SaveClue | HGroupMoveKind::FakeSave) {
+                        CluePurpose::Save
+                    } else if kind == HGroupMoveKind::LieComponentFinesse {
+                        CluePurpose::Play
+                    } else {
+                        CluePurpose::Advanced
+                    },
+                    ClueSchedule::new(
+                        kind == HGroupMoveKind::FakeSave || urgently_protects_critical_chop,
+                        // A Fill-In Stall may touch a playable card, but it does not
+                        // acquire that play. Do not grant it scheduling credit.
+                        playable > 0
+                            && !matches!(
+                                kind,
+                                HGroupMoveKind::Stall
+                                    | HGroupMoveKind::FillInClue
+                                    | HGroupMoveKind::Burn
+                            ),
+                    ),
+                    if kind == HGroupMoveKind::LieComponentFinesse {
+                        clue_focus
+                            .and_then(|focus| identity_of(view, focus))
+                            .map_or(0, |identity| {
+                                u8::try_from(usize::from(identity.rank.number()).saturating_sub(
+                                    view.play_stacks[identity.suit.index()].len() + 1,
+                                ))
+                                .expect("a standard connection has at most four steps")
+                            })
+                    } else {
+                        0
+                    },
+                );
+            if kind == HGroupMoveKind::Bluff {
+                let actor = next_player(view.current_player, view.hands.len());
+                proposal.required_response = view.hands[actor.index()]
+                    .iter()
+                    .rev()
+                    .find(|card| !gotten.contains(&card.id))
+                    .map(|card| (actor, card.id));
+            }
+            candidates.push(proposal);
+        }
     }
     candidates
 }
@@ -2457,7 +2345,7 @@ pub(super) fn save_clue_score(
     // Save Principle: the next-player bonus belongs to an actual deadline,
     // not merely a seat. An occupied player can safely wait for their Save.
     // Whether the Save may preempt an existing play obligation is represented
-    // separately on `CompiledClueAction`.
+    // separately on `ClueProposal`.
     Some(if immediate_deadline { 450 } else { 400 })
 }
 
@@ -2491,21 +2379,7 @@ pub(super) fn play_clue_score(
     {
         return None;
     }
-    let ordinary_touches = newly_touched
-        .iter()
-        .copied()
-        .filter(|card| !trash_collateral.contains(card))
-        .collect::<Vec<_>>();
-    if !good_touch(GoodTouchContext {
-        view,
-        newly_touched: &ordinary_touches,
-        clue: Some((clue, clue_touched)),
-        explicitly_clued,
-        fixed_cards,
-        convention_cards,
-    }) {
-        return None;
-    }
+    // Good Touch is validated over compiled effects at the common boundary.
     let height = view.play_stacks[focus_identity.suit.index()].len();
     let rank = usize::from(focus_identity.rank.number());
     if rank <= height {
@@ -3155,7 +3029,7 @@ pub(super) fn tempo_clue_candidates(
     replay: &HGroupState,
     gotten: &CardSet,
     profile: HGroupProfile,
-) -> Vec<CompiledClueAction> {
+) -> Vec<ClueProposal> {
     let mut candidates = Vec::new();
     let promptable = replay.promptable();
     for action in view.legal_actions() {
@@ -3201,7 +3075,7 @@ pub(super) fn tempo_clue_candidates(
             // A Tempo Clue accelerates an already-clued card that was not
             // already known to be playable. Re-cluing a card already bound to
             // play is a Burn Clue and is not admitted by this fallback.
-            candidates.push(CompiledClueAction::new(
+            candidates.push(ClueProposal::new(
                 action,
                 Some(HGroupMoveKind::TempoClue),
                 ClueValue::new(100 + u16::from(matches!(clue, Clue::Suit(_)))),

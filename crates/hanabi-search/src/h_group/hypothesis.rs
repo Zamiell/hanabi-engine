@@ -71,3 +71,83 @@ impl InterpretationHypotheses {
         self.alternatives.swap_remove(selected).state
     }
 }
+
+/// A hypothesis can depend on a response that has not happened yet. It cannot
+/// be exported as evidence to the very decision on which that hypothesis rests.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AssumptionDependency {
+    pub origin_turn: u32,
+    pub focus: super::CardId,
+    pub response_actor: PlayerId,
+    pub decision_turn: u32,
+}
+
+impl AssumptionDependency {
+    pub(super) fn would_prove_itself(self, observer: PlayerId, turn: u32) -> bool {
+        self.response_actor == observer && turn <= self.decision_turn
+    }
+}
+
+/// Compile the dependency at the semantic owner of provisional connections.
+/// The projector consumes dependencies; it does not recognize convention kinds.
+/// <https://hanabi.github.io/level-11/#bobs-truth-principle-part-1>
+pub(super) fn identity_dependencies(
+    source: &super::PlayerView,
+    replay: &HGroupState,
+    card: super::CardId,
+) -> Vec<AssumptionDependency> {
+    replay
+        .pending_connections
+        .iter()
+        .filter_map(|connection| {
+            if !connection.cards.contains(&card)
+                || connection.kind != super::HGroupConnectionKind::Finesse
+            {
+                return None;
+            }
+            let origin = replay.pending_connections.provenance(connection.promise)?;
+            let giver = source.history.iter().find_map(|entry| {
+                if entry.turn != origin.created_turn {
+                    return None;
+                }
+                match entry.event {
+                    super::ObservedEvent::Clued { giver, .. } => Some(giver),
+                    _ => None,
+                }
+            })?;
+            let reactor = super::next_player(giver, source.hands.len());
+            (connection.actor != reactor).then_some(AssumptionDependency {
+                origin_turn: origin.created_turn,
+                focus: origin.focus,
+                response_actor: reactor,
+                decision_turn: origin.created_turn.saturating_add(1),
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod dependency_tests {
+    use super::*;
+
+    #[test]
+    fn only_the_unresolved_prerequisite_decision_is_blocked() {
+        // Dependency evaluation is an algorithmic invariant. The reviewed
+        // bluff regression in perspective.rs supplies the actual provenance.
+        for actor in 0..4 {
+            let dependency = AssumptionDependency {
+                origin_turn: 18,
+                focus: super::super::CardId::new(2),
+                response_actor: PlayerId::new(actor),
+                decision_turn: 19,
+            };
+            for observer in 0..4 {
+                assert_eq!(
+                    dependency.would_prove_itself(PlayerId::new(observer), 19),
+                    actor == observer
+                );
+                assert!(!dependency.would_prove_itself(PlayerId::new(observer), 20));
+            }
+        }
+    }
+}

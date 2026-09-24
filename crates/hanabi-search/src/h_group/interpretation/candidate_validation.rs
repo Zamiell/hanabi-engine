@@ -1,6 +1,6 @@
 use super::{
-    Action, CluePurpose, ClueRecognition, CompiledClueAction, ConventionRejectionReason,
-    HGroupClueKind, HGroupMoveKind, HGroupProfile, HGroupState, LogicalDeductions, PlayerView,
+    Action, ClueProposal, CluePurpose, ClueRecognition, ConventionRejectionReason, HGroupClueKind,
+    HGroupMoveKind, HGroupProfile, HGroupState, LogicalDeductions, PlayerView,
     RejectedConventionAction, chop, focus, identity_of, prospective_team_clue_signal_kinds,
 };
 
@@ -42,6 +42,7 @@ pub(crate) fn h_group_rejected_clues_from_replay(
                 let Some(focus) = focus(&replay.hands[target.index()], &touched, old_chop, &gotten)
                 else {
                     return Some(RejectedConventionAction {
+                        validation: None,
                         action,
                         reason: ConventionRejectionReason::NoFocus,
                     });
@@ -62,7 +63,11 @@ pub(crate) fn h_group_rejected_clues_from_replay(
             } else {
                 ConventionRejectionReason::NoNewInformation
             };
-            Some(RejectedConventionAction { action, reason })
+            Some(RejectedConventionAction {
+                action,
+                reason,
+                validation: None,
+            })
         })
         .collect()
 }
@@ -70,7 +75,7 @@ pub(crate) fn h_group_rejected_clues_from_replay(
 pub(in crate::h_group) fn recipient_replay_assessment(
     view: &PlayerView,
     profile: HGroupProfile,
-    candidate: &CompiledClueAction,
+    candidate: &ClueProposal,
 ) -> ClueRecognition {
     let Action::Clue { target, clue } = candidate.action else {
         return ClueRecognition::GeneratorProof;

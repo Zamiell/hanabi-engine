@@ -10,6 +10,11 @@ use super::{
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProjectionRequirementKind {
+    /// An unproven principle is retained as a condition, never credited as
+    /// an unconditional future action by the forecast.
+    ClueAdmission {
+        checks: [crate::CluePrincipleCheck; 3],
+    },
     /// Priority cannot be inferred from absence if another hidden hand may
     /// contain this connector. Cards drawn after the signal do not count.
     NoUnobservedConnector { identity: Card, signal_turn: u32 },
@@ -104,7 +109,12 @@ pub(super) fn assess(
     view: &PlayerView,
     requirement: &ProjectionRequirement,
 ) -> DependencyAssessment {
-    let status = if let Action::Play(card) = requirement.action {
+    let status = if matches!(
+        requirement.kind,
+        ProjectionRequirementKind::ClueAdmission { .. }
+    ) {
+        assess_kind(view, requirement)
+    } else if let Action::Play(card) = requirement.action {
         if view.hands[requirement.actor.index()]
             .iter()
             .any(|slot| slot.id == card)
@@ -127,6 +137,21 @@ fn assess_kind(view: &PlayerView, requirement: &ProjectionRequirement) -> Depend
         return DependencyStatus::Conditional { witness: None };
     };
     match requirement.kind {
+        ProjectionRequirementKind::ClueAdmission { checks } => {
+            return if checks
+                .iter()
+                .any(|check| check.verdict == crate::PrincipleVerdict::Fail)
+            {
+                DependencyStatus::Contradicted
+            } else if checks
+                .iter()
+                .any(|check| check.verdict == crate::PrincipleVerdict::Unresolved)
+            {
+                DependencyStatus::Conditional { witness: None }
+            } else {
+                DependencyStatus::Supported
+            };
+        }
         ProjectionRequirementKind::NoUnobservedConnector {
             identity,
             signal_turn,
@@ -210,5 +235,49 @@ fn conditional(view: &PlayerView, owner: usize, card: CardId, identity: Card) ->
             card,
             identity,
         }),
+    }
+}
+
+#[cfg(test)]
+mod admission_tests {
+    use super::*;
+    use crate::{CluePrincipleCheck, PrincipleVerdict};
+
+    #[test]
+    fn clue_admission_dependencies_do_not_take_the_non_play_shortcut() {
+        let fixture = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let state = fixture.state_at_turn(18).unwrap();
+        let view = state.view_for(state.current_player()).unwrap();
+        for (verdict, expected) in [
+            (PrincipleVerdict::Pass, DependencyStatus::Supported),
+            (PrincipleVerdict::Exception, DependencyStatus::Supported),
+            (
+                PrincipleVerdict::Unresolved,
+                DependencyStatus::Conditional { witness: None },
+            ),
+            (PrincipleVerdict::Fail, DependencyStatus::Contradicted),
+        ] {
+            let requirement = ProjectionRequirement {
+                actor: view.current_player,
+                action: Action::Clue {
+                    target: PlayerId::new(0),
+                    clue: hanabi_core::Clue::Rank(hanabi_core::Rank::Four),
+                },
+                evidence_turn: view.turn,
+                kind: ProjectionRequirementKind::ClueAdmission {
+                    checks: [CluePrincipleCheck {
+                        principle: "minimumClueValue",
+                        verdict,
+                        evidence: "contract test",
+                        exception: None,
+                        new_cards: 0,
+                    }; 3],
+                },
+            };
+            assert_eq!(assess(&view, &requirement).status, expected);
+        }
     }
 }

@@ -460,7 +460,7 @@ fn add_root_opportunities(
     let candidate = candidates
         .iter()
         .find(|candidate| candidate.action == root)?;
-    let positional = super::positional_value::evaluate(&d, profile, *candidate);
+    let positional = super::positional_value::evaluate(&d, profile, **candidate);
     value.foregone_blind_plays = positional.foregone_blind_plays;
     value.conditional_prompt_chains = positional.conditional_prompt_chains;
     if candidate.immediate_play() {
@@ -502,13 +502,11 @@ fn add_root_opportunities(
             .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
             .map(|card| card.id)
             .collect::<Vec<_>>();
-        let after = super::compiled_prospective_clue(source, profile, target, clue, &touched)?
-            .projection(target)?;
-        if after
-            .inferred
-            .playable_now
+        let outcome = super::clue_outcome::scheduled_clue_outcome(source, profile, candidate)?;
+        if outcome
+            .newly_playable
             .iter()
-            .any(|card| !owner.playable_now.contains(card))
+            .any(|(owner, _)| *owner == target)
         {
             // A Save-shaped clue can also obtain an immediate play. It is
             // not a passive Early Save merely because Save has interpretation

@@ -65,6 +65,29 @@ pub(super) struct CompiledObserverProjection {
     pub(super) inferred: HGroupInferences,
 }
 
+impl CompiledObserverProjection {
+    /// Trash includes identities already secured elsewhere, not only completed
+    /// stacks. Require the owner's whole domain and no outstanding play duty.
+    pub(super) fn knows_trash(&self, card: CardId, prior_promises: &super::CardSet) -> bool {
+        self.inferred
+            .cards
+            .iter()
+            .find(|note| note.card == card)
+            .is_some_and(|note| {
+                note.play_obligation.is_none()
+                    && !note.identities.is_empty()
+                    && note.identities.iter().all(|id| {
+                        !super::is_eventually_useful(self.deductions.view(), id)
+                            || self.deductions.view().hands.iter().flatten().any(|other| {
+                                other.id != card
+                                    && prior_promises.contains(&other.id)
+                                    && other.identity == Some(id)
+                            })
+                    })
+            })
+    }
+}
+
 /// One coherent public position with lazily materialized epistemic overlays
 /// for every player. All consumers of a hypothetical share this object, so an
 /// observer projection cannot be reconstructed under a different convention
@@ -121,7 +144,10 @@ pub(super) struct CompiledProspectiveClue {
     after: PlayerView,
     team: TeamConventionSnapshot,
     line_evidence: Rc<RefCell<CompiledLineCache>>,
+    outcomes: Rc<RefCell<CompiledOutcomeCache>>,
 }
+
+type CompiledOutcomeCache = Vec<(Option<HGroupMoveKind>, Option<super::LineOutcome>)>;
 
 type CompiledLineCache = Vec<(
     Option<HGroupMoveKind>,
@@ -129,6 +155,25 @@ type CompiledLineCache = Vec<(
 )>;
 
 impl CompiledProspectiveClue {
+    pub(super) fn outcome(
+        &self,
+        source: &PlayerView,
+        profile: HGroupProfile,
+        baselines: &[super::line_state::ProjectedLineState],
+        kind: Option<HGroupMoveKind>,
+    ) -> Option<super::LineOutcome> {
+        if let Some((_, result)) = self.outcomes.borrow().iter().find(|(key, _)| *key == kind) {
+            return result.clone();
+        }
+        let result = super::clue_outcome::compile_uncached(source, profile, self, baselines, kind);
+        self.outcomes.borrow_mut().push((kind, result.clone()));
+        result
+    }
+
+    pub(super) const fn action(&self) -> Action {
+        self.action
+    }
+
     pub(super) fn line_evidence(
         &self,
         source: &PlayerView,
@@ -452,6 +497,7 @@ pub(super) fn compiled_prospective_clue(
         after,
         team,
         line_evidence: Rc::new(RefCell::new(Vec::new())),
+        outcomes: Rc::new(RefCell::new(Vec::new())),
     });
     PROSPECTIVE_ANALYSIS_CACHE.with(|cache| {
         let mut cache = cache.borrow_mut();

@@ -22,7 +22,7 @@ use super::{
 pub(crate) struct HGroupAnalysis {
     replay: HGroupState,
     inferences: HGroupInferences,
-    clue_candidates: OnceLock<Vec<CompiledClueAction>>,
+    clue_candidates: OnceLock<super::candidate_pipeline::ClueCompilation>,
     endgame_completion: OnceLock<Option<EndgameCompletionPlan>>,
     action_set: OnceLock<HGroupActionSet>,
 }
@@ -57,7 +57,12 @@ pub(super) fn analysis_clue_candidates<'a>(
 ) -> &'a [CompiledClueAction] {
     analysis
         .clue_candidates
-        .get_or_init(|| h_group_clue_candidates_from_replay(deductions, profile, &analysis.replay))
+        .get_or_init(|| {
+            super::with_prospective_analysis_cache(deductions.view(), profile, || {
+                super::candidate_pipeline::compile(deductions, profile, &analysis.replay)
+            })
+        })
+        .admitted
         .as_slice()
 }
 
@@ -960,21 +965,30 @@ fn deferred_early_saves(
     }).map(|candidate| candidate.action).collect()
 }
 
+/// Shared response policy: admission and execution must agree on whether an
+/// otherwise due blind play is suspended by Ambiguous Finesse Pass Back.
+pub(super) fn response_requires_pass_back(
+    view: &PlayerView,
+    profile: HGroupProfile,
+    connection: HGroupConnection,
+) -> bool {
+    connection.kind == HGroupConnectionKind::Finesse
+        && rule_enabled(profile, HGroupRuleId::SpecialFinesses)
+        && super::prospective::assumed_play_has_unsafe_inference(
+            view,
+            profile,
+            connection.card,
+            connection.identity,
+        )
+}
+
 fn pass_back_analysis(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
     analysis: &HGroupAnalysis,
 ) -> Option<HGroupAnalysis> {
     let connection = analysis.inferences.connection?;
-    if connection.kind != HGroupConnectionKind::Finesse
-        || !rule_enabled(profile, HGroupRuleId::SpecialFinesses)
-        || !super::prospective::assumed_play_has_unsafe_inference(
-            deductions.view(),
-            profile,
-            connection.card,
-            connection.identity,
-        )
-    {
+    if !response_requires_pass_back(deductions.view(), profile, connection) {
         return None;
     }
     // AFPB suspends an unsafe blind-play obligation, not the underlying
@@ -1013,12 +1027,26 @@ pub(crate) fn analyze_h_group_convention(
         .iter()
         .map(|candidate| candidate.action)
         .collect::<Vec<_>>();
-    let rejected_actions = h_group_rejected_clues_from_replay(
+    let mut rejected_actions = h_group_rejected_clues_from_replay(
         deductions,
         profile,
         &analysis.replay,
         &admitted_actions,
     );
+    if let Some(compiled) = analysis.clue_candidates.get() {
+        for rejection in &compiled.rejected {
+            if !admitted_actions.contains(&rejection.action) {
+                if let Some(existing) = rejected_actions
+                    .iter_mut()
+                    .find(|old| old.action == rejection.action)
+                {
+                    *existing = *rejection;
+                } else {
+                    rejected_actions.push(*rejection);
+                }
+            }
+        }
+    }
     let ranked = actions
         .actions
         .iter()
@@ -1034,6 +1062,12 @@ pub(crate) fn analyze_h_group_convention(
     // actual convention requirements (or a single admitted action) can
     // prevent the planner from comparing the alternatives.
     let forced = actions.predictable.filter(|action| {
+        if analysis_clue_candidates(deductions, profile, &analysis)
+            .iter()
+            .any(|candidate| candidate.action == *action && candidate.conditional())
+        {
+            return false;
+        }
         actions.actions.len() == 1
             || matches!(action, Action::Play(card) if
             analysis.inferences.cards.iter().any(|note| {
@@ -1185,7 +1219,7 @@ fn derive_convention_constraints(
                         || (candidate.target() == urgent.target()
                             && (candidate.immediate_play()
                                 || hard_clue_obligation(view, replay, candidate)
-                                || delayed_clue_protects_chop(view, inferred, candidate)))
+                                || clue_protects_chop(view, profile, inferred, candidate)))
                 })
                 .map(|candidate| candidate.action),
         );
@@ -1241,18 +1275,22 @@ fn derive_convention_constraints(
 /// A convention-admitted delayed Play Clue also protects its touched chop.
 /// Urgent protection requires saving the card from discard, not making it
 /// playable immediately. Untouched chops still need a separate protection.
-fn delayed_clue_protects_chop(
+fn clue_protects_chop(
     view: &PlayerView,
+    profile: HGroupProfile,
     inferred: &HGroupInferences,
-    candidate: &CompiledClueAction,
+    candidate: &super::ClueProposal,
 ) -> bool {
-    let Action::Clue { target, clue } = candidate.action else {
-        return false;
-    };
-    candidate.purpose() == CluePurpose::Play
-        && inferred.chops[target.index()].is_some_and(|chop| {
-            identity_of(view, chop).is_some_and(|identity| clue.matches(identity))
-        })
+    let target = candidate.target();
+    inferred.chops[target.index()].is_some_and(|chop| {
+        super::clue_outcome::scheduled_clue_outcome(view, profile, candidate).is_some_and(
+            |outcome| {
+                outcome.protection.iter().any(|effect| {
+                    effect.owner == target && effect.card == chop && effect.deadline > view.turn
+                })
+            },
+        )
+    })
 }
 
 /// At zero clues an ordinary known play cannot be chosen over the only
@@ -2327,7 +2365,7 @@ fn play_preserves_clue_for_free_teammate(
     {
         return false;
     }
-    let Some(outcome) = super::strategic_value::scheduled_clue_outcome(source, profile, candidate)
+    let Some(outcome) = super::clue_outcome::scheduled_clue_outcome(source, profile, candidate)
     else {
         return false;
     };
@@ -2373,7 +2411,7 @@ fn play_preserves_clue_for_free_teammate(
             return false;
         }
         let Some(later) =
-            super::strategic_value::scheduled_clue_outcome(future_deductions.view(), profile, same)
+            super::clue_outcome::scheduled_clue_outcome(future_deductions.view(), profile, same)
         else {
             return false;
         };
@@ -2458,7 +2496,7 @@ fn early_game_clue_handoff_priority(
     if best.purpose() != CluePurpose::Play || best.target() == next {
         return None;
     }
-    let outcome = super::strategic_value::scheduled_clue_outcome(source, profile, best)?;
+    let outcome = super::clue_outcome::scheduled_clue_outcome(source, profile, best)?;
     // No promised actor may lose a turn when the clue moves one seat later.
     if outcome.public_actions.is_empty()
         || outcome
@@ -2507,7 +2545,7 @@ fn early_game_clue_handoff_priority(
             .iter()
             .find(|candidate| candidate.action == best.action)?;
         let later =
-            super::strategic_value::scheduled_clue_outcome(next_deductions.view(), profile, same)?;
+            super::clue_outcome::scheduled_clue_outcome(next_deductions.view(), profile, same)?;
         if later.public_actions != outcome.public_actions
             || later.owner_actions != outcome.owner_actions
             || later.protected_cards != outcome.protected_cards
@@ -2967,12 +3005,13 @@ mod urgent_protection_tests {
                 .any(|candidate| candidate.action == Action::Discard(CardId::new(16))),
             "discarding still leaves p5 exposed"
         );
-        let mut candidate = *analysis_clue_candidates(&deductions, HGroupProfile::Max, &analysis)
+        let mut candidate = **analysis_clue_candidates(&deductions, HGroupProfile::Max, &analysis)
             .iter()
             .find(|candidate| candidate.action == purple)
             .unwrap();
-        assert!(delayed_clue_protects_chop(
+        assert!(clue_protects_chop(
             deductions.view(),
+            HGroupProfile::Max,
             &analysis.inferences,
             &candidate
         ));
@@ -2982,8 +3021,9 @@ mod urgent_protection_tests {
             target: PlayerId::new(2),
             clue: Clue::Rank(Rank::Four),
         };
-        assert!(!delayed_clue_protects_chop(
+        assert!(!clue_protects_chop(
             deductions.view(),
+            HGroupProfile::Max,
             &analysis.inferences,
             &candidate
         ));

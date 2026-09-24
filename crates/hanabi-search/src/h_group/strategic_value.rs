@@ -1,10 +1,10 @@
+use super::clue_outcome::clue_line_value;
 use super::line_state::{ProjectedLineState, card_owner, projected_line_state};
 use super::{
-    Action, ActionCommitment, Card, CardId, CluePurpose, CluedCardSuperposition,
-    CompiledClueAction, HGroupConnection, HGroupMoveKind, HGroupProfile, HGroupRuleId, IdentitySet,
-    LineOutcome, LogicalDeductions, PlayerId, PlayerView, Rank, RecipientCardConsequence,
-    RecipientCardDisposition, card_is_trash, compiled_baseline_team, compiled_prospective_clue,
-    identity_of, is_eventually_useful, is_playable_at, is_playable_now, rule_enabled,
+    Action, Card, CardId, ClueProposal, CluePurpose, HGroupMoveKind, HGroupProfile, HGroupRuleId,
+    IdentitySet, LineOutcome, LogicalDeductions, PlayerId, PlayerView, Rank,
+    RecipientCardDisposition, compiled_baseline_team, compiled_prospective_clue, identity_of,
+    is_eventually_useful, is_playable_at, is_playable_now, rule_enabled,
 };
 
 const TEAM_ACTION_COVERAGE_PENALTY: u16 = 80;
@@ -36,7 +36,7 @@ const POSITIONAL_OPPORTUNITY_LOSS_PENALTY: u16 = 40;
 pub(super) fn apply_strategic_clue_values(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
-    candidates: &mut [CompiledClueAction],
+    candidates: &mut [ClueProposal],
 ) {
     if !rule_enabled(profile, HGroupRuleId::TempoCluesAndClarity) {
         return;
@@ -503,7 +503,7 @@ fn bottom_deck_risk_protection(
 fn expiring_multi_card_opportunity(
     source: &PlayerView,
     profile: HGroupProfile,
-    candidate: CompiledClueAction,
+    candidate: ClueProposal,
     outcome: &LineOutcome,
     baselines: &[ProjectedLineState],
 ) -> Option<CardId> {
@@ -541,7 +541,7 @@ fn expiring_multi_card_opportunity(
 fn positional_opportunity_losses(
     source: &PlayerView,
     profile: HGroupProfile,
-    candidates: &[CompiledClueAction],
+    candidates: &[ClueProposal],
 ) -> Vec<bool> {
     let mut losses = vec![false; candidates.len()];
     if source.deck_size == 0 {
@@ -727,7 +727,7 @@ fn occupies_next_turn(
 /// visible successors than the giver's current play.
 fn preserves_visible_continuation(
     source: &PlayerView,
-    candidate: CompiledClueAction,
+    candidate: ClueProposal,
     baselines: &[ProjectedLineState],
 ) -> bool {
     let Action::Clue { target, clue } = candidate.action else {
@@ -901,464 +901,6 @@ fn clue_establishes_actor_recognized_action(
     Some(false)
 }
 
-/// Compile a scheduling alternative with the same owner-relative outcome
-/// calculation used for ordinary clue valuation.
-pub(super) fn scheduled_clue_outcome(
-    source: &PlayerView,
-    profile: HGroupProfile,
-    candidate: &CompiledClueAction,
-) -> Option<LineOutcome> {
-    let team = compiled_baseline_team(source, profile);
-    let baselines = (0..source.hands.len())
-        .map(|player| {
-            let observer = PlayerId::new(u8::try_from(player).ok()?);
-            Some(projected_line_state(
-                source,
-                team.projection(observer)?.as_ref(),
-            ))
-        })
-        .collect::<Option<Vec<_>>>()?;
-    clue_line_value(
-        source,
-        profile,
-        candidate.action,
-        &baselines,
-        candidate.move_kind(),
-    )
-}
-
-#[allow(clippy::too_many_lines)]
-fn clue_line_value(
-    source: &PlayerView,
-    profile: HGroupProfile,
-    action: Action,
-    baselines: &[ProjectedLineState],
-    canonical_kind: Option<HGroupMoveKind>,
-) -> Option<LineOutcome> {
-    let Action::Clue { target, clue } = action else {
-        return None;
-    };
-    let touched = source.hands[target.index()]
-        .iter()
-        .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
-        .map(|card| card.id)
-        .collect::<Vec<_>>();
-    let compiled = compiled_prospective_clue(source, profile, target, clue, &touched)?;
-    let after_clue = compiled.after();
-    let mut value = LineOutcome::default();
-    let evidence = compiled.line_evidence(source, canonical_kind)?;
-    debug_assert_eq!(evidence.observer, source.observer);
-    let ignition_cards = &evidence.ignition_cards;
-    let charm_focus = evidence.charm_focus;
-    let mut giver_public_actions = Vec::new();
-    let caused_by_clue = |card: CardId, identity: Card| {
-        touched.contains(&card)
-            || touched
-                .iter()
-                .chain(ignition_cards)
-                .copied()
-                .any(|touched_card| {
-                    identity_of(source, touched_card).is_some_and(|touched_identity| {
-                        touched_identity.suit == identity.suit
-                            && touched_identity.rank.number() < identity.rank.number()
-                    })
-                })
-    };
-    let connects_to_clue_focus = |identity: Card| {
-        touched.iter().copied().any(|touched_card| {
-            identity_of(source, touched_card).is_some_and(|focus_identity| {
-                focus_identity.suit == identity.suit
-                    && identity.rank.number() < focus_identity.rank.number()
-            })
-        })
-    };
-    for (player, baseline) in baselines.iter().enumerate() {
-        let observer =
-            PlayerId::new(u8::try_from(player).expect("standard Hanabi has at most five players"));
-        let projection = compiled.projection(observer)?;
-        let conflicts_with_giver = evidence.conflicting_observers.contains(&observer);
-        let after = projected_line_state(after_clue, &projection);
-        if baseline.chop != after.chop {
-            let safe_discard = super::decision::convention_known_trash_discard(
-                projection.deductions.view(),
-                &projection.inferred,
-            )
-            .is_some();
-            // Only protection-driven chop changes are an exchange. A clue
-            // causing an ordinary play is valued by the ensuing line.
-            if baseline
-                .chop
-                .is_some_and(|card| after.chop_moved.contains(&card))
-                && !safe_discard
-                && super::decision::fresh_trash_chop_move_focus(
-                    projection.deductions.view(),
-                    &projection.replay,
-                )
-                .is_none()
-                && super::frontier_value::worsened_chop_exposure(
-                    source,
-                    after_clue,
-                    profile,
-                    baseline.chop,
-                    after.chop,
-                )
-                .is_some()
-            {
-                value.worsened_chop_exposure = true;
-            }
-        }
-        record_clued_superpositions(&mut value, observer, &after);
-        let changed_connection_cards = after
-            .connection_lines
-            .iter()
-            .flat_map(|(actor, focus, expected, cards)| {
-                let prior = baseline.connection_lines.iter().find(
-                    |(old_actor, old_focus, old_expected, _)| {
-                        old_actor == actor && old_focus == focus && old_expected == expected
-                    },
-                );
-                cards.iter().copied().filter(move |card| {
-                    prior.is_none_or(|(_, _, _, old_cards)| !old_cards.contains(card))
-                })
-            })
-            .collect::<super::CardSet>();
-        let commitment_caused = |card: CardId, identity: Card| {
-            caused_by_clue(card, identity)
-                || after.causal_cards.contains(&card)
-                || changed_connection_cards.contains(&card)
-        };
-        let baseline_public_commitments = baseline.closed_public_commitments(source);
-        if observer == target {
-            giver_public_actions.extend(
-                after
-                    .closed_public_commitments(source)
-                    .iter()
-                    .copied()
-                    .filter(|commitment| !baseline_public_commitments.contains(commitment))
-                    .filter(|(card, identity)| commitment_caused(*card, *identity))
-                    .filter_map(|(card, identity)| {
-                        card_owner(source, card)
-                            .map(|owner| ActionCommitment::exact(card, owner, identity))
-                    }),
-            );
-            giver_public_actions.extend(changed_connection_cards.iter().copied().filter_map(
-                |card| {
-                    identity_of(source, card)
-                        .filter(|identity| is_eventually_useful(source, *identity))
-                        .filter(|identity| {
-                            !baseline_public_commitments.contains(&(card, *identity))
-                        })
-                        .and_then(|identity| {
-                            card_owner(source, card)
-                                .map(|owner| ActionCommitment::exact(card, owner, identity))
-                        })
-                },
-            ));
-            giver_public_actions.extend(
-                after
-                    .connection_lines
-                    .iter()
-                    .flat_map(|(_, _, _, cards)| cards.iter().copied())
-                    .filter_map(|card| {
-                        identity_of(source, card)
-                            .filter(|identity| {
-                                caused_by_clue(card, *identity)
-                                    || connects_to_clue_focus(*identity)
-                                    || changed_connection_cards.contains(&card)
-                            })
-                            .filter(|identity| {
-                                !baseline_public_commitments.contains(&(card, *identity))
-                            })
-                            .and_then(|identity| {
-                                card_owner(source, card)
-                                    .map(|owner| ActionCommitment::exact(card, owner, identity))
-                            })
-                    }),
-            );
-        }
-        if !conflicts_with_giver {
-            value.public_actions.extend(
-                after
-                    .closed_public_commitments(source)
-                    .iter()
-                    .copied()
-                    .filter(|commitment| !baseline_public_commitments.contains(commitment))
-                    .filter(|(card, identity)| commitment_caused(*card, *identity))
-                    .filter_map(|(card, identity)| {
-                        card_owner(source, card)
-                            .map(|owner| ActionCommitment::exact(card, owner, identity))
-                    }),
-            );
-        }
-        let baseline_owner_commitments = baseline.closed_owner_commitments(source);
-        let new_actions = after
-            .closed_owner_commitments(source)
-            .iter()
-            .copied()
-            .filter(|commitment| !baseline_owner_commitments.contains(commitment))
-            .filter(|(card, identity)| commitment_caused(*card, *identity))
-            .filter_map(|(card, identity)| {
-                card_owner(source, card).map(|owner| ActionCommitment::exact(card, owner, identity))
-            })
-            .collect::<Vec<_>>();
-        value.owner_actions.extend(new_actions);
-        value
-            .protected_cards
-            .extend(
-                after
-                    .owner_promises
-                    .iter()
-                    .filter_map(|(card, identities)| {
-                        (!baseline.owner_promises.iter().any(|(old, _)| old == card)
-                            // A connection can list alternative hidden slots.
-                            // The giver must not count every visible face in
-                            // that list as secured by the expected identity.
-                            && (touched.contains(card)
-                                || after.chop_moved.contains(card)
-                                || !changed_connection_cards.contains(card)
-                                || identity_of(source, *card).is_none_or(|actual| {
-                                    after.connection_lines.iter().any(|(_, _, expected, cards)| {
-                                        *expected == actual && cards.contains(card)
-                                    })
-                                }))
-                            && identities
-                                .iter()
-                                .any(|identity| commitment_caused(*card, identity)))
-                        .then_some(*card)
-                    }),
-            );
-        value
-            .known_trash
-            .extend(after.epistemic.own_beliefs().filter_map(|belief| {
-                if !touched.contains(&belief.card) {
-                    return None;
-                }
-                belief
-                    .known_identity()
-                    .filter(|identity| card_is_trash(source, *identity))
-                    .and_then(|_| {
-                        baseline
-                            .epistemic
-                            .belief(belief.card)
-                            .is_none_or(|prior| prior.known_identity().is_none())
-                            .then_some(belief.card)
-                    })
-            }));
-        if let Some(connection) = (!conflicts_with_giver)
-            .then_some(after.connection)
-            .flatten()
-            .filter(|connection| {
-                baseline
-                    .connection
-                    .is_none_or(|prior| prior.card != connection.card)
-                    && !baseline_public_commitments.iter().any(|(card, identity)| {
-                        *card == connection.card && *identity == connection.identity
-                    })
-            })
-        {
-            record_new_connection(&mut value, source, connection);
-        }
-    }
-    giver_public_actions.extend(ignition_cards.iter().copied().filter_map(|card| {
-        identity_of(source, card)
-            .and_then(|identity| card_owner(source, card).map(|owner| (card, owner, identity)))
-            .map(|(card, owner, identity)| ActionCommitment::exact(card, owner, identity))
-    }));
-    if let Some(focus) = charm_focus {
-        // A Charm immediately schedules the Fourth-Finesse-Position card.
-        // Its untouched 4 remains a valuable long-term promise, but is not a
-        // deterministic continuation until the intervening 1, 2, and 3 are
-        // secured. Keep it in owner knowledge/protection without inflating
-        // immediate team-action coverage.
-        giver_public_actions.retain(|commitment| commitment.card != focus);
-        value
-            .public_actions
-            .retain(|commitment| commitment.card != focus);
-    }
-    // An observer's alternative Finesse reading is not an additional action
-    // in the canonical Bluff/Clandestine line. Keep only that line's cards,
-    // and never count two different identities on the same visible card.
-    // https://hanabi.github.io/level-11/#mistaking-a-layered-finesse-for-a-bluff
-    let canonical_cards = evidence
-        .named
-        .as_ref()
-        .and_then(|line| line.playable_cards.as_ref());
-    let consistent = |commitment: &ActionCommitment| {
-        canonical_cards.is_none_or(|cards| {
-            cards.contains(&commitment.card)
-                && identity_of(source, commitment.card)
-                    .is_none_or(|actual| commitment.identities.contains(actual))
-        })
-    };
-    giver_public_actions.retain(consistent);
-    value.public_actions.retain(consistent);
-    value.owner_actions.retain(consistent);
-    // A canonical blind-play line commits to playing these slots, not to
-    // their provisional imagined identities. For example, p2 imagined on a
-    // visibly green 1 still produces a green-1 play in a Double Bluff. Count
-    // the compiled behavioral consequence instead of losing both actions
-    // when the provisional Finesse promises are filtered above.
-    if let Some(line) = &evidence.named {
-        for card in &line.blind_play_cards {
-            if let Some((identity, owner)) = identity_of(source, *card)
-                .filter(|identity| is_eventually_useful(source, *identity))
-                .zip(card_owner(source, *card))
-            {
-                let commitment = ActionCommitment::exact(*card, owner, identity);
-                giver_public_actions.push(commitment);
-                value.public_actions.push(commitment);
-            }
-        }
-    }
-    giver_public_actions
-        .sort_unstable_by_key(|commitment| (commitment.card.index(), commitment.owner.index()));
-    giver_public_actions.dedup();
-    value
-        .recipient_consequences
-        .extend(value.public_actions.iter().map(|commitment| {
-            RecipientCardConsequence {
-                card: commitment.card,
-                owner: commitment.owner,
-                identities: commitment.identities,
-                disposition: if !commitment.identities.is_empty()
-                    && commitment
-                        .identities
-                        .iter()
-                        .all(|identity| is_playable_now(source, identity))
-                {
-                    RecipientCardDisposition::PlayNow
-                } else {
-                    RecipientCardDisposition::PlayAfterConnection
-                },
-            }
-        }));
-    value
-        .recipient_consequences
-        .extend(value.known_trash.iter().filter_map(|card| {
-            card_owner(source, *card).map(|owner| RecipientCardConsequence {
-                card: *card,
-                owner,
-                identities: IdentitySet::default(),
-                disposition: RecipientCardDisposition::KnownTrash,
-            })
-        }));
-    value
-        .recipient_consequences
-        .extend(value.protected_cards.iter().filter_map(|card| {
-            card_owner(source, *card).map(|owner| RecipientCardConsequence {
-                card: *card,
-                owner,
-                identities: IdentitySet::default(),
-                disposition: RecipientCardDisposition::Protected,
-            })
-        }));
-    value.action_coverage = giver_public_actions.len();
-    // Efficiency counts cards obtained by this clue, not already-clued
-    // successors that become playable automatically. Those successors keep
-    // their separate tempo/endpoint value. A red-2 Finesse through red 1 is
-    // a 2-for-1 even when it also releases an already-clued red 3.
-    let mut directly_secured = giver_public_actions
-        .iter()
-        .filter(|commitment| {
-            // Retouching or clarifying an already-clued connector can
-            // improve its timing, but does not obtain that card again.
-            // Reviewed p4v0s1 turn 19: p3 and g5 are already secured.
-            !super::was_clued_before(source, source.turn, commitment.card)
-        })
-        .map(|commitment| commitment.card)
-        .collect::<Vec<_>>();
-    directly_secured.extend(touched.iter().copied().filter(|card| {
-        !super::was_clued_before(source, source.turn, *card)
-            && !baselines.iter().any(|baseline| {
-                baseline.owner_promises.iter().any(|(old, _)| old == card)
-                    || baseline.playable_now.contains(card)
-            })
-            && identity_of(source, *card)
-                .is_some_and(|identity| is_eventually_useful(source, identity))
-    }));
-    directly_secured.extend(value.protected_cards.iter().copied());
-    directly_secured.sort_unstable();
-    directly_secured.dedup();
-    let previously_secured = source
-        .hands
-        .iter()
-        .flatten()
-        .filter(|card| {
-            super::was_clued_before(source, source.turn, card.id)
-                || baselines.iter().any(|baseline| {
-                    baseline
-                        .owner_promises
-                        .iter()
-                        .any(|(old, _)| *old == card.id)
-                        || baseline.playable_now.contains(&card.id)
-                })
-        })
-        .map(|card| (card.id, card.identity))
-        .collect::<Vec<_>>();
-    value.clue_efficiency =
-        super::admission::minimum_clue_value(source, &previously_secured, directly_secured);
-    // A fill-in may improve timing, but does not obtain a previously saved
-    // card again. Keep that benefit in actions/tempo, never invent a 1-for-1.
-    if let Some(line) = &evidence.named {
-        let action_count = line.secured_actions;
-        let connection_steps = line.connection_steps;
-        value.convention_action_count = Some(if canonical_kind == Some(HGroupMoveKind::PlayClue) {
-            // A normal Play line earns only its newly secured cards, not
-            // older scheduled predecessors or every alternative blind slot.
-            // Cap by the named line's size so unrelated downstream benefits
-            // do not become extra steps in that convention line.
-            // A compiled cross-suit line has explicit connector evidence;
-            // do not reconstruct it with the ordinary same-suit fallback.
-            let mut secured = value
-                .public_actions
-                .iter()
-                .map(|action| action.card)
-                .chain(value.protected_cards.iter().copied())
-                .collect::<Vec<_>>();
-            secured.sort_unstable();
-            secured.dedup();
-            secured.len().min(action_count)
-        } else {
-            action_count
-        });
-        value.convention_connection_steps = Some(connection_steps);
-    }
-    value.normalize();
-    Some(value)
-}
-
-fn record_clued_superpositions(
-    value: &mut LineOutcome,
-    observer: PlayerId,
-    state: &ProjectedLineState,
-) {
-    value
-        .clued_superpositions
-        .extend(
-            state
-                .owner_clued_superpositions
-                .iter()
-                .map(|(card, identities)| CluedCardSuperposition {
-                    card: *card,
-                    owner: observer,
-                    identities: *identities,
-                }),
-        );
-}
-
-fn record_new_connection(
-    value: &mut LineOutcome,
-    source: &PlayerView,
-    connection: HGroupConnection,
-) {
-    if let Some(owner) = card_owner(source, connection.card) {
-        let commitment = ActionCommitment::exact(connection.card, owner, connection.identity);
-        value.public_actions.push(commitment);
-        value.owner_actions.push(commitment);
-    }
-    value.new_connections += 1;
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1480,7 +1022,10 @@ mod tests {
         assert_eq!(outcomes[0].convention_action_count, Some(2));
         assert_eq!(outcomes[0].clue_efficiency, 2);
         let deductions = LogicalDeductions::new(source).unwrap();
-        let candidates = super::super::h_group_clue_candidates(&deductions, HGroupProfile::Max);
+        let candidates = super::super::h_group_clue_candidates(&deductions, HGroupProfile::Max)
+            .into_iter()
+            .map(super::super::candidate_pipeline::CompiledClueAction::proposal)
+            .collect::<Vec<_>>();
         assert_eq!(
             candidates
                 .iter()
@@ -1588,7 +1133,10 @@ mod tests {
         loses_protection.protected_cards.clear();
         assert!(!loses_protection.strictly_improves_owner_knowledge(&outcomes[1]));
         let deductions = LogicalDeductions::new(source.clone()).unwrap();
-        let available = super::super::h_group_clue_candidates(&deductions, HGroupProfile::Max);
+        let available = super::super::h_group_clue_candidates(&deductions, HGroupProfile::Max)
+            .into_iter()
+            .map(super::super::candidate_pipeline::CompiledClueAction::proposal)
+            .collect::<Vec<_>>();
         let mut pair = [Clue::Suit(Suit::Yellow), Clue::Rank(Rank::Five)].map(|clue| {
             *available
                 .iter()
@@ -1638,7 +1186,10 @@ mod tests {
         let state = replay.state_at_turn(0).unwrap();
         let mut source = state.view_for(state.current_player()).unwrap();
         let deductions = LogicalDeductions::new(source.clone()).unwrap();
-        let candidates = super::super::h_group_clue_candidates(&deductions, HGroupProfile::Max);
+        let candidates = super::super::h_group_clue_candidates(&deductions, HGroupProfile::Max)
+            .into_iter()
+            .map(super::super::candidate_pipeline::CompiledClueAction::proposal)
+            .collect::<Vec<_>>();
         let losses = positional_opportunity_losses(&source, HGroupProfile::Max, &candidates);
         let blue = candidates
             .iter()

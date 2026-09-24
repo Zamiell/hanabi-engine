@@ -20,9 +20,13 @@ use super::{
 pub(super) struct PerspectiveProjector<'a> {
     source: &'a PlayerView,
     profile: HGroupProfile,
-    // Separate the immediate reactor from other observers: provisional
-    // Finesse identities must not determine their own triggering response.
-    source_known_cards: [OnceLock<HashMap<CardId, Card>>; 2],
+    source_known_cards: OnceLock<HashMap<CardId, AssumedIdentity>>,
+}
+
+#[derive(Clone)]
+struct AssumedIdentity {
+    identity: Card,
+    dependencies: Vec<super::hypothesis::AssumptionDependency>,
 }
 
 /// A conditional reasoning input, deliberately not a `PlayerView`. The
@@ -38,7 +42,7 @@ impl<'a> PerspectiveProjector<'a> {
         Self {
             source,
             profile,
-            source_known_cards: [OnceLock::new(), OnceLock::new()],
+            source_known_cards: OnceLock::new(),
         }
     }
 
@@ -51,7 +55,7 @@ impl<'a> PerspectiveProjector<'a> {
         Some((projected.deductions, projected.replay))
     }
 
-    fn inferred_source_cards(&self, immediate_reactor: bool) -> HashMap<CardId, Card> {
+    fn inferred_source_cards(&self) -> HashMap<CardId, AssumedIdentity> {
         // Hypothesize what another player sees if our convention
         // promises are right. This map must not become observed truth.
         let mut source_observation = self.source.clone();
@@ -69,37 +73,26 @@ impl<'a> PerspectiveProjector<'a> {
         );
         convention_card_inferences(&source_deductions, &source_replay)
             .into_iter()
-            .filter(|note| {
-                // A later player's fresh Finesse reading depends on
-                // the immediate reactor not demonstrating a Bluff.
-                // Exporting it as a visible card to that reactor makes
-                // this premise prove itself via Bob's Truth Principle.
-                // Literal knowledge is independent of this reading.
-                !immediate_reactor
-                    || source_deductions
-                        .possible_identities(note.card)
-                        .is_some_and(|identities| identities.len() == 1)
-                    || !source_replay.pending_connections.iter().any(|connection| {
-                        connection.actor != self.source.current_player
-                            && connection.kind == super::HGroupConnectionKind::Finesse
-                            && connection.cards.contains(&note.card)
-                            && source_replay
-                                .pending_connections
-                                .provenance(connection.promise)
-                                .is_some_and(|origin| {
-                                    origin.created_turn.saturating_add(1) == self.source.turn
-                                })
-                    })
-            })
             .filter_map(|note| {
-                (note.identities.len() == 1)
-                    .then(|| {
-                        note.identities
-                            .iter()
-                            .next()
-                            .map(|identity| (note.card, identity))
-                    })
-                    .flatten()
+                if note.identities.len() != 1 {
+                    return None;
+                }
+                let identity = note.identities.iter().next()?;
+                let literal = source_deductions
+                    .possible_identities(note.card)
+                    .is_some_and(|domain| domain.len() == 1);
+                let dependencies = if literal {
+                    Vec::new()
+                } else {
+                    super::hypothesis::identity_dependencies(self.source, &source_replay, note.card)
+                };
+                Some((
+                    note.card,
+                    AssumedIdentity {
+                        identity,
+                        dependencies,
+                    },
+                ))
             })
             .collect::<HashMap<_, _>>()
     }
@@ -116,11 +109,10 @@ impl<'a> PerspectiveProjector<'a> {
             && observer != self.source.observer
             && !source_hand_is_resolved
         {
-            let immediate_reactor = observer == self.source.current_player;
-            self.source_known_cards[usize::from(immediate_reactor)]
-                .get_or_init(|| self.inferred_source_cards(immediate_reactor))
+            self.source_known_cards
+                .get_or_init(|| self.inferred_source_cards())
         } else {
-            static EMPTY: OnceLock<HashMap<CardId, Card>> = OnceLock::new();
+            static EMPTY: OnceLock<HashMap<CardId, AssumedIdentity>> = OnceLock::new();
             EMPTY.get_or_init(HashMap::new)
         };
         let mut view = self.source.clone();
@@ -131,13 +123,20 @@ impl<'a> PerspectiveProjector<'a> {
                 card.identity = (player != observer.index())
                     .then(|| {
                         identity_of(self.source, card.id).or_else(|| {
-                            let identity = source_known_cards.get(&card.id).copied()?;
+                            let inferred = source_known_cards.get(&card.id)?;
+                            if inferred.dependencies.iter().any(|dependency| {
+                                dependency.would_prove_itself(observer, self.source.turn)
+                            }) {
+                                return None;
+                            }
+                            let identity = inferred.identity;
                             assumptions.push(super::PerspectiveAssumption {
                                 turn: self.source.turn,
                                 source_observer: self.source.observer,
                                 modeled_observer: observer,
                                 card: card.id,
                                 identity,
+                                dependencies: inferred.dependencies.clone(),
                             });
                             Some(identity)
                         })

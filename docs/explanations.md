@@ -64,9 +64,17 @@ The report contains:
   diagnostics include touched cards and a description of the exclusion rule. A
   generic `NoConventionMeaning` is explicitly identified as an exclusion
   classification, not a detailed proof from every semantic generator.
+- Common principle checks for Minimum Clue Value, Good Touch, and response
+  safety. Each records `Pass`, `Exception`, `Unresolved`, or `Fail`, its
+  evidence, and an exception source when applicable. A rejection from this
+  boundary uses that recorded evidence. Missing causal evidence is conditional
+  admission; projections stop before relying on it and exact search reports
+  `ConditionalAdmission` instead of treating it as proven.
 - The actual pairwise comparisons, including endpoint decisions and cycles.
-  Higher raw scores do not necessarily win. Exact-phase outcome statistics are
-  reported separately; an exact principal variation is not currently retained.
+  Their `authority` distinguishes policy, forecast evidence, and heuristic
+  preference. Higher raw scores do not necessarily win. Exact-phase outcome
+  statistics are reported separately; an exact principal variation is not
+  currently retained.
 - `actualBasis` retains the resource operands used by endpoint comparisons,
   including the elapsed horizon and normalized token values. Raw endpoints and a
   shared checkpoint are also included, but are labeled as context rather than
@@ -75,8 +83,9 @@ The report contains:
 - Projected actions with actors, one-based turns, actor-relative interpreted
   card domains where recorded, token changes, strikes, Save Principle
   violations, and BDR. Conditional branches, assumptions, and dependency
-  evidence remain explicit. Missing interpretations are null, not invented from
-  the deck.
+  evidence remain explicit. Assumptions retain their originating turn, focus,
+  and prerequisite response decision; they cannot establish that same response.
+  Missing interpretations are null, not invented from the deck.
 - Endpoint values, stopping reasons, and pending unknown discards. A selected
   forecast action is not necessarily forced; pending BDR is a possible risk, not
   proof of an inevitable loss. `forcedRoot` records the root convention

@@ -3,9 +3,8 @@
 //! <https://hanabi.github.io/level-11/#bluffs-through-already-clued-cards>
 
 use super::{
-    Card, CluePurpose, CompiledClueAction, HGroupProfile, HGroupRuleId, IdentitySet,
-    LogicalDeductions, PlayerId, Rank, compiled_baseline_team, finesse_position, is_playable_now,
-    rule_enabled,
+    Card, ClueProposal, CluePurpose, HGroupProfile, HGroupRuleId, IdentitySet, LogicalDeductions,
+    PlayerId, Rank, compiled_baseline_team, finesse_position, is_playable_now, rule_enabled,
 };
 use hanabi_core::Action;
 
@@ -21,7 +20,7 @@ pub(super) struct PositionalValue {
 pub(super) fn evaluate(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
-    candidate: CompiledClueAction,
+    candidate: ClueProposal,
 ) -> PositionalValue {
     let mut value = PositionalValue::default();
     if !rule_enabled(profile, HGroupRuleId::Bluffs) {

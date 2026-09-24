@@ -233,3 +233,105 @@ The September 18 review already identified incorrect intermediate behavior and
 insufficiently enforced contracts. The intervening fixes sharpen that diagnosis:
 the missing abstraction is a shared, evidence-bearing admission decision over
 the actual effects of a clue.
+
+## Implementation follow-through
+
+The subsequent refactor introduces `ClueProposal` and a private
+`CompiledClueAction` construction boundary. Ordinary, advanced, mandatory Fix,
+and fallback Stall/Burn proposals pass through common MCVP, Good Touch, and
+response checks before strategic scoring. Ordinary Good Touch and MCVP filters
+were removed from their old admission branches. Conditions that distinguish
+convention meanings remain in interpretation; those conditions cannot waive
+common validation. Competing meanings survive until validation, so rejection of
+an incorrect Bluff does not erase a valid ordinary interpretation.
+
+Causal outcome compilation now lives in `clue_outcome.rs`, independently of
+strategic preferences, and is cached with the prospective clue. It includes
+untouched knowledge changes, newly playable cards, protection deadlines, and
+trash demonstrated by a safe intervening response. Urgent protection and the
+Save negative-information consumer use these effects. The discharge regression
+exposed missing responder-relative value and trash knowledge being incorrectly
+tied to an immediate discard instruction; both were corrected without changing
+the recorded move or weakening its assertion.
+
+Each principle records Pass, Exception, Unresolved, or Fail, with evidence and a
+source for exceptions. Explanations use the recorded rejection when a proposal
+fails validation; clues with no proposed interpretation retain an explicitly
+labeled generic classification. Unresolved admission is a projection dependency,
+not a passed check. Forecasts stop before consuming it, and exact search does
+not report unconditional certainty over conditional clue admissions.
+
+Projection assumptions now carry their originating focus, turn, and prerequisite
+response decision. The projector enforces those dependencies without recognizing
+Bluff/Finesse labels itself. The current dependency producer covers provisional
+Finesse alternatives; this is not a claim that every possible future convention
+has a complete dependency graph. Comparison records separately identify policy,
+forecast evidence, and heuristic preference. Development heuristics no longer
+supply edges in the forecast-dominance exclusion graph.
+
+Contract coverage includes complete cached/uncached outcome equality at reviewed
+turns 19 and 21; all registered move labels tested against zero and unavailable
+value; conditional-clue dependency evaluation; the existing Bluff response,
+indirect protection, new-card counting, and circular-assumption regressions; and
+the reviewed discharge exception with demonstration evidence removed as a
+negative control. The before/after reviewed-test comparison used baseline
+`7199261`: 15 failures were reproduced before the refactor. Initial additional
+discharge failures exposed the missing effects described above, rather than a
+reason to exempt Discharge from validation. These focused comparisons do not
+constitute replay-wide agreement or a clean full-suite result.
+
+The rescan also exposed a response-policy inconsistency in a counterfactual
+branch from turn 3: admission claimed Donald's blind play after purple to Bob,
+while the action selector passed that obligation back because playing would
+mislead Bob. Proposals now declare their required response, and the common
+validator shares the action selector's Ambiguous Finesse Pass Back predicate.
+The boundary regression checks both a wrong declared card and an inferred but
+suspended response; the reviewed turn-19/21 Bluffs remain positive controls.
+This is an implementation consistency fix, not a new human ruling that the
+counterfactual clue or continuation is optimal.
+
+The full checkpoint exposed six additional regressions against `7199261`. The
+follow-up corrections preserve all original assertions: demonstrated Trash Chop
+Moves count the unlabelled cards they protect; the Good Touch validator
+recognizes accounted-for trash in the recipient's entire domain; critical Saves
+record the explicit Save Principle exception when every direct clue has bad
+collateral; and a layered connection no longer counts every possible slot's
+physical identity as already secured. The latter preserves the reviewed p4v0s2
+turn-6 Ejection's two acquisitions, p2 and b5, without double-counting
+previously secured cards in the reviewed p4v0s1 Bluffs.
+
+The duplicate-touch reproduction also verifies that established invisible
+promises participate in Good Touch accounting. The common check now uses the
+same promptable promise set as interpretation. The ordinary Rust checkpoint ran
+449 tests: 388 passed and 61 failed. Before follow-up fixes, 55 failures were
+separately reproduced on `7199261`, and six passed there. This is a measured
+failing baseline, not permission to weaken or remove those tests. The checkpoint
+passed build, Clippy, documentation, Python, and dead-code stages. Its GNU-only
+ownership query silently failed on macOS; the script now uses numeric GNU/BSD
+stat fallbacks and propagates query failures.
+
+The subsequent broad recheck exposed a circular trash exception: a bad clue
+could make the recipient incorrectly eliminate its real identity, then use that
+inferred trash to waive Good Touch. The validator now also requires the giver's
+existing evidence that the touched card is trash or duplicates an already
+secured card. A newly created promise cannot certify its own exception. The
+existing two-new-fours negative control passes, alongside the reviewed Trash
+Chop Move and critical Save positive controls.
+
+The historical p4v0s415 turn-32 discard assertion also fails on the starting
+revision: baseline chooses 4s to Cathy, while the refactor chooses yellow to
+Bob. Both reject the no-value 5s fill-in, which remains the test's admission
+assertion. The first checkpoint temporarily passed the optimal-move assertion
+because the incomplete causal outcome rejected productive Trash Chop Moves.
+Restoring their protection effects exposed this pre-existing strategy failure;
+the assertion is retained. Thus 56 failing tests have now been separately
+reproduced on the starting revision, rather than 55.
+
+Final verification: `scripts/check.sh --fast` passed. A workspace Rust recheck
+passed all 394 included tests, excluding the 56 individually reproduced baseline
+failures (plus the suite's normally skipped tests). This is not a clean
+full-suite pass. The final p4v0s1 rescan agrees on turns 1–25 and stops at turn
+26: Bob's recorded p4 discard versus purple to Alice. The current owner-relative
+forecasts and unresolved strategic question are recorded in
+`docs/replay-reviews/p4v0s1.json`. The fixture and all existing assertions are
+unchanged.

@@ -59,8 +59,15 @@ check_file_ownership() {
   local expected_group
   local repository_parent
   repository_parent="$(dirname -- "$repository_root")"
-  expected_owner="$(stat --format='%U' -- "$repository_parent")"
-  expected_group="$(stat --format='%G' -- "$repository_parent")"
+  # GNU and BSD stat use different flags. Numeric IDs also avoid depending
+  # on name-service lookup. Propagate failures instead of accepting an empty
+  # find result after a failed ownership query.
+  if ! expected_owner="$(stat --format='%u' -- "$repository_parent" 2>/dev/null)"; then
+    expected_owner="$(stat -f '%u' "$repository_parent")" || return 1
+  fi
+  if ! expected_group="$(stat --format='%g' -- "$repository_parent" 2>/dev/null)"; then
+    expected_group="$(stat -f '%g' "$repository_parent")" || return 1
+  fi
 
   local -a mismatched_paths=()
   mapfile -d '' mismatched_paths < <(

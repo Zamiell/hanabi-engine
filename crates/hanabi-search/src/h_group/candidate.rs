@@ -2,7 +2,7 @@ use hanabi_core::{Action, CardId, PlayerId};
 
 use super::HGroupMoveKind;
 
-/// The primary convention role of an admitted clue.
+/// The proposed convention role; this label grants no principle exception.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum CluePurpose {
     Fix,
@@ -12,21 +12,20 @@ pub(super) enum CluePurpose {
     Tempo,
 }
 
-/// Evidence supporting prospective admission. Some clues have meaning that
-/// legitimately branches on the giver's hidden hand once the recipient sees
-/// it; those retain their focused construction proof instead of pretending a
-/// single unresolved projection can assign one universal label.
+/// Interpretation recognition, independent of the principle-validation trace.
+/// Some meanings branch on the giver's hidden hand; generator recognition
+/// never establishes that a missing principle check passed.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ClueRecognition {
-    /// The semantic generator proved the clue, but nested recipient replay
-    /// could not assign one universal interpretation across hidden worlds.
+    /// A rule proposed this meaning, but recipient replay could not assign
+    /// one universal interpretation across hidden worlds.
     GeneratorProof,
     /// The recipient's canonical replay independently reconstructed it.
     RecipientReplay,
 }
 
 /// Scheduling consequences kept together instead of accumulating unrelated
-/// booleans on `CompiledClueAction`.
+/// booleans on `ClueProposal`.
 #[derive(Clone, Copy, Debug, Default)]
 pub(super) struct ClueSchedule {
     urgent_save: bool,
@@ -176,17 +175,18 @@ pub(super) struct CompiledClueSemantics {
     line: CompiledClueLine,
 }
 
-/// Convention-valid clue plus the one compiled semantic result consumed by
-/// recipient validation, policy, strategy, and planning.
+/// A proposed meaning and its declared response obligations. Only the common
+/// validator can promote it to an admitted action.
 #[derive(Clone, Copy, Debug)]
-pub(super) struct CompiledClueAction {
+pub(super) struct ClueProposal {
     pub(super) action: Action,
     semantics: CompiledClueSemantics,
     pub(super) value: ClueValue,
     recognition: ClueRecognition,
+    pub(super) required_response: Option<(PlayerId, CardId)>,
 }
 
-impl CompiledClueAction {
+impl ClueProposal {
     pub(super) const fn new(
         action: Action,
         move_kind: Option<HGroupMoveKind>,
@@ -211,6 +211,7 @@ impl CompiledClueAction {
             },
             value,
             recognition: ClueRecognition::GeneratorProof,
+            required_response: None,
         }
     }
 
@@ -242,6 +243,7 @@ impl CompiledClueAction {
 
     pub(super) fn explanation(self) -> crate::ClueExplanation {
         crate::ClueExplanation {
+            validation: Vec::new(),
             interpretation: None,
             recognition: match self.recognition {
                 ClueRecognition::GeneratorProof => "generatorProof",

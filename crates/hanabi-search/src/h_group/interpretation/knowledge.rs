@@ -398,6 +398,49 @@ impl<'a> ConventionKnowledgeCompiler<'a> {
     }
 
     /// <https://hanabi.github.io/level-16/#the-5-color-ejection-5ce>
+    /// A Discharge teaches that its focus is trash. This knowledge survives
+    /// the Unnecessary Trash Push temporarily superseding the discard action.
+    /// <https://hanabi.github.io/level-16/#the-unknown-trash-discharge-1-for-1-form-utd>
+    fn apply_resolved_discharge_trash(&mut self) {
+        let view = self.deductions.view();
+        for signal in self
+            .replay
+            .signals
+            .of_kind(HGroupMoveKind::UnknownTrashDischarge)
+        {
+            let Some(origin) = self.replay.clues.iter().rev().find(|clue| {
+                (clue.turn == signal.turn || clue.turn.saturating_add(1) == signal.turn)
+                    && signal.cards.contains(&clue.focus)
+                    && clue.target == view.observer
+            }) else {
+                continue;
+            };
+            let Some(literal) = self.deductions.possible_identities(origin.focus) else {
+                continue;
+            };
+            let trash = IdentitySet::from_mask(
+                literal
+                    .iter()
+                    .filter(|identity| !is_eventually_useful(view, *identity))
+                    .fold(0, |mask, identity| mask | (1 << identity.index())),
+            );
+            if trash.is_empty() {
+                continue;
+            }
+            self.knowledge.update(
+                origin.focus,
+                KnowledgeSource::Reinterpretation(signal.turn),
+                |note| {
+                    note.identities = trash;
+                    note.promised_identity = None;
+                    note.identity_status = HGroupIdentityStatus::Settled;
+                    note.play_obligation = None;
+                    note.focused = false;
+                },
+            );
+        }
+    }
+
     fn apply_resolved_ejections(&mut self) {
         for card in self.knowledge.cards.clone() {
             let Some(identity) = self
@@ -1234,6 +1277,7 @@ fn compile_convention_card_inferences(
     compiler.apply_current_focus();
     compiler.apply_forced_plays();
     compiler.apply_implicit_saves();
+    compiler.apply_resolved_discharge_trash();
     for deduction in &replay.strategic_deductions {
         compiler.knowledge.update(
             deduction.card,

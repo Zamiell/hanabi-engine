@@ -165,7 +165,7 @@ fn equivalent_clue_handoff(
 ) -> bool {
     let view = deductions.view();
     let next = next_player(view.observer, view.hands.len());
-    let Some(outcome) = super::strategic_value::scheduled_clue_outcome(view, profile, best) else {
+    let Some(outcome) = super::clue_outcome::scheduled_clue_outcome(view, profile, best) else {
         return false;
     };
     // Outcomes contain *new* commitments relative to each giver's baseline.
@@ -212,7 +212,7 @@ fn equivalent_clue_handoff(
         else {
             return false;
         };
-        let Some(later) = super::strategic_value::scheduled_clue_outcome(d.view(), profile, same)
+        let Some(later) = super::clue_outcome::scheduled_clue_outcome(d.view(), profile, same)
         else {
             return false;
         };

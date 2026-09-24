@@ -199,6 +199,23 @@ fn first_seed_unknown_trash_discharge_and_unnecessary_push() {
         "{notes:?}"
     );
     assert!(notes.playable_now.contains(&CardId::new(33)), "{notes:?}");
+    let trash_note = notes
+        .cards
+        .iter()
+        .find(|note| note.card == CardId::new(29))
+        .unwrap();
+    assert!(!trash_note.identities.is_empty());
+    assert!(
+        trash_note
+            .identities
+            .iter()
+            .all(|identity| !is_eventually_useful(d.view(), identity))
+    );
+    assert!(
+        !notes.playable_now.contains(&CardId::new(29)),
+        "a postponed discard must not restore the false play note"
+    );
+
     assert_eq!(
         select_h_group_action(&d, HGroupProfile::Max),
         Some(Action::Play(CardId::new(33)))
@@ -1941,9 +1958,9 @@ fn fourth_replay_two_save_preserves_positional_red_options() {
             .unwrap()
     };
     let direct =
-        super::super::positional_value::evaluate(&d, HGroupProfile::Max, candidate(Rank::One));
+        super::super::positional_value::evaluate(&d, HGroupProfile::Max, *candidate(Rank::One));
     let save =
-        super::super::positional_value::evaluate(&d, HGroupProfile::Max, candidate(Rank::Two));
+        super::super::positional_value::evaluate(&d, HGroupProfile::Max, *candidate(Rank::Two));
     assert_eq!(direct.foregone_blind_plays, 1);
     assert_eq!(save.foregone_blind_plays, 0);
     assert_eq!(save.conditional_prompt_chains, 1);
@@ -2055,7 +2072,7 @@ fn fourth_replay_green_gets_more_new_plays_than_rank_four() {
                     }
             })
             .unwrap();
-        let outcome = super::super::strategic_value::scheduled_clue_outcome(
+        let outcome = super::super::clue_outcome::scheduled_clue_outcome(
             d.view(),
             HGroupProfile::Max,
             candidate,
@@ -2753,7 +2770,7 @@ fn fifth_replay_purple_double_bluff_is_admitted() {
         .find(|candidate| candidate.action == action)
         .expect("the Double Bluff is admitted");
     let outcome =
-        super::super::strategic_value::scheduled_clue_outcome(&view, HGroupProfile::Max, candidate)
+        super::super::clue_outcome::scheduled_clue_outcome(&view, HGroupProfile::Max, candidate)
             .unwrap();
     assert_eq!(outcome.convention_action_count, Some(3));
     assert_eq!(outcome.convention_connection_steps, Some(2));
@@ -2772,8 +2789,7 @@ fn fifth_replay_purple_double_bluff_is_admitted() {
         })
         .unwrap();
     let red_outcome =
-        super::super::strategic_value::scheduled_clue_outcome(&view, HGroupProfile::Max, red)
-            .unwrap();
+        super::super::clue_outcome::scheduled_clue_outcome(&view, HGroupProfile::Max, red).unwrap();
     assert_eq!(red_outcome.clue_efficiency, 2);
     assert_eq!(outcome.clue_efficiency, 3);
     assert!(candidate.value.total() > red.value.total());
@@ -4698,6 +4714,15 @@ fn third_replay_turn_six_blue_is_a_five_color_ejection() {
             .iter()
             .any(|candidate| candidate.action == action),
         "{candidates:#?}"
+    );
+    let admitted = candidates
+        .iter()
+        .find(|candidate| candidate.action == action)
+        .unwrap();
+    assert_eq!(
+        admitted.checks()[0].new_cards,
+        2,
+        "the old layered alternatives did not already secure Cathy's p2 and Donald's b5"
     );
     let analysis = analyze_h_group_convention(&deductions, HGroupProfile::Max);
     assert!(

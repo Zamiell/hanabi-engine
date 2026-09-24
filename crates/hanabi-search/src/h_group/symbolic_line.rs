@@ -206,6 +206,47 @@ fn continue_plan<const REUSE_SELECTED: bool>(
         plan.record_assumptions(&projected.assumptions);
         let actor_deductions = projected.deductions;
         let actor_replay = projected.replay;
+        if matches!(current, Action::Clue { .. }) {
+            let compiled =
+                super::with_prospective_analysis_cache(actor_deductions.view(), profile, || {
+                    super::candidate_pipeline::compile(&actor_deductions, profile, &actor_replay)
+                });
+            let checks = compiled
+                .admitted
+                .iter()
+                .find(|candidate| candidate.action == current)
+                .filter(|candidate| candidate.conditional())
+                .map(|candidate| candidate.checks())
+                .or_else(|| {
+                    (!compiled
+                        .admitted
+                        .iter()
+                        .any(|candidate| candidate.action == current))
+                    .then(|| {
+                        compiled
+                            .rejected
+                            .iter()
+                            .find(|rejection| rejection.action == current)
+                            .and_then(|rejection| rejection.validation)
+                    })
+                    .flatten()
+                });
+            if let Some(checks) = checks {
+                let requirement = super::ProjectionRequirement {
+                    actor,
+                    action: current,
+                    evidence_turn: public.turn,
+                    kind: super::ProjectionRequirementKind::ClueAdmission { checks },
+                };
+                if !plan.assess_dependencies(vec![super::projection_requirements::assess(
+                    &public,
+                    &requirement,
+                )]) {
+                    plan.stop_at(PlanFrontier::InterpretationBranch);
+                    break;
+                }
+            }
+        }
         let actor_inferences = infer_h_group_from_replay(&actor_deductions, actor_replay, profile);
         plan.record_window(super::ActionWindow::from_inferences(
             actor_deductions.view(),
@@ -747,6 +788,41 @@ mod tests {
         let (d, _) = PerspectiveProjector::new(&after, HGroupProfile::Max)
             .project(after.current_player, PerspectiveDepth::NestedRecipients)
             .unwrap();
+        let yellow = super::super::h_group_clue_candidates(&d, HGroupProfile::Max)
+            .into_iter()
+            .find(|candidate| {
+                candidate.action
+                    == Action::Clue {
+                        target: PlayerId::new(0),
+                        clue: Clue::Suit(hanabi_core::Suit::Yellow),
+                    }
+            })
+            .unwrap();
+        let outcome = super::super::clue_outcome::scheduled_clue_outcome(
+            d.view(),
+            HGroupProfile::Max,
+            &yellow,
+        )
+        .unwrap();
+        assert_eq!(
+            outcome.clue_efficiency, 2,
+            "the reviewed response obtains r4 and r5"
+        );
+        assert!(outcome.demonstrated_trash.contains(&CardId::new(29)));
+        assert_eq!(
+            yellow.checks()[1].verdict,
+            crate::PrincipleVerdict::Exception
+        );
+        let mut unsupported = outcome.clone();
+        unsupported.demonstrated_trash.clear();
+        let validation = super::super::principle_validation::validate(
+            &d,
+            HGroupProfile::Max,
+            &super::super::replay_h_group(&d, HGroupProfile::Max),
+            &yellow,
+            Some(&unsupported),
+        );
+        assert_eq!(validation.checks[1].verdict, crate::PrincipleVerdict::Fail);
         let action = crate::planner::choose_projected_follow_up(
             &d,
             HGroupProfile::Max,

@@ -1,4 +1,4 @@
-use super::{CluePurpose, CompiledClueAction, HGroupMoveKind};
+use super::{ClueProposal, CluePurpose, HGroupMoveKind};
 
 /// Whether a named interpretation is one of the Ignition family. Consumers
 /// use this semantic family instead of maintaining subtly different lists of
@@ -36,8 +36,8 @@ pub(super) const fn supersedes(challenger: HGroupMoveKind, incumbent: HGroupMove
 
 /// Resolves two compiled meanings for the same physical clue.
 pub(super) fn candidate_replaces(
-    existing: CompiledClueAction,
-    challenger: CompiledClueAction,
+    existing: ClueProposal,
+    challenger: ClueProposal,
     bluff_recognized: bool,
 ) -> bool {
     // An advanced label cannot erase the mandatory repair of a false note.

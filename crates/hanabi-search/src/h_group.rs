@@ -28,6 +28,7 @@ mod candidate;
 mod candidate_pipeline;
 mod chop_safety;
 mod claims;
+mod clue_outcome;
 mod compiled_line;
 mod connection;
 mod constraint_graph;
@@ -59,6 +60,7 @@ mod perspective;
 mod plan;
 mod play_order;
 mod primary;
+mod principle_validation;
 mod projection_requirements;
 mod prospective;
 use history_reducer::replay_h_group_inner_uncached;
@@ -80,8 +82,8 @@ pub use action_schedule::{ActionWindow, TurnCommitment};
 use bluff::{
     BluffTargetKind, bluff_play_connects, bluff_target_kind_at, bluff_target_order_is_legal,
 };
-use candidate::{CluePurpose, ClueRecognition, ClueSchedule, ClueValue, CompiledClueAction};
-use candidate_pipeline::SemanticallyAdmittedCandidates;
+use candidate::{ClueProposal, CluePurpose, ClueRecognition, ClueSchedule, ClueValue};
+use candidate_pipeline::CompiledClueAction;
 use claims::{IdentityClaims, claimed_identities_at_clue};
 use connection::{
     ConnectionClueMatch, ConnectionManager, ConnectionObligation, ConnectionTransitionReason,

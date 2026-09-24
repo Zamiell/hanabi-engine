@@ -1,5 +1,36 @@
 [
   {
+    "id": "t26-duplicate-discard-versus-earlier-purple-setup",
+    "turn": 26,
+    "positionKey": "fea6b97076914c804c6eb8526c06482e889fe100c1de46f0aea5f35e558465e7",
+    "status": "unresolved",
+    "perspective": "Bob. The actual discarded card is p4 #5, but Bob cannot identify it; future draws remain unknown.",
+    "source": {
+      "conversation": "Current task: earlier fixture correction, followed by the 2026-09-24 shared-admission replay investigation.",
+      "quote": "discarding p4 is correct on that turn.",
+      "kind": "The recorded action is user-confirmed. The strategic question below is an engine investigation, not a new user ruling."
+    },
+    "explanation": {
+      "fixture": "Bob discards #5 (actually p4). The strict forecast stops before the discard because its identity is unknown; no refund or downstream play is credited.",
+      "engineLine": [
+        "26 Bob purple to Alice",
+        "27 Cathy r2 #18",
+        "28 Donald r3 #13",
+        "29 Alice discards r1 #21 to generate a token",
+        "30 Bob 5s to Cathy",
+        "31 Cathy r4 #28",
+        "32 Donald discards r2 #26",
+        "33 Alice p2 #24",
+        "34 Bob discards old chop #5 from a now-safe unresolved domain; stop before an unknown next draw action"
+      ],
+      "comparison": "BottomDeckRisk, before heuristic priority. At turn26 the discard domain still contains y3/g3 without visible replacements. The purple line delays the draw and eventually excludes these identities through later protection opportunities. Purple secures Alice p2 and lets Donald play r3; using the last clue requires Alice to generate a token before Bob saves Cathy p5.",
+      "priorRulingBoundary": "The earlier confirmation corrects the recorded sequence and establishes the intended fixture action. It supplied no general preference for this risk versus earlier purple development. The play-and-handoff ruling concerns a player with a due play; Bob has none here.",
+      "question": "Should Bob prefer the normal chop draw despite possible y3/g3, or is there earlier evidence that excludes them? Alice discarded at turn25 with zero clues, so that action does not establish a declined protection opportunity. Do not infer that #5 is p4 from the simulator, change the fixture, or encode a preferred action without the missing reasoning."
+    },
+    "regressions": [],
+    "coverageNote": "No optimal-move assertion for this unresolved strategy. Existing Save Principle tests cover occupied recipients, positive-token protection opportunities, and persistence after later token exhaustion."
+  },
+  {
     "id": "t33-green-bluff-zero-minimum-clue-value",
     "turn": 33,
     "positionKey": "c311db8a69ce7cb630a1cb949c3593db8cfb67caa6fe46abdd7213457123561d",
@@ -14,13 +45,14 @@
       "ruling": "Green to Cathy is illegal under Minimum Clue Value, not merely a lower-priority bluff.",
       "reasoning": "Cathy’s g4 is already clued. Bluffing Bob’s p3 obtains no new needed identity because Donald’s p3 is already clued and promised. Adding a physical green clue or moving the p3 play to Bob does not obtain a new play or save.",
       "boundary": "Count newly secured useful identities. A known secured duplicate contributes zero; an unknown card cannot prove duplication. Preserve genuine indirect new plays, saves, and documented Fix, valuable Tempo, chop-move and forced Stall exceptions. Do not ban all re-clue bluffs or change the fixture.",
-      "implementation": "Ordinary Play/Save admission now requires positive clue efficiency when its outcome is available, while Bluff admission counts new useful touched identities and its blind response. Both use the shared minimum-clue-value count; strategic scoring no longer floors fill-in value to one. Existing named exception admission remains separate."
+      "implementation": "All ordinary, advanced, required Fix, and fallback proposals now pass common Minimum Clue Value, Good Touch, and response validation over compiled causal effects. Exceptions require evidence and a source; unavailable evidence remains conditional. No named convention label can bypass these checks."
     },
     "regressions": [
       "h_group::tests::replay::reviewed_green_bluff_requires_minimum_clue_value",
-      "h_group::strategic_value::tests::reviewed_turn_nineteen_counts_new_cards_not_old_connectors"
+      "h_group::strategic_value::tests::reviewed_turn_nineteen_counts_new_cards_not_old_connectors",
+      "h_group::principle_validation::tests::principle_failures_and_unknowns_cannot_be_rescued_by_labels_or_scores"
     ],
-    "coverageNote": "Admission tested with future draws hidden, turn19/21 legitimate Bluff controls, and known-versus-unknown duplicate controls. Outcome regression covers zero efficiency and the earlier reviewed two-for-one lines. No fixture edits or full replay scan. The same turn33 rank-4 fill-in is also rejected as an ordinary zero-value Play clue."
+    "coverageNote": "Admission tested with future draws hidden, turn19/21 legitimate Bluff controls, and known-versus-unknown duplicate controls. Outcome regression covers zero efficiency and the earlier reviewed two-for-one lines. No fixture edits. The later shared-admission investigation rescans from the beginning and stops at the unresolved turn26 strategy question recorded above; it does not establish agreement through turn33. The same turn33 rank-4 fill-in is also rejected as an ordinary zero-value Play clue."
   },
   {
     "id": "t28-red-three-versus-purple-and-red-four-ambiguity",
@@ -684,14 +716,17 @@
       "unnecessary": "The complicated move could obtain Donald's r4 directly instead. The unnecessary unknown-trash-on-chop response is a Trash Push on Alice's adjacent #33, which plays as r5.",
       "implementation": "Recognize visible trash against the recipient's still-useful unplayable possibilities; do not require a wholly-trash domain or two touched cards. Observe the successful third-position response from the recipient's perspective, then apply the level-24 transform. Only Trash Finesses/Bluffs are automatically unnecessary; Discharges require a direct alternative. The added Trash Push takes priority over discarding the discharged focus.",
       "verification": "The actual turn-35 yellow candidate is admitted as Discharge and projects Donald r4 #28, Alice r5 #33, then Bob discards #16. The planner still selects Cathy discarding at turn 35; this recognition fix does not assert that the separate move ranking or full replay parity is settled.",
-      "boundaries": "Known trash does not trigger UTD; level 15 does not enable discharge, and level 16 alone does not enable the unnecessary Trash Push. Forecast verification retains Bob's hidden hand."
+      "boundaries": "Known trash does not trigger UTD; level 15 does not enable discharge, and level 16 alone does not enable the unnecessary Trash Push. Forecast verification retains Bob's hidden hand.",
+      "admissionRefactor": "The common admission validator exposed two missing causal facts: the actor-recognized r4 response was absent from the recipient-only efficiency count, and postponing the focus discard for the unnecessary r5 push erased trash knowledge. Compile newly obtained actions across consistent owner views; retain demonstrated trash knowledge independently of the discard schedule; verify the safe intervening response and resulting recipient knowledge before allowing the Good Touch exception."
     },
     "regressions": [
       "h_group::tests::replay::first_seed_unknown_trash_discharge_and_unnecessary_push",
-      "h_group::tests::replay::first_seed_discharge_response_survives_bobs_projection"
+      "h_group::tests::replay::first_seed_discharge_response_survives_bobs_projection",
+      "h_group::symbolic_line::tests::first_seed_projected_follow_up_preserves_the_reviewed_discharge"
     ],
     "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json",
-    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay."
+    "fixtureRevisionNote": "The active continuation from turn 18 was replaced by the user on 2026-09-23. Original positionKey and reasoning are preserved for this historical fixture; do not apply this continuation to the current replay.",
+    "coverageNote": "The regression verifies two newly secured plays, demonstrated trash, an explicit Good Touch exception, and rejection when the demonstration evidence is removed. The existing inference regression also checks that the old focus remains known trash while the extra play takes precedence."
   },
   {
     "id": "t34-four-save-followup-meaning-question",

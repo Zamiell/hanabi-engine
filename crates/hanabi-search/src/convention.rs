@@ -203,6 +203,9 @@ pub enum ConventionActionReason {
 /// Semantic reason a legal action was excluded by the selected convention.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ConventionRejectionReason {
+    MinimumClueValue,
+    BadTouch,
+    UnprovenResponse,
     NoNewInformation,
     NoFocus,
     RepeatsKnownIdentity,
@@ -211,9 +214,29 @@ pub enum ConventionRejectionReason {
     RedundantOutcome,
 }
 
+/// Outcome of one mandatory principle check. Unresolved is never a pass.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PrincipleVerdict {
+    Pass,
+    Exception,
+    Unresolved,
+    Fail,
+}
+
+/// Evidence retained at the admission boundary and reused by explanations.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CluePrincipleCheck {
+    pub principle: &'static str,
+    pub verdict: PrincipleVerdict,
+    pub evidence: &'static str,
+    pub exception: Option<&'static str>,
+    pub new_cards: usize,
+}
+
 /// A legal game action rejected before strategic planning.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RejectedConventionAction {
+    pub validation: Option<[CluePrincipleCheck; 3]>,
     pub action: hanabi_core::Action,
     pub reason: ConventionRejectionReason,
 }
@@ -237,6 +260,7 @@ pub struct ConventionAnalysis {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClueExplanation {
+    pub validation: Vec<CluePrincipleCheck>,
     pub interpretation: Option<crate::HGroupClueInterpretation>,
     pub recognition: &'static str,
     pub connection_steps: u8,

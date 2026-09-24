@@ -53,10 +53,30 @@ impl ActionCommitment {
     }
 }
 
+/// A clue's change to one owner's knowledge, including negative information.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct KnowledgeChange {
+    pub(super) owner: PlayerId,
+    pub(super) card: CardId,
+    pub(super) before: IdentitySet,
+    pub(super) after: IdentitySet,
+}
+
+/// Protection must hold through the owner's next decision, not only at clue time.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct ProtectionEffect {
+    pub(super) owner: PlayerId,
+    pub(super) card: CardId,
+    pub(super) deadline: u32,
+}
+
 /// Structured semantic result of a clue line. Strategic principles compare
 /// this object before converting genuine preferences to numeric ordering.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub(super) struct LineOutcome {
+    pub(super) knowledge_changes: Vec<KnowledgeChange>,
+    pub(super) newly_playable: Vec<(PlayerId, CardId)>,
+    pub(super) protection: Vec<ProtectionEffect>,
     /// Protecting the old chop exposes a more valuable needed card. A
     /// strategic cost, not grounds to reinterpret or reject the convention.
     pub(super) worsened_chop_exposure: bool,
@@ -68,6 +88,9 @@ pub(super) struct LineOutcome {
     pub(super) clued_superpositions: Vec<CluedCardSuperposition>,
     pub(super) protected_cards: Vec<CardId>,
     pub(super) known_trash: Vec<CardId>,
+    /// Trash whose identity is demonstrated to its owner by the immediate
+    /// actor's safe, convention-required response (e.g. Unknown Trash Discharge).
+    pub(super) demonstrated_trash: Vec<CardId>,
     /// Canonical behavioral consequences. Aggregate metrics are derived from
     /// this collection instead of separately reinterpreting card identities.
     pub(super) recipient_consequences: Vec<RecipientCardConsequence>,
@@ -80,6 +103,9 @@ pub(super) struct LineOutcome {
     /// This is distinct from scheduled play coverage: a Save can obtain a
     /// card without scheduling a play, and a clue can unlock older promises.
     pub(super) clue_efficiency: usize,
+    /// Potential new acquisitions whose identities remain unavailable. Zero
+    /// demonstrated value with these dependencies is unresolved, not a 0-for-1 proof.
+    pub(super) unresolved_acquisitions: Vec<CardId>,
     /// Total cards secured by the canonical named convention line.
     pub(super) convention_action_count: Option<usize>,
     /// Blind-play steps established by the canonical named interpretation.

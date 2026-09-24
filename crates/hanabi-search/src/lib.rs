@@ -20,10 +20,10 @@ pub use analysis::{
 };
 pub use baseline::{CardAssessment, ConventionAgnosticPolicy, PolicyError, assess_card};
 pub use convention::{
-    ClueExplanation, ConventionAction, ConventionActionReason, ConventionAnalysis,
-    ConventionInferences, ConventionPolicyTier, ConventionRejectionReason,
+    ClueExplanation, CluePrincipleCheck, ConventionAction, ConventionActionReason,
+    ConventionAnalysis, ConventionInferences, ConventionPolicyTier, ConventionRejectionReason,
     H_GROUP_RULESET_REVISION, HGroupLevel, HGroupProfile, ParseConventionError,
-    ParseHGroupProfileError, RejectedConventionAction, SupportedConvention,
+    ParseHGroupProfileError, PrincipleVerdict, RejectedConventionAction, SupportedConvention,
 };
 pub use h_group::{
     ActionPreference, ActionWindow, ClueTouchBranch, ConditionalAlternative, DependencyAssessment,
@@ -40,8 +40,9 @@ pub use information_set::{
     LogicalDeductions, WorldCount,
 };
 pub use planner::{
-    CandidateComparison, ComparisonBasis, ComparisonReason, EndpointComparison, ExactActionValue,
-    ExactSearchStatus, ParsePlanningObjectiveError, PlannerActionEvaluation, PlannerConfig,
-    PlannerError, PlannerPhase, PlannerResult, PlanningObjective, ProjectedPositionValue,
-    RotationCheckpoint, SymbolicLineOutcome, SymbolicStopReason, plan_move,
+    CandidateComparison, ComparisonAuthority, ComparisonBasis, ComparisonReason,
+    EndpointComparison, ExactActionValue, ExactSearchStatus, ParsePlanningObjectiveError,
+    PlannerActionEvaluation, PlannerConfig, PlannerError, PlannerPhase, PlannerResult,
+    PlanningObjective, ProjectedPositionValue, RotationCheckpoint, SymbolicLineOutcome,
+    SymbolicStopReason, plan_move,
 };

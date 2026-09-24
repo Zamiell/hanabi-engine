@@ -280,7 +280,10 @@ fn candidates(
                 let Action::Clue {target,clue}=action else {return Value::Null;};
                 let touched=view.hands[target.index()].iter().filter(|card|card.identity.is_some_and(|identity|clue.matches(identity)))
                     .map(|card|json!({"card":card.id.index(),"alreadyHasThisClue":card.clues.has_positive_clue(clue)})).collect::<Vec<_>>();
-                json!({"source":"post-admission exclusion classification", "touched":touched,"explanation":match rejection.reason {
+                json!({"source": if rejection.validation.is_some() {"principle validation"} else {"post-admission exclusion classification"}, "validation":rejection.validation.map(|checks| checks.iter().map(|c|json!({"principle":c.principle,"verdict":format!("{:?}",c.verdict),"evidence":c.evidence,"exception":c.exception,"newCards":c.new_cards})).collect::<Vec<_>>()), "touched":touched,"explanation":match rejection.reason {
+                    hanabi_search::ConventionRejectionReason::MinimumClueValue => "The resolved clue has zero minimum clue value and no demonstrated exception.",
+                    hanabi_search::ConventionRejectionReason::BadTouch => "The clue failed the common Good Touch check.",
+                    hanabi_search::ConventionRejectionReason::UnprovenResponse => "The clue failed the common response safety check.",
                     hanabi_search::ConventionRejectionReason::NoNewInformation => "No touched card gains a new positive clue fact.",
                     hanabi_search::ConventionRejectionReason::NoFocus => "The convention focus rules did not select a focus among these touched cards.",
                     hanabi_search::ConventionRejectionReason::RepeatsKnownIdentity => "The selected focus is already gotten and its exact identity is established.",
@@ -289,7 +292,7 @@ fn candidates(
                     hanabi_search::ConventionRejectionReason::NoConventionMeaning => "No semantic generator admitted this clue; the engine did not retain a more specific proof of exclusion.",
                 }})
             }),
-            semantic_evidence: clue.map_or(Value::Null, |c| json!({"recognition":c.recognition,
+            semantic_evidence: clue.map_or(Value::Null, |c| json!({"recognition":c.recognition,"validation":c.validation.iter().map(|v|json!({"principle":v.principle,"verdict":format!("{:?}",v.verdict),"evidence":v.evidence,"exception":v.exception,"newCards":v.new_cards})).collect::<Vec<_>>(),
                 "recipientInterpretation": c.interpretation.as_ref().map(|i|json!({"focus":i.focus.index(),"focusWasChop":i.focus_was_chop,
                     "kind":format!("{:?}",i.kind),"identities":identities(i.focus_identities),"playIdentities":identities(i.play_identities),
                     "saveIdentities":identities(i.save_identities),"touched":i.touched.iter().map(|id|id.index()).collect::<Vec<_>>()})),
@@ -321,7 +324,7 @@ fn comparisons(
             preferred_label:action_label(view,players,comparison.preferred), reason:format!("{:?}",comparison.reason),
             endpoint:format!("{:?}",comparison.endpoint), in_cycle:comparison.in_cycle,
             evidence:json!({"leftEndpoint":endpoint(left),"rightEndpoint":endpoint(right),"latestSharedCheckpoint":shared,
-                "actualBasis": comparison.basis.as_ref().map(|basis|json!({"stage":basis.stage,"horizon":basis.horizon,
+                "authority":format!("{:?}",comparison.authority), "actualBasis": comparison.basis.as_ref().map(|basis|json!({"stage":basis.stage,"horizon":basis.horizon,
                     "clueCostBounds": basis.clue_cost_bounds,
                     "scheduledRefunds": basis.scheduled_refunds,
                     "left":basis.left.iter().map(|c|crate::live_action::position_value_json(c.value)).collect::<Vec<_>>(),
@@ -846,6 +849,7 @@ mod tests {
             "excludedByForcedAction"
         );
         let comparison = CandidateComparison {
+            authority: hanabi_search::ComparisonAuthority::Forecast,
             left: a.action,
             right: b.action,
             preferred: a.action,

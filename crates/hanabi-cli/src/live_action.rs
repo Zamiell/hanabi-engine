@@ -421,6 +421,10 @@ pub(crate) fn projection_evidence_json(
             "sourceObserver": assumption.source_observer.index(),
             "modeledObserver": assumption.modeled_observer.index(),
             "card": assumption.card.index(), "identity": identity_json(assumption.identity),
+            "dependencies": assumption.dependencies.iter().map(|d| json!({
+                "originTurn":d.origin_turn+1,"focus":d.focus.index(),
+                "responseActor":d.response_actor.index(),"decisionTurn":d.decision_turn+1,
+            })).collect::<Vec<_>>(),
         })).collect::<Vec<_>>(),
         "steps": evidence.steps.iter().map(|step| projected_step_json(table_id, step)).collect::<Vec<_>>(),
         "alternatives": evidence.alternatives.iter().map(|alternative| json!({

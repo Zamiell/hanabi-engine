@@ -457,8 +457,9 @@ impl ProjectionEvidence {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PerspectiveAssumption {
+    pub dependencies: Vec<super::hypothesis::AssumptionDependency>,
     pub turn: u32,
     pub source_observer: PlayerId,
     pub modeled_observer: PlayerId,
@@ -479,7 +480,7 @@ impl ConditionalPlan {
     pub(super) fn record_assumptions(&mut self, assumptions: &[PerspectiveAssumption]) {
         for assumption in assumptions {
             if !self.evidence.assumptions.contains(assumption) {
-                self.evidence.assumptions.push(*assumption);
+                self.evidence.assumptions.push(assumption.clone());
             }
         }
     }
