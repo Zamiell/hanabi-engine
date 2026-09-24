@@ -1,8 +1,8 @@
 # Cross-position user rulings
 
 Except for the current turn-18 teammate-clue, turn-19 clue-efficiency, and
-turn-26 discard-safety and turn-33 minimum-clue-value rulings, the p4v0s1
-positions below refer to the preserved
+turn-26 discard-safety, turn-27 duplicate-response, and turn-33
+minimum-clue-value rulings, the p4v0s1 positions below refer to the preserved
 [historical fixture](../../crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json),
 not the replacement continuation supplied on 2026-09-23. Their original review
 anchors and regression assertions are retained.
@@ -159,3 +159,18 @@ Regressions: `reviewed_green_bluff_requires_minimum_clue_value` checks
 rejection, legitimate turn19/21 bluffs, and unknown-identity controls;
 `reviewed_turn_nineteen_counts_new_cards_not_old_connectors` checks zero value
 for this clue alongside the previously reviewed productive lines.
+
+The current turn-27 review (`t27-indirect-red-two-duplicates-givers-known-play`)
+also checks the giver's own known card. A hidden physical face is not an unknown
+identity when the giver already knows it from prior clues. Use only that giver's
+pre-clue evidence; unresolved domains and other observers' hypotheses do not
+prove duplication. Donald's r2 does not obtain another useful identity when
+Cathy already knows she holds the secured r2.
+
+`reviewed_turn_twenty_seven_counts_givers_known_duplicate` checks the corrected
+acquisition count and removes the giver's identity evidence as a negative
+control. The existing turn33 green Bluff regression covers the parallel
+visible-copy case. The turn27 ledger separately records an unresolved question
+about the extra Ignition: the clue also Trash Pushes Alice's p2, so correcting
+its false extra r2 credit is not a ruling that the entire clue has zero value or
+that every indirect duplicate is prohibited.

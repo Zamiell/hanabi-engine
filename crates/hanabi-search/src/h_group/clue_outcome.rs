@@ -507,7 +507,19 @@ pub(super) fn compile_uncached(
         .iter()
         .flatten()
         .filter(|card| already_secured(card.id))
-        .map(|card| (card.id, card.identity))
+        .map(|card| {
+            let known = card.identity.or_else(|| {
+                // The giver may know an identity in their own hidden hand.
+                // Only their pre-clue knowledge can prove that duplicate;
+                // another observer's hypothesis or this clue's effects cannot.
+                baselines
+                    .get(source.observer.index())?
+                    .epistemic
+                    .belief(card.id)?
+                    .known_identity()
+            });
+            (card.id, known)
+        })
         .collect::<Vec<_>>();
     value.unresolved_acquisitions = directly_secured
         .iter()

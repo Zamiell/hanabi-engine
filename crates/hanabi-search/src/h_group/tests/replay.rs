@@ -5707,6 +5707,107 @@ fn current_turn_twenty_one_purple_bluffs_bobs_green_two() {
     assert_eq!(line.strikes, 0);
 }
 
+fn reviewed_turn_twenty_seven_projection() -> (LogicalDeductions, super::super::HGroupState) {
+    // User-reviewed branch of current p4v0s1: Bob discards p4 at turn26.
+    // The reveal is a conditional outcome; his replacement draw stays unknown.
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .unwrap();
+    let state = fixture.state_at_turn(25).unwrap();
+    let source = state.view_for(state.current_player()).unwrap();
+    let after = super::super::ProspectiveTransition::discard(
+        &source,
+        PlayerId::new(1),
+        CardId::new(5),
+        Card::new(Suit::Purple, Rank::Four),
+    );
+    PerspectiveProjector::new(&after, HGroupProfile::Max)
+        .project(PlayerId::new(2), PerspectiveDepth::NestedRecipients)
+        .unwrap()
+}
+
+#[test]
+fn reviewed_turn_twenty_seven_counts_givers_known_duplicate() {
+    let (d, r) = reviewed_turn_twenty_seven_projection();
+    let notes = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+    let own = notes
+        .cards
+        .iter()
+        .find(|c| c.card == CardId::new(18))
+        .unwrap();
+    assert_eq!(
+        own.identities,
+        IdentitySet::singleton(Card::new(Suit::Red, Rank::Two))
+    );
+    let action = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Rank(Rank::One),
+    };
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    let candidate = candidates.iter().find(|c| c.action == action).unwrap();
+    assert_eq!(
+        candidate.checks()[0].new_cards,
+        1,
+        "Alice's p2 is new, but Donald's duplicate r2 is not"
+    );
+
+    // Remove only Cathy's pre-clue identity knowledge in the causal input.
+    // The actual hidden face must not rescue duplicate accounting.
+    let team = super::super::compiled_baseline_team(d.view(), HGroupProfile::Max);
+    let mut baselines = (0..4)
+        .map(|p| {
+            super::super::line_state::projected_line_state(
+                d.view(),
+                &team.projection(PlayerId::new(p)).unwrap(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let touched = d.view().hands[0]
+        .iter()
+        .filter(|c| c.identity.is_some_and(|id| id.rank == Rank::One))
+        .map(|c| c.id)
+        .collect::<Vec<_>>();
+    let compiled = super::super::compiled_prospective_clue(
+        d.view(),
+        HGroupProfile::Max,
+        PlayerId::new(0),
+        Clue::Rank(Rank::One),
+        &touched,
+    )
+    .unwrap();
+    for (knows, expected) in [(true, 1), (false, 2)] {
+        let mut prior = notes.clone();
+        if !knows {
+            prior
+                .cards
+                .iter_mut()
+                .find(|c| c.card == CardId::new(18))
+                .unwrap()
+                .identities = d.possible_identities(CardId::new(18)).unwrap();
+        }
+        baselines[2].epistemic = super::super::epistemic::EpistemicState::from_analysis(&d, &prior);
+        assert_eq!(
+            baselines[2]
+                .epistemic
+                .belief(CardId::new(18))
+                .unwrap()
+                .known_identity()
+                .is_some(),
+            knows
+        );
+        let outcome = super::super::clue_outcome::compile_uncached(
+            d.view(),
+            HGroupProfile::Max,
+            &compiled,
+            &baselines,
+            Some(HGroupMoveKind::UnnecessaryIgnition),
+        )
+        .unwrap();
+        assert_eq!(outcome.clue_efficiency, expected);
+    }
+}
+
 #[test]
 fn reviewed_green_bluff_requires_minimum_clue_value() {
     // User-reviewed p4v0s1 turn 33 in the turn-28 purple-to-Alice line:

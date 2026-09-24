@@ -1,5 +1,44 @@
 [
   {
+    "id": "t27-indirect-red-two-duplicates-givers-known-play",
+    "turn": 27,
+    "positionKey": "7293c016ef9dc3f2a465c169190de1ae780f2347a5d4ba3b74769813a54ee559",
+    "status": "unresolved",
+    "perspective": "Cathy after the current fixture turn26 Bob p4 discard. Regression branches from Bob’s prior view with the discarded p4 revealed and the replacement draw unknown. Cathy’s own cards remain physically hidden to her.",
+    "source": {
+      "conversation": "Current task, user challenges the projected 1s-to-Alice clue at turn27.",
+      "quote": "that is a bug, 1's to alice would make r2 blind play and duplicate it for no other benefit, right?"
+    },
+    "explanation": {
+      "reviewedProblem": "The user identifies Donald’s indirect r2 play as duplicating Cathy’s already-secured, ready r2 and questions what extra benefit it provides.",
+      "diagnosis": "Cathy’s pre-clue inference identifies #18 as r2, but the causal MCV calculation retained only the raw visible identity for an already-secured card. Since #18 is in the giver’s own hand, that raw field is None. This incorrectly counts Donald’s duplicate r2 as a new acquisition.",
+      "valueClarification": "Engine analysis, not an additional user ruling: known-trash 1s also Trash Pushes Alice’s p2 and is interpreted as Unnecessary Ignition. Its actual MCV is one (p2), not the falsely reported two. Purple to Alice can obtain p2 directly. Whether the useless extra Ignition makes this move inadmissible, or admissible but strategically inferior, is pending user clarification.",
+      "implementation": "Previously secured identities use the giver’s own pre-clue epistemic knowledge when physical identity is hidden. No broad indirect-duplicate prohibition is introduced: the existing p4v0s415 turn30 rank-3 Bluff regression permits an indirect duplicate while obtaining another card.",
+      "uncertainty": "Only a settled identity in the giver’s prior view proves duplication. A widened domain must not inherit hidden simulator truth or knowledge created by the new clue.",
+      "comparison": "After correcting MCV, the bounded follow-up planner still chooses 1s by FundedProgress at a shared three-action horizon: both lines score 13; play r2 has 3 tokens, 4 secured future cards and clue demand 1, while 1s has 1 token, 5 secured future cards and clue demand 0. This is not evidence that the duplicate r2 itself adds value.",
+      "lines": {
+        "playR2": [
+          "27 Cathy plays r2 #18",
+          "28 Donald plays r3 #13",
+          "29 Alice discards r1 #21",
+          "30 Bob clues purple to Alice; leaf horizon ends"
+        ],
+        "ones": [
+          "27 Cathy clues 1s to Alice",
+          "28 Donald plays r2 #26",
+          "29 Alice plays p2 #24; forecast stops before Bob’s unknown discard"
+        ]
+      },
+      "question": "Does the extra Ignition have to obtain a genuinely new card, making 1s inadmissible despite the p2 Trash Push, or is it admissible but should lose strategically to playing r2 and arranging the teammate clue?"
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_turn_twenty_seven_counts_givers_known_duplicate",
+      "h_group::tests::replay::reviewed_green_bluff_requires_minimum_clue_value",
+      "h_group::clue_outcome::tests::reviewed_causal_outcomes_are_identical_with_and_without_cache"
+    ],
+    "coverageNote": "Checks Cathy’s known own r2, corrected one-card MCV, and a pre-clue identity-knowledge ablation restoring the unresolved acquisition. No optimal-move or admission assertion is added for the unresolved convention question."
+  },
+  {
     "id": "t26-team-save-principle-removes-all-discard-bdr",
     "turn": 26,
     "positionKey": "fea6b97076914c804c6eb8526c06482e889fe100c1de46f0aea5f35e558465e7",
