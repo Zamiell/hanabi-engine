@@ -409,6 +409,25 @@ impl ProjectedPositionValue {
         self_value.dominates_resources(other)
     }
 
+    /// Equal-cost clues with equal realized progress should prefer more
+    /// newly secured cards over the readiness of already secured cards.
+    /// The caller verifies elapsed time and the actual clue bill.
+    fn clue_efficiency_preference(self, other: Self) -> bool {
+        if self.score != other.score
+            || self.clues != other.clues
+            || self.secured_future_plays <= other.secured_future_plays
+            || self.clue_demand > other.clue_demand
+        {
+            return false;
+        }
+        let normalize = |mut value: Self| {
+            value.committed_future_plays = 0;
+            value.visible_successors = 0;
+            value
+        };
+        normalize(self).dominates(normalize(other))
+    }
+
     fn dominates_resources(self, other: Self) -> bool {
         self != other
             && other.exposed_chop_quality.no_worse_than(self.exposed_chop_quality)
@@ -1578,6 +1597,30 @@ fn compare_endpoint_evidence(
             }]
         },
     );
+    // Reviewed p4v0s1 turn 19: two 2-for-1s beat a 2-for-1 plus a
+    // 1-for-1 at equal realized points and clue cost. Previously secured
+    // connectors becoming ready are tempo, not additional cards obtained.
+    if compares_clues && !left.projection.has_branches() && !right.projection.has_branches() {
+        let horizon = left.symbolic_line.actions;
+        if let Some((left_cost, right_cost)) = left
+            .projection
+            .clue_cost_at(horizon)
+            .zip(right.projection.clue_cost_at(horizon))
+        {
+            if left_cost.1 <= right_cost.0 && a.clue_efficiency_preference(b) {
+                if let Some(basis) = basis {
+                    basis.clue_cost_bounds = Some((left_cost, right_cost));
+                }
+                return EndpointComparison::PreferLeft(ComparisonReason::ClueEfficiency);
+            }
+            if right_cost.1 <= left_cost.0 && b.clue_efficiency_preference(a) {
+                if let Some(basis) = basis {
+                    basis.clue_cost_bounds = Some((left_cost, right_cost));
+                }
+                return EndpointComparison::PreferRight(ComparisonReason::ClueEfficiency);
+            }
+        }
+    }
     if a.protection_development_preference(b) {
         return EndpointComparison::PreferLeft(ComparisonReason::ProtectedDevelopment);
     }
@@ -2408,6 +2451,81 @@ impl std::error::Error for PlannerError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewed_turn_nineteen_prefers_two_two_for_one_clues() {
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(18).unwrap();
+        let analysis = crate::analyze_position(
+            &state.view_for(state.current_player()).unwrap(),
+            SupportedConvention::HGroup(crate::HGroupProfile::Max),
+            PlannerConfig {
+                objective: PlanningObjective::PerfectScore,
+                ..PlannerConfig::default()
+            },
+        )
+        .unwrap();
+        let four = Action::Clue {
+            target: hanabi_core::PlayerId::new(0),
+            clue: hanabi_core::Clue::Rank(hanabi_core::Rank::Four),
+        };
+        let purple = Action::Clue {
+            target: hanabi_core::PlayerId::new(1),
+            clue: hanabi_core::Clue::Suit(hanabi_core::Suit::Purple),
+        };
+        let candidate = |action| {
+            analysis
+                .planner
+                .root_actions
+                .iter()
+                .find(|c| c.action == action)
+                .unwrap()
+        };
+        let a = candidate(four).symbolic_line.position_value.unwrap();
+        let b = candidate(purple).symbolic_line.position_value.unwrap();
+        assert_eq!(a.score, b.score);
+        assert_eq!(a.clues, b.clues);
+        assert_eq!(a.secured_future_plays, b.secured_future_plays + 1);
+        assert_eq!(
+            candidate(four).projection.steps[3].projected.action,
+            Action::Play(hanabi_core::CardId::new(25))
+        );
+        assert!(a.clue_efficiency_preference(b));
+        assert_eq!(analysis.planner.best_action, four);
+        // This is not permission to lose points, resources,
+        // or safety for a longer queue. Nor does equal coverage beat a
+        // genuinely better successor opportunity.
+        for worse in [
+            ProjectedPositionValue {
+                score: b.score - 1,
+                ..a
+            },
+            ProjectedPositionValue {
+                secured_future_plays: b.secured_future_plays,
+                ..a
+            },
+            ProjectedPositionValue {
+                exposed_critical_chops: b.exposed_critical_chops + 1,
+                ..a
+            },
+        ] {
+            assert!(!worse.clue_efficiency_preference(b));
+        }
+        assert!(!a.clue_efficiency_preference(ProjectedPositionValue {
+            clues: b.clues + 1,
+            ..b
+        }));
+        assert!(
+            !ProjectedPositionValue {
+                clue_demand: b.clue_demand + 1,
+                ..a
+            }
+            .clue_efficiency_preference(b)
+        );
+    }
 
     #[test]
     fn reviewed_turn_eighteen_leaves_the_clue_to_a_teammate() {

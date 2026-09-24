@@ -218,9 +218,16 @@ pub(in crate::h_group) fn apply_resolved_bluff_effects(
                     |needed| {
                         before.hands.iter().flatten().any(|prior| {
                             was_clued_before(view, clue.turn, *prior)
-                                && identity_of(view, *prior).or_else(|| {
-                                    signals.facts().known_identity_before(*prior, clue.turn)
-                                }) == Some(needed)
+                                && identity_of(view, *prior)
+                                    .or_else(|| {
+                                        signals.facts().known_identity_before(*prior, clue.turn)
+                                    })
+                                    .or_else(|| {
+                                        super::super::bluff::literal_identity_through(
+                                            view, *prior, clue.turn,
+                                        )
+                                    })
+                                    == Some(needed)
                         })
                     },
                 ))

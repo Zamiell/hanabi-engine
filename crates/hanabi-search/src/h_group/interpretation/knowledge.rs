@@ -867,7 +867,7 @@ fn compile_convention_card_inferences(
                                                         .cards
                                                         .facts
                                                         .known_identity_before(*prior, clue.turn)
-                                                }) == Some(needed)
+                                                }).or_else(|| crate::h_group::bluff::literal_identity_through(view, *prior, clue.turn)) == Some(needed)
                                             })
                                         },
                                     )

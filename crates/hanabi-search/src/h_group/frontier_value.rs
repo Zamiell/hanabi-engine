@@ -574,6 +574,75 @@ mod tests {
     use super::*;
 
     #[test]
+    fn reviewed_two_bluffs_secure_both_fours() {
+        // User-reviewed p4v0s1 turn 19: 4s to Alice and purple to Donald
+        // are both 2-for-1s. Releasing already-clued p3 is not a new card.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let source = replay
+            .state_at_turn(18)
+            .unwrap()
+            .view_for(PlayerId::new(2))
+            .unwrap();
+        let mut frontier = replay
+            .state_at_turn(22)
+            .unwrap()
+            .view_for(PlayerId::new(2))
+            .unwrap();
+        for hand in &mut frontier.hands {
+            for card in hand {
+                if card.id.index() >= 26 {
+                    card.identity = None;
+                }
+            }
+        }
+        for entry in &mut frontier.history {
+            if let hanabi_core::ObservedEvent::Drew { card, identity, .. } = &mut entry.event {
+                if card.index() >= 26 {
+                    *identity = None;
+                }
+            }
+        }
+        let (d, r) = PerspectiveProjector::new(&frontier, HGroupProfile::Max)
+            .project(PlayerId::new(3), PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        let inferred = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+        // Donald learns the intermediate's suit from this very clue. An
+        // earlier cutoff must not borrow that information from the future.
+        let p3 = hanabi_core::CardId::new(14);
+        assert_eq!(
+            super::super::bluff::literal_identity_through(d.view(), p3, 19),
+            None
+        );
+        assert_eq!(
+            super::super::bluff::literal_identity_through(d.view(), p3, 20),
+            Some(Card::new(Suit::Purple, Rank::Three))
+        );
+        let p4 = inferred
+            .cards
+            .iter()
+            .find(|c| c.card == hanabi_core::CardId::new(12))
+            .unwrap();
+        assert_eq!(
+            p4.identities,
+            IdentitySet::singleton(Card::new(Suit::Purple, Rank::Four))
+        );
+        let value = evaluate(
+            &source,
+            &frontier,
+            HGroupProfile::Max,
+            Action::Clue {
+                target: PlayerId::new(0),
+                clue: Clue::Rank(Rank::Four),
+            },
+        )
+        .unwrap();
+        assert_eq!(value.secured_future_plays, 5);
+    }
+
+    #[test]
     fn reviewed_opening_distinguishes_the_saved_threes_and_fours() {
         let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
             "tests/fixtures/game-p4v0s1-before-turn18-revision.json"

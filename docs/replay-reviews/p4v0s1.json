@@ -1,5 +1,31 @@
 [
   {
+    "id": "t19-two-bluffs-have-higher-clue-efficiency",
+    "turn": 19,
+    "positionKey": "ee5daa8560702db2a691291ccb787b74716f8efd14342bba307fd68132253c71",
+    "status": "user-explained",
+    "perspective": "Cathy compares two four-action forecasts at turn 19, with her hand and future draws unknown.",
+    "source": {
+      "conversation": "2026-09-24 current task, user explains efficiency after correcting Bob’s projected response",
+      "quote": "the 4's line is two 2-for-1 clues.\nthe purple to bob line is one 2-for-1 clue and one 1-for-1 clue.\nthus, why does it prefer the latter?"
+    },
+    "explanation": {
+      "ruling": "4s to Alice obtains Donald r1 and Alice y4; Alice purple to Donald obtains Bob g2 and Donald p4. Purple to Bob obtains Alice p2 and Bob p4; Donald green to Bob obtains only g2. Already-clued p3 and g5 are not additional newly obtained cards.",
+      "bug": "After the second bluff the resolver omitted Donald’s p4: it failed to recognize already-clued p3 as the intermediate when the same purple clue supplies its suit. It checked only pre-clue identity claims, leaving a false direct p2 focus note. The endpoint then incorrectly counted four secured future cards in both lines and favored the purple line’s nearer stack development.",
+      "fix": "Literal clue information through the originating clue may identify an already-clued intermediate. Preserve dated evidence: do not use later clues or same-clue speculative convention claims as proof of the intermediate.",
+      "additionalBug": "The clue_efficiency metric counted already-clued p3 again when it was retouched or recognized as a connector. Count newly obtained cards separately from action coverage and timing; preserve one-card fallback for productive fill-ins.",
+      "comparisonFix": "For unbranched lines at equal elapsed time, realized points and remaining tokens, no greater actual clue cost or future clue demand, and no worsened safety/resources, compare newly secured cards before readiness of already-secured cards. Record this as ClueEfficiency, including actual clue-cost bounds, so a fallback preference cycle cannot erase the reviewed efficiency advantage.",
+      "result": "The focused full-planner regression now chooses 4s to Alice. Both lines score two points and spend two clues through four actions; 4s retains five secured future cards versus four. The additional card is credited as ClueEfficiency before fallback heuristic cycles.",
+      "validation": "Final release explanation chooses 4s to Alice with ClueEfficiency and actual clue-cost bounds [2,2] on both lines. Focused efficiency/inference/control tests pass; planner tests20 pass3 previously recorded failures; bluff tests23 pass7 previously recorded failures. Clippy, formatting and review-ledger tests pass. Fast validation remains blocked by missing Python development dependencies; full suite not claimed."
+    },
+    "regressions": [
+      "h_group::frontier_value::tests::reviewed_two_bluffs_secure_both_fours",
+      "h_group::strategic_value::tests::reviewed_turn_nineteen_counts_new_cards_not_old_connectors",
+      "planner::tests::reviewed_turn_nineteen_prefers_two_two_for_one_clues"
+    ],
+    "coverage": "Tests Donald’s p4 inference, five secured future cards, a pre-clue cutoff that cannot borrow the new suit information, and the user’s four clue-efficiency counts."
+  },
+  {
     "id": "t19-projected-bluff-cannot-prove-its-own-alternative",
     "turn": 19,
     "positionKey": "ee5daa8560702db2a691291ccb787b74716f8efd14342bba307fd68132253c71",
@@ -66,7 +92,7 @@
     "id": "t19-four-bluff-versus-purple-bob-strategy",
     "turn": 19,
     "positionKey": "ee5daa8560702db2a691291ccb787b74716f8efd14342bba307fd68132253c71",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Cathy, current fixture; own hand and future draws unknown.",
     "source": {
       "conversation": "2026-09-23 current task, autonomous replay investigation after confirmed fixture update",
@@ -116,7 +142,8 @@
       "h_group::tests::replay::current_turn_twenty_one_purple_bluffs_bobs_green_two",
       "h_group::tests::replay::current_turn_nineteen_bluff_requires_the_reactors_response"
     ],
-    "coverage": "No turn-19 optimal-action assertion: strategy weighting unresolved."
+    "coverage": "No turn-19 optimal-action assertion: strategy weighting unresolved.",
+    "supersededBy": "t19-two-bluffs-have-higher-clue-efficiency"
   },
   {
     "id": "t19-user-replaces-continuation-with-four-bluff",

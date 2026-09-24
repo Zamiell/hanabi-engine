@@ -1,7 +1,7 @@
 # Cross-position user rulings
 
-Except for the current turn-18 teammate-clue ruling, the p4v0s1 positions below
-refer to the preserved
+Except for the current turn-18 teammate-clue and turn-19 clue-efficiency
+rulings, the p4v0s1 positions below refer to the preserved
 [historical fixture](../../crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json),
 not the replacement continuation supplied on 2026-09-23. Their original review
 anchors and regression assertions are retained.
@@ -101,3 +101,32 @@ not a prediction of their identities.
 An unfunded later part of the chain must not erase an earlier funded advantage.
 Compare the same funded prefix on both sides. Preserve clue availability,
 recipient deadlines, interpretation, and protection when handing off the clue.
+
+## Clue efficiency counts newly obtained cards
+
+Current `p4v0s1`, live turn 19, record
+`t19-two-bluffs-have-higher-clue-efficiency`: the user compares two 2-for-1
+clues (4s to Alice, then purple to Donald) against a 2-for-1 and a 1-for-1
+(purple to Bob, then green to Bob). Already-clued p3 and g5 do not become new
+cards obtained by the later clue merely because it clarifies or releases them.
+Keep their timing and continuation benefits separate from clue efficiency.
+
+A Bluff through an already-clued intermediate can identify that intermediate
+using literal information from the same clue. Donald's rank-clued p3 becomes
+literally purple 3 when the purple clue touches it; overlooking that evidence
+must not erase the newly secured p4. Do not use later clues or speculative
+same-clue identity promises to establish the intermediate.
+
+Regressions: `reviewed_turn_nineteen_counts_new_cards_not_old_connectors` checks
+all four clue counts; `reviewed_two_bluffs_secure_both_fours` checks Donald's
+inference and the endpoint's secured cards, with a historical cutoff control and
+future draws hidden.
+
+At equal realized points and clue resources, an additional secured future card
+is a concrete efficiency gain; an unclued visible successor must not by itself
+veto that gain. Readiness of already secured cards is a tempo benefit, not
+additional clue efficiency. Retain guards for realized points, clue costs,
+future clue demand and safety.
+`reviewed_turn_nineteen_prefers_two_two_for_one_clues` checks the actual planner
+choice and endpoint counts, with controls for lost points, extra clue cost, lost
+committed plays, exposed critical cards and equal secured coverage.

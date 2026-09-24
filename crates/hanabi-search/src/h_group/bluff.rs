@@ -5,6 +5,32 @@ use super::{
     Rank, identity_of,
 };
 
+/// Literal identity established by the clue itself is safe evidence for an
+/// already-clued intermediate. Do not use later clues or the clue's own
+/// speculative convention claims to justify its prerequisites.
+pub(super) fn literal_identity_through(view: &PlayerView, card: CardId, turn: u32) -> Option<Card> {
+    let mut facts = hanabi_core::ClueFacts::default();
+    for entry in view.history.iter().filter(|entry| entry.turn <= turn) {
+        if let hanabi_core::ObservedEvent::Clued {
+            clue,
+            touched,
+            untouched,
+            ..
+        } = &entry.event
+        {
+            if touched.contains(&card) {
+                facts.add_positive_clue(*clue);
+            } else if untouched.contains(&card) {
+                facts.add_negative_clue(*clue);
+            }
+        }
+    }
+    let identities = crate::IdentitySet::from_mask(facts.identity_mask());
+    (identities.len() == 1)
+        .then(|| identities.iter().next())
+        .flatten()
+}
+
 /// A connector that is already due makes the clue a truthful continuation,
 /// not a reason for the next player to invent another blind connector.
 /// <https://hanabi.github.io/level-11/#bobs-truth-principle-part-1>

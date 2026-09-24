@@ -1260,22 +1260,10 @@ fn clue_line_value(
     let mut directly_secured = giver_public_actions
         .iter()
         .filter(|commitment| {
-            touched.contains(&commitment.card)
-                || commitment.identities.iter().any(connects_to_clue_focus)
-                || !baselines.iter().any(|baseline| {
-                    baseline
-                        .owner_clued_superpositions
-                        .iter()
-                        .any(|(card, identities)| {
-                            *card == commitment.card
-                                && (identities.len() == 1
-                                    || !value.clued_superpositions.iter().any(|after| {
-                                        after.card == commitment.card
-                                            && after.owner == commitment.owner
-                                            && after.identities.len() == 1
-                                    }))
-                        })
-                })
+            // Retouching or clarifying an already-clued connector can
+            // improve its timing, but does not obtain that card again.
+            // Reviewed p4v0s1 turn 19: p3 and g5 are already secured.
+            !super::was_clued_before(source, source.turn, commitment.card)
         })
         .map(|commitment| commitment.card)
         .collect::<Vec<_>>();
@@ -1362,6 +1350,68 @@ mod tests {
     use super::*;
     use hanabi_core::{Clue, Suit};
     use hanabi_protocol::HanabiLiveReplay;
+
+    #[test]
+    fn reviewed_turn_nineteen_counts_new_cards_not_old_connectors() {
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let root = replay.state_at_turn(18).unwrap();
+        let purple = Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Suit(Suit::Purple),
+        };
+        let mut alternative = root.clone();
+        alternative.apply(purple).unwrap();
+        let cases = [
+            (
+                root.clone(),
+                Action::Clue {
+                    target: PlayerId::new(0),
+                    clue: Clue::Rank(Rank::Four),
+                },
+                HGroupMoveKind::Bluff,
+                2,
+            ),
+            (
+                replay.state_at_turn(20).unwrap(),
+                Action::Clue {
+                    target: PlayerId::new(3),
+                    clue: Clue::Suit(Suit::Purple),
+                },
+                HGroupMoveKind::Bluff,
+                2,
+            ),
+            (root, purple, HGroupMoveKind::PlayClue, 2),
+            (
+                alternative,
+                Action::Clue {
+                    target: PlayerId::new(1),
+                    clue: Clue::Suit(Suit::Green),
+                },
+                HGroupMoveKind::PlayClue,
+                1,
+            ),
+        ];
+        for (state, action, kind, efficiency) in cases {
+            let source = state.view_for(state.current_player()).unwrap();
+            let team = compiled_baseline_team(&source, HGroupProfile::Max);
+            let baselines = (0..source.hands.len())
+                .map(|player| {
+                    let observer = PlayerId::new(u8::try_from(player).unwrap());
+                    projected_line_state(&source, &team.projection(observer).unwrap())
+                })
+                .collect::<Vec<_>>();
+            let outcome =
+                clue_line_value(&source, HGroupProfile::Max, action, &baselines, Some(kind))
+                    .unwrap();
+            assert_eq!(
+                outcome.clue_efficiency, efficiency,
+                "{action:?}: {outcome:?}"
+            );
+        }
+    }
 
     #[test]
     fn reviewed_red_finesse_adds_two_plays_not_one() {
