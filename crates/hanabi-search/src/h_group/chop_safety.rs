@@ -2,7 +2,7 @@
 //!
 //! This is strategy knowledge, not literal card information or a trash note.
 //! [Save Principle](https://hanabi.github.io/beginner/save-principle/) forbids
-//! knowingly letting the next player discard a unique playable or last copy.
+//! knowingly letting a teammate discard a unique playable or last copy.
 //! Unlike general inverse planning, the witness is a mandatory protection duty,
 //! not a comparison between heuristic scores.
 
@@ -11,7 +11,7 @@ use hanabi_core::{CardId, ClueFacts, ObservedCard, ObservedEvent, PlayerView};
 use super::{
     HGroupInferences, HGroupProfile, HGroupRuleId, LogicalDeductions, PerspectiveDepth,
     PerspectiveProjector, Rank, infer_h_group, is_critical_save_identity, is_eventually_useful,
-    is_playable_now, next_player, rule_enabled,
+    is_playable_now, rule_enabled,
 };
 use crate::IdentitySet;
 
@@ -60,7 +60,11 @@ pub(super) fn discard_domain(
             ObservedEvent::Clued { giver, .. } => giver,
             _ => continue,
         };
-        if next_player(actor, view.hands.len()) != view.observer {
+        // Protection is a team obligation, not evidence confined to the
+        // immediately preceding seat. A prior teammate can spend the last
+        // clue elsewhere, leaving the predecessor unable to protect this
+        // chop. Retain that earlier opportunity (reviewed p4v0s1 turn 26).
+        if actor == view.observer {
             continue;
         }
         let snapshot = before_historical_turn(view, entry.turn + 1);
@@ -245,7 +249,7 @@ fn before_ordinary_play(view: &PlayerView) -> Option<PlayerView> {
     else {
         return None;
     };
-    if last.turn + 1 != view.turn || next_player(player, view.hands.len()) != view.observer {
+    if last.turn + 1 != view.turn || player == view.observer {
         return None;
     }
     // Rewind only this successful play and its draw. In particular, do not

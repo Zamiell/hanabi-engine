@@ -1,9 +1,44 @@
 [
   {
+    "id": "t26-team-save-principle-removes-all-discard-bdr",
+    "turn": 26,
+    "positionKey": "fea6b97076914c804c6eb8526c06482e889fe100c1de46f0aea5f35e558465e7",
+    "status": "user-explained",
+    "perspective": "Bob, current p4v0s1 fixture. Card #5 remains unidentified; this is discard safety, not permission to blind-play p4.",
+    "source": {
+      "conversation": "Current task, 2026-09-24: user explains every remaining BDR possibility at turn26.",
+      "quote": "y3 - impossible because it would have been play clued before now (because of Save Principle)\ng3 - impossible because it would have been play clued before now (because of Save Principle)\nThus, there is 0 BDR risk for Bob."
+    },
+    "explanation": {
+      "r2_y4": "Both copies are visible, so Bob cannot hold them.",
+      "r3_r4_g4_p3_p4": "A touched copy is already secured.",
+      "r5_y5_g5": "The chop has negative 5 information.",
+      "p2": "The other copy is visible and can be play clued.",
+      "p5": "The only p5 is visible.",
+      "y3_g3": "Earlier teammates would have play clued these unique playable cards under Save Principle. Protection evidence is not confined to the player seated immediately before Bob.",
+      "implementation": "Scan prior teammate protection opportunities, retaining the same exposed-chop, recipient-occupancy, giver-obligation, token and historical-knowledge guards. The engine must remove y3/g3 from the conditional discard-risk domain without altering Bob’s literal knowledge or substituting his actual p4 identity.",
+      "downstream": "Every remaining useful identity has a visible replacement. The existing safe-discard reveal branches can execute the discard and credit its token without inventing a draw.",
+      "verification": "The focused turn26 regression passes. All eleven remaining reveal identities are safe and receive the discard refund. The full explanation now compares purple to Alice against discarding by ConventionPreference, not BottomDeckRisk; this localized risk fix does not claim optimal-move parity.",
+      "discardForecast": [
+        "26 Bob discards #5 (actual p4, identity not assumed)",
+        "27 Cathy clues 1s to Alice",
+        "28 Donald plays r2 #26",
+        "29 Alice plays p2 #24",
+        "30 Bob discards #16 (actual r3); stops at safe discard reveal after exhausting the branch budget"
+      ]
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_turn_twenty_six_discard_has_no_bottom_deck_risk",
+      "h_group::tests::replay::reviewed_save_principle_exclusions_apply_after_plays_and_clues",
+      "h_group::tests::replay::save_principle_does_not_infer_safe_chop_for_an_occupied_player"
+    ],
+    "coverageNote": "Checks y3/g3 exclusion, unchanged literal knowledge, zero conditional losses and the certain discard refund across reveal branches, plus missing-history and occupied-player negative controls. The historical matrix has a separately recorded pre-existing turn44 failure. Related focused run: five passes and the unchanged historical turn44 matrix failure, separately reproduced on starting baseline 7199261. Fast validation passes."
+  },
+  {
     "id": "t26-duplicate-discard-versus-earlier-purple-setup",
     "turn": 26,
     "positionKey": "fea6b97076914c804c6eb8526c06482e889fe100c1de46f0aea5f35e558465e7",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Bob. The actual discarded card is p4 #5, but Bob cannot identify it; future draws remain unknown.",
     "source": {
       "conversation": "Current task: earlier fixture correction, followed by the 2026-09-24 shared-admission replay investigation.",
@@ -28,7 +63,9 @@
       "question": "Should Bob prefer the normal chop draw despite possible y3/g3, or is there earlier evidence that excludes them? Alice discarded at turn25 with zero clues, so that action does not establish a declined protection opportunity. Do not infer that #5 is p4 from the simulator, change the fixture, or encode a preferred action without the missing reasoning."
     },
     "regressions": [],
-    "coverageNote": "No optimal-move assertion for this unresolved strategy. Existing Save Principle tests cover occupied recipients, positive-token protection opportunities, and persistence after later token exhaustion."
+    "coverageNote": "No optimal-move assertion for this unresolved strategy. Existing Save Principle tests cover occupied recipients, positive-token protection opportunities, and persistence after later token exhaustion.",
+    "supersededBy": "t26-team-save-principle-removes-all-discard-bdr",
+    "resolution": "The user supplied the missing Save Principle reasoning. The engine had incorrectly restricted historical protection evidence to the immediately preceding seat; the zero-token action at turn25 does not erase the earlier team opportunity."
   },
   {
     "id": "t33-green-bluff-zero-minimum-clue-value",

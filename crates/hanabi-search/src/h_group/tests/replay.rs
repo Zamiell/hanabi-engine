@@ -464,14 +464,99 @@ fn first_seed_unloaded_donald_draws_and_hands_save_to_alice() {
 }
 
 #[test]
+fn reviewed_turn_twenty_six_discard_has_no_bottom_deck_risk() {
+    // User-reviewed current p4v0s1 turn 26: y3/g3 would have been play
+    // clued; all other useful possibilities have visible replacements.
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .unwrap();
+    let state = fixture.state_at_turn(25).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let d = LogicalDeductions::new(view.clone()).unwrap();
+    let notes = infer_h_group(&d, HGroupProfile::Max);
+    let card = CardId::new(5);
+    let literal = d.possible_identities(card).unwrap();
+    let domain =
+        super::super::chop_safety::discard_domain(&d, &notes, HGroupProfile::Max, card).unwrap();
+    for suit in [Suit::Yellow, Suit::Green] {
+        let identity = Card::new(suit, Rank::Three);
+        assert!(literal.contains(identity));
+        assert!(
+            !domain.contains(identity),
+            "Save Principle excludes {identity:?}: {domain:?}"
+        );
+    }
+    assert_eq!(d.possible_identities(card), Some(literal));
+    assert!(domain.len() > 1, "safe to discard does not mean identified");
+    assert!(domain.iter().all(|identity| {
+        !is_eventually_useful(&view, identity)
+            || view
+                .hands
+                .iter()
+                .flatten()
+                .any(|other| other.id != card && other.identity == Some(identity))
+    }));
+    let (_, projection) = super::super::symbolic_line::project_leaf_projection(
+        &view,
+        HGroupProfile::Max,
+        Action::Discard(card),
+        &crate::AnalysisControl::default(),
+    )
+    .unwrap();
+    assert_eq!(projection.maximum_bottom_deck_risks(), 0);
+    assert!(projection.unresolved_discard.is_none());
+    assert!(!projection.discard_branches.is_empty());
+    for branch in &projection.discard_branches {
+        assert_eq!(branch.continuation.resources.tokens, view.clue_tokens + 1);
+        assert_eq!(branch.continuation.steps[0].consequences.discards, 1);
+        assert_eq!(
+            branch.continuation.steps[0].consequences.bottom_deck_risk,
+            None
+        );
+        assert_eq!(
+            branch.continuation.steps[0]
+                .consequences
+                .save_principle_violation,
+            None
+        );
+    }
+    // Without the earlier team decisions, the uncertain chop stays uncertain.
+    let mut without_history = view;
+    without_history.history.clear();
+    let without_history = LogicalDeductions::new(without_history).unwrap();
+    assert_eq!(
+        super::super::chop_safety::discard_domain(
+            &without_history,
+            &notes,
+            HGroupProfile::Max,
+            card
+        ),
+        without_history.possible_identities(card)
+    );
+}
+
+#[test]
 fn reviewed_save_principle_exclusions_apply_after_plays_and_clues() {
     // The user's p4v0s1 rulings at live turns 33, 38 and 40 establish
     // the same inference, not three independent strategic exceptions.
     // Turn 42 checks the same invariant when a Save exposes the next chop;
     // it is a derived regression, not a separate human optimal-move ruling.
     // Turn 44 covers a predecessor's voluntary trash discard with tokens.
-    for (turn, id) in [(33, 1), (38, 16), (40, 23), (42, 30), (44, 32)] {
-        let state = historical_replay_p4v0s1().state_at_turn(turn - 1).unwrap();
+    let current = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .unwrap();
+    let historical = historical_replay_p4v0s1();
+    for (fixture, turn, id) in [
+        (&current, 26, 5),
+        (&historical, 33, 1),
+        (&historical, 38, 16),
+        (&historical, 40, 23),
+        (&historical, 42, 30),
+        (&historical, 44, 32),
+    ] {
+        let state = fixture.state_at_turn(turn - 1).unwrap();
         let view = state.view_for(state.current_player()).unwrap();
         let d = LogicalDeductions::new(view.clone()).unwrap();
         let notes = infer_h_group(&d, HGroupProfile::Max);

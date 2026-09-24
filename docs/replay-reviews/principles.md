@@ -1,8 +1,8 @@
 # Cross-position user rulings
 
 Except for the current turn-18 teammate-clue, turn-19 clue-efficiency, and
-turn-33 minimum-clue-value rulings, the p4v0s1 positions below refer to the
-preserved
+turn-26 discard-safety and turn-33 minimum-clue-value rulings, the p4v0s1
+positions below refer to the preserved
 [historical fixture](../../crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json),
 not the replacement continuation supplied on 2026-09-23. Their original review
 anchors and regression assertions are retained.
@@ -47,12 +47,20 @@ evidence. Do not treat old implementation restrictions as exceptions to Save
 Principle.
 
 Evaluate the actual historical opportunity: the same card was exposed, the team
-could protect it, and the recipient was not occupied by a promised response.
-Retain valid historical evidence across later token exhaustion. Do not assume
-that all unknown cards are safe, use their actual faces, or turn conditional
-discard safety into literal knowledge or permission to blind-play.
+could protect it, and the recipient was not occupied by a promised response. The
+current turn-26 ruling also covers earlier teammates, not only the player seated
+immediately before the discarder: Alice's zero-token discard does not erase
+Donald's earlier opportunity to protect Bob. See
+`t26-team-save-principle-removes-all-discard-bdr` for the user's per-identity
+reasoning. Retain valid historical evidence across later token exhaustion. Do
+not assume that all unknown cards are safe, use their actual faces, or turn
+conditional discard safety into literal knowledge or permission to blind-play.
 
 Regression contract:
+
+- `reviewed_turn_twenty_six_discard_has_no_bottom_deck_risk` covers the current
+  turn26 ruling, unchanged literal knowledge, missing-history control, and the
+  safe reveal branches' zero losses and guaranteed token refund.
 
 - `reviewed_save_principle_exclusions_apply_after_plays_and_clues` checks all
   three reviewed positions, unchanged literal knowledge, and the missing-history
