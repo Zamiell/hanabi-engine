@@ -1,7 +1,8 @@
 # Cross-position user rulings
 
-Except for the current turn-18 teammate-clue and turn-19 clue-efficiency
-rulings, the p4v0s1 positions below refer to the preserved
+Except for the current turn-18 teammate-clue, turn-19 clue-efficiency, and
+turn-33 minimum-clue-value rulings, the p4v0s1 positions below refer to the
+preserved
 [historical fixture](../../crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json),
 not the replacement continuation supplied on 2026-09-23. Their original review
 anchors and regression assertions are retained.
@@ -130,3 +131,23 @@ future clue demand and safety.
 `reviewed_turn_nineteen_prefers_two_two_for_one_clues` checks the actual planner
 choice and endpoint counts, with controls for lost points, extra clue cost, lost
 committed plays, exposed critical cards and equal secured coverage.
+
+## Minimum clue value is an admission requirement
+
+Current `p4v0s1` turn 33 in the turn-28 purple-to-Alice projection, record
+`t33-green-bluff-zero-minimum-clue-value`: the user rules that green to Cathy is
+an illegal 0-for-1 under
+[MCVP](https://hanabi.github.io/beginner/minimum-clue-value-principle/). Cathy's
+g4 is already clued; bluffing Bob's p3 merely replaces Donald's secured p3.
+Neither a new physical clue fact nor playing a different copy earns new card
+value. This is not a preference to resolve with a heuristic penalty.
+
+Count newly secured useful identities, including indirect plays and protection.
+Do not count previously secured cards again or infer duplication from unknown
+identities. Preserve the documented Fix, valuable Tempo, chop-move and forced
+Stall exceptions; do not prohibit all clues on already-clued cards.
+
+Regressions: `reviewed_green_bluff_requires_minimum_clue_value` checks
+rejection, legitimate turn19/21 bluffs, and unknown-identity controls;
+`reviewed_turn_nineteen_counts_new_cards_not_old_connectors` checks zero value
+for this clue alongside the previously reviewed productive lines.

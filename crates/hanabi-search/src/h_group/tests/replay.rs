@@ -5596,3 +5596,70 @@ fn current_turn_twenty_one_purple_bluffs_bobs_green_two() {
     );
     assert_eq!(line.strikes, 0);
 }
+
+#[test]
+fn reviewed_green_bluff_requires_minimum_clue_value() {
+    // User-reviewed p4v0s1 turn 33 in the turn-28 purple-to-Alice line:
+    // g4 is already clued and Bob's p3 duplicates Donald's secured p3.
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .unwrap();
+    for (turn, target, clue, admitted) in [
+        (32, PlayerId::new(2), Clue::Suit(Suit::Green), false),
+        // Filling in r4's rank obtains no new card either.
+        (32, PlayerId::new(2), Clue::Rank(Rank::Four), false),
+        (18, PlayerId::new(0), Clue::Rank(Rank::Four), true),
+        (20, PlayerId::new(3), Clue::Suit(Suit::Purple), true),
+    ] {
+        let state = fixture.state_at_turn(turn).unwrap();
+        let mut view = state.view_for(state.current_player()).unwrap();
+        // Model the turn-28 forecast without leaking its subsequent draws.
+        if turn == 32 {
+            for card in view.hands.iter_mut().flatten() {
+                if card.id.index() >= 32 {
+                    card.identity = None;
+                }
+            }
+            for entry in &mut view.history {
+                if let ObservedEvent::Drew { card, identity, .. } = &mut entry.event {
+                    if card.index() >= 32 {
+                        *identity = None;
+                    }
+                }
+            }
+        }
+        if turn == 32 {
+            let p3 = Card::new(Suit::Purple, Rank::Three);
+            // A known secured duplicate removes value; an unknown identity
+            // cannot. Repeating the same secured card never adds value.
+            for (known, expected) in [(Some(p3), 0), (None, 1)] {
+                assert_eq!(
+                    super::super::admission::minimum_clue_value(
+                        &view,
+                        &[
+                            (CardId::new(14), known),
+                            (CardId::new(10), Some(Card::new(Suit::Green, Rank::Four)))
+                        ],
+                        [CardId::new(10), CardId::new(30)],
+                    ),
+                    expected
+                );
+            }
+        }
+        let d = LogicalDeductions::new(view).unwrap();
+        let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+        let candidate = candidates
+            .iter()
+            .find(|c| c.action == Action::Clue { target, clue });
+        assert_eq!(
+            candidate.is_some(),
+            admitted,
+            "turn {}: {candidate:?}",
+            turn + 1
+        );
+        if admitted {
+            assert_eq!(candidate.unwrap().move_kind(), Some(HGroupMoveKind::Bluff));
+        }
+    }
+}

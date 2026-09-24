@@ -1279,12 +1279,26 @@ fn clue_line_value(
     directly_secured.extend(value.protected_cards.iter().copied());
     directly_secured.sort_unstable();
     directly_secured.dedup();
-    value.clue_efficiency = directly_secured.len();
-    if value.clue_efficiency == 0 && !giver_public_actions.is_empty() {
-        // A productive fill-in can obtain a previously saved card. Do not
-        // count its already-clued higher successors as additional cards.
-        value.clue_efficiency = 1;
-    }
+    let previously_secured = source
+        .hands
+        .iter()
+        .flatten()
+        .filter(|card| {
+            super::was_clued_before(source, source.turn, card.id)
+                || baselines.iter().any(|baseline| {
+                    baseline
+                        .owner_promises
+                        .iter()
+                        .any(|(old, _)| *old == card.id)
+                        || baseline.playable_now.contains(&card.id)
+                })
+        })
+        .map(|card| (card.id, card.identity))
+        .collect::<Vec<_>>();
+    value.clue_efficiency =
+        super::admission::minimum_clue_value(source, &previously_secured, directly_secured);
+    // A fill-in may improve timing, but does not obtain a previously saved
+    // card again. Keep that benefit in actions/tempo, never invent a 1-for-1.
     if let Some(line) = &evidence.named {
         let action_count = line.secured_actions;
         let connection_steps = line.connection_steps;
@@ -1365,6 +1379,17 @@ mod tests {
         let mut alternative = root.clone();
         alternative.apply(purple).unwrap();
         let cases = [
+            // User-reviewed turn 33: the blind p3 merely replaces Donald's
+            // already secured p3; g4 is also already clued. Zero for one.
+            (
+                replay.state_at_turn(32).unwrap(),
+                Action::Clue {
+                    target: PlayerId::new(2),
+                    clue: Clue::Suit(Suit::Green),
+                },
+                HGroupMoveKind::Bluff,
+                0,
+            ),
             (
                 root.clone(),
                 Action::Clue {

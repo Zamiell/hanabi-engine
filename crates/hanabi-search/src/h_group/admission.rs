@@ -5,6 +5,33 @@ use super::{
     identity_of, is_eventually_useful,
 };
 
+/// MCVP counts newly secured useful identities, not extra clue facts or a
+/// replacement copy of an already secured card. Unknown old identities cannot
+/// prove duplication. Callers supply only cards actually obtained by the clue;
+/// interpretation-specific Fix, valuable Tempo and forced Stall exceptions are
+/// handled separately from ordinary productive clue admission.
+/// <https://hanabi.github.io/beginner/minimum-clue-value-principle/>
+pub(super) fn minimum_clue_value(
+    view: &PlayerView,
+    previously_secured: &[(CardId, Option<Card>)],
+    obtained: impl IntoIterator<Item = CardId>,
+) -> usize {
+    let mut identities = IdentitySet::default();
+    for card in obtained {
+        let Some(identity) = identity_of(view, card) else {
+            continue;
+        };
+        if is_eventually_useful(view, identity)
+            && !previously_secured
+                .iter()
+                .any(|(old, known)| *old == card || *known == Some(identity))
+        {
+            identities = identities.union(IdentitySet::singleton(identity));
+        }
+    }
+    identities.len()
+}
+
 /// Immutable inputs for Good Touch admission. Keeping the complete recipient
 /// consequence context together prevents callers from accidentally validating
 /// only the giver-visible focus while ignoring other newly promised cards.

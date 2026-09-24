@@ -333,9 +333,9 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
             .copied()
             .filter(|card| !promptable.contains(card))
             .collect::<Vec<_>>();
-        // Minimum Clue Value rejects a literal reclue, not a clue that fills
-        // in a new suit/rank on an already gotten card. Fill-in/Fix clues are
-        // essential for repairing ambiguous connection notes.
+        // A physical information check is only a prerequisite for this path,
+        // not proof of Minimum Clue Value. Productive Play/Save admission and
+        // explicit Fix/Tempo exceptions are checked below.
         let adds_objective_information = hand
             .iter()
             .any(|card| touched.contains(&card.id) && !card.clues.has_positive_clue(clue));
@@ -964,6 +964,14 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
     candidates.retain(|candidate| {
         candidate.purpose() == CluePurpose::Fix
             || !stomps_unresolved_visible_prefix(view, replay, candidate.action)
+    });
+    // Ordinary Play/Save labels must not bypass MCVP by filling in a
+    // previously secured card. Named Fix, valuable Tempo, chop-move and
+    // Stall interpretations keep their own documented admission conditions.
+    candidates.retain(|candidate| {
+        !matches!(candidate.purpose(), CluePurpose::Play | CluePurpose::Save)
+            || super::strategic_value::scheduled_clue_outcome(view, profile, candidate)
+                .is_none_or(|outcome| outcome.clue_efficiency > 0)
     });
     let observer_chop = chop(&replay.hands[view.observer.index()], &gotten);
     if candidates.is_empty()
@@ -1961,12 +1969,38 @@ pub(super) fn advanced_clue_candidates(
                 && (kind == BluffTargetKind::Ordinary
                     || rule_enabled(profile, HGroupRuleId::IntermediateBluffs))
         }) {
-            let useful_cards = newly_touched.len().saturating_add(1);
+            let previously_secured = gotten
+                .iter()
+                .map(|card| {
+                    let identity = identity_of(view, *card).or_else(|| {
+                        convention_cards
+                            .iter()
+                            .find(|note| note.card == *card)
+                            .filter(|note| note.identities.len() == 1)
+                            .and_then(|note| note.identities.iter().next())
+                    });
+                    (*card, identity)
+                })
+                .collect::<Vec<_>>();
+            let actor = next_player(view.current_player, view.hands.len());
+            let blind = view.hands[actor.index()]
+                .iter()
+                .rev()
+                .find(|card| !gotten.contains(&card.id))
+                .map(|card| card.id);
+            let useful_cards = super::admission::minimum_clue_value(
+                view,
+                &previously_secured,
+                newly_touched.iter().copied().chain(blind),
+            );
             // A Bluff also promises its newly touched collateral cards.
             // Recognizing the blind play cannot waive Good Touch for those
             // cards or fall through to a different, lower-priority meaning.
             // https://hanabi.github.io/beginner/good-touch-principle/
-            respects_good_touch.then_some((
+            // A recognizable Bluff is not automatically worth a clue. Reject
+            // zero-for-one outcomes here, without falling through to a new
+            // label that would bypass Minimum Clue Value.
+            (respects_good_touch && useful_cards > 0).then_some((
                 HGroupMoveKind::Bluff,
                 330 + 2 * u16::try_from(useful_cards).unwrap_or(u16::MAX),
             ))

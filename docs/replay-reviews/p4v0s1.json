@@ -1,9 +1,32 @@
 [
   {
+    "id": "t33-green-bluff-zero-minimum-clue-value",
+    "turn": 33,
+    "positionKey": "c311db8a69ce7cb630a1cb949c3593db8cfb67caa6fe46abdd7213457123561d",
+    "status": "user-explained",
+    "perspective": "Alice in the turn-28 purple-to-Alice projection; its prefix through turn32 matches the current fixture, but subsequent draws remain unknown.",
+    "source": {
+      "conversation": "2026-09-24 clarification of the rejected projected green clue.",
+      "quote": "it is a 0 for 1 clue, which is illegal because it does not meet minimum clue value prinicpal.",
+      "url": "https://hanabi.github.io/beginner/minimum-clue-value-principle"
+    },
+    "explanation": {
+      "ruling": "Green to Cathy is illegal under Minimum Clue Value, not merely a lower-priority bluff.",
+      "reasoning": "Cathy’s g4 is already clued. Bluffing Bob’s p3 obtains no new needed identity because Donald’s p3 is already clued and promised. Adding a physical green clue or moving the p3 play to Bob does not obtain a new play or save.",
+      "boundary": "Count newly secured useful identities. A known secured duplicate contributes zero; an unknown card cannot prove duplication. Preserve genuine indirect new plays, saves, and documented Fix, valuable Tempo, chop-move and forced Stall exceptions. Do not ban all re-clue bluffs or change the fixture.",
+      "implementation": "Ordinary Play/Save admission now requires positive clue efficiency when its outcome is available, while Bluff admission counts new useful touched identities and its blind response. Both use the shared minimum-clue-value count; strategic scoring no longer floors fill-in value to one. Existing named exception admission remains separate."
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_green_bluff_requires_minimum_clue_value",
+      "h_group::strategic_value::tests::reviewed_turn_nineteen_counts_new_cards_not_old_connectors"
+    ],
+    "coverageNote": "Admission tested with future draws hidden, turn19/21 legitimate Bluff controls, and known-versus-unknown duplicate controls. Outcome regression covers zero efficiency and the earlier reviewed two-for-one lines. No fixture edits or full replay scan. The same turn33 rank-4 fill-in is also rejected as an ordinary zero-value Play clue."
+  },
+  {
     "id": "t28-red-three-versus-purple-and-red-four-ambiguity",
     "turn": 28,
     "positionKey": "b205e690b40f23272a5c38755626862d8e7ca23a3c50343684f82537d9597642",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Donald, with his own unpromised cards and all future draws unknown.",
     "source": {
       "conversation": "Autonomous replay investigation 2026-09-24.",
@@ -44,7 +67,8 @@
       "mechanism": "The 5 Save negatively clarifies Cathy’s r4/r5 nonfocus red card and allows r4 on turn31. Purple to Cathy protects p5 but does not exclude r5 from the other red card. The latter remains r4/r5 at turn35; the engine does not execute an unknown discard or pretend the unknown draw is actual r5.",
       "uncertainty": "The r3 line exports Donald’s inferred p3/p4 to teammate views. Purple line additionally exports his r3. All ten assessed safe identities of #26 produce the same action suffix. Unknown #32 at turn44 remains unknown and only a safe-discard refund is credited; no realized endpoint after revealing it is invented.",
       "question": "In the supplied purple continuation, what allows Cathy to identify her nonfocus red card as r4 rather than r5 when Donald has played r3? Should another convention resolve this, or should a clarifying clue occur? This affects whether the r3-first line truly saves a clue.",
-      "documentationBoundary": "Single Card Focus promises only eventual usefulness for nonfocused cards; Good Touch excludes played/duplicated identities but leaves r4/r5 here. Historical turn28 rulings concern a different prefix and do not establish this inference. The current fixture supplies the r4 play but no explanation of the missing inference."
+      "documentationBoundary": "Single Card Focus promises only eventual usefulness for nonfocused cards; Good Touch excludes played/duplicated identities but leaves r4/r5 here. Historical turn28 rulings concern a different prefix and do not establish this inference. The current fixture supplies the r4 play but no explanation of the missing inference.",
+      "supersededBy": "t33-green-bluff-zero-minimum-clue-value; the projected green clue is illegal, so this comparison is not a sound basis for the previous strategy question."
     },
     "regressions": [],
     "coverageNote": "No preferred-move assertion or fixture changes. Both clear protection bugs found during this investigation have separate regressions. Final from-start scan agrees through turn27 and stops at this turn28 disagreement."
