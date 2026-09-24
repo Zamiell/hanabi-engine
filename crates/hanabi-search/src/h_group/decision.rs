@@ -1184,7 +1184,8 @@ fn derive_convention_constraints(
                     candidate.action == urgent.action
                         || (candidate.target() == urgent.target()
                             && (candidate.immediate_play()
-                                || hard_clue_obligation(view, replay, candidate)))
+                                || hard_clue_obligation(view, replay, candidate)
+                                || delayed_clue_protects_chop(view, inferred, candidate)))
                 })
                 .map(|candidate| candidate.action),
         );
@@ -1235,6 +1236,23 @@ fn derive_convention_constraints(
         );
     }
     ConventionConstraints::default()
+}
+
+/// A convention-admitted delayed Play Clue also protects its touched chop.
+/// Urgent protection requires saving the card from discard, not making it
+/// playable immediately. Untouched chops still need a separate protection.
+fn delayed_clue_protects_chop(
+    view: &PlayerView,
+    inferred: &HGroupInferences,
+    candidate: &CompiledClueAction,
+) -> bool {
+    let Action::Clue { target, clue } = candidate.action else {
+        return false;
+    };
+    candidate.purpose() == CluePurpose::Play
+        && inferred.chops[target.index()].is_some_and(|chop| {
+            identity_of(view, chop).is_some_and(|identity| clue.matches(identity))
+        })
 }
 
 /// At zero clues an ordinary known play cannot be chosen over the only
@@ -2911,5 +2929,74 @@ mod early_game_handoff_tests {
             None,
             "preserving an already-ended phase has no value"
         );
+    }
+}
+
+#[cfg(test)]
+mod urgent_protection_tests {
+    use super::*;
+
+    #[test]
+    fn reviewed_purple_play_clue_protects_the_endangered_five() {
+        // User's current p4v0s1 turn 30: purple to Cathy protects p5 while
+        // Donald holds its clued p3/p4 connectors. Test admission, not optimality.
+        let fixture = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let state = fixture.state_at_turn(29).unwrap();
+        let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+        let analysis = build_h_group_analysis(&deductions, HGroupProfile::Max);
+        let decisions =
+            analyze_h_group_actions_from_analysis(&deductions, HGroupProfile::Max, &analysis);
+        let purple = Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Purple),
+        };
+        assert!(
+            decisions
+                .actions
+                .iter()
+                .any(|candidate| candidate.action == purple),
+            "a delayed Play Clue protects the same critical chop as the 5 Save"
+        );
+        assert!(
+            !decisions
+                .actions
+                .iter()
+                .any(|candidate| candidate.action == Action::Discard(CardId::new(16))),
+            "discarding still leaves p5 exposed"
+        );
+        let mut candidate = *analysis_clue_candidates(&deductions, HGroupProfile::Max, &analysis)
+            .iter()
+            .find(|candidate| candidate.action == purple)
+            .unwrap();
+        assert!(delayed_clue_protects_chop(
+            deductions.view(),
+            &analysis.inferences,
+            &candidate
+        ));
+        // Same target and delayed Play purpose alone are insufficient: a 4
+        // clue does not touch the endangered p5.
+        candidate.action = Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::Four),
+        };
+        assert!(!delayed_clue_protects_chop(
+            deductions.view(),
+            &analysis.inferences,
+            &candidate
+        ));
+        let compiled = super::super::prospective::compiled_prospective_clue(
+            deductions.view(),
+            HGroupProfile::Max,
+            PlayerId::new(2),
+            Clue::Suit(Suit::Purple),
+            &[CardId::new(22)],
+        )
+        .unwrap();
+        let recipient = compiled.projection(PlayerId::new(2)).unwrap();
+        assert!(recipient.inferred.gotten().contains(&CardId::new(22)));
+        assert!(!recipient.inferred.playable_now.contains(&CardId::new(22)));
     }
 }

@@ -1,5 +1,119 @@
 [
   {
+    "id": "t28-red-three-versus-purple-and-red-four-ambiguity",
+    "turn": 28,
+    "positionKey": "b205e690b40f23272a5c38755626862d8e7ca23a3c50343684f82537d9597642",
+    "status": "unresolved",
+    "perspective": "Donald, with his own unpromised cards and all future draws unknown.",
+    "source": {
+      "conversation": "Autonomous replay investigation 2026-09-24.",
+      "kind": "Engine evidence and a question; not a user-approved strategy ruling."
+    },
+    "explanation": {
+      "fixture": "Purple to Alice; engine instead plays promised r3 #13.",
+      "engineLine": [
+        "28 Donald r3 #13",
+        "29 Alice 5s to Cathy",
+        "30 Bob purple to Alice",
+        "31 Cathy r4 #28",
+        "32 Donald discards unknown #26, branching over ten safe identities",
+        "33 Alice p2 #24",
+        "34 Bob purple to Cathy",
+        "35 Cathy b2 #31 discard",
+        "36 Donald p3 #14",
+        "37 Alice r1 #21 discard",
+        "38 Bob r3 #16 discard",
+        "39 Cathy 5s to Bob",
+        "40 Donald p4 #12",
+        "41 Alice y2 #29 discard",
+        "42 Bob p3 #30 discard",
+        "43 Cathy p5 #22",
+        "44 Donald unknown #32 safe discard; stop at reveal budget"
+      ],
+      "fixtureLine": [
+        "28 Donald purple to Alice",
+        "29 Alice p2 #24",
+        "30 Bob purple to Cathy",
+        "31 Cathy b2 #31 discard",
+        "32 Donald r3 #13",
+        "33 Alice green to Cathy",
+        "34 Bob blind-plays #30, visible p3 to Donald",
+        "35 Pending Cathy discard of unknown #33; projection stops before the discard"
+      ],
+      "comparison": "After seven actions all ten r3 discard branches have score15, zero tokens, six secured future cards and eight protected BDRs, matching the purple line on those dimensions. R3 has three committed future plays and zero clue demand versus two and one. Actual comparison is EndpointResources at sharedHorizon7, not raw heuristic priority or unequal final score.",
+      "mechanism": "The 5 Save negatively clarifies Cathy’s r4/r5 nonfocus red card and allows r4 on turn31. Purple to Cathy protects p5 but does not exclude r5 from the other red card. The latter remains r4/r5 at turn35; the engine does not execute an unknown discard or pretend the unknown draw is actual r5.",
+      "uncertainty": "The r3 line exports Donald’s inferred p3/p4 to teammate views. Purple line additionally exports his r3. All ten assessed safe identities of #26 produce the same action suffix. Unknown #32 at turn44 remains unknown and only a safe-discard refund is credited; no realized endpoint after revealing it is invented.",
+      "question": "In the supplied purple continuation, what allows Cathy to identify her nonfocus red card as r4 rather than r5 when Donald has played r3? Should another convention resolve this, or should a clarifying clue occur? This affects whether the r3-first line truly saves a clue.",
+      "documentationBoundary": "Single Card Focus promises only eventual usefulness for nonfocused cards; Good Touch excludes played/duplicated identities but leaves r4/r5 here. Historical turn28 rulings concern a different prefix and do not establish this inference. The current fixture supplies the r4 play but no explanation of the missing inference."
+    },
+    "regressions": [],
+    "coverageNote": "No preferred-move assertion or fixture changes. Both clear protection bugs found during this investigation have separate regressions. Final from-start scan agrees through turn27 and stops at this turn28 disagreement."
+  },
+  {
+    "id": "t30-delayed-play-clue-satisfies-urgent-protection",
+    "turn": 30,
+    "positionKey": "1648d9827a059b313a2e9e9e7852f3386dffa0fabbd3961afdb771125ff2db65",
+    "status": "user-explained",
+    "perspective": "Bob at current turn30, also projected from Donald’s turn28 purple clue.",
+    "source": {
+      "quote": "p2 play\npurple to cathy\nb2 discard",
+      "conversation": "User replacement continuation beginning at turn19; investigated 2026-09-24.",
+      "boundary": "The user supplied these actions. The admission diagnosis is an implementation finding, not an additional strategy ruling."
+    },
+    "explanation": {
+      "bug": "Purple to Cathy is a semantically admitted delayed Play Clue protecting p5 with Donald’s p3/p4 connectors. UrgentProtection nevertheless removed it because it was neither a Save-labeled clue nor an immediate play. Generic explanation misleadingly classified the omitted clue as NoConventionMeaning.",
+      "fix": "An admitted Play Clue touching the endangered chop satisfies protection even when its play is delayed. A delayed clue to another card and a discard do not satisfy that obligation.",
+      "result": "Bob’s projected turn30 now clues purple to Cathy as recorded. This does not resolve the root turn28 comparison."
+    },
+    "regressions": [
+      "h_group::decision::urgent_protection_tests::reviewed_purple_play_clue_protects_the_endangered_five"
+    ],
+    "coverageNote": "Checks actual admission and recipient protection without immediate play; controls discard exclusion and a rank4 clue not touching p5. Related protect filter: eight pass, three failures reproduced at unchanged HEAD."
+  },
+  {
+    "id": "t24-save-negative-information-releases-red-four",
+    "turn": 24,
+    "positionKey": "04d02f00265db976013af48976fbf00cb99db2a423e36b971c42bba025f1d19c",
+    "status": "user-explained",
+    "perspective": "Donald at current turn 24; Bob in the hypothetical continuation at turn 30.",
+    "source": {
+      "conversation": "User replacement continuation beginning with 4s to Alice on turn 19; autonomous examination on 2026-09-24.",
+      "quote": "red to cathy",
+      "boundary": "The user supplied the fixture action. The negative-information diagnosis below is an implementation finding, not an additional user strategy ruling."
+    },
+    "explanation": {
+      "fixture": "Donald clues red to Cathy. Before the fix the engine preferred 2s to Alice.",
+      "bug": "In the red-first forecast Bob later chose 4s rather than saving Cathy’s p5, because Save-pressure evaluation only credited newly playable touched cards. A 5 Save also excludes r5 from her untouched r4/r5 card, releasing r4. Penalizing this as a passive Save contradicted the actual projected response.",
+      "fix": "Check all newly playable recipient cards, including untouched cards informed negatively. Keep pressure when clarification does not release an immediate play.",
+      "fixtureLine": [
+        "24 Donald red to Cathy",
+        "25 Alice discards y1 #1",
+        "26 Bob purple to Alice",
+        "27 Cathy plays r2 #18",
+        "28 Donald plays r3 #13",
+        "29 Alice discards r1 #21",
+        "30 Bob 5s to Cathy",
+        "31 Cathy plays r4 #28"
+      ],
+      "alternativeLine": [
+        "24 Donald 2s to Alice",
+        "25 Alice discards y1 #1",
+        "26 Bob red to Cathy",
+        "27 Cathy plays r2 #18",
+        "28 Donald plays r3 #13",
+        "29 Alice discards r1 #21",
+        "30 Bob 5s to Cathy",
+        "31 Cathy plays r4 #28"
+      ],
+      "uncertainty": "Both forecasts model Donald’s inferred p4 #12, r3 #13 and p3 #14 as visible to teammates; future draws stay unknown. Both stop before Donald’s unknown #26 discard on turn 32. These are projections, not a replacement fixture suffix.",
+      "result": "Corrected engine selects red to Cathy. Both lines reach score14 with zero clues and seven secured future cards; the former false efficiency advantage disappears. The recorded direct comparison uses ConventionPreference, not a proven optimal full-game outcome."
+    },
+    "regressions": [
+      "h_group::frontier_value::tests::reviewed_red_line_save_credits_negative_information_play"
+    ],
+    "coverageNote": "Derived continuation of reviewed turn24, no preferred-action assertion. Checks negative-information productivity with future draws hidden and a control retaining unplayed r3. Related frontier tests: five pass; two failures reproduced with the production fix removed. Fast validation blocked by missing Python development dependencies; focused test, formatting and Clippy pass."
+  },
+  {
     "id": "t19-two-bluffs-have-higher-clue-efficiency",
     "turn": 19,
     "positionKey": "ee5daa8560702db2a691291ccb787b74716f8efd14342bba307fd68132253c71",

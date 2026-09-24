@@ -504,12 +504,16 @@ fn add_root_opportunities(
             .collect::<Vec<_>>();
         let after = super::compiled_prospective_clue(source, profile, target, clue, &touched)?
             .projection(target)?;
-        if touched.iter().any(|card| {
-            after.inferred.playable_now.contains(card) && !owner.playable_now.contains(card)
-        }) {
+        if after
+            .inferred
+            .playable_now
+            .iter()
+            .any(|card| !owner.playable_now.contains(card))
+        {
             // A Save-shaped clue can also obtain an immediate play. It is
             // not a passive Early Save merely because Save has interpretation
-            // precedence. Waiting sacrifices real progress in this case.
+            // precedence. Negative clue information can release an untouched
+            // card too. Waiting sacrifices real progress in either case.
             return Some(());
         }
         let next_chop = source.hands[target.index()]
@@ -572,6 +576,97 @@ fn consecutive_save_pressure(tokens: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewed_red_line_save_credits_negative_information_play() {
+        // Hypothetical continuation of the user's p4v0s1 turn-24 red clue,
+        // not a preferred-move oracle: a 5 Save also disambiguates r4/r5.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let mut state = replay.state_at_turn(25).unwrap();
+        state
+            .apply(Action::Clue {
+                target: PlayerId::new(0),
+                clue: Clue::Suit(Suit::Purple),
+            })
+            .unwrap();
+        state
+            .apply(Action::Play(hanabi_core::CardId::new(18)))
+            .unwrap();
+        for play_predecessor in [false, true] {
+            // Negative control: discarding instead leaves r3 in hand and r4 unplayable.
+            let mut branch = state.clone();
+            let r3 = hanabi_core::CardId::new(13);
+            branch
+                .apply(if play_predecessor {
+                    Action::Play(r3)
+                } else {
+                    Action::Discard(hanabi_core::CardId::new(26))
+                })
+                .unwrap();
+            branch
+                .apply(Action::Discard(hanabi_core::CardId::new(21)))
+                .unwrap();
+            let mut view = branch.view_for(PlayerId::new(1)).unwrap();
+            for hand in &mut view.hands {
+                for card in hand {
+                    if card.id.index() >= 29 {
+                        card.identity = None;
+                    }
+                }
+            }
+            for entry in &mut view.history {
+                if let hanabi_core::ObservedEvent::Drew { card, identity, .. } = &mut entry.event {
+                    if card.index() >= 29 {
+                        *identity = None;
+                    }
+                }
+            }
+            let target = PlayerId::new(2);
+            let r4 = hanabi_core::CardId::new(28);
+            let touched = [hanabi_core::CardId::new(22)];
+            let before = PerspectiveProjector::new(&view, HGroupProfile::Max)
+                .project(target, PerspectiveDepth::NestedRecipients)
+                .unwrap();
+            let before = infer_h_group_from_replay(&before.0, before.1, HGroupProfile::Max);
+            assert!(!before.playable_now.contains(&r4));
+            let after = super::super::compiled_prospective_clue(
+                &view,
+                HGroupProfile::Max,
+                target,
+                Clue::Rank(Rank::Five),
+                &touched,
+            )
+            .unwrap()
+            .projection(target)
+            .unwrap();
+            assert_eq!(after.inferred.playable_now.contains(&r4), play_predecessor);
+            let mut value = ProjectedPositionValue::default();
+            add_root_opportunities(
+                &view,
+                HGroupProfile::Max,
+                Action::Clue {
+                    target: PlayerId::new(2),
+                    clue: Clue::Rank(Rank::Five),
+                },
+                &mut value,
+            )
+            .unwrap();
+            if play_predecessor {
+                assert_eq!(
+                    value.save_pressure, 0,
+                    "negative 5 information releases Cathy's red 4"
+                );
+            } else {
+                assert!(
+                    value.save_pressure > 0,
+                    "clarifying an unplayable card does not remove Save pressure"
+                );
+            }
+        }
+    }
 
     #[test]
     fn reviewed_two_bluffs_secure_both_fours() {
