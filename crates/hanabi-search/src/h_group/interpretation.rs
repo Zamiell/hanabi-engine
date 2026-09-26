@@ -2382,19 +2382,41 @@ pub(super) fn play_clue_score(
     if rank <= height {
         return None;
     }
-    if target == next_player(view.current_player, view.hands.len())
-        && rank > height + 1
-        && newly_touched.iter().copied().any(|card| {
-            identity_of(view, card).is_some_and(|connector| {
-                connector.suit == focus_identity.suit
-                    && usize::from(connector.rank.number()) > height
-                    && connector.rank.number() < focus_identity.rank.number()
+    if target == next_player(view.current_player, view.hands.len()) && rank > height + 1 {
+        let lower_touches = newly_touched
+            .iter()
+            .copied()
+            .filter(|card| {
+                identity_of(view, *card).is_some_and(|connector| {
+                    connector.suit == focus_identity.suit
+                        && usize::from(connector.rank.number()) > height
+                        && connector.rank.number() < focus_identity.rank.number()
+                })
             })
-        })
-    {
-        // The next player cannot distinguish a newly introduced connector
-        // from the delayed focus without an intervening Out-of-Order Fix.
-        return None;
+            .collect::<Vec<_>>();
+        if !lower_touches.is_empty() {
+            let compiled = super::prospective::compiled_prospective_clue(
+                view,
+                profile,
+                target,
+                clue,
+                clue_touched,
+            );
+            // A genuinely new connector still needs an Out-of-Order Fix.
+            // Recipient-known trash is not a connector: use the same compiled
+            // owner knowledge as common Good Touch validation, not its face.
+            if !compiled
+                .as_ref()
+                .and_then(|c| c.projection(target))
+                .is_some_and(|after| {
+                    lower_touches
+                        .iter()
+                        .all(|card| after.knows_trash(*card, explicitly_clued))
+                })
+            {
+                return None;
+            }
+        }
     }
     let base = if rank == height + 1 {
         330

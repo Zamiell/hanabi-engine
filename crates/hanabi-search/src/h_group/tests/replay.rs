@@ -713,10 +713,17 @@ fn first_seed_four_save_accounts_for_collateral_trash() {
             .find(|note| note.card == CardId::new(id))
             .unwrap();
         assert!(!note.identities.is_empty());
+        // The visible clued g4 makes this possibility trash, not impossible.
+        assert!(note.identities.contains(Card::new(Suit::Green, Rank::Four)));
         assert!(
-            note.identities
-                .iter()
-                .all(|identity| !super::super::is_eventually_useful(d.view(), identity)),
+            note.identities.iter().all(|identity| {
+                !super::super::is_eventually_useful(d.view(), identity)
+                    || (identity == Card::new(Suit::Green, Rank::Four)
+                        && d.view().hands[2].iter().any(|card| {
+                            card.identity == Some(identity)
+                                && notes.clued_or_promised().contains(&card.id)
+                        }))
+            }),
             "{note:?}"
         );
     }
@@ -5932,5 +5939,84 @@ fn reviewed_turn_thirty_known_trash_prevents_false_anxiety() {
             select_h_group_action(&recipient, HGroupProfile::Max),
             Some(Action::Discard(CardId::new(18)))
         );
+    }
+}
+
+#[test]
+fn reviewed_purple_play_with_known_duplicate_collateral() {
+    // p4v0s1 live turn 30: user confirms purple to Cathy is the normal
+    // Play Clue after Alice plays p2, despite touching Cathy's duplicate p3.
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .unwrap();
+    let state = fixture.state_at_turn(29).unwrap();
+    let root = fixture
+        .state_at_turn(28)
+        .unwrap()
+        .view_for(PlayerId::new(0))
+        .unwrap();
+    let after_play = ProspectiveTransition::successful_play(
+        &root,
+        PlayerId::new(0),
+        CardId::new(24),
+        Card::new(Suit::Purple, Rank::Two),
+    );
+    let (projected, _) = PerspectiveProjector::new(&after_play, HGroupProfile::Max)
+        .project(PlayerId::new(1), PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    for view in [
+        state.view_for(PlayerId::new(1)).unwrap(),
+        projected.view().clone(),
+    ] {
+        let clue = Clue::Suit(Suit::Purple);
+        let compiled = super::super::compiled_prospective_clue(
+            &view,
+            HGroupProfile::Max,
+            PlayerId::new(2),
+            clue,
+            &[CardId::new(22), CardId::new(30)],
+        )
+        .unwrap();
+        let d = LogicalDeductions::new(view).unwrap();
+        let replay = replay_h_group(&d, HGroupProfile::Max);
+        assert!(
+            compiled
+                .projection(PlayerId::new(2))
+                .unwrap()
+                .knows_trash(CardId::new(30), &replay.promptable())
+        );
+        let recipient = compiled.projection(PlayerId::new(2)).unwrap();
+        let collateral = recipient
+            .inferred
+            .cards
+            .iter()
+            .find(|c| c.card == CardId::new(30))
+            .unwrap();
+        assert!(
+            collateral
+                .identities
+                .contains(Card::new(Suit::Purple, Rank::Three)),
+            "{collateral:?}"
+        );
+        // No duplicate evidence means useful purple identities are not trash.
+        assert!(!recipient.knows_trash(CardId::new(30), &CardSet::default()));
+        assert!(!recipient.knows_trash(CardId::new(22), &replay.promptable()));
+        assert_eq!(
+            select_h_group_action(&recipient.deductions, HGroupProfile::Max),
+            Some(Action::Discard(CardId::new(30)))
+        );
+        let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+        let candidate = candidates
+            .iter()
+            .find(|c| {
+                c.action
+                    == Action::Clue {
+                        target: PlayerId::new(2),
+                        clue,
+                    }
+            })
+            .expect("reviewed purple Play Clue must be admitted");
+        assert_eq!(candidate.move_kind(), Some(HGroupMoveKind::PlayClue));
     }
 }

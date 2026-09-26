@@ -1,9 +1,34 @@
 [
   {
+    "id": "t30-normal-purple-play-with-duplicate-collateral",
+    "turn": 30,
+    "positionKey": "2158be01300d548e122ca333dced1a9fb8add85ef22595b743fe9202d33a95fd",
+    "status": "user-explained",
+    "perspective": "Bob after Alice plays p2; also Bob projected from Alice at live turn29, with future draws unknown.",
+    "source": {
+      "conversation": "2026-09-26 current task",
+      "quote": "in the play p2 projection, it should project purples to cathy, not 5s, so that is a bug, explain why it chooses a 5 save instead of the obvious normal play clue"
+    },
+    "explanation": {
+      "decision": "Purple to Cathy is a normal delayed Play Clue on p5. The reviewed continuation discards the newly touched p3 while Donald already has clued p3/p4.",
+      "boundary": "The user establishes this concrete ordinary Play interpretation; not a blanket exemption for all duplicate touches.",
+      "implementation": "The lower-touch admission guard and duplicate-connector hazard must consult compiled recipient trash knowledge. Collateral domains retain identities already secured elsewhere, rather than falsely narrowing to physically dead identities only. Known-trash discard selection checks each possible identity against another clued copy without requiring the discard card to be exactly identified. Common Good Touch and minimum clue value validation remain active.",
+      "verification": "Rebuilt turn29 report selects purple to Cathy at projected turn30. The nested comparison prefers purple over5s by EndpointResources at horizon3: blocked clued cards3 versus4. Root29 still prefers5s by FundedProgress at horizon6; this localized fix does not establish root parity.",
+      "currentFixtureProjection": "29 Alice p2;30 Bob purple to Cathy;31 Cathy p3 discard;32 Donald p3;33 Alice unknown21 discard (r1/y1/y2/g1/g2/b1/b3 reveal branches);34 Bob p4 discard in every branch; stop before35 Cathy unknown33 discard. Future draws remain unknown.",
+      "currentEngineProjection": "29 Alice5s to Cathy;30 Bob p4 discard;31 Cathy p3 discard;32 Donald r3;33 Alice p2;34 Bob r3 discard;35 Cathy r4;36 Donald p3;37 Alice5s to Bob; stop before38 Bob unknown32 discard.",
+      "supersedes": "t29-play-handoff-versus-five-save-with-purple-collateral"
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_purple_play_with_known_duplicate_collateral"
+    ],
+    "coverageNote": "Actual turn30 and projected post-p2 position: p3 remains possible, owner knows trash, normal Play admitted, Cathy discards p3. Negative controls remove duplicate evidence and check p5 is not trash. Historical first_seed_four_save_accounts_for_collateral_trash now explicitly retains the secured g4 possibility while still requiring every alternative to be dead or that visible clued g4; the former physically-dead-only assertion encoded the same invalid elimination."
+  },
+  {
     "id": "t29-play-handoff-versus-five-save-with-purple-collateral",
     "turn": 29,
     "positionKey": "c1acadff54e7a1fadb5390b60ec761f1caa54f70844bc54364520c7d780d97f0",
-    "status": "unresolved",
+    "status": "superseded",
+    "supersededBy": "t30-normal-purple-play-with-duplicate-collateral",
     "perspective": "Alice after Cathy’s Gentleman’s Discard and Donald’s r2 play. Alice’s own unknown cards and all future draws remain unknown.",
     "source": {
       "conversation": "2026-09-26 current Gentleman’s Discard continuation and replay investigation.",

@@ -1499,15 +1499,16 @@ impl ReplayReducer {
                     } else if good_touch.is_empty() {
                         // Every useful identity is already accounted for
                         // (including the exact focus). Collateral can be
-                        // known trash, not an impossible Good-Touch promise
+                        // known trash, including identities secured in other hands,
+                        // not an impossible Good-Touch promise
                         // that falls back to the full literal domain.
                         // https://hanabi.github.io/level-1/#good-touch-principle
                         let useful = snapshot_good_touch_identities(
                             *card,
                             direct,
                             view,
-                            &[],
-                            &CardSet::default(),
+                            &self.hands,
+                            &previously_promptable,
                             self.stack_heights,
                             self.public_removed,
                         );

@@ -1729,6 +1729,9 @@ pub(super) fn convention_known_trash_discard(
     // https://hanabi.github.io/level-14/#known-trash-discard-order
     // Required discharge discards are handled before this ordinary fallback.
     let hand = &view.hands[view.observer.index()];
+    // Test each possible face against another secured copy. Requiring two
+    // exactly identified copies misses ambiguous cards whose entire domain
+    // is trash (and can incorrectly force an Anxiety play at zero tokens).
     let is_trash = |card: &hanabi_core::ObservedCard| {
         inferred
             .cards
@@ -1737,7 +1740,17 @@ pub(super) fn convention_known_trash_discard(
             .is_some_and(|note| {
                 !note.identities.is_empty()
                     && note.identities.iter().all(|identity| {
-                        is_convention_trash(view, identity, &gotten, &inferred.cards)
+                        !is_eventually_useful(view, identity)
+                            || view.hands.iter().flatten().any(|other| {
+                                other.id != card.id
+                                    && gotten.contains(&other.id)
+                                    && (other.identity == Some(identity)
+                                        || inferred.cards.iter().any(|other_note| {
+                                            other_note.card == other.id
+                                                && other_note.identities
+                                                    == IdentitySet::singleton(identity)
+                                        }))
+                            })
                     })
             })
     };

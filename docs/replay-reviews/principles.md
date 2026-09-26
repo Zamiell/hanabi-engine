@@ -204,3 +204,26 @@ the revised move supplies no broader strategy rule.
 The user subsequently accepted the turn27 Gentleman’s Discard and replaced its
 continuation through54 (`t27-user-accepts-gentlemans-discard-continuation`).
 This accepts the concrete move without establishing a general transfer premium.
+
+## Known-trash collateral retains secured duplicate possibilities
+
+Current `p4v0s1`, live turn 30, record
+`t30-normal-purple-play-with-duplicate-collateral`: the user identifies purple
+to Cathy after Alice's p2 play as an ordinary Play Clue. The reviewed
+continuation discards Cathy's newly touched p3 while Donald already holds clued
+p3 and p4.
+
+The implementation must distinguish a new play promise from collateral that the
+recipient knows is trash. Being safely discardable does not imply a physically
+dead identity: preserve possibilities secured by other clued cards. Admission,
+connection safety, and discard/Anxiety evaluation must agree about that
+knowledge. This is not blanket permission to duplicate useful touches; the
+owner's entire remaining domain must be accounted for, and common clue
+validation still applies.
+
+`reviewed_purple_play_with_known_duplicate_collateral` checks the actual
+position and the projected post-p2 position without future draws, including
+missing-evidence and useful-focus controls. Historical
+`first_seed_four_save_accounts_for_collateral_trash` retains secured g4 as
+possible while requiring every collateral alternative to be physically dead or
+that visible clued g4.

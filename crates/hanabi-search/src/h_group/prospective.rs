@@ -1387,6 +1387,10 @@ pub(super) fn prospective_clue_hazard(
             && touched.iter().any(|card| {
                 !connection.cards.contains(card)
                     && identity_of(source, *card) == Some(connection.expected)
+                    // A collateral card the recipient knows is trash carries
+                    // no competing play promise. Keep checking genuinely new
+                    // duplicate promises, using pre-clue Good Touch evidence.
+                    && !recipient.knows_trash(*card, &baseline.replay.promptable())
             })
     }) {
         return Some(ProspectiveClueHazard::DuplicateGoodTouchPromise);
