@@ -227,3 +227,19 @@ missing-evidence and useful-focus controls. Historical
 `first_seed_four_save_accounts_for_collateral_trash` retains secured g4 as
 possible while requiring every collateral alternative to be physically dead or
 that visible clued g4.
+
+The same reviewed normal clue must retain its meaning after a connector is
+played. Record `t29-public-connector-play-must-not-rewrite-purple-as-ejection`
+documents a historical-state bug: counting connectors in current hands could
+retroactively classify the old clue as a 5 Color Ejection and retract Donald's
+p4. Count clue-time hands and prior literal evidence; neither later draws nor
+same-clue touches supply previously established connectors.
+`reviewed_purple_connectors_survive_their_public_plays` checks r3-first and
+p3-first branches, retained p4 knowledge and downstream commitments, plus a
+control removing the old rank clue without exposing the hidden card's face.
+
+The same regression covers all seven safe reveals of Alice's unknown discard. A
+hypothetical connector created by a clue cannot make that originating clue a
+zero-value duplicate for Time Travel Chop Move recognition: the duplicate must
+already have been secured before the clue. Otherwise a possible g1 reveal
+falsely changes an earlier green clue's meaning and the later purple focus.

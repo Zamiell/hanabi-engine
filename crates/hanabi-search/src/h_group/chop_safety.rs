@@ -167,7 +167,7 @@ fn declined_protection_domain(
 
 /// Reuse the historical observation constructor; never import future clues,
 /// draws, stack heights, or the observer's later-revealed card identities.
-fn before_historical_turn(source: &PlayerView, turn: u32) -> PlayerView {
+pub(super) fn before_historical_turn(source: &PlayerView, turn: u32) -> PlayerView {
     let mut hands = source
         .hands
         .iter()

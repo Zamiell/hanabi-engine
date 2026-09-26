@@ -6020,3 +6020,110 @@ fn reviewed_purple_play_with_known_duplicate_collateral() {
         assert_eq!(candidate.move_kind(), Some(HGroupMoveKind::PlayClue));
     }
 }
+
+#[test]
+fn reviewed_purple_connectors_survive_their_public_plays() {
+    // Current p4v0s1: reviewed normal purple Play Clue at30 relies on
+    // Donald's established p3/p4. A hypothetical p3-first response must not
+    // rewrite that old clue as an Ejection or turn his p4 into p1.
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .unwrap();
+    let state = fixture.state_at_turn(28).unwrap();
+    let root = state.view_for(PlayerId::new(0)).unwrap();
+    let after_play = ProspectiveTransition::successful_play(
+        &root,
+        PlayerId::new(0),
+        CardId::new(24),
+        Card::new(Suit::Purple, Rank::Two),
+    );
+    let after_clue = ProspectiveTransition::clue_by(
+        &after_play,
+        PlayerId::new(1),
+        PlayerId::new(2),
+        Clue::Suit(Suit::Purple),
+        &[CardId::new(22), CardId::new(30)],
+    );
+    let after_discard = ProspectiveTransition::discard(
+        &after_clue,
+        PlayerId::new(2),
+        CardId::new(30),
+        Card::new(Suit::Purple, Rank::Three),
+    );
+    for (played, identity) in [
+        (13, Card::new(Suit::Red, Rank::Three)),
+        (14, Card::new(Suit::Purple, Rank::Three)),
+    ] {
+        let after = ProspectiveTransition::successful_play(
+            &after_discard,
+            PlayerId::new(3),
+            CardId::new(played),
+            identity,
+        );
+        let mut positions = vec![after_discard.clone(), after.clone()];
+        positions.extend(
+            [
+                Card::new(Suit::Red, Rank::One),
+                Card::new(Suit::Yellow, Rank::One),
+                Card::new(Suit::Yellow, Rank::Two),
+                Card::new(Suit::Green, Rank::One),
+                Card::new(Suit::Green, Rank::Two),
+                Card::new(Suit::Blue, Rank::One),
+                Card::new(Suit::Blue, Rank::Three),
+            ]
+            .into_iter()
+            .map(|reveal| {
+                ProspectiveTransition::discard(&after, PlayerId::new(0), CardId::new(21), reveal)
+            }),
+        );
+        for position in &positions {
+            let (d, replay) = PerspectiveProjector::new(position, HGroupProfile::Max)
+                .project(PlayerId::new(3), PerspectiveDepth::NestedRecipients)
+                .unwrap();
+            assert!(!replay.signals.iter().any(
+                |signal| signal.turn == 29 && signal.kind == HGroupMoveKind::FiveColorEjection
+            ));
+            let missing = |view: &PlayerView| {
+                super::super::recognition::unassigned_finesse_ranks(
+                    view,
+                    PlayerId::new(1),
+                    PlayerId::new(2),
+                    Card::new(Suit::Purple, Rank::Five),
+                    [2, 2, 2, 5, 2],
+                    &replay.promptable(),
+                    29,
+                )
+            };
+            assert_eq!(missing(d.view()), 1);
+            // Remove the literal rank clue that establishes Donald's p3.
+            // His hidden face and its later public play cannot replace it.
+            let mut no_rank_evidence = d.view().clone();
+            no_rank_evidence.history.retain(|entry| entry.turn != 0);
+            assert_eq!(missing(&no_rank_evidence), 2);
+            assert!(!replay.signals.iter().any(
+                |signal| signal.turn == 15 && signal.kind == HGroupMoveKind::TimeTravelChopMove
+            ));
+            if position.turn >= 32 {
+                let value = super::super::frontier_value::evaluate(
+                    &root,
+                    position,
+                    HGroupProfile::Max,
+                    Action::Play(CardId::new(24)),
+                )
+                .unwrap();
+                assert!(value.committed_future_plays >= 3, "{value:?}");
+            }
+            let inferred = super::super::infer_h_group_from_replay(&d, replay, HGroupProfile::Max);
+            assert_eq!(
+                inferred
+                    .cards
+                    .iter()
+                    .find(|card| card.card == CardId::new(12))
+                    .unwrap()
+                    .identities,
+                IdentitySet::singleton(Card::new(Suit::Purple, Rank::Four))
+            );
+        }
+    }
+}

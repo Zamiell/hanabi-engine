@@ -73,12 +73,23 @@ pub(super) fn unassigned_finesse_ranks(
     explicitly_clued: &CardSet,
     turn: u32,
 ) -> usize {
+    // Interpret the clue using the hands and literal facts that existed then.
+    // Later connector plays/draws must not turn an ordinary delayed clue into
+    // a 5 Color Ejection and retract an established connector identity.
+    let historical;
+    let view = if turn < view.turn {
+        historical = super::chop_safety::before_historical_turn(view, turn);
+        &historical
+    } else {
+        view
+    };
     let height = stack_heights[focus_identity.suit.index()];
     ((height + 1)..focus_identity.rank.number())
         .filter(|rank| {
             let needed = Card::new(focus_identity.suit, Rank::ALL[usize::from(*rank - 1)]);
             !view.hands[actor.index()].iter().any(|card| {
                 explicitly_clued.contains(&card.id)
+                    && was_clued_before(view, turn, card.id)
                     && (card.identity == Some(needed)
                         || IdentitySet::from_mask(card.clues.identity_mask())
                             == IdentitySet::singleton(needed))
@@ -94,7 +105,9 @@ pub(super) fn unassigned_finesse_ranks(
                 hand.iter().any(|card| {
                     explicitly_clued.contains(&card.id)
                         && was_clued_before(view, turn, card.id)
-                        && card.identity == Some(needed)
+                        && (card.identity == Some(needed)
+                            || IdentitySet::from_mask(card.clues.identity_mask())
+                                == IdentitySet::singleton(needed))
                 }) || super::interpretation::visible_finesse_connects_at(
                     hand,
                     needed,

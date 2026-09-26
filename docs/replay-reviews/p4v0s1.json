@@ -1,5 +1,68 @@
 [
   {
+    "id": "t29-five-save-negative-information-versus-play-handoff",
+    "turn": 29,
+    "positionKey": "c1acadff54e7a1fadb5390b60ec761f1caa54f70844bc54364520c7d780d97f0",
+    "status": "unresolved",
+    "perspective": "Alice at29; own unknown cards and future draws remain unknown.",
+    "source": {
+      "conversation": "2026-09-26 autonomous replay continuation",
+      "kind": "Engine investigation and convention question; not a user ruling."
+    },
+    "explanation": {
+      "fixtureLine": [
+        "29 Alice p2",
+        "30 Bob purple to Cathy",
+        "31 Cathy p3 discard",
+        "32 Donald p3",
+        "33 Alice unknown #21 safe discard; r1/y1/y2/g1/g2/b1/b3 branches",
+        "34 Bob p4 discard in every branch",
+        "Stop before35 Cathy unknown #33 discard"
+      ],
+      "engineLine": [
+        "29 Alice 5s to Cathy",
+        "30 Bob p4 discard",
+        "31 Cathy p3 discard",
+        "32 Donald r3",
+        "33 Alice p2",
+        "34 Bob r3 discard",
+        "35 Cathy r4",
+        "36 Donald p3",
+        "37 Alice 5s to Bob",
+        "Stop before38 Bob unknown #32 discard"
+      ],
+      "comparison": "FundedProgress at shared horizon6. Both score14, clues3, clueDemand1, protectedBottomDeckRisks4, securedFuturePlays7, blockedCluedCards3. Play-first has committedFuturePlays3 and visibleSuccessors1 in all seven reveal branches; Save-first has4 and2. No unknown discard is treated as an inevitable loss.",
+      "mechanism": "Cathy’s red #28 was nonfocus of the turn24 red clue. Purple to Cathy leaves it r4/r5; 5s to Cathy gives negative5 and makes it r4. A read-only diagnostic on the hypothetical Donald-r3-first branch also retains r4/r5, so changing his play order alone does not resolve this.",
+      "question": "What convention lets Cathy rule out r5 and play her nonfocus red #28 as r4 after Donald plays r3 in the purple continuation? Otherwise, is the 5 Save’s negative information worth delaying Alice’s p2?",
+      "documentationBoundary": "Single Card Focus guarantees eventual usefulness for nonfocus, not its exact rank. No recorded user ruling supplies this missing inference. Historical t28-red-three-versus-purple-and-red-four-ambiguity asked a related question but was superseded because its green-to-Cathy projection violated MCVP; that invalid comparison is not authority. The current comparison has no such green clue.",
+      "fixesBeforeComparison": "Historical Ejection recognition now retains clue-time connector evidence; same-clue hypothetical connectors cannot count as preexisting duplicates for Time Travel Chop Move. All seven safe reveal branches retain Donald’s p4 and downstream commitments."
+    },
+    "regressions": [],
+    "coverageNote": "No new preferred-move or red-rank assertion pending user judgment. Corrected inference has separate table-driven regression in t29-public-connector-play-must-not-rewrite-purple-as-ejection."
+  },
+  {
+    "id": "t29-public-connector-play-must-not-rewrite-purple-as-ejection",
+    "turn": 29,
+    "positionKey": "c1acadff54e7a1fadb5390b60ec761f1caa54f70844bc54364520c7d780d97f0",
+    "status": "user-explained",
+    "perspective": "Alice at29 forecasting Bob purple to Cathy at30, Cathy p3 discard, then Donald playing either r3 or p3. All future draws stay unknown.",
+    "source": {
+      "conversation": "2026-09-26 continuation after normal-purple-Play clarification",
+      "quote": "in the play p2 projection, it should project purples to cathy, not 5s, so that is a bug, explain why it chooses a 5 save instead of the obvious normal play clue",
+      "boundary": "The user establishes the normal Play Clue. The historical-state and downstream knowledge failures below are implementation findings, not additional user strategy rulings."
+    },
+    "explanation": {
+      "bug": "After Donald plays p3, historical 5 Color Ejection recognition re-evaluates turn30 using current hands, loses the old p3 connector, and retracts Donald’s p4. His inferred identity becomes p1, dropping p4 and the dependent p5 from frontier commitments.",
+      "fix": "Count unassigned blind ranks using the existing clue-time view reconstruction. A literally identified clued connector counts even when its face is hidden in the observer’s own hand. Later plays and draws cannot rewrite this original clue.",
+      "conditionalBranchBug": "The g1 reveal branch of Alice’s turn33 discard of unknown #21 also invented a Time Travel Chop Move at16: it counted the green clue’s own conditional g1 connector as a previously secured duplicate. That falsely chop-moved Donald’s p4 and changed the later purple clue’s focus. Duplication now requires the other card to have been gotten before the originating clue, preserving this ordinary direct/Reverse-Finesse alternative.",
+      "boundary": "This does not add speculative hidden connectors or assert a best turn29 root action. Ejection thresholds still require their actual missing blind ranks."
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_purple_connectors_survive_their_public_plays"
+    ],
+    "coverageNote": "Branches the reviewed turn29 state with both Donald r3-first and p3-first; verifies no false Ejection, retained p4 identity, and downstream commitment accounting. All seven assessed safe reveal branches of Alice’s unknown discard retain p4 and its downstream commitments, with no false Time Travel Chop Move. Removing the prior rank clue restores the missing blind-rank count; later revelation of the hidden card cannot replace clue-time evidence."
+  },
+  {
     "id": "t30-normal-purple-play-with-duplicate-collateral",
     "turn": 30,
     "positionKey": "2158be01300d548e122ca333dced1a9fb8add85ef22595b743fe9202d33a95fd",

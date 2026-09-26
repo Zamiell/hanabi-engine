@@ -655,6 +655,31 @@ pub(in crate::h_group) fn apply_duplication_effects(
             identity,
             successful: true,
         } => {
+            let direct = effects.clues.iter().rev().find(|clue| clue.focus == *card);
+            let blind_signal = effects.signals.iter().rev().find(|signal| {
+                signal.turn < entry.turn
+                    && matches!(
+                        signal.kind,
+                        HGroupMoveKind::Finesse
+                            | HGroupMoveKind::ReverseFinesse
+                            | HGroupMoveKind::SelfFinesse
+                            | HGroupMoveKind::LayeredFinesse
+                    )
+                    && signal.cards.contains(card)
+            });
+            let origin = direct.or_else(|| {
+                blind_signal.and_then(|signal| {
+                    effects
+                        .clues
+                        .iter()
+                        .rev()
+                        .find(|clue| clue.turn == signal.turn)
+                })
+            });
+            let Some(origin) = origin.cloned() else {
+                return;
+            };
+
             let gotten = protected_cards(
                 effects.explicitly_clued,
                 effects.invisibly_clued,
@@ -668,6 +693,11 @@ pub(in crate::h_group) fn apply_duplication_effects(
                         })
                 });
                 other != *card
+                    // A connector hypothesized by this very clue is not an
+                    // older secured duplicate. Its alternative branch cannot
+                    // make the clue retroactively zero-value when the direct
+                    // focus plays (and trigger a Time Travel Chop Move).
+                    && origin.previously_gotten.contains(&other)
                     && (effects.explicitly_clued.contains(&other)
                         || effects.invisibly_clued.contains(&other))
                     && (context.historical.identity(other) == Some(*identity)
@@ -696,31 +726,6 @@ pub(in crate::h_group) fn apply_duplication_effects(
             if !duplicate_is_gotten {
                 return;
             }
-
-            let direct = effects.clues.iter().rev().find(|clue| clue.focus == *card);
-            let blind_signal = effects.signals.iter().rev().find(|signal| {
-                signal.turn < entry.turn
-                    && matches!(
-                        signal.kind,
-                        HGroupMoveKind::Finesse
-                            | HGroupMoveKind::ReverseFinesse
-                            | HGroupMoveKind::SelfFinesse
-                            | HGroupMoveKind::LayeredFinesse
-                    )
-                    && signal.cards.contains(card)
-            });
-            let origin = direct.or_else(|| {
-                blind_signal.and_then(|signal| {
-                    effects
-                        .clues
-                        .iter()
-                        .rev()
-                        .find(|clue| clue.turn == signal.turn)
-                })
-            });
-            let Some(origin) = origin.cloned() else {
-                return;
-            };
 
             // For a blind play the clued focus is also an extra card: it is
             // distinct from the duplicated card that just played. Level 17's
