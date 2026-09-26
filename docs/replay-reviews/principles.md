@@ -200,3 +200,7 @@ continuation through turn54
 continuation and known-trash Anxiety regression are preserved in
 `game-p4v0s1-before-turn26-purple-revision.json`. Discard safety remains valid;
 the revised move supplies no broader strategy rule.
+
+The user subsequently accepted the turn27 Gentleman’s Discard and replaced its
+continuation through54 (`t27-user-accepts-gentlemans-discard-continuation`).
+This accepts the concrete move without establishing a general transfer premium.

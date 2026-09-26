@@ -1,9 +1,189 @@
 [
   {
+    "id": "t29-play-handoff-versus-five-save-with-purple-collateral",
+    "turn": 29,
+    "positionKey": "c1acadff54e7a1fadb5390b60ec761f1caa54f70844bc54364520c7d780d97f0",
+    "status": "unresolved",
+    "perspective": "Alice after Cathy’s Gentleman’s Discard and Donald’s r2 play. Alice’s own unknown cards and all future draws remain unknown.",
+    "source": {
+      "conversation": "2026-09-26 current Gentleman’s Discard continuation and replay investigation.",
+      "quote": "- p2 play\n- purple to cathy\n- discard p3",
+      "boundary": "The supplied actions are user-reviewed. The admission diagnosis and comparison below are engine analysis, not a new convention ruling."
+    },
+    "explanation": {
+      "fixtureProjection": [
+        "29 Alice plays p2 #24",
+        "30 Bob 5s to Cathy (engine substitutes this for the recorded purple clue)",
+        "31 Cathy discards p3 #30",
+        "32 Donald plays p3 #14",
+        "33 Alice discards unknown #21 (actual r1): seven safe reveal branches",
+        "34 Bob discards p4 #5 in six branches; stop before35 Cathy discards unknown #33. In the g1 reveal branch, stop before34 purple to Cathy because its interpretation remains unresolved."
+      ],
+      "engineProjection": [
+        "29 Alice 5s to Cathy",
+        "30 Bob discards p4 #5",
+        "31 Cathy discards p3 #30",
+        "32 Donald plays r3 #13",
+        "33 Alice plays p2 #24",
+        "34 Bob discards r3 #16",
+        "35 Cathy plays r4 #28",
+        "36 Donald plays p3 #14",
+        "37 Alice 5s to Bob; stop before38 Bob discards unknown #32"
+      ],
+      "comparison": "EndpointResources at shared five-action horizon (after33). Both score14, have2 tokens and7 secured future identities. Save-first has2 visible successors versus1 after playing: red and purple both advanced, whereas playing-first advances purple twice. Save-first has4 committed future plays; playing-first has4 in six reveal branches and2 in the g1 branch. Save-first dominates the recorded endpoint operands. This is not an immediate Save deadline, and not the higher raw action priority (play525 versusSave500).",
+      "handoff": "Bob has a funded 5 Save after Alice plays, so protection can be handed off. The current play/clue/immediate-response scheduling fallback does not apply to a clue followed by Cathy discarding, and endpoint comparison precedes it. Do not manufacture a universal preference merely to force parity.",
+      "purpleIssue": "At turn30 purple touches p5 #22 plus Cathy’s new p3 #30. Donald already has p3 #14 and p4 #12 clued. The ordinary delayed-Play proposal rejects a clue to the immediately next player when it newly touches a lower same-suit connector in that hand. No alternate generator admits it. The public explanation is only NoConventionMeaning; it does not record a common-validator Good Touch rejection.",
+      "newCondition": "Earlier reviewed purple-to-Cathy admission protected p5 without this additional new p3 touch. The known-trash Anxiety fix is also not the issue. This continuation needs a meaning for the collateral p3, including why Cathy can discard it while retaining p5.",
+      "question": "What convention makes purple to Cathy a delayed p5 clue with a discardable newly touched p3, despite Donald’s secured p3/p4? Is this intended as known-duplicate collateral or a named exception? The beginner Good Touch rule and the inspected Duplicitous Value rule do not directly establish this delayed-focus/nonfocus-discard meaning.",
+      "scope": "Scan from1 agrees through28 and stops at29. No engine changes or unsupplied fixture edits."
+    },
+    "regressions": [],
+    "coverageNote": "Builtin root and projected-decision evidence plus read-only admission inspection. No speculative convention fix or new optimal-action test."
+  },
+  {
+    "id": "t27-user-accepts-gentlemans-discard-continuation",
+    "turn": 27,
+    "positionKey": "50d10fa120071e1fbcfe9fa36e51bc1e628416e33fe978ad79b21cb35674c509",
+    "status": "user-explained",
+    "perspective": "Cathy after Bob purple to Alice at26; prefix through26 unchanged.",
+    "source": {
+      "conversation": "Current task, 2026-09-26.",
+      "quote": "change the fixture to do the gentleman's discard. then:\n\n- r2 play\n- p2 play\n- purple to cathy\n- discard p3"
+    },
+    "explanation": {
+      "decision": "Cathy discards r2, Donald plays the transferred r2, Alice plays p2, Bob clues purple to Cathy, and Cathy discards her p3. The supplied continuation runs through54.",
+      "boundary": "Accepts the concrete transfer and continuation; no general priority rule for Gentleman’s Discards was supplied. The previous explanation’s contingent protection limitations remain historical analysis, not a convention ruling.",
+      "validation": "54 legal actions, 25 points, zero strikes, no ambiguous same-identity card selections.",
+      "continuation": [
+        {
+          "type": 1,
+          "target": 18
+        },
+        {
+          "type": 0,
+          "target": 26
+        },
+        {
+          "type": 0,
+          "target": 24
+        },
+        {
+          "type": 2,
+          "target": 2,
+          "value": 4
+        },
+        {
+          "type": 1,
+          "target": 30
+        },
+        {
+          "type": 0,
+          "target": 13
+        },
+        {
+          "type": 1,
+          "target": 21
+        },
+        {
+          "type": 1,
+          "target": 5
+        },
+        {
+          "type": 0,
+          "target": 28
+        },
+        {
+          "type": 0,
+          "target": 14
+        },
+        {
+          "type": 1,
+          "target": 29
+        },
+        {
+          "type": 2,
+          "target": 2,
+          "value": 0
+        },
+        {
+          "type": 0,
+          "target": 33
+        },
+        {
+          "type": 0,
+          "target": 12
+        },
+        {
+          "type": 1,
+          "target": 32
+        },
+        {
+          "type": 3,
+          "target": 0,
+          "value": 3
+        },
+        {
+          "type": 0,
+          "target": 22
+        },
+        {
+          "type": 1,
+          "target": 31
+        },
+        {
+          "type": 0,
+          "target": 42
+        },
+        {
+          "type": 3,
+          "target": 3,
+          "value": 3
+        },
+        {
+          "type": 2,
+          "target": 1,
+          "value": 1
+        },
+        {
+          "type": 0,
+          "target": 44
+        },
+        {
+          "type": 0,
+          "target": 2
+        },
+        {
+          "type": 0,
+          "target": 27
+        },
+        {
+          "type": 0,
+          "target": 10
+        },
+        {
+          "type": 2,
+          "target": 1,
+          "value": 2
+        },
+        {
+          "type": 2,
+          "target": 1,
+          "value": 2
+        },
+        {
+          "type": 0,
+          "target": 19
+        }
+      ]
+    },
+    "regressions": [],
+    "coverageNote": "Interactive full replay scan and legality validation; no new golden optimal-move test."
+  },
+  {
     "id": "t27-gentlemans-discard-versus-red-stack-tempo",
     "turn": 27,
     "positionKey": "50d10fa120071e1fbcfe9fa36e51bc1e628416e33fe978ad79b21cb35674c509",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Cathy after Bob purple to Alice at26. Cathy knows her r2 and sees Donald’s unclued r2 on finesse position, but cannot see her own p5 #22; all future draws remain unknown.",
     "source": {
       "conversation": "2026-09-26 replay investigation after user changes turn26 to purple.",
@@ -34,7 +214,8 @@
       "scope": "From-start scan matches1–26 and stops at27. No new engine change or fixture alteration to force parity."
     },
     "regressions": [],
-    "coverageNote": "Read-only explanation and implementation inspection. No optimal-move assertion before the strategy is resolved."
+    "coverageNote": "Read-only explanation and implementation inspection. No optimal-move assertion before the strategy is resolved.",
+    "supersededBy": "t27-user-accepts-gentlemans-discard-continuation"
   },
   {
     "id": "t26-user-accepts-purple-and-replaces-continuation",

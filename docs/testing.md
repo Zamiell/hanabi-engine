@@ -243,8 +243,8 @@ suite pass.
 ## Historical p4v0s1 positions
 
 The active fixture includes the user-supplied turn-19 revision and the
-replacement from turn 26 supplied on 2026-09-26, ending at turn 54. The earlier
-replays are retained in
+replacements from turns 26 and 27 supplied on 2026-09-26, ending at turn 54. The
+earlier replays are retained in
 `crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json`
 `crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn27-revision.json`,
 and
