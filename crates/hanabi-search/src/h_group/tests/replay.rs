@@ -5881,7 +5881,7 @@ fn reviewed_turn_thirty_known_trash_prevents_false_anxiety() {
     // discards her known r2. Cluing the last unclued card does not lock
     // a hand with known trash. Future draws are not needed for this proof.
     let fixture = HanabiLiveReplay::from_json(include_str!(
-        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        "fixtures/game-p4v0s1-before-turn26-purple-revision.json"
     ))
     .unwrap();
     let state = fixture.state_at_turn(29).unwrap();

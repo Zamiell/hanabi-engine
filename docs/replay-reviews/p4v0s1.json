@@ -1,9 +1,191 @@
 [
   {
+    "id": "t27-gentlemans-discard-versus-red-stack-tempo",
+    "turn": 27,
+    "positionKey": "50d10fa120071e1fbcfe9fa36e51bc1e628416e33fe978ad79b21cb35674c509",
+    "status": "unresolved",
+    "perspective": "Cathy after Bob purple to Alice at26. Cathy knows her r2 and sees Donald’s unclued r2 on finesse position, but cannot see her own p5 #22; all future draws remain unknown.",
+    "source": {
+      "conversation": "2026-09-26 replay investigation after user changes turn26 to purple.",
+      "quote": "Change the fixture to clue purple to Alice. Then:\n\n- play r2\n- play r3\n- discard r1\n- 5s to cathy",
+      "boundary": "Playing r2 is the supplied action; the following engine analysis is not a new user convention ruling."
+    },
+    "explanation": {
+      "fixtureProjection": [
+        "27 Cathy plays r2 #18",
+        "28 Donald plays r3 #13",
+        "29 Alice plays p2 #24",
+        "30 Bob discards p4 #5",
+        "Stops before31 Cathy discards unknown #22; possible BDR is assessed but no card face, loss, refund, or draw is invented."
+      ],
+      "engineProjection": [
+        "27 Cathy discards r2 #18 as a Gentleman’s Discard",
+        "28 Donald plays transferred r2 #26",
+        "29 Alice plays p2 #24",
+        "30 Bob discards p4 #5",
+        "Stops before31 Cathy discards unknown #22; current model assesses no BDR, without inferring its identity."
+      ],
+      "admission": "Cathy’s r2 is exactly known and positively clued; the other copy is on Donald’s finesse position. The transfer is permitted by the documented Gentleman’s Discard convention. It delays Donald’s queued r3 and earns a clue.",
+      "comparison": "BottomDeckRisk, at aligned turn31 unresolved-discard frontiers, before resource or heuristic ranking. GD has0 assessed BDR versus1 possible BDR after play. Actual completed prefix after30: GD score13/clues2/committed3; play score14/clues1/committed2. Both total16 points played or committed. GD also has higher fallback priority550 versus525, but that is not the decisive comparison.",
+      "forecastLimitation": "The play-root forecast does not reproduce Alice’s recorded turn29 Generation Discard or Bob’s turn30 5 Save. Cathy cannot see her own #22; this forecast leaves it unknown to hypothetical teammates, so it cannot recognize that concrete protection obligation. Bob’s earlier root could see p5 and did forecast those actions. Do not replace Cathy’s forecast with the fixture or import hidden p5.",
+      "riskMechanism": "The GD funds intervening turns, enabling declined-protection evidence under Save Principle. The play-root forecast spends the same intervening turns at zero clues and reaches Cathy’s next chop with weaker safety evidence. This is a conditional model assessment, not a proven actual loss or proof that no contingent Generation/Save line exists.",
+      "question": "Should Cathy preserve Donald’s r3 tempo, or is the extra clue enough compensation for a Gentleman’s Discard here? If playing is preferred, how should the possible contingent generation/protection line and uncertain own chop enter that comparison? The documentation explicitly calls GD optional and requires a compensating side benefit for lost tempo; it does not quantify this tradeoff.",
+      "documentation": "https://hanabi.github.io/level-10/#the-gentlemans-discard-gd",
+      "scope": "From-start scan matches1–26 and stops at27. No new engine change or fixture alteration to force parity."
+    },
+    "regressions": [],
+    "coverageNote": "Read-only explanation and implementation inspection. No optimal-move assertion before the strategy is resolved."
+  },
+  {
+    "id": "t26-user-accepts-purple-and-replaces-continuation",
+    "turn": 26,
+    "positionKey": "fea6b97076914c804c6eb8526c06482e889fe100c1de46f0aea5f35e558465e7",
+    "status": "user-explained",
+    "perspective": "Bob at turn26; turns1–25 unchanged.",
+    "source": {
+      "conversation": "Current task, 2026-09-26.",
+      "quote": "Change the fixture to clue purple to Alice. Then:\n\n- play r2\n- play r3\n- discard r1\n- 5s to cathy"
+    },
+    "explanation": {
+      "decision": "The user accepts purple to Alice and supplies the complete continuation through turn54. This supersedes the preferred discard, not its established zero-BDR safety or the known-trash Anxiety fix.",
+      "boundary": "No additional general strategy justification was supplied; do not infer a universal tempo-over-clue rule.",
+      "cardSelection": "At turn33 Alice plays the previously clued p2 #24, not the freshly drawn unclued p2 #32; #32 is discarded at turn41.",
+      "validation": "All54 actions legal; 25 points, no strikes.",
+      "continuation": [
+        {
+          "type": 2,
+          "target": 0,
+          "value": 4
+        },
+        {
+          "type": 0,
+          "target": 18
+        },
+        {
+          "type": 0,
+          "target": 13
+        },
+        {
+          "type": 1,
+          "target": 21
+        },
+        {
+          "type": 3,
+          "target": 2,
+          "value": 5
+        },
+        {
+          "type": 0,
+          "target": 28
+        },
+        {
+          "type": 1,
+          "target": 26
+        },
+        {
+          "type": 0,
+          "target": 24
+        },
+        {
+          "type": 2,
+          "target": 2,
+          "value": 0
+        },
+        {
+          "type": 0,
+          "target": 33
+        },
+        {
+          "type": 0,
+          "target": 14
+        },
+        {
+          "type": 1,
+          "target": 29
+        },
+        {
+          "type": 1,
+          "target": 5
+        },
+        {
+          "type": 1,
+          "target": 30
+        },
+        {
+          "type": 0,
+          "target": 12
+        },
+        {
+          "type": 1,
+          "target": 32
+        },
+        {
+          "type": 1,
+          "target": 16
+        },
+        {
+          "type": 0,
+          "target": 22
+        },
+        {
+          "type": 2,
+          "target": 2,
+          "value": 2
+        },
+        {
+          "type": 3,
+          "target": 1,
+          "value": 3
+        },
+        {
+          "type": 0,
+          "target": 43
+        },
+        {
+          "type": 0,
+          "target": 44
+        },
+        {
+          "type": 2,
+          "target": 1,
+          "value": 1
+        },
+        {
+          "type": 0,
+          "target": 2
+        },
+        {
+          "type": 0,
+          "target": 27
+        },
+        {
+          "type": 0,
+          "target": 10
+        },
+        {
+          "type": 2,
+          "target": 1,
+          "value": 2
+        },
+        {
+          "type": 2,
+          "target": 1,
+          "value": 2
+        },
+        {
+          "type": 0,
+          "target": 19
+        }
+      ]
+    },
+    "regressions": [],
+    "coverageNote": "Interactive full replay scan and legality validation; historical interpretation regressions retain their prior fixtures."
+  },
+  {
     "id": "t26-funded-red-tempo-versus-reviewed-discard",
     "turn": 26,
     "positionKey": "fea6b97076914c804c6eb8526c06482e889fe100c1de46f0aea5f35e558465e7",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Bob; his chop remains unknown. All eleven safe reveal branches keep future draws blank and share the reported actions.",
     "source": {
       "conversation": "2026-09-26 engine investigation after the user accepts 1s to Alice and supplies the continuation.",
@@ -42,7 +224,8 @@
       "h_group::tests::replay::reviewed_turn_twenty_six_discard_has_no_bottom_deck_risk",
       "h_group::tests::replay::reviewed_turn_thirty_known_trash_prevents_false_anxiety"
     ],
-    "coverageNote": "Safety and corrected follow-up have focused regressions. No new optimal-move assertion for this unresolved strategic comparison."
+    "coverageNote": "Safety and corrected follow-up have focused regressions. No new optimal-move assertion for this unresolved strategic comparison.",
+    "supersededBy": "t26-user-accepts-purple-and-replaces-continuation"
   },
   {
     "id": "t30-known-trash-prevents-false-anxiety",
@@ -65,7 +248,9 @@
       "h_group::tests::replay::reviewed_turn_thirty_known_trash_prevents_false_anxiety",
       "h_group::tests::replay::fourth_replay_rank_four_locks_alice_into_the_leftmost_anxiety_play"
     ],
-    "coverageNote": "Checks admission and the actual recipient r2 discard, with hidden replacement draws. Existing genuine Anxiety regression protects the opposite case."
+    "coverageNote": "Checks admission and the actual recipient r2 discard, with hidden replacement draws. Existing genuine Anxiety regression protects the opposite case.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn26-purple-revision.json",
+    "continuationRevision": "The user replaced turn26 onward with purple to Alice on 2026-09-26. Preserve this historical anchor and reasoning."
   },
   {
     "id": "t27-user-accepts-ones-and-replaces-continuation",
@@ -208,7 +393,9 @@
     "regressions": [
       "h_group::tests::replay::reviewed_turn_twenty_seven_counts_givers_known_duplicate"
     ],
-    "coverageNote": "Existing regression verifies duplicate accounting. Full optimal-action parity remains an interactive scan, not a newly added golden test."
+    "coverageNote": "Existing regression verifies duplicate accounting. Full optimal-action parity remains an interactive scan, not a newly added golden test.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn26-purple-revision.json",
+    "continuationRevision": "The user replaced turn26 onward with purple to Alice on 2026-09-26. Preserve this historical anchor and reasoning."
   },
   {
     "id": "t27-indirect-red-two-duplicates-givers-known-play",
@@ -248,7 +435,9 @@
       "h_group::clue_outcome::tests::reviewed_causal_outcomes_are_identical_with_and_without_cache"
     ],
     "coverageNote": "Checks Cathy’s known own r2, corrected one-card MCV, and a pre-clue identity-knowledge ablation restoring the unresolved acquisition. No optimal-move or admission assertion is added for the unresolved convention question.",
-    "supersededBy": "t27-user-accepts-ones-and-replaces-continuation"
+    "supersededBy": "t27-user-accepts-ones-and-replaces-continuation",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn26-purple-revision.json",
+    "continuationRevision": "The user replaced turn26 onward with purple to Alice on 2026-09-26. Preserve this historical anchor and reasoning."
   },
   {
     "id": "t26-team-save-principle-removes-all-discard-bdr",

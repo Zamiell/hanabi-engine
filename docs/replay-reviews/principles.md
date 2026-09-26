@@ -193,3 +193,10 @@ the recipient’s ordinary action policy must agree on this condition.
 admission and the recipient’s discard with both actual visible draws and unknown
 replacement draws. The existing reviewed p4v0s3 Anxiety regression retains the
 genuine locked-hand case.
+
+On 2026-09-26 the user accepted purple to Alice at turn26 and replaced the
+continuation through turn54
+(`t26-user-accepts-purple-and-replaces-continuation`). The prior 1s-to-Alice
+continuation and known-trash Anxiety regression are preserved in
+`game-p4v0s1-before-turn26-purple-revision.json`. Discard safety remains valid;
+the revised move supplies no broader strategy rule.
