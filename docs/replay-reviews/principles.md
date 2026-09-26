@@ -174,3 +174,22 @@ visible-copy case. The turn27 ledger separately records an unresolved question
 about the extra Ignition: the clue also Trash Pushes Alice's p2, so correcting
 its false extra r2 credit is not a ruling that the entire clue has zero value or
 that every indirect duplicate is prohibited.
+
+On 2026-09-25 the user accepted 1s to Alice and replaced the continuation from
+turn27 (`t27-user-accepts-ones-and-replaces-continuation`). This resolves the
+move choice for that position, without supplying a broader duplicate-Ignition
+rule. Later positions from the prior continuation retain their historical
+anchors and regressions in `game-p4v0s1-before-turn27-revision.json`.
+
+## Known trash prevents a locked-hand Anxiety obligation
+
+Current turn30, `t30-known-trash-prevents-false-anxiety`: the user supplies
+purple to Cathy followed by her r2 discard. A fully touched hand is not locked
+when the recipient knows a card is trash. Use the recipient’s knowledge after
+the clue, not merely the giver seeing no playable card. The clue validator and
+the recipient’s ordinary action policy must agree on this condition.
+
+`reviewed_turn_thirty_known_trash_prevents_false_anxiety` verifies clue
+admission and the recipient’s discard with both actual visible draws and unknown
+replacement draws. The existing reviewed p4v0s3 Anxiety regression retains the
+genuine locked-hand case.

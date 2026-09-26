@@ -1051,16 +1051,6 @@ pub(super) fn creates_false_anxiety(
     if hand.is_empty() || hand.iter().any(|card| !gotten_after.contains(&card.id)) {
         return false;
     }
-    if !hand.iter().any(|card| {
-        card.identity
-            .is_some_and(|identity| is_playable_now(view, identity))
-    }) {
-        // Deliberately leaving a locked player at zero clues promises that an
-        // Anxiety Play exists. The giver sees that player's hand and must not
-        // make the promise when every card would misplay.
-        return true;
-    }
-
     let touched = if target == actor {
         hand.iter()
             .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
@@ -1074,6 +1064,13 @@ pub(super) fn creates_false_anxiety(
         return true;
     };
     let inferred = infer_h_group_from_replay(&deductions, replay, profile);
+    // Having every card touched is not enough to be locked. The recipient
+    // can discard known trash at zero clues; test their own knowledge rather
+    // than the giver's visible faces or the absence of a playable card.
+    if super::decision::convention_known_trash_discard(deductions.view(), &inferred).is_some() {
+        return false;
+    }
+
     let selected = inferred
         .connection
         .map(|connection| connection.card)

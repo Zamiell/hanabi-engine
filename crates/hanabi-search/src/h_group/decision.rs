@@ -2976,10 +2976,10 @@ mod urgent_protection_tests {
 
     #[test]
     fn reviewed_purple_play_clue_protects_the_endangered_five() {
-        // User's current p4v0s1 turn 30: purple to Cathy protects p5 while
+        // Prior reviewed p4v0s1 turn 30: purple to Cathy protects p5 while
         // Donald holds its clued p3/p4 connectors. Test admission, not optimality.
         let fixture = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
-            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+            "tests/fixtures/game-p4v0s1-before-turn27-revision.json"
         ))
         .unwrap();
         let state = fixture.state_at_turn(29).unwrap();

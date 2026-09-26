@@ -5813,7 +5813,7 @@ fn reviewed_green_bluff_requires_minimum_clue_value() {
     // User-reviewed p4v0s1 turn 33 in the turn-28 purple-to-Alice line:
     // g4 is already clued and Bob's p3 duplicates Donald's secured p3.
     let fixture = HanabiLiveReplay::from_json(include_str!(
-        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        "fixtures/game-p4v0s1-before-turn27-revision.json"
     ))
     .unwrap();
     for (turn, target, clue, admitted) in [
@@ -5872,5 +5872,65 @@ fn reviewed_green_bluff_requires_minimum_clue_value() {
         if admitted {
             assert_eq!(candidate.unwrap().move_kind(), Some(HGroupMoveKind::Bluff));
         }
+    }
+}
+
+#[test]
+fn reviewed_turn_thirty_known_trash_prevents_false_anxiety() {
+    // User's 2026-09-25 continuation: Bob purple -> Cathy, then Cathy
+    // discards her known r2. Cluing the last unclued card does not lock
+    // a hand with known trash. Future draws are not needed for this proof.
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .unwrap();
+    let state = fixture.state_at_turn(29).unwrap();
+    for hide_draws in [false, true] {
+        let mut view = state.view_for(PlayerId::new(1)).unwrap();
+        if hide_draws {
+            for card in view.hands.iter_mut().flatten() {
+                if card.id.index() >= 30 {
+                    card.identity = None;
+                }
+            }
+            for entry in &mut view.history {
+                if let ObservedEvent::Drew { card, identity, .. } = &mut entry.event {
+                    if card.index() >= 30 {
+                        *identity = None;
+                    }
+                }
+            }
+        }
+        let d = LogicalDeductions::new(view.clone()).unwrap();
+        let action = Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Purple),
+        };
+        assert!(
+            h_group_clue_candidates(&d, HGroupProfile::Max)
+                .iter()
+                .any(|candidate| candidate.action == action),
+            "known trash permits the reviewed purple clue; hidden draws: {hide_draws}"
+        );
+        let after = super::super::ProspectiveTransition::clue_by(
+            &view,
+            PlayerId::new(1),
+            PlayerId::new(2),
+            Clue::Suit(Suit::Purple),
+            &[CardId::new(22)],
+        );
+        let (recipient, replay) = PerspectiveProjector::new(&after, HGroupProfile::Max)
+            .project(PlayerId::new(2), PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        let inferred =
+            super::super::infer_h_group_from_replay(&recipient, replay, HGroupProfile::Max);
+        assert_eq!(
+            super::super::decision::convention_known_trash_discard(recipient.view(), &inferred),
+            Some(CardId::new(18))
+        );
+        assert_eq!(
+            select_h_group_action(&recipient, HGroupProfile::Max),
+            Some(Action::Discard(CardId::new(18)))
+        );
     }
 }

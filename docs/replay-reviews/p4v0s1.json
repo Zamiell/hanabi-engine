@@ -1,9 +1,220 @@
 [
   {
+    "id": "t26-funded-red-tempo-versus-reviewed-discard",
+    "turn": 26,
+    "positionKey": "fea6b97076914c804c6eb8526c06482e889fe100c1de46f0aea5f35e558465e7",
+    "status": "unresolved",
+    "perspective": "Bob; his chop remains unknown. All eleven safe reveal branches keep future draws blank and share the reported actions.",
+    "source": {
+      "conversation": "2026-09-26 engine investigation after the user accepts 1s to Alice and supplies the continuation.",
+      "quote": "Then, continue to autonomously go through the replay and find disagreements. Do a deep analysis for each disagreement. If there are obvious bugs, then fix them autonomously. Otherwise, ask me about the correct strategy or convention.",
+      "boundary": "The discard is already user-confirmed. The outstanding question asks for its strategic justification over the corrected competing forecast, not permission to change the fixture."
+    },
+    "explanation": {
+      "fixedBug": "t30-known-trash-prevents-false-anxiety restores the reviewed purple-to-Cathy clue and r2 discard in Bob’s turn26 forecast.",
+      "fixtureProjection": [
+        "26 Bob discards #5 (actual p4, unknown to Bob)",
+        "27 Cathy 1s to Alice",
+        "28 Donald plays r2 #26",
+        "29 Alice plays p2 #24",
+        "30 Bob purple to Cathy",
+        "31 Cathy discards r2 #18",
+        "32 Donald plays r3 #13",
+        "33 Alice discards r1 #21",
+        "34 Bob safely discards #16 (actual r3, unknown to Bob); reveal budget frontier, no subsequent state invented"
+      ],
+      "engineProjection": [
+        "26 Bob purple to Alice",
+        "27 Cathy plays r2 #18",
+        "28 Donald plays r3 #13",
+        "29 Alice discards r1 #21",
+        "30 Bob 5s to Cathy",
+        "31 Cathy plays r4 #28",
+        "32 Donald discards r2 #26",
+        "33 Alice plays p2 #24",
+        "34 Bob safely discards #5 (actual p4, unknown to Bob); conditional continuations stop before further unknown-card action"
+      ],
+      "comparison": "FundedProgress at shared horizon8, after turn33, across every reveal branch. Purple: score15, clues1, committed future plays2, secured future5, clue demand1. Discard: score14, clues2, committed future plays3, secured future5–6, clue demand1. Both have no exposed critical chop or executed loss in this prefix. Both have score+committed=17. The current comparator prefers one point already played when both reserves are funded and total committed/secured progress does not fall behind.",
+      "question": "What should outweigh the temporary red-stack lead here: letting Bob draw sooner while the loaded Cathy gives the clue, preserving the extra clue, or another strategic reason? Existing rulings establish zero BDR and the correct recorded discard; they do not specify this tradeoff against the now-corrected forecast.",
+      "scope": "Do not force parity with a replay-specific score or change the reviewed discard. Replay-wide agreement is not claimed beyond turns1–25."
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_turn_twenty_six_discard_has_no_bottom_deck_risk",
+      "h_group::tests::replay::reviewed_turn_thirty_known_trash_prevents_false_anxiety"
+    ],
+    "coverageNote": "Safety and corrected follow-up have focused regressions. No new optimal-move assertion for this unresolved strategic comparison."
+  },
+  {
+    "id": "t30-known-trash-prevents-false-anxiety",
+    "turn": 30,
+    "positionKey": "48d93d698df89fe46cfb7bab74185735b2c22e5ce114f74a6be6015caeda751f",
+    "status": "user-explained",
+    "perspective": "Bob before purple to Cathy, including the conditional turn26 discard forecast with replacement draws unknown.",
+    "source": {
+      "conversation": "User continuation supplied 2026-09-25; implementation investigation 2026-09-26.",
+      "quote": "- purple to cathy\n- r2 discard",
+      "boundary": "User supplies the intended clue and discard. The false-Anxiety diagnosis is implementation analysis, not a new user strategy ruling."
+    },
+    "explanation": {
+      "bug": "The common response-safety validator treated every fully touched hand without a visibly playable card as locked. Cathy already knows her r2 is trash after Donald plays r2. The validator nevertheless rejected purple and 5s to Cathy at one token as a false Anxiety Play.",
+      "fix": "Project the recipient after the clue and use the ordinary convention-known-trash discard check before rejecting the clue for lack of a safe play. This matches the existing recipient Anxiety inference, which already excludes hands with known trash.",
+      "knowledge": "Use recipient knowledge, not the giver seeing a trash identity. The regression also hides all replacement draws from turn26 onward.",
+      "documentation": "https://hanabi.github.io/level-9/#the-anxiety-play-forcing-a-locked-player-to-play"
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_turn_thirty_known_trash_prevents_false_anxiety",
+      "h_group::tests::replay::fourth_replay_rank_four_locks_alice_into_the_leftmost_anxiety_play"
+    ],
+    "coverageNote": "Checks admission and the actual recipient r2 discard, with hidden replacement draws. Existing genuine Anxiety regression protects the opposite case."
+  },
+  {
+    "id": "t27-user-accepts-ones-and-replaces-continuation",
+    "turn": 27,
+    "positionKey": "7293c016ef9dc3f2a465c169190de1ae780f2347a5d4ba3b74769813a54ee559",
+    "status": "user-explained",
+    "perspective": "Cathy at live turn27; the preceding 26 moves are unchanged.",
+    "source": {
+      "conversation": "User continuation supplied 2026-09-25, resumed 2026-09-26.",
+      "quote": "change the fixture to clue 1 to alice.\n\nthen:\n\n- r2 play\n- p2 play\n- purple to cathy\n- r2 discard"
+    },
+    "explanation": {
+      "decision": "The user accepts 1s to Alice and supplies the full continuation through turn54. Donald plays r2, Alice plays p2, Bob protects Cathy with purple, and Cathy discards her duplicate r2.",
+      "scope": "This settles the requested move and continuation, not a new general rule that every duplicate-producing Ignition is good. The earlier known-duplicate MCV accounting fix remains valid.",
+      "continuation": [
+        {
+          "type": 3,
+          "target": 0,
+          "value": 1
+        },
+        {
+          "type": 0,
+          "target": 26
+        },
+        {
+          "type": 0,
+          "target": 24
+        },
+        {
+          "type": 2,
+          "target": 2,
+          "value": 4
+        },
+        {
+          "type": 1,
+          "target": 18
+        },
+        {
+          "type": 0,
+          "target": 13
+        },
+        {
+          "type": 1,
+          "target": 21
+        },
+        {
+          "type": 1,
+          "target": 16
+        },
+        {
+          "type": 0,
+          "target": 28
+        },
+        {
+          "type": 0,
+          "target": 14
+        },
+        {
+          "type": 3,
+          "target": 1,
+          "value": 5
+        },
+        {
+          "type": 2,
+          "target": 2,
+          "value": 0
+        },
+        {
+          "type": 0,
+          "target": 33
+        },
+        {
+          "type": 0,
+          "target": 12
+        },
+        {
+          "type": 1,
+          "target": 29
+        },
+        {
+          "type": 1,
+          "target": 30
+        },
+        {
+          "type": 0,
+          "target": 22
+        },
+        {
+          "type": 1,
+          "target": 31
+        },
+        {
+          "type": 2,
+          "target": 1,
+          "value": 2
+        },
+        {
+          "type": 3,
+          "target": 2,
+          "value": 3
+        },
+        {
+          "type": 0,
+          "target": 43
+        },
+        {
+          "type": 0,
+          "target": 44
+        },
+        {
+          "type": 0,
+          "target": 2
+        },
+        {
+          "type": 0,
+          "target": 27
+        },
+        {
+          "type": 0,
+          "target": 10
+        },
+        {
+          "type": 2,
+          "target": 1,
+          "value": 2
+        },
+        {
+          "type": 2,
+          "target": 1,
+          "value": 2
+        },
+        {
+          "type": 0,
+          "target": 19
+        }
+      ],
+      "validation": "The requested 54-action replay is legal, has no ambiguous same-identity card selections, and scores 25 without strikes.",
+      "supersedes": "t27-indirect-red-two-duplicates-givers-known-play"
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_turn_twenty_seven_counts_givers_known_duplicate"
+    ],
+    "coverageNote": "Existing regression verifies duplicate accounting. Full optimal-action parity remains an interactive scan, not a newly added golden test."
+  },
+  {
     "id": "t27-indirect-red-two-duplicates-givers-known-play",
     "turn": 27,
     "positionKey": "7293c016ef9dc3f2a465c169190de1ae780f2347a5d4ba3b74769813a54ee559",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Cathy after the current fixture turn26 Bob p4 discard. Regression branches from Bob’s prior view with the discarded p4 revealed and the replacement draw unknown. Cathy’s own cards remain physically hidden to her.",
     "source": {
       "conversation": "Current task, user challenges the projected 1s-to-Alice clue at turn27.",
@@ -36,7 +247,8 @@
       "h_group::tests::replay::reviewed_green_bluff_requires_minimum_clue_value",
       "h_group::clue_outcome::tests::reviewed_causal_outcomes_are_identical_with_and_without_cache"
     ],
-    "coverageNote": "Checks Cathy’s known own r2, corrected one-card MCV, and a pre-clue identity-knowledge ablation restoring the unresolved acquisition. No optimal-move or admission assertion is added for the unresolved convention question."
+    "coverageNote": "Checks Cathy’s known own r2, corrected one-card MCV, and a pre-clue identity-knowledge ablation restoring the unresolved acquisition. No optimal-move or admission assertion is added for the unresolved convention question.",
+    "supersededBy": "t27-user-accepts-ones-and-replaces-continuation"
   },
   {
     "id": "t26-team-save-principle-removes-all-discard-bdr",
@@ -128,7 +340,9 @@
       "h_group::strategic_value::tests::reviewed_turn_nineteen_counts_new_cards_not_old_connectors",
       "h_group::principle_validation::tests::principle_failures_and_unknowns_cannot_be_rescued_by_labels_or_scores"
     ],
-    "coverageNote": "Admission tested with future draws hidden, turn19/21 legitimate Bluff controls, and known-versus-unknown duplicate controls. Outcome regression covers zero efficiency and the earlier reviewed two-for-one lines. No fixture edits. The later shared-admission investigation rescans from the beginning and stops at the unresolved turn26 strategy question recorded above; it does not establish agreement through turn33. The same turn33 rank-4 fill-in is also rejected as an ordinary zero-value Play clue."
+    "coverageNote": "Admission tested with future draws hidden, turn19/21 legitimate Bluff controls, and known-versus-unknown duplicate controls. Outcome regression covers zero efficiency and the earlier reviewed two-for-one lines. No fixture edits. The later shared-admission investigation rescans from the beginning and stops at the unresolved turn26 strategy question recorded above; it does not establish agreement through turn33. The same turn33 rank-4 fill-in is also rejected as an ordinary zero-value Play clue.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn27-revision.json",
+    "continuationRevision": "The user replaced turn27 onward on 2026-09-25. This anchor is historical; retain the reasoning and original hash, not authority for the new suffix."
   },
   {
     "id": "t28-red-three-versus-purple-and-red-four-ambiguity",
@@ -179,7 +393,9 @@
       "supersededBy": "t33-green-bluff-zero-minimum-clue-value; the projected green clue is illegal, so this comparison is not a sound basis for the previous strategy question."
     },
     "regressions": [],
-    "coverageNote": "No preferred-move assertion or fixture changes. Both clear protection bugs found during this investigation have separate regressions. Final from-start scan agrees through turn27 and stops at this turn28 disagreement."
+    "coverageNote": "No preferred-move assertion or fixture changes. Both clear protection bugs found during this investigation have separate regressions. Final from-start scan agrees through turn27 and stops at this turn28 disagreement.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn27-revision.json",
+    "continuationRevision": "The user replaced turn27 onward on 2026-09-25. This anchor is historical; retain the reasoning and original hash, not authority for the new suffix."
   },
   {
     "id": "t30-delayed-play-clue-satisfies-urgent-protection",
@@ -200,7 +416,9 @@
     "regressions": [
       "h_group::decision::urgent_protection_tests::reviewed_purple_play_clue_protects_the_endangered_five"
     ],
-    "coverageNote": "Checks actual admission and recipient protection without immediate play; controls discard exclusion and a rank4 clue not touching p5. Related protect filter: eight pass, three failures reproduced at unchanged HEAD."
+    "coverageNote": "Checks actual admission and recipient protection without immediate play; controls discard exclusion and a rank4 clue not touching p5. Related protect filter: eight pass, three failures reproduced at unchanged HEAD.",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn27-revision.json",
+    "continuationRevision": "The user replaced turn27 onward on 2026-09-25. This anchor is historical; retain the reasoning and original hash, not authority for the new suffix."
   },
   {
     "id": "t24-save-negative-information-releases-red-four",

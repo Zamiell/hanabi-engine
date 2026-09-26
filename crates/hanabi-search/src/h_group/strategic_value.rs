@@ -910,7 +910,7 @@ mod tests {
     #[test]
     fn reviewed_turn_nineteen_counts_new_cards_not_old_connectors() {
         let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
-            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+            "tests/fixtures/game-p4v0s1-before-turn27-revision.json"
         ))
         .unwrap();
         let root = replay.state_at_turn(18).unwrap();

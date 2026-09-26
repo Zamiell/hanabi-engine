@@ -242,10 +242,12 @@ suite pass.
 
 ## Historical p4v0s1 positions
 
-The active fixture preserves turns 1–17 and uses the user-supplied replacement
-through turn 58, including the confirmed p4 play at turn 32. The earlier replay
-is retained in
+The active fixture includes the user-supplied turn-19 revision and the
+replacement from turn 27 supplied on 2026-09-25, ending at turn 54. The earlier
+replays are retained in
 `crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn18-revision.json`
+and
+`crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s1-before-turn27-revision.json`
 for position-specific regressions. Those tests keep their original assertions;
 the user subsequently requested deletion of the full action-parity test and
 `first_seed_turn_eighteen_compares_reviewed_full_lines`. No automated

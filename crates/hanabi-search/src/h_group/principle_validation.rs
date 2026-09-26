@@ -521,10 +521,10 @@ mod tests {
 
     #[test]
     fn principle_failures_and_unknowns_cannot_be_rescued_by_labels_or_scores() {
-        // Actual reviewed p4v0s1 turn 33; substitute only the outcome evidence
+        // Prior reviewed p4v0s1 turn 33; substitute only the outcome evidence
         // to exercise the validator's contract, not to assert a new strategy.
         let fixture = HanabiLiveReplay::from_json(include_str!(
-            "../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+            "tests/fixtures/game-p4v0s1-before-turn27-revision.json"
         ))
         .unwrap();
         let state = fixture.state_at_turn(32).unwrap();
