@@ -6307,3 +6307,120 @@ fn reviewed_clarification_releases_priority_projection_dependency() {
         assert!(notes.playable_now.contains(&CardId::new(28)));
     }
 }
+
+#[test]
+fn reviewed_turn_forty_three_bluff_retracts_the_hidden_green_finesse() {
+    // Hypothetical continuation of reviewed turn43: 5s to Bob, green to
+    // Bob, then Alice's visible y3 demonstrates a Bluff. Cathy's g4 is
+    // known through public Good Touch, without exposing her hidden faces.
+    let f = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .unwrap();
+    let state = f.state_at_turn(42).unwrap();
+    let view = state.view_for(PlayerId::new(2)).unwrap();
+    let saved = ProspectiveTransition::clue_by(
+        &view,
+        PlayerId::new(2),
+        PlayerId::new(1),
+        Clue::Rank(Rank::Five),
+        &[CardId::new(19), CardId::new(27)],
+    );
+    let clued = ProspectiveTransition::clue_by(
+        &saved,
+        PlayerId::new(3),
+        PlayerId::new(1),
+        Clue::Suit(Suit::Green),
+        &[CardId::new(19)],
+    );
+    let after = ProspectiveTransition::successful_play(
+        &clued,
+        PlayerId::new(0),
+        CardId::new(42),
+        Card::new(Suit::Yellow, Rank::Three),
+    );
+    let d = LogicalDeductions::new(after.clone()).unwrap();
+    let r = replay_h_group(&d, HGroupProfile::Max);
+    assert!(r.signals.iter().any(|s| s.turn == 44
+        && s.kind == HGroupMoveKind::Bluff
+        && s.cards == [CardId::new(42), CardId::new(19)]));
+    assert!(
+        !r.pending_connections
+            .iter()
+            .any(|c| c.focus == CardId::new(19) && r.pending_connections.is_active(c))
+    );
+    let inferred = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+    assert!(!inferred.playable_now.contains(&CardId::new(40)));
+    assert_ne!(
+        inferred
+            .cards
+            .iter()
+            .find(|c| c.card == CardId::new(40))
+            .unwrap()
+            .identities,
+        IdentitySet::singleton(Card::new(Suit::Green, Rank::Three))
+    );
+    for observer in [0, 1, 3] {
+        let projected = PerspectiveProjector::new(&after, HGroupProfile::Max)
+            .project_with_evidence(PlayerId::new(observer), PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        assert!(
+            !projected
+                .assumptions
+                .iter()
+                .any(|a| a.card == CardId::new(40)),
+            "a disproved connection cannot become another player's visible evidence"
+        );
+    }
+}
+
+#[test]
+fn reviewed_good_touch_identities_reach_priority_and_bluff_consumers() {
+    type IdentityConsumerCase = (u32, u8, usize, Card, fn());
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .unwrap();
+    let cases: [IdentityConsumerCase; 2] = [
+        (
+            31,
+            3,
+            13,
+            Card::new(Suit::Red, Rank::Three),
+            reviewed_red_three_priority_prompt_reaches_cathy,
+        ),
+        (
+            42,
+            2,
+            10,
+            Card::new(Suit::Green, Rank::Four),
+            reviewed_turn_forty_three_bluff_retracts_the_hidden_green_finesse,
+        ),
+    ];
+    for (turn, observer, card, identity, downstream) in cases {
+        let state = fixture.state_at_turn(turn).unwrap();
+        let d = LogicalDeductions::new(state.view_for(PlayerId::new(observer)).unwrap()).unwrap();
+        let id = CardId::new(card);
+        assert!(
+            d.view().hands[usize::from(observer)]
+                .iter()
+                .find(|c| c.id == id)
+                .unwrap()
+                .identity
+                .is_none()
+        );
+        let notes = infer_h_group(&d, HGroupProfile::Max);
+        assert_eq!(
+            notes
+                .cards
+                .iter()
+                .find(|c| c.card == id)
+                .unwrap()
+                .identities,
+            IdentitySet::singleton(identity)
+        );
+        // The same public identity must reach its convention consumer and
+        // downstream action/export checks; recognition cannot require a face.
+        downstream();
+    }
+}

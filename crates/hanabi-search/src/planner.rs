@@ -533,6 +533,7 @@ pub enum ComparisonReason {
     ProtectedDevelopment,
     PolicyTier,
     TerminalProgress,
+    PerfectFinish,
     KnownStrikes,
     ConditionalStrikes,
     EndpointResources,
@@ -578,7 +579,8 @@ impl ComparisonReason {
             | Self::ConditionalStrikes
             | Self::EndpointResources
             | Self::LineProgress
-            | Self::TerminalProgress => ComparisonAuthority::Forecast,
+            | Self::TerminalProgress
+            | Self::PerfectFinish => ComparisonAuthority::Forecast,
             _ => ComparisonAuthority::Heuristic,
         }
     }
@@ -1165,7 +1167,8 @@ fn compare_symbolic_candidates(
             let (endpoint, basis) = compare_endpoints_with_basis(a, b);
             match endpoint {
                 EndpointComparison::PreferLeft(
-                    ComparisonReason::FundedProgress
+                    ComparisonReason::PerfectFinish
+                    | ComparisonReason::FundedProgress
                     | ComparisonReason::ClueEfficiency
                     | ComparisonReason::ProgressTiming
                     | ComparisonReason::BottomDeckRisk,
@@ -1173,7 +1176,8 @@ fn compare_symbolic_candidates(
                     evidence_reaches[left][right] = true;
                 }
                 EndpointComparison::PreferRight(
-                    ComparisonReason::FundedProgress
+                    ComparisonReason::PerfectFinish
+                    | ComparisonReason::FundedProgress
                     | ComparisonReason::ClueEfficiency
                     | ComparisonReason::ProgressTiming
                     | ComparisonReason::BottomDeckRisk,
@@ -1291,12 +1295,39 @@ fn compare_endpoints_with_basis(
     (guarded, basis)
 }
 
+/// A funded, assumption-free terminal forecast reaches the game's score
+/// ceiling. An unfinished alternative cannot earn precedence from tempo or
+/// resource heuristics. This is forecast evidence, not an exhaustive-world solve.
+fn has_unconditional_perfect_finish(candidate: &PlannerActionEvaluation) -> bool {
+    let p = &candidate.projection;
+    p.frontier == crate::PlanFrontier::Terminal
+        && !p.has_branches()
+        && p.assumptions.is_empty()
+        && p.alternatives.is_empty()
+        && p.dependencies
+            .iter()
+            .all(|dependency| dependency.status == crate::DependencyStatus::Supported)
+        && p.unresolved_discard.is_none()
+        && p.resources.unfunded_turn.is_none()
+        && p.maximum_strikes() == 0
+        && p.checkpoints
+            .last()
+            .is_some_and(|point| point.value.score == 25)
+}
+
 #[allow(clippy::too_many_lines)]
 fn compare_endpoint_evidence(
     left: &PlannerActionEvaluation,
     right: &PlannerActionEvaluation,
     basis: &mut Option<ComparisonBasis>,
 ) -> EndpointComparison {
+    match has_unconditional_perfect_finish(left).cmp(&has_unconditional_perfect_finish(right)) {
+        Ordering::Greater => {
+            return EndpointComparison::PreferLeft(ComparisonReason::PerfectFinish);
+        }
+        Ordering::Less => return EndpointComparison::PreferRight(ComparisonReason::PerfectFinish),
+        Ordering::Equal => {}
+    }
     match compare_save_principle_risks(left, right) {
         Ordering::Less => return EndpointComparison::PreferLeft(ComparisonReason::SavePrinciple),
         Ordering::Greater => {
@@ -2503,6 +2534,96 @@ impl std::error::Error for PlannerError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewed_turn_forty_four_prefers_a_demonstrated_perfect_finish() {
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(43).unwrap();
+        let analysis = crate::analyze_position(
+            &state.view_for(state.current_player()).unwrap(),
+            SupportedConvention::HGroup(crate::HGroupProfile::Max),
+            PlannerConfig {
+                objective: PlanningObjective::PerfectScore,
+                ..PlannerConfig::default()
+            },
+        )
+        .unwrap();
+        let green = Action::Clue {
+            target: hanabi_core::PlayerId::new(1),
+            clue: Clue::Suit(hanabi_core::Suit::Green),
+        };
+        let candidate = analysis
+            .planner
+            .root_actions
+            .iter()
+            .find(|c| c.action == green)
+            .unwrap();
+        let discard = analysis
+            .planner
+            .root_actions
+            .iter()
+            .find(|c| c.action == Action::Discard(hanabi_core::CardId::new(31)))
+            .unwrap();
+        assert!(has_unconditional_perfect_finish(candidate));
+        assert!(!has_unconditional_perfect_finish(discard));
+        assert_eq!(
+            compare_endpoints(candidate, discard),
+            EndpointComparison::PreferLeft(ComparisonReason::PerfectFinish)
+        );
+        assert_eq!(
+            compare_endpoints(discard, candidate),
+            EndpointComparison::PreferRight(ComparisonReason::PerfectFinish)
+        );
+        assert!(has_unconditional_perfect_finish(
+            analysis
+                .planner
+                .root_actions
+                .iter()
+                .find(|c| c.action == analysis.planner.best_action)
+                .unwrap()
+        ));
+        for control in 0..4 {
+            let mut incomplete = candidate.clone();
+            match control {
+                0 => incomplete.projection.frontier = crate::PlanFrontier::Limit,
+                1 => {
+                    incomplete
+                        .projection
+                        .checkpoints
+                        .last_mut()
+                        .unwrap()
+                        .value
+                        .score = 24;
+                }
+                2 => incomplete.projection.resources.unfunded_turn = Some(44),
+                _ => incomplete
+                    .projection
+                    .dependencies
+                    .push(crate::DependencyAssessment {
+                        requirement: crate::ProjectionRequirement {
+                            actor: hanabi_core::PlayerId::new(1),
+                            action: green,
+                            evidence_turn: 43,
+                            kind: crate::ProjectionRequirementKind::NoUnobservedConnector {
+                                identity: hanabi_core::Card::new(
+                                    hanabi_core::Suit::Green,
+                                    Rank::Three,
+                                ),
+                                signal_turn: 43,
+                            },
+                        },
+                        status: crate::DependencyStatus::Conditional { witness: None },
+                    }),
+            }
+            assert!(
+                !has_unconditional_perfect_finish(&incomplete),
+                "control {control}"
+            );
+        }
+    }
 
     #[test]
     fn reviewed_turn_twenty_nine_clarification_preserves_save_timing() {

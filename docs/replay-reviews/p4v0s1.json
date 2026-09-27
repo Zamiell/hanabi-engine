@@ -1,5 +1,61 @@
 [
   {
+    "id": "t43-demonstrated-bluff-retracts-hidden-connector",
+    "turn": 43,
+    "positionKey": "1e5e3d48c61e2647bd03debba0b63190bac01e2e46dc6050074a497653ca0d6f",
+    "status": "user-explained",
+    "perspective": "Cathy forecasting5s to Bob, Donald green to Bob, Alice’s visible y3 play; Cathy’s own unknown #40 must remain unknown after that Bluff.",
+    "source": {
+      "conversation": "Autonomous examination of the user-supplied turn43 p5 position, 2026-09-27",
+      "quote": "play p5",
+      "boundary": "Hypothetical alternative used to reproduce an inference bug, not a replacement fixture or a user-approved green3 identity.",
+      "documentation": "https://hanabi.github.io/level-11/#the-bluff"
+    },
+    "explanation": {
+      "bug": "Resolved-Bluff recognition saw the intermediate g4 for other observers but not for Cathy herself: her literal4 has only blue/green possibilities and blue4 is dead, so public Good Touch identifies g4. Missing that knowledge prevented her from cancelling a provisional g3 Finesse after Alice’s y3 demonstrated the Bluff. The projector subsequently exported Cathy’s unknown #40 as g3, falsely forecasting25.",
+      "fix": "Recognize the unique useful literal identity of an already-clued intermediate using public stacks. Resolving the demonstrated Bluff cancels its competing connections and prevents the discarded hypothesis from becoming another observer’s visible identity.",
+      "boundaries": "No hidden face is supplied. Existing prior-obligation guards still stop unrelated promised plays from being misclassified as Bluffs. The green5 hypothetical is analyzed from Cathy’s incomplete perspective, not other players’ fully revealed actual hands."
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_turn_forty_three_bluff_retracts_the_hidden_green_finesse"
+    ],
+    "coverageNote": "Checks the demonstrated-Bluff signal, cancellation, owner playability/domain, and absence of the obsolete #40 identity in all three modeled teammate views. Seven of eight related checks pass; the older fifth_replay_bluffs_through_the_givers_known_green_four failure reproduces with this fix disabled. The three related planner failures likewise reproduce with PerfectFinish disabled. No assertions were removed."
+  },
+  {
+    "id": "t44-demonstrated-perfect-finish-beats-unfinished-discard",
+    "turn": 44,
+    "positionKey": "6eac6d4b26a5e6f620174383789b850191b68a8080d3c594845ac2ce33470c89",
+    "status": "user-explained",
+    "perspective": "Donald, with his hand and future draws hidden.",
+    "source": {
+      "conversation": "User five-save continuation, corrected turn38 chop; autonomous examination 2026-09-27",
+      "quote": "green to bob",
+      "boundary": "The user supplied the move. Preferring an assumption-free funded score25 finish over an unfinished forecast is an objective-bound implementation invariant, not a new convention ruling."
+    },
+    "explanation": {
+      "bug": "The complete green-to-Bob line reached terminal25 without assumptions, conditional dependencies, identity branches, or unfunded actions. Equal-horizon resource comparisons returned Incomparable and heuristic ConventionPreference selected discard400 over green309. The comparator had no completion bound for a perfect symbolic forecast.",
+      "fixtureLine": [
+        "44 Donald green to Bob",
+        "45 Alice 3s to Bob",
+        "46 Bob y3",
+        "47 Cathy g3",
+        "48 Donald yellow to Bob",
+        "49 Alice y4",
+        "50 Bob y5",
+        "51 Cathy g4",
+        "52 Donald green to Bob",
+        "53 Alice green to Bob",
+        "54 Bob g5; terminal25"
+      ],
+      "fix": "Add a PerfectFinish forecast comparison for a funded, unbranched, assumption-free terminal25 projection with supported dependencies and no strikes. Treat it as an evidence edge so heuristic cycles cannot undo it. Do not label this an exhaustive-world proof or promote incomplete/conditional forecasts.",
+      "priorAlternative": "Discard #31 (actual b2) branches over g1/g2/g3/g4/b1/b2/b3. Six branches go45 Alice red to Cathy,46 Bob y3,47 Cathy yellow to Bob, then stop at an identity frontier. The g3 branch continues45 Alice3sBob,46 Bob redAlice,47 Cathy g3,48 Donald yellowBob,49 Alice greenCathy,50 Bob y3,51 Cathy g4,52 Donald safe-discard#34, then stops at the reveal budget."
+    },
+    "regressions": [
+      "planner::tests::reviewed_turn_forty_four_prefers_a_demonstrated_perfect_finish"
+    ],
+    "coverageNote": "Checks actual reviewed forecast and pairwise ordering in both directions, selected action attaining the ceiling, and incomplete,24-point,unfunded and conditional-evidence controls."
+  },
+  {
     "id": "t34-user-accepts-five-save-continuation",
     "turn": 34,
     "positionKey": "21f7c88bc2ca51f450de56042fb925908e45893f852b2c75eb23ac814919e421",

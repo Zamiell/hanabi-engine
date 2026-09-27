@@ -227,6 +227,20 @@ pub(in crate::h_group) fn apply_resolved_bluff_effects(
                                             view, *prior, clue.turn,
                                         )
                                     })
+                                    .or_else(|| {
+                                        // Public Good Touch exclusions can
+                                        // identify a clued connector in the
+                                        // observer's own hidden hand too.
+                                        let mut useful = IdentitySet::from_mask(
+                                            facts[prior.index()].identity_mask(),
+                                        )
+                                        .iter()
+                                        .filter(|id| {
+                                            !super::super::is_trash_at(stack_heights, *id)
+                                        });
+                                        let only = useful.next()?;
+                                        useful.next().is_none().then_some(only)
+                                    })
                                     == Some(needed)
                         })
                     },

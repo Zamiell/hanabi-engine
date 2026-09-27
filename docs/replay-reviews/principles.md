@@ -273,3 +273,23 @@ hypothetical connector created by a clue cannot make that originating clue a
 zero-value duplicate for Time Travel Chop Move recognition: the duplicate must
 already have been secured before the clue. Otherwise a possible g1 reveal
 falsely changes an earlier green clue's meaning and the later purple focus.
+
+## Public Good Touch identities must reach convention consumers
+
+Current turn32 (`t32-priority-prompt-identifies-cathys-red-four`) and the
+hypothetical turn43 branch (`t43-demonstrated-bluff-retracts-hidden-connector`)
+expose the same implementation omission: a clued card can be publicly known
+because all but one literal possibility are dead. Priority and resolved-Bluff
+recognition must retain that knowledge when the card is in the observer's own
+hand. Requiring a visible face or an explicit rank-and-color singleton creates
+inconsistent interpretations between observers.
+
+This is an implementation consequence of Good Touch, not a new user strategy
+ruling. It does not identify arbitrary unknown cards or use later evidence to
+justify an earlier decision. A demonstrated Bluff must cancel its competing
+Finesse, including the inferred identity subsequently exported to teammates.
+
+`reviewed_good_touch_identities_reach_priority_and_bluff_consumers` checks both
+reviewed positions with hidden owner faces, then exercises each downstream
+recognition and action/export regression. Existing prior-obligation and
+unresolved-response controls remain in place.
