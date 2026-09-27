@@ -2107,6 +2107,9 @@ impl ReplayReducer {
             }
         }
         remove_card(&mut self.hands[player.index()], *card);
+        // A card that left the hand cannot still require a repair, nor
+        // sustain a conditional repair of another card.
+        self.required_fixes.remove_card(*card);
         self.invisibly_clued.remove(card);
         self.already_playing.remove(card);
         if *successful {
@@ -2256,6 +2259,9 @@ impl ReplayReducer {
         }
         self.pending_connections.discard(entry.turn, *player, *card);
         remove_card(&mut self.hands[player.index()], *card);
+        // A card that left the hand cannot still require a repair, nor
+        // sustain a conditional repair of another card.
+        self.required_fixes.remove_card(*card);
         self.invisibly_clued.remove(card);
         self.already_playing.remove(card);
         self.public_removed[identity.index()] += 1;

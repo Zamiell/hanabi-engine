@@ -6535,3 +6535,87 @@ fn reviewed_yellow_out_of_order_fix_uses_bobs_connector() {
         }
     }
 }
+
+#[test]
+fn reviewed_endgame_burn_is_not_blocked_by_a_removed_fix_focus() {
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .unwrap();
+    // Both successful plays and discards retire the obligation. Discarding
+    // p5 here tests lifecycle cleanup only, not a recommended game move.
+    for action in [
+        Action::Play(CardId::new(22)),
+        Action::Discard(CardId::new(22)),
+    ] {
+        let mut before = fixture.state_at_turn(42).unwrap();
+        let d = LogicalDeductions::new(before.view_for(PlayerId::new(3)).unwrap()).unwrap();
+        let r = replay_h_group_inner(
+            &d,
+            HGroupProfile::Max,
+            PerspectiveDepth::ObserverOnly,
+            false,
+        );
+        assert!(
+            r.required_fixes
+                .iter()
+                .any(|fix| fix.required.focus == CardId::new(22))
+        );
+        before.apply(action).unwrap();
+        let d = LogicalDeductions::new(before.view_for(PlayerId::new(3)).unwrap()).unwrap();
+        let r = replay_h_group_inner(
+            &d,
+            HGroupProfile::Max,
+            PerspectiveDepth::ObserverOnly,
+            false,
+        );
+        assert!(
+            !r.required_fixes
+                .iter()
+                .any(|fix| fix.required.focus == CardId::new(22))
+        );
+    }
+    let state = fixture.state_at_turn(51).unwrap();
+    let d = LogicalDeductions::new(state.view_for(state.current_player()).unwrap()).unwrap();
+    let replay = replay_h_group_inner(
+        &d,
+        HGroupProfile::Max,
+        PerspectiveDepth::ObserverOnly,
+        false,
+    );
+    assert!(
+        replay
+            .required_fixes
+            .iter()
+            .all(|fix| d.view().hands[fix.required.target.index()]
+                .iter()
+                .any(|c| c.id == fix.required.focus)),
+        "{:?}",
+        replay.required_fixes
+    );
+    let green = Action::Clue {
+        target: PlayerId::new(1),
+        clue: Clue::Suit(Suit::Green),
+    };
+    assert!(
+        h_group_clue_candidates(&d, HGroupProfile::Max)
+            .iter()
+            .any(|c| c.action == green && c.move_kind() == Some(HGroupMoveKind::Burn))
+    );
+    let mut after = state;
+    after.apply(green).unwrap();
+    for observer in 0..4 {
+        let d = LogicalDeductions::new(after.view_for(PlayerId::new(observer)).unwrap()).unwrap();
+        let notes = infer_h_group(&d, HGroupProfile::Max);
+        assert!(
+            notes
+                .signals
+                .iter()
+                .any(|s| s.turn == 51 && s.kind == HGroupMoveKind::Burn),
+            "observer {observer}"
+        );
+        if observer == 1 {
+            assert!(notes.playable_now.contains(&CardId::new(19)));
+        }
+    }
+}

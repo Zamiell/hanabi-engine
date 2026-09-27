@@ -766,4 +766,11 @@ impl FixObligations {
     pub(super) fn retain(&mut self, retain: impl FnMut(&FixObligation) -> bool) {
         self.entries.retain(retain);
     }
+
+    pub(super) fn remove_card(&mut self, card: CardId) {
+        self.entries.retain(|obligation| {
+            obligation.required.focus != card
+                && !matches!(obligation.condition, FixCondition::FocusIdentity { focus, .. } if focus == card)
+        });
+    }
 }
