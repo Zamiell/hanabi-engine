@@ -123,7 +123,8 @@
     "explanation": {
       "action": "Replace turns34–54 with the supplied five-save continuation. Turn38 discards Bob’s p4 #5, not y4.",
       "boundary": "Acceptance of the concrete move, not a ruling about Priority Prompts with visible unclued duplicates. Earlier position anchors through34 are unchanged. Historical later records remain stale and are not re-anchored.",
-      "validation": "All54 actions replay legally without strikes, finishing at score25."
+      "validation": "All54 actions replay legally without strikes, finishing at score25.",
+      "engineAudit": "The from-start comparison and independent suffix analyses verified all54 fixture moves under H-Group max / perfect-score. Turns1–49 and51–54 were checked at3f83948; turn50 (Bob y5 #27) was checked at549b8df, whose only additional production change skips wholly played endgame domains. The final turn50 analysis completed in4579.735 seconds. This is observed engine parity, not a new convention ruling or an assertion that every alternative is strategically inferior."
     },
     "regressions": [],
     "coverageNote": "Replay legality and from-start engine comparison; no new optimal-move assertion."
