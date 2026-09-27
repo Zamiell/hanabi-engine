@@ -14,10 +14,14 @@
     "explanation": {
       "bug": "A required Fix on Cathy’s p5 #22 remained after she played it at turn43. The pending-Fix guard suppressed fully-clued endgame Burn admission, incorrectly rejecting green to Bob for touching harmless unmarked trash. It admitted only the narrower 5 re-clue.",
       "fix": "Playing, misplaying, or discarding a card retires any Fix on it and any conditional Fix supported by that removed focus. The fully-clued endgame recognizer can then admit the supplied green Burn and all observers retain Bob’s g5 play.",
-      "coverageBoundary": "The hypothetical p5 discard tests lifecycle cleanup only; it is not an endorsed strategy. Remaining live Fix obligations keep their normal semantics."
+      "coverageBoundary": "The hypothetical p5 discard tests lifecycle cleanup only; it is not an endorsed strategy. Remaining live Fix obligations keep their normal semantics.",
+      "terminalComparison": "After admission was repaired, purple to Alice forecast a known p1 discard followed by Bob’s g5, finishing25 with six tokens; green to Bob forecast two Burns then g5, finishing25 with four tokens. ClueEfficiency incorrectly treated the unused tokens as a strategic win. Two unconditional, funded, strike-free perfect finishes are endpoint-equivalent before resource comparison; ordinary convention tie-breaks remain.",
+      "boundedFollowups": "Projected follow-up search tries the convention-preferred action first and stops when a complete, unbranched, assumption-free, funded, strike-free line proves25. This avoids expanding every equivalent endgame Burn. Root candidates keep independent projections, and unfinished or conditional forecasts do not qualify."
     },
     "regressions": [
-      "h_group::tests::replay::reviewed_endgame_burn_is_not_blocked_by_a_removed_fix_focus"
+      "h_group::tests::replay::reviewed_endgame_burn_is_not_blocked_by_a_removed_fix_focus",
+      "planner::tests::reviewed_endgame_followup_stops_at_a_certified_perfect_finish",
+      "planner::tests::reviewed_turn_forty_four_prefers_a_demonstrated_perfect_finish"
     ],
     "coverageNote": "New lifecycle/Burn regression and two existing live-Fix controls pass. Fast validation passes. The historical fifth_replay_fully_clued_endgame_clues_are_all_burns fails for Bob’s owner perspective after a red clue; the same failure reproduces with this lifecycle cleanup disabled. Its assertions are retained."
   },

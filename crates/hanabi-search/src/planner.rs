@@ -929,7 +929,10 @@ pub(crate) fn choose_projected_follow_up(
 ) -> Result<Option<Action>, crate::AnalysisStopped> {
     let convention = SupportedConvention::HGroup(profile);
     let analysis = convention.analyze(deductions);
-    let candidates = planning_candidates(&analysis);
+    let mut candidates = planning_candidates(&analysis).into_owned();
+    // Try the ordinary preferred move first. A certified perfect finish
+    // below reaches the score ceiling without branching or assumptions.
+    candidates.sort_by_key(|candidate| Some(candidate.action) != analysis.preferred_action);
     if candidates.len() == 1 {
         crate::diagnostics::record(
             deductions.view(),
@@ -951,7 +954,21 @@ pub(crate) fn choose_projected_follow_up(
                 candidate.action,
                 control,
             )?;
+        let perfect = has_unconditional_perfect_finish(&evaluation);
         evaluations.push(evaluation);
+        if perfect {
+            // No alternative can improve on an unconditional, funded 25
+            // without strikes. In particular, do not recursively expand
+            // every interchangeable Burn after all useful cards are clued.
+            crate::diagnostics::record(
+                deductions.view(),
+                &analysis,
+                &evaluations,
+                &[],
+                Some(candidate.action),
+            );
+            return Ok(Some(candidate.action));
+        }
     }
     let (best, comparisons) = compare_symbolic_candidates(&evaluations, analysis.preferred_action);
     let selected = best.map(|index| evaluations[index].action);
@@ -1321,6 +1338,11 @@ fn compare_endpoint_evidence(
     right: &PlannerActionEvaluation,
     basis: &mut Option<ComparisonBasis>,
 ) -> EndpointComparison {
+    if has_unconditional_perfect_finish(left) && has_unconditional_perfect_finish(right) {
+        // A won game has no remaining clue demand. Resource savings cannot
+        // distinguish two certain perfect finishes; use ordinary tie-breaks.
+        return EndpointComparison::Equivalent;
+    }
     match has_unconditional_perfect_finish(left).cmp(&has_unconditional_perfect_finish(right)) {
         Ordering::Greater => {
             return EndpointComparison::PreferLeft(ComparisonReason::PerfectFinish);
@@ -2536,6 +2558,38 @@ mod tests {
     use super::*;
 
     #[test]
+    fn reviewed_endgame_followup_stops_at_a_certified_perfect_finish() {
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        for turn in [51, 52] {
+            let state = replay.state_at_turn(turn).unwrap();
+            let view = state.view_for(state.current_player()).unwrap();
+            let deductions = LogicalDeductions::new(view).unwrap();
+            let profile = crate::HGroupProfile::Max;
+            let control = crate::AnalysisControl::default();
+            let action = choose_projected_follow_up(&deductions, profile, &control)
+                .unwrap()
+                .unwrap();
+            let (line, projection) = crate::h_group::symbolic_line::project_leaf_projection(
+                deductions.view(),
+                profile,
+                action,
+                &control,
+            )
+            .unwrap();
+            assert_eq!(line.position_value.unwrap().score, 25);
+            assert_eq!(line.strikes, 0);
+            assert_eq!(projection.frontier, crate::PlanFrontier::Terminal);
+            assert!(projection.assumptions.is_empty());
+            assert!(projection.resources.unfunded_turn.is_none());
+        }
+    }
+
+    // Reuse the expensive reviewed analysis for the endpoint and ablation checks.
+    #[test]
+    #[allow(clippy::too_many_lines)]
     fn reviewed_turn_forty_four_prefers_a_demonstrated_perfect_finish() {
         let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
             "../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
@@ -2585,6 +2639,24 @@ mod tests {
                 .find(|c| c.action == analysis.planner.best_action)
                 .unwrap()
         ));
+        let mut surplus = candidate.clone();
+        surplus.projection.resources.tokens = 8;
+        surplus
+            .projection
+            .checkpoints
+            .last_mut()
+            .unwrap()
+            .value
+            .clues = 8;
+        surplus.symbolic_line.clues_spent = 0;
+        assert_eq!(
+            compare_endpoints(candidate, &surplus),
+            EndpointComparison::Equivalent
+        );
+        assert_eq!(
+            compare_endpoints(&surplus, candidate),
+            EndpointComparison::Equivalent
+        );
         for control in 0..4 {
             let mut incomplete = candidate.clone();
             match control {
