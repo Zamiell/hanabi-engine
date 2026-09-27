@@ -113,6 +113,12 @@ impl ConventionFacts {
                 self.active_priority.insert(*card);
             } else {
                 self.active_priority.remove(card);
+                // A Load Clue retracts the provisional Priority identity as
+                // well as its action flag. Other independent promises survive.
+                self.identity_claims.retain(|claim| {
+                    claim.source != HGroupMoveKind::Priority || !claim.cards.contains(card)
+                });
+                self.rebuild_known_identity(*card);
             }
         }
     }
@@ -339,6 +345,29 @@ mod tests {
     use hanabi_core::{PlayerId, Rank, Suit};
 
     use super::*;
+
+    #[test]
+    fn priority_retraction_removes_only_priority_identity_claims() {
+        let card = CardId::new(7);
+        let priority = Card::new(Suit::Blue, Rank::Four);
+        let independent = Card::new(Suit::Green, Rank::Two);
+        for other in [None, Some(independent)] {
+            let mut facts = ConventionFacts::default();
+            if let Some(identity) = other {
+                facts.apply_signal(&signal(HGroupMoveKind::Prompt, card, Some(identity)));
+            }
+            facts.apply_signal(&signal(HGroupMoveKind::Priority, card, Some(priority)));
+            facts.apply_signal(&signal(HGroupMoveKind::Retraction, card, None));
+            assert!(!facts.active_priority().contains(&card));
+            assert_eq!(facts.known_identity(card), other);
+            assert!(
+                facts
+                    .identity_claims()
+                    .iter()
+                    .all(|claim| claim.source != HGroupMoveKind::Priority)
+            );
+        }
+    }
 
     #[test]
     fn clue_prerequisites_exclude_same_turn_identity_claims() {

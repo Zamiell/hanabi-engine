@@ -33,6 +33,18 @@ evidence-ablation and urgent-policy controls. Historical
 `reviewed_turn_thirty_compares_equal_elapsed_time` retains a reviewed case where
 endpoint evidence favors a clue over b5.
 
+Implementation audit, 2026-09-27: the same scheduling preference applies when
+playability is established by a settled convention interpretation rather than
+literal clues alone. In `p4v0s415` turn 12, Donald's b3 permits Alice's funded
+blue Load Clue and Bob's immediate b4. A literal-only certainty guard silently
+excluded that case. The forecast must record a settled singleton interpretation
+and a successful root play; unknown or multivalued interpretations do not earn
+this additional proof route. This is an implementation of the existing ruling,
+not a new user strategy rule. Regression:
+`reviewed_convention_known_play_earns_teammate_handoff`, with missing and
+ambiguous interpretation controls, alongside the original turn-18
+evidence-ablation test.
+
 ## Save Principle: declined protection constrains discard risk
 
 Source: [Save Principle](https://hanabi.github.io/beginner/save-principle/).

@@ -149,6 +149,23 @@ pub(super) fn assess(
     }
 }
 
+fn all_copies_visible(view: &PlayerView, identity: Card) -> bool {
+    let accounted = view
+        .hands
+        .iter()
+        .flatten()
+        .filter(|card| card.identity == Some(identity))
+        .count()
+        + view
+            .play_stacks
+            .iter()
+            .flatten()
+            .chain(view.discard_pile.iter())
+            .filter(|(_, card)| *card == identity)
+            .count();
+    accounted >= usize::from(identity.rank.copies())
+}
+
 fn assess_kind(view: &PlayerView, requirement: &ProjectionRequirement) -> DependencyStatus {
     let Ok(deductions) = LogicalDeductions::new(view.clone()) else {
         return DependencyStatus::Conditional { witness: None };
@@ -173,6 +190,11 @@ fn assess_kind(view: &PlayerView, requirement: &ProjectionRequirement) -> Depend
             identity,
             signal_turn,
         } => {
+            // Unknown external slots have no observer-owned deduction domain.
+            // They still obey literal clues and public physical copy counts.
+            if all_copies_visible(view, identity) {
+                return DependencyStatus::Supported;
+            }
             for (owner, hand) in view.hands.iter().enumerate() {
                 if owner == requirement.actor.index() {
                     continue;
@@ -181,9 +203,10 @@ fn assess_kind(view: &PlayerView, requirement: &ProjectionRequirement) -> Depend
                     if view.history.iter().any(|entry| entry.turn >= signal_turn
                         && matches!(entry.event, ObservedEvent::Drew { card: drawn, .. } if drawn == card.id))
                     { continue; }
-                    if deductions
-                        .possible_identities(card.id)
-                        .is_none_or(|domain| domain.contains(identity))
+                    if card.clues.allows(identity)
+                        && deductions
+                            .possible_identities(card.id)
+                            .is_none_or(|domain| domain.contains(identity))
                     {
                         return conditional(view, owner, card.id, identity);
                     }
@@ -259,6 +282,49 @@ fn conditional(view: &PlayerView, owner: usize, card: CardId, identity: Card) ->
 mod admission_tests {
     use super::*;
     use crate::{CluePrincipleCheck, PrincipleVerdict};
+
+    #[test]
+    fn reviewed_priority_dependency_respects_visible_copy_counts() {
+        // p4v0s415 T16: Cathy visibly holds the unique r5. Hiding a
+        // teammate's card (as a symbolic forecast does for draws) cannot put
+        // a second r5 there and block Cathy's later Priority response.
+        let fixture = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        ))
+        .unwrap();
+        let state = fixture.state_at_turn(15).unwrap();
+        let mut view = state.view_for(PlayerId::new(3)).unwrap();
+        view.hands[0]
+            .iter_mut()
+            .find(|c| c.id == CardId::new(19))
+            .unwrap()
+            .identity = None;
+        let requirement = ProjectionRequirement {
+            actor: PlayerId::new(2),
+            action: Action::Play(CardId::new(23)),
+            evidence_turn: 15,
+            kind: ProjectionRequirementKind::NoUnobservedConnector {
+                identity: Card::new(hanabi_core::Suit::Red, hanabi_core::Rank::Five),
+                signal_turn: 15,
+            },
+        };
+        assert_eq!(
+            assess(&view, &requirement).status,
+            DependencyStatus::Supported
+        );
+        view.hands[2]
+            .iter_mut()
+            .find(|c| c.id == CardId::new(23))
+            .unwrap()
+            .identity = None;
+        assert!(
+            matches!(
+                assess(&view, &requirement).status,
+                DependencyStatus::Conditional { .. }
+            ),
+            "without the visible unique copy, the alternative remains possible"
+        );
+    }
 
     #[test]
     fn clue_admission_dependencies_do_not_take_the_non_play_shortcut() {

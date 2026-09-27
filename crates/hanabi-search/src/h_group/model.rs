@@ -637,7 +637,12 @@ impl HGroupState {
                     .iter()
                     .filter(|candidate| ***candidate == *effect)
                     .count()
-                    != 1
+                    != self
+                        .knowledge
+                        .effects()
+                        .iter()
+                        .filter(|candidate| *candidate == effect)
+                        .count()
             })
         {
             return Err(

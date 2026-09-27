@@ -46,6 +46,45 @@ fn every_semantic_move_links_to_its_documented_rule() {
 }
 
 #[test]
+fn knowledge_transition_partition_preserves_effect_multiplicity() {
+    // Data-structure invariant: an ordered program can repeat an effect
+    // after intervening changes. Partition occurrences, not unique values.
+    let fixture = reviewed_rank_three_branch_p4v0s415();
+    let state = fixture.state_at_turn(2).unwrap();
+    let d = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let mut r = replay_h_group(&d, HGroupProfile::Max);
+    let first = r.knowledge.effects()[0];
+    let other = *r
+        .knowledge
+        .effects()
+        .iter()
+        .find(|effect| **effect != first)
+        .unwrap();
+    r.knowledge = ConventionKnowledge::new(vec![first, other, first]);
+    for transition in &mut r.transitions {
+        transition.delta.knowledge_changes.clear();
+    }
+    r.knowledge.attach_to_transitions(&mut r.transitions);
+    assert_eq!(r.validate(), Ok(()));
+    let index = r
+        .transitions
+        .iter()
+        .position(|t| t.delta.knowledge_changes.contains(&first))
+        .unwrap();
+    r.transitions[index].delta.knowledge_changes.push(first);
+    assert!(
+        r.validate().is_err(),
+        "an extra occurrence is not a partition"
+    );
+    r.transitions[index].delta.knowledge_changes.pop();
+    r.transitions[index].delta.knowledge_changes.pop();
+    assert!(
+        r.validate().is_err(),
+        "a missing occurrence is not a partition"
+    );
+}
+
+#[test]
 fn every_expert_replay_prefix_satisfies_state_and_knowledge_invariants() {
     for (fixture_name, fixture) in expert_replays() {
         for turn in 0..=u32::try_from(fixture.actions.len()).expect("replay fits in u32") {

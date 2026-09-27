@@ -540,6 +540,7 @@ fn apply_demonstrated_double_bluff(
             return;
         };
         if is_trash_at(clue.stack_heights, focus_identity)
+            || is_playable_at(clue.stack_heights, focus_identity)
             || bluff_target_kind_at(clue.stack_heights, clue.clue, focus_identity).is_some()
             || super::super::bluff::bluff_through_clued_cards(
                 usize::from(clue.stack_heights[focus_identity.suit.index()]),

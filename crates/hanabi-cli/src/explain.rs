@@ -291,6 +291,7 @@ fn candidates(
                     hanabi_search::ConventionRejectionReason::NoFocus => "The convention focus rules did not select a focus among these touched cards.",
                     hanabi_search::ConventionRejectionReason::RepeatsKnownIdentity => "The selected focus is already gotten and its exact identity is established.",
                     hanabi_search::ConventionRejectionReason::RedundantOutcome => "The clue repeats an already-scheduled outcome or stomps an unresolved visible connection.",
+                    hanabi_search::ConventionRejectionReason::StallPrecedence => "An admitted normal Play or Save Clue rules out the 5 Stall last-resort exception.",
                     hanabi_search::ConventionRejectionReason::UnsafeConnection => "The proposed connection failed convention safety validation.",
                     hanabi_search::ConventionRejectionReason::NoConventionMeaning => "No semantic generator admitted this clue; the engine did not retain a more specific proof of exclusion.",
                 }})

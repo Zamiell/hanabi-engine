@@ -1373,6 +1373,70 @@ pub(in crate::h_group) fn apply_unnecessary_move_effects(
         None,
     );
 }
+/// Load Clues rewind provisional Priority notes before ordinary clue meaning
+/// and Good Touch are computed, rather than after they have used stale claims.
+/// <https://hanabi.github.io/level-25/#the-load-clue>
+pub(in crate::h_group) fn retract_loaded_priority(
+    entry: &ObservedHistoryEntry,
+    hands: &[Vec<CardId>],
+    forced_playable: &mut CardSet,
+    signals: &mut ConventionJournal,
+) -> IdentitySet {
+    if let ObservedEvent::Clued {
+        target,
+        clue,
+        touched,
+        ..
+    } = &entry.event
+    {
+        // A clue matching a pending Priority connector but touching a
+        // different card is the Load Clue that disproves the provisional
+        // Finesse-Position interpretation.
+        let convention_facts = signals.facts();
+        let claims = convention_facts
+            .identity_claims()
+            .iter()
+            .filter(|claim| {
+                claim.source == HGroupMoveKind::Priority
+                    && claim.cards.iter().any(|card| {
+                        hands[target.index()].contains(card)
+                            && convention_facts.active_priority().contains(card)
+                    })
+                    && claim.target == Some(*target)
+                    && clue.matches(claim.identity)
+                    && claim.cards.iter().all(|card| !touched.contains(card))
+            })
+            .collect::<Vec<_>>();
+        let canceled = claims
+            .iter()
+            .flat_map(|claim| claim.cards.iter().copied())
+            .collect::<CardSet>();
+        // Read live claims, not old journal entries for a card that may have
+        // received a different Priority promise after an earlier retraction.
+        let identities = IdentitySet::from_mask(
+            claims
+                .iter()
+                .fold(0, |mask, claim| mask | (1 << claim.identity.index())),
+        );
+        for card in &canceled {
+            forced_playable.remove(card);
+        }
+        if !canceled.is_empty() {
+            push_signal(
+                signals,
+                entry,
+                *target,
+                Some(*target),
+                HGroupMoveKind::Retraction,
+                canceled.iter().copied().collect(),
+                None,
+            );
+        }
+        return identities;
+    }
+    IdentitySet::default()
+}
+
 #[allow(clippy::too_many_lines)]
 pub(in crate::h_group) fn apply_priority_effects(
     context: &HGroupTurnContext<'_>,
@@ -1392,49 +1456,6 @@ pub(in crate::h_group) fn apply_priority_effects(
     let hands = &context.before.hands;
     let facts = &context.before.facts;
     let stack_heights = context.before.stack_heights;
-    if let ObservedEvent::Clued {
-        target,
-        clue,
-        touched,
-        ..
-    } = &entry.event
-    {
-        // A clue matching a pending Priority connector but touching a
-        // different card is the Load Clue that disproves the provisional
-        // Finesse-Position interpretation.
-        let convention_facts = signals.facts();
-        let canceled = signals
-            .iter()
-            .filter(|signal| {
-                signal.kind == HGroupMoveKind::Priority
-                    && signal
-                        .cards
-                        .iter()
-                        .any(|card| convention_facts.active_priority().contains(card))
-                    && signal.target == Some(*target)
-                    && signal
-                        .identity
-                        .is_some_and(|identity| clue.matches(identity))
-                    && signal.cards.iter().all(|card| !touched.contains(card))
-            })
-            .flat_map(|signal| signal.cards.iter().copied())
-            .collect::<CardSet>();
-        for card in &canceled {
-            forced_playable.remove(card);
-        }
-        if !canceled.is_empty() {
-            push_signal(
-                signals,
-                entry,
-                *target,
-                Some(*target),
-                HGroupMoveKind::Retraction,
-                canceled.iter().copied().collect(),
-                None,
-            );
-        }
-        return;
-    }
     let ObservedEvent::Played {
         player,
         card,

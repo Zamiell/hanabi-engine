@@ -119,6 +119,14 @@ fn validate_proposals(
             }
         }
     }
+    enforce_five_stall_precedence(
+        deductions,
+        profile,
+        replay,
+        &mut retained,
+        &mut evidence,
+        &mut rejected,
+    );
     // Stall precedence is applied only after admission: an invalid proposed
     // alternative cannot suppress the only lawful Burn.
     if retained
@@ -153,10 +161,158 @@ fn validate_proposals(
     }
 }
 
+fn enforce_five_stall_precedence(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+    replay: &HGroupState,
+    retained: &mut Vec<ClueProposal>,
+    evidence: &mut Vec<[crate::CluePrincipleCheck; 3]>,
+    rejected: &mut Vec<RejectedConventionAction>,
+) {
+    // https://hanabi.github.io/level-9/#5-stalls-are-a-last-resort
+    // A normal Save, or a Play Clue that cannot qualify for the Finesse
+    // Position Exception, forbids a 5 Stall. This is admission, not a score
+    // penalty that a speculative safer forecast can override.
+    if super::rule_enabled(profile, super::HGroupRuleId::Stalling)
+        && retained
+            .iter()
+            .zip(evidence.iter())
+            .any(|(proposal, checks)| {
+                checks
+                    .iter()
+                    .all(|check| check.verdict != crate::PrincipleVerdict::Unresolved)
+                    && normal_clue_precludes_fpe(deductions, replay, proposal)
+            })
+    {
+        let mut index = 0;
+        evidence.retain(|_| {
+            let keep = retained[index].move_kind() != Some(super::HGroupMoveKind::FiveStall);
+            index += 1;
+            keep
+        });
+        retained.retain(|proposal| {
+            if proposal.move_kind() == Some(super::HGroupMoveKind::FiveStall) {
+                rejected.push(RejectedConventionAction {
+                    action: proposal.action,
+                    reason: crate::ConventionRejectionReason::StallPrecedence,
+                    validation: None,
+                });
+                false
+            } else {
+                true
+            }
+        });
+    }
+}
+
+// A potentially finesseable playable focus remains eligible for the documented
+// exception. Unknown focus evidence is not proof that the exception is absent.
+fn normal_clue_precludes_fpe(
+    deductions: &LogicalDeductions,
+    replay: &HGroupState,
+    proposal: &ClueProposal,
+) -> bool {
+    if proposal.is_save() {
+        return true;
+    }
+    if proposal.purpose() != super::CluePurpose::Play {
+        return false;
+    }
+    let view = deductions.view();
+    let hanabi_core::Action::Clue { target, clue } = proposal.action else {
+        return false;
+    };
+    let gotten = replay.gotten_from(&replay.promptable());
+    let touched = view.hands[target.index()]
+        .iter()
+        .filter(|card| card.identity.is_some_and(|identity| clue.matches(identity)))
+        .map(|card| card.id)
+        .collect::<Vec<_>>();
+    let hand = &replay.hands[target.index()];
+    super::focus(hand, &touched, super::chop(hand, &gotten), &gotten).is_some_and(|focus| {
+        super::identity_of(view, focus).is_some_and(|identity| {
+            !super::is_playable_now(view, identity)
+                || super::finesse_position(&view.hands[target.index()], &gotten, 0)
+                    .is_none_or(|card| card.id != focus)
+        })
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use hanabi_core::{Action, Card, CardId, Clue, PlayerId, Rank, Suit};
+
+    #[test]
+    fn reviewed_first_replay_five_stall_cannot_override_a_normal_play_clue() {
+        // p4v0s415 T5: reviewed yellow to Cathy gets y3 and y5. The
+        // alternative 5 Stall cannot use FPE: y3 is not currently playable.
+        let fixture = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        ))
+        .unwrap();
+        let state = fixture.state_at_turn(4).unwrap();
+        let view = state.view_for(state.current_player()).unwrap();
+        let deductions = LogicalDeductions::new(view.clone()).unwrap();
+        let yellow = Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Suit(Suit::Yellow),
+        };
+        let five = Action::Clue {
+            target: PlayerId::new(2),
+            clue: Clue::Rank(Rank::Five),
+        };
+        for profile in ["9".parse().unwrap(), HGroupProfile::Max] {
+            let replay = super::super::replay_h_group(&deductions, profile);
+            let compiled = compile(&deductions, profile, &replay);
+            assert!(compiled.admitted.iter().any(|c| c.action == yellow));
+            assert!(!compiled.admitted.iter().any(|c| c.action == five));
+            assert!(compiled.rejected.iter().any(|c| c.action == five
+                && c.reason == crate::ConventionRejectionReason::StallPrecedence));
+            // Removing the competing proposal tests precedence only; this is
+            // not an assertion that the Stall is optimal in the real position.
+            let stalls = super::super::interpretation::h_group_clue_candidates_from_replay_inner(
+                &deductions,
+                profile,
+                &replay,
+            )
+            .into_iter()
+            .filter(|c| c.action == five)
+            .collect();
+            let alone = validate_proposals(&deductions, profile, &replay, stalls);
+            assert!(alone.admitted.iter().any(|c| c.action == five));
+            // A conditional alternative is not proof that a normal clue is
+            // available; test this at the shared admission boundary.
+            let normal = *compiled
+                .admitted
+                .iter()
+                .find(|c| c.action == yellow)
+                .unwrap();
+            let stall = *alone.admitted.iter().find(|c| c.action == five).unwrap();
+            let mut proposals = vec![normal.proposal(), stall.proposal()];
+            let mut checks = vec![normal.checks(), stall.checks()];
+            checks[0][2].verdict = crate::PrincipleVerdict::Unresolved;
+            enforce_five_stall_precedence(
+                &deductions,
+                profile,
+                &replay,
+                &mut proposals,
+                &mut checks,
+                &mut Vec::new(),
+            );
+            assert!(proposals.iter().any(|c| c.action == five));
+        }
+        let result = crate::analyze_position(
+            &view,
+            crate::SupportedConvention::HGroup(HGroupProfile::Max),
+            crate::PlannerConfig {
+                objective: crate::PlanningObjective::PerfectScore,
+                ..crate::PlannerConfig::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(result.planner.best_action, yellow);
+    }
 
     #[test]
     fn proposed_bluff_must_prove_its_declared_response() {

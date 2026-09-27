@@ -2950,6 +2950,66 @@ fn fifth_replay_double_bluff_keeps_observer_relative_focus_domains() {
 }
 
 #[test]
+fn demonstrated_layer_pause_is_not_vetoed_by_generic_play_order() {
+    // Reviewed p4v0s415 T10 3s to Donald; at T12 the new b3 play may
+    // interrupt the already-demonstrated yellow layer. This tests the
+    // permission and downstream forecast, not an unconditional pause rule.
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    let state = fixture.state_at_turn(11).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let deductions = LogicalDeductions::new(view.clone()).unwrap();
+    let mut inferred = infer_h_group(&deductions, HGroupProfile::Max);
+    let ordered = ordered_playable_cards(&view, &inferred, HGroupProfile::Max);
+    for card in [CardId::new(13), CardId::new(18)] {
+        assert_eq!(
+            super::super::decision::semantic_play_order(
+                &view,
+                &inferred,
+                HGroupProfile::Max,
+                card,
+                &ordered
+            ),
+            None
+        );
+    }
+    inferred.demonstrated_connections.clear();
+    for card in [CardId::new(13), CardId::new(18)] {
+        assert!(
+            super::super::decision::semantic_play_order(
+                &view,
+                &inferred,
+                HGroupProfile::Max,
+                card,
+                &ordered
+            )
+            .is_some()
+        );
+    }
+    let state = fixture.state_at_turn(9).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let (_, projection) = crate::SupportedConvention::HGroup(HGroupProfile::Max)
+        .project_symbolic_projection(
+            &view,
+            Action::Clue {
+                target: PlayerId::new(3),
+                clue: Clue::Rank(Rank::Three),
+            },
+            32,
+            &crate::AnalysisControl::default(),
+        )
+        .unwrap();
+    let donald = projection
+        .steps
+        .iter()
+        .find(|step| step.projected.actor == PlayerId::new(3))
+        .unwrap();
+    assert_eq!(donald.projected.action, Action::Play(CardId::new(18)));
+}
+
+#[test]
 fn demonstrated_yellow_layer_is_shared_across_observer_projections() {
     let fixture = HanabiLiveReplay::from_json(include_str!(
         "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
@@ -6618,4 +6678,210 @@ fn reviewed_endgame_burn_is_not_blocked_by_a_removed_fix_focus() {
             assert!(notes.playable_now.contains(&CardId::new(19)));
         }
     }
+}
+
+// Reviewed p4v0s415 T7 is a Fix of Alice's promised r1 (#3), not
+// a new green Play Clue. A nested observer cannot see Alice's unknown green
+// face, but the immediate repair still explains the preceding loaded clue.
+#[test]
+fn reviewed_hidden_fix_survives_nested_perspectives() {
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    for turn in [7, 12, 13] {
+        let state = fixture.state_at_turn(turn).unwrap();
+        for source in [PlayerId::new(0), PlayerId::new(3)] {
+            let view = state.view_for(source).unwrap();
+            let (d, r) = PerspectiveProjector::new(&view, HGroupProfile::Max)
+                .project(PlayerId::new(1), PerspectiveDepth::NestedRecipients)
+                .unwrap();
+            assert!(
+                r.cards.facts.fixed_cards().contains(&CardId::new(3)),
+                "turn={turn} source={source:?}"
+            );
+            assert!(
+                !r.pending_connections
+                    .iter()
+                    .any(|c| c.focus == CardId::new(3))
+            );
+            if source == PlayerId::new(0) {
+                assert_eq!(
+                    identity_of(d.view(), CardId::new(3)),
+                    None,
+                    "recognizing the Fix must not assign its hypothetical face"
+                );
+            }
+        }
+    }
+    // A different legal clue after the same loaded clue does not repair #3.
+    let mut state = fixture.state_at_turn(6).unwrap();
+    state
+        .apply(Action::Clue {
+            target: PlayerId::new(3),
+            clue: Clue::Suit(Suit::Blue),
+        })
+        .unwrap();
+    let view = state.view_for(PlayerId::new(0)).unwrap();
+    let (_, r) = PerspectiveProjector::new(&view, HGroupProfile::Max)
+        .project(PlayerId::new(1), PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    assert!(!r.cards.facts.fixed_cards().contains(&CardId::new(3)));
+}
+
+#[test]
+fn reviewed_load_clue_rewinds_priority_before_good_touch() {
+    // T13 Alice loads Bob's off-finesse-position b4 after Donald's paused b3.
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    let state = fixture.state_at_turn(12).unwrap();
+    let d = LogicalDeductions::new(state.view_for(state.current_player()).unwrap()).unwrap();
+    let target = PlayerId::new(1);
+    let touched = [CardId::new(4)];
+    let before = TeamConventionSnapshot::new(d.view().clone(), HGroupProfile::Max)
+        .projection(target)
+        .unwrap();
+    assert!(
+        before
+            .replay
+            .cards
+            .facts
+            .active_priority()
+            .contains(&CardId::new(7))
+    );
+    assert_eq!(
+        before.replay.cards.facts.known_identity(CardId::new(7)),
+        Some(Card::new(Suit::Blue, Rank::Four))
+    );
+    for clue in [Clue::Suit(Suit::Blue), Clue::Rank(Rank::Four)] {
+        let snapshot = super::super::prospective::compiled_prospective_clue(
+            d.view(),
+            HGroupProfile::Max,
+            target,
+            clue,
+            &touched,
+        )
+        .unwrap();
+        let bob = snapshot.projection(target).unwrap();
+        assert!(
+            !bob.replay
+                .cards
+                .facts
+                .active_priority()
+                .contains(&CardId::new(7))
+        );
+        assert!(
+            !bob.replay
+                .cards
+                .facts
+                .identity_claims()
+                .iter()
+                .any(|claim| claim.source == HGroupMoveKind::Priority
+                    && claim.cards.contains(&CardId::new(7)))
+        );
+        assert!(
+            bob.inferred.playable_now.contains(&touched[0]),
+            "clue={clue:?} note={:?} clues={:?}",
+            bob.inferred.cards,
+            bob.inferred.clues.last()
+        );
+        assert!(!bob.inferred.playable_now.contains(&CardId::new(7)));
+        assert_eq!(
+            super::super::prospective::prospective_clue_hazard(
+                d.view(),
+                HGroupProfile::Max,
+                target,
+                touched[0],
+                clue,
+                &touched,
+                true
+            ),
+            None
+        );
+        assert!(
+            h_group_clue_candidates(&d, HGroupProfile::Max)
+                .iter()
+                .any(|c| c.action == Action::Clue { target, clue })
+        );
+    }
+}
+
+#[test]
+fn reviewed_direct_play_clue_does_not_reinterpret_an_older_blind_response() {
+    // Hypothetical purple-to-Alice alternative at reviewed p4v0s415 T10.
+    // Cathy already owes r2 for Donald's older red clue. Alice's visible p1
+    // neither requires a Bluff nor provides a Double Bluff connection.
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    let mut state = fixture.state_at_turn(9).unwrap();
+    state
+        .apply(Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Purple),
+        })
+        .unwrap();
+    state.apply(Action::Play(CardId::new(11))).unwrap();
+    let d = LogicalDeductions::new(state.view_for(PlayerId::new(3)).unwrap()).unwrap();
+    let notes = infer_h_group(&d, HGroupProfile::Max);
+    assert!(
+        !notes.signals.iter().any(|s| s.turn == 10
+            && matches!(s.kind, HGroupMoveKind::Bluff | HGroupMoveKind::DoubleBluff))
+    );
+    assert!(!notes.playable_now.contains(&CardId::new(18)));
+}
+
+#[test]
+fn reviewed_opening_clued_play_is_not_a_bluff_response() {
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    // Cathy already knows g1 from T1. Bob's T2 yellow cannot Bluff that
+    // clued card; Donald's actual finesse position remains the truthful line.
+    for turn in [2, 3, 12] {
+        let state = fixture.state_at_turn(turn).unwrap();
+        for observer in 0..4 {
+            let d =
+                LogicalDeductions::new(state.view_for(PlayerId::new(observer)).unwrap()).unwrap();
+            let r = replay_h_group(&d, HGroupProfile::Max);
+            assert!(
+                !r.signals.iter().any(|signal| signal.turn == 1
+                    && signal.kind == HGroupMoveKind::Bluff
+                    && signal.cards.contains(&CardId::new(8))),
+                "turn={turn} observer={observer}"
+            );
+        }
+    }
+}
+
+#[test]
+fn reviewed_four_clue_does_not_invent_a_second_red_five_in_a_draw() {
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    let state = fixture.state_at_turn(15).unwrap();
+    let view = state.view_for(state.current_player()).unwrap();
+    let (_, projection) = crate::SupportedConvention::HGroup(HGroupProfile::Max)
+        .project_symbolic_projection(
+            &view,
+            Action::Clue {
+                target: PlayerId::new(0),
+                clue: Clue::Rank(Rank::Four),
+            },
+            32,
+            &crate::AnalysisControl::default(),
+        )
+        .unwrap();
+    assert!(
+        projection
+            .steps
+            .iter()
+            .any(|step| step.projected.action == Action::Play(CardId::new(23))),
+        "Cathy's r5 must not be blocked by an impossible duplicate in an unknown draw: {projection:?}"
+    );
 }

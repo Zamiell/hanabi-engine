@@ -527,6 +527,93 @@ impl ReplayReducer {
         state
     }
 
+    /// A newly observed Fix can explain a loaded clue even when the modeled
+    /// observer cannot see the repaired card. Reconstruct only the immediate
+    /// lie-component repair; do not assign the hypothetical face to knowledge.
+    fn observed_hidden_prefix_fix(&self, frame: &ReplayEvent<'_>) -> bool {
+        if !rule_enabled(frame.profile, HGroupRuleId::Extras) {
+            return false;
+        }
+        let ObservedEvent::Clued {
+            giver,
+            target,
+            clue,
+            touched,
+            ..
+        } = &frame.entry.event
+        else {
+            return false;
+        };
+        let Some(prior) = self.clues.last() else {
+            return false;
+        };
+        if prior.turn + 1 != frame.entry.turn
+            || *giver != next_player(prior.giver, self.hands.len())
+            || *target == frame.view.observer
+            || !self.pending_connections.actor_had_pending_before(
+                prior.target,
+                prior.turn,
+                prior.focus,
+            )
+        {
+            return false;
+        }
+        let Some(focus_identity) = frame.historical.identity(prior.focus) else {
+            return false;
+        };
+        let gotten = protected_cards(
+            &self.explicitly_clued,
+            &self.invisibly_clued,
+            &self.chop_moved,
+        );
+        for card in touched
+            .iter()
+            .filter(|card| frame.historical.identity(**card).is_none())
+        {
+            for identity in IdentitySet::from_mask(self.facts[card.index()].identity_mask())
+                .iter()
+                .filter(|identity| {
+                    clue.matches(*identity)
+                        && !is_playable_at(self.stack_heights, *identity)
+                        && frame.historical.has_unseen_copy(*identity, &self.hands)
+                })
+            {
+                let mut conditional = frame.view.clone();
+                let Some(slot) = conditional.hands[target.index()]
+                    .iter_mut()
+                    .find(|slot| slot.id == *card)
+                else {
+                    continue;
+                };
+                slot.identity = Some(identity);
+                if loaded_connection_plan(
+                    &conditional,
+                    Some(&self.hands),
+                    Some(&self.facts),
+                    Some(HistoricalView::new(&conditional, prior.turn)),
+                    prior.giver,
+                    prior.target,
+                    prior.focus,
+                    focus_identity,
+                    &gotten,
+                    &self.already_playing,
+                    &self.pending_connections,
+                    self.stack_heights,
+                )
+                .flatten()
+                .is_some_and(|required| {
+                    required.actor == *giver
+                        && required.target == *target
+                        && required.focus == *card
+                        && clue.matches(required.identity)
+                }) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
     #[allow(clippy::too_many_lines)]
     fn reduce_clue(&mut self, frame: &mut ReplayEvent<'_>) {
         let event_connection_transition_start = frame.event_connection_transition_start;
@@ -546,6 +633,17 @@ impl ReplayReducer {
         } = &frame.entry.event
         else {
             unreachable!("event dispatcher selects its handler")
+        };
+
+        let priority_load = if rule_enabled(profile, HGroupRuleId::Priority) {
+            super::recognition::retract_loaded_priority(
+                entry,
+                &self.hands,
+                &mut self.forced_playable,
+                &mut self.signals,
+            )
+        } else {
+            IdentitySet::default()
         };
 
         if rule_enabled(profile, HGroupRuleId::Stalling)
@@ -752,7 +850,8 @@ impl ReplayReducer {
         } else {
             Vec::new()
         };
-        let is_required_fix = !out_of_order_repairs.is_empty()
+        let is_required_fix = self.observed_hidden_prefix_fix(frame)
+            || !out_of_order_repairs.is_empty()
             || promised_card_fix
             || signaled_card_fix
             || hypothetical_connection_fix
@@ -879,6 +978,13 @@ impl ReplayReducer {
                 || IdentitySet::from_mask(self.facts[focus.index()].identity_mask()),
                 IdentitySet::singleton,
             );
+            // The Load Clue relocates the connector promised by Priority.
+            // It does not introduce an unrelated delayed rank-clue branch.
+            let raw_focus_identities = if priority_load.is_empty() {
+                raw_focus_identities
+            } else {
+                raw_focus_identities.intersection(priority_load)
+            };
             let mut focus_identities = raw_focus_identities;
             let mut claimed_identities = IdentitySet::default();
             if focus_identity.is_none() {

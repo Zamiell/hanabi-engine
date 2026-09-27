@@ -42,7 +42,7 @@ pub(super) use extras::lie_component_fix_connection;
 pub(super) use extras::{apply_extra_effects, apply_max_special_effects};
 pub(super) use late_game::{
     apply_charm_effects, apply_ignition_effects, apply_phantom_effects, apply_priority_effects,
-    apply_unnecessary_move_effects,
+    apply_unnecessary_move_effects, retract_loaded_priority,
 };
 pub(super) use order_chop::apply_order_chop_move_effects;
 pub(super) use special_discards::{apply_special_finesse_discard_effects, apply_transfer_effects};

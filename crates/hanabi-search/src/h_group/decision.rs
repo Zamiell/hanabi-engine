@@ -859,8 +859,8 @@ fn analyze_h_group_actions_from_analysis(
                     terminal_progress.is_some(),
                 )
                 .with_play_order(match action {
-                    Action::Play(card) if rule_enabled(profile, HGroupRuleId::Priority) => {
-                        play_order.iter().position(|candidate| *candidate == card)
+                    Action::Play(card) => {
+                        semantic_play_order(deductions.view(), inferred, profile, card, &play_order)
                     }
                     _ => None,
                 }),
@@ -2647,6 +2647,28 @@ fn deferred_teamwork_action_count(candidate: &CompiledClueAction) -> u8 {
 /// parked for a new setup.
 fn completed_connection_focus_is_due(inferred: &HGroupInferences) -> bool {
     !inferred.completed_connection_focuses.is_empty()
+}
+
+/// A permitted pause of a demonstrated layer is a strategic alternative, not
+/// a violation of the generic blind-play-first priority table.
+/// <https://hanabi.github.io/level-25/#the-paused-priority-finesse>
+pub(super) fn semantic_play_order(
+    view: &PlayerView,
+    inferred: &HGroupInferences,
+    profile: HGroupProfile,
+    card: CardId,
+    ordered: &[CardId],
+) -> Option<usize> {
+    if !rule_enabled(profile, HGroupRuleId::Priority) {
+        return None;
+    }
+    if inferred.connection.is_some_and(|connection| {
+        paused_priority_play(view, inferred, profile, connection)
+            .is_some_and(|paused| card == paused || card == connection.card)
+    }) {
+        return None;
+    }
+    ordered.iter().position(|candidate| *candidate == card)
 }
 
 fn paused_priority_play(

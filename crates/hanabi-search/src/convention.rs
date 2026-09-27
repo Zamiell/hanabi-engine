@@ -212,6 +212,7 @@ pub enum ConventionRejectionReason {
     NoConventionMeaning,
     UnsafeConnection,
     RedundantOutcome,
+    StallPrecedence,
 }
 
 /// Outcome of one mandatory principle check. Unresolved is never a pass.

@@ -1,0 +1,266 @@
+[
+  {
+    "id": "t5-five-stall-must-be-last-resort",
+    "turn": 5,
+    "positionKey": "4464559b7d95cd278f50a3727a6f1b7f504fbb83928e84bc0697d532e4fd17a3",
+    "status": "unresolved",
+    "perspective": "Alice; yellow to Cathy is the reviewed fixture action. This is a documented-convention implementation finding, not a new user strategy ruling.",
+    "source": {
+      "conversation": "Autonomous all-replay audit requested 2026-09-27",
+      "quote": "If there are obvious bugs, then fix them autonomously.",
+      "documentation": "https://hanabi.github.io/level-9/#5-stalls-are-a-last-resort"
+    },
+    "explanation": {
+      "bug": "5 Stall remained admitted alongside a normal Play Clue. Its forecast avoided Bob discarding b4, so the risk comparison overrode its low priority. The documented last-resort requirement is admission, not a numerical preference.",
+      "position": "Yellow to Cathy focuses her y3 and also obtains y5. The Finesse Position Exception cannot justify stalling over that clue: y3 is not currently playable.",
+      "fix": "After common validation, an admitted normal Save or normal Play Clue whose visible focus rules out FPE excludes FiveStall proposals. Invalid proposals cannot suppress a legitimate Stall. Potentially playable finesse-position focuses and unknown evidence are left to their existing handling; this change does not claim to implement every FPE eligibility condition.",
+      "oldLines": {
+        "fixture": [
+          "T5 Alice yellow to Cathy",
+          "T6 Bob discard b4",
+          "T7 Cathy discard r3",
+          "T8 Donald play b2",
+          "T9 Alice unresolved chop discard; forecast stops"
+        ],
+        "engine": [
+          "T5 Alice 5s to Cathy",
+          "T6 Bob yellow to Cathy",
+          "T7 Cathy discard r3",
+          "T8 Donald play b2",
+          "T9 Alice unresolved chop discard; forecast stops"
+        ]
+      },
+      "uncertainty": "Both old forecasts condition on Alice\u2019s convention-inferred y2 and keep her other cards and future draws unknown. The b4/r3 discards are modeled choices, not forced real-game outcomes."
+    },
+    "regressions": [
+      "h_group::candidate_pipeline::tests::reviewed_first_replay_five_stall_cannot_override_a_normal_play_clue"
+    ],
+    "coverageNote": "Checks level 9 and Max admission, rejection reason, removal-of-alternative control, and downstream selected move. Full FPE eligibility remains outside this localized fix. A conditional-admission alternative is also ablated: it cannot prove that a normal clue is available and suppress the Stall."
+  },
+  {
+    "id": "t10-demonstrated-layer-pause-comparison",
+    "turn": 10,
+    "positionKey": "5d934587318654c473075822edf8b1b0ed4a000387b9e400f2911aed5d415119",
+    "status": "unresolved",
+    "perspective": "Bob comparing the fixture 3s to Donald with purple to Alice. Document-derived implementation finding, not a new user strategy ruling.",
+    "source": {
+      "conversation": "Autonomous all-replay audit requested 2026-09-27",
+      "quote": "If there are obvious bugs, then fix them autonomously.",
+      "documentation": "https://hanabi.github.io/level-25/#the-paused-priority-finesse"
+    },
+    "explanation": {
+      "bug": "At Donald\u2019s projected turn 12, admission explicitly allows his newer b3 Play Clue to pause the already demonstrated unrelated layer leading to Alice\u2019s y2. Generic ConventionPlayOrder nevertheless makes the old blind y1 connection obligatory, overriding that permission and preventing comparison of the legal b3 pause.",
+      "fix": "Leave both the permitted pause and its old connection unordered by the generic hard play-order comparator. Their forecast and ordinary preference can then decide between them. Unproven layers retain the original ordering.",
+      "oldLines": {
+        "fixture": [
+          "T10 Bob 3s to Donald",
+          "T11 Cathy play r2",
+          "T12 Donald play y1",
+          "T13 Alice play y2",
+          "T14 Bob purple to Alice",
+          "T15 Cathy play r3",
+          "T16 Donald play r4",
+          "T17 Alice play p1",
+          "T18 Bob unresolved chop; forecast stops"
+        ],
+        "engine": [
+          "T10 Bob purple to Alice",
+          "T11 Cathy play r2",
+          "T12 Donald play b3",
+          "T13 Alice play p1",
+          "T14 Bob unresolved chop; forecast stops"
+        ]
+      },
+      "comparison": "The old comparison used a common four-action horizon, not those unequal endpoints: equal score 7 and two clues, but purple had seven secured/four committed cards versus six/three for 3s. Its FundedProgress advantage depended on the wrongly imposed y1 choice.",
+      "uncertainty": "Old forecasts keep Bob\u2019s unknown cards and future draws unknown. These lines describe the faulty prediction, not endorsed strategy."
+    },
+    "regressions": [
+      "h_group::tests::replay::demonstrated_layer_pause_is_not_vetoed_by_generic_play_order"
+    ],
+    "coverageNote": "Tests both candidate play-order values, a no-demonstration negative control, and Donald\u2019s actual projected response. After the fix, replay turns 1\u201311 match; later turns remain under investigation."
+  },
+  {
+    "id": "t7-fix-meaning-in-nested-views",
+    "turn": 7,
+    "positionKey": "8c39528384c2f148455611e11ef2340d27e4241496a1c7f4e3840ef1bc737765",
+    "status": "unresolved",
+    "perspective": "Document-derived implementation finding during the autonomous replay audit; not a new user strategy ruling.",
+    "source": {
+      "conversation": "Autonomous all-replay audit requested 2026-09-27",
+      "quote": "If there are obvious bugs, then fix them autonomously.",
+      "documentation": "https://hanabi.github.io/extras/special-finesses/#finesses-with-a-lie-component"
+    },
+    "explanation": {
+      "priorAuthority": "Existing first_replay_move_seven_is_a_fix_of_the_promised_red_one regression documents the reviewed interpretation: green to Alice repairs the red-1 promise on #3. This audit does not invent that meaning.",
+      "bug": "When Alice forecasts Bob, her own unknown green card prevents reconstructing the preceding loaded red clue. The immediate green Fix is then mistaken for a new Play Clue requiring Bob to blind-play g3 as g2. This falsely rejects the turn-13 blue Load Clue.",
+      "fix": "Recognize the immediate next-player repair of an unknown obstruction in the preceding loaded clue. Check literal-compatible available identities through the existing loaded connection planner, require the exact giver/target/repaired slot, and preserve the card\u2019s unknown face. This supplies repair meaning without leaking a simulator identity.",
+      "negativeControl": "An alternative blue clue to Donald after the same loaded red clue does not mark Alice\u2019s #3 fixed.",
+      "downstream": "Bob\u2019s nested notes retain the Fix at turns 7, 12 and 13; they no longer invent a green connection from it."
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_hidden_fix_survives_nested_perspectives",
+      "h_group::tests::replay::first_replay_move_seven_is_a_fix_of_the_promised_red_one"
+    ]
+  },
+  {
+    "id": "t13-load-clue-rewinds-priority",
+    "turn": 13,
+    "positionKey": "4fb8da1e0636666ee2a79f62e7ba3e8975bb43d0ce00ace8db3a7394cd93a6c9",
+    "status": "unresolved",
+    "perspective": "Document-derived implementation finding during the autonomous replay audit; not a new user strategy ruling.",
+    "source": {
+      "conversation": "Autonomous all-replay audit requested 2026-09-27",
+      "quote": "If there are obvious bugs, then fix them autonomously.",
+      "documentation": "https://hanabi.github.io/level-25/#the-load-clue"
+    },
+    "explanation": {
+      "position": "Donald played b3 while pausing his demonstrated y1 layer. Bob holds b4 on chop rather than finesse position; Alice\u2019s blue clue loads b4 and cancels Bob\u2019s provisional Priority finesse on #7.",
+      "bug": "Priority cancellation occurred after ordinary interpretation and cleared only its action flag, leaving the old b4 identity claim. Rank-4 Load interpretation also retained unrelated delayed y4 alternatives instead of relocating the promised b4.",
+      "fix": "Retract provisional Priority before compiling the Load Clue, remove its identity claims while preserving independent claims, and use the promised connector identity when interpreting the new focus.",
+      "uncertainty": "Alice\u2019s other hidden cards and future draws remain unknown. The nested Fix repair is independently necessary for this projection.",
+      "coverage": "Actual reviewed blue clue and hypothetical rank-4 alternative both admit b4 and no blind #7 response. Invariant tests verify that unrelated identity claims survive Priority retraction.",
+      "completedPriorityGuard": "Full validation exposed a regression in historical reviewed branch turn 26: Cathy had already played Priority r5, but its retained journal claim made a later 5 clue incorrectly repair that completed promise. Retraction now requires the Priority card to remain in the target hand. The existing optimal_replay_move_26_compares_clarity_and_team_tempo assertions are preserved and strengthened with a no-spurious-retraction check."
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_load_clue_rewinds_priority_before_good_touch",
+      "h_group::facts::tests::priority_retraction_removes_only_priority_identity_claims",
+      "h_group::tests::optimal_replay_move_26_compares_clarity_and_team_tempo"
+    ]
+  },
+  {
+    "id": "t10-direct-play-does-not-manufacture-bluff",
+    "turn": 10,
+    "positionKey": "5d934587318654c473075822edf8b1b0ed4a000387b9e400f2911aed5d415119",
+    "status": "unresolved",
+    "perspective": "Document-derived implementation finding during the autonomous replay audit; not a new user strategy ruling.",
+    "source": {
+      "conversation": "Autonomous all-replay audit requested 2026-09-27",
+      "quote": "If there are obvious bugs, then fix them autonomously.",
+      "documentation": "https://hanabi.github.io/level-15/#the-double-bluff"
+    },
+    "explanation": {
+      "branch": "Hypothetical purple to Alice instead of the fixture 3s to Donald, followed by Cathy\u2019s already-owed r2 play for the earlier red clue.",
+      "bug": "Donald\u2019s observer-relative replay could fail to reconstruct that older obligation, then invent a Bluff and Double Bluff from the r2 play despite seeing that the new purple focus was directly playable p1. This manufactured an unearned b3 blind play in the purple alternative.",
+      "fix": "Resolved Bluff targets respect a visible focus identity rather than using unrelated literal possibilities. Demonstrated Double Bluff recognition, like initial admission, excludes a directly playable visible focus.",
+      "coverage": "The new branch regression preserves the actual r2 response and checks no new Bluff/DoubleBluff signal and no forced b3. The existing fifth_replay_double_bluff_keeps_observer_relative_focus_domains and fifth_replay_purple_double_bluff_is_admitted positive controls are already recorded failures in the preceding full baseline; they are not claimed passing."
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_direct_play_clue_does_not_reinterpret_an_older_blind_response"
+    ]
+  },
+  {
+    "id": "t2-clued-green-one-cannot-be-bluffed",
+    "turn": 2,
+    "positionKey": "f05036c2b04173320253b5965b0767f44390de6488d33bc59e98b1cbdd311513",
+    "status": "unresolved",
+    "perspective": "Document-derived recognition bug seen in the turn-12 competing forecast; no new user ruling.",
+    "source": {
+      "conversation": "Autonomous all-replay audit requested 2026-09-27",
+      "quote": "If there are obvious bugs, then fix them autonomously.",
+      "documentation": "https://hanabi.github.io/level-11/#bluff-prompts--prompt-bluffs-illegal"
+    },
+    "explanation": {
+      "bug": "Initial Bluff recognition searched the entire reacting hand for any visible playable card, including Cathy\u2019s already-clued g1. It consequently attributed that prior play to Bob\u2019s yellow clue, which in later projections contaminated Donald\u2019s old layer with a p1 identity and made Alice discard her newly clued p1.",
+      "fix": "The blind response must be the actual unclued finesse-position card; a clued playable elsewhere cannot be substituted. This also prevents skipping an unplayable finesse-position card in favor of an older playable.",
+      "coverage": "Reviewed opening history at turns 2, 3 and 12 from all four actual observers must contain no Bluff on Cathy\u2019s #8."
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_opening_clued_play_is_not_a_bluff_response"
+    ]
+  },
+  {
+    "id": "t12-convention-known-play-earns-handoff",
+    "turn": 12,
+    "positionKey": "c2a36e818cf66c93ea1f75b5f85f6346adf3c45b5753041719154daa4365c586",
+    "status": "unresolved",
+    "perspective": "Donald comparing fixture b3 with blue to Bob. Applies the existing user teamwork ruling; this is not a new turn-12 user explanation.",
+    "source": {
+      "conversation": "Existing t18-play-and-leave-the-clue-to-cathy user explanation; autonomous audit requested 2026-09-27",
+      "quote": "when one player has a card to play, it is usually better for them to play that card and let a teammate give the clue."
+    },
+    "explanation": {
+      "bug": "Even after fixing the Load Clue forecast, the valid b3 \u2192 Alice blue \u2192 Bob b4 handoff did not receive scheduling credit because the comparator required literal certainty. Donald knows b3 by convention. The fallback instead preferred blue\u2019s fixed deferral priority (850) over b3 (825); it did not establish that blue had a better outcome.",
+      "fix": "A successful root play with a singleton convention interpretation can establish the same handoff evidence as literal certainty. Existing safety, funding, endpoint and policy precedence remain intact.",
+      "fixtureProjection": [
+        "T12 Donald play b3",
+        "T13 Alice blue to Bob",
+        "T14 Bob play b4",
+        "T15 Cathy play r3",
+        "T16 Donald play r4",
+        "T17 unresolved interpretation; forecast stops"
+      ],
+      "uncertainty": "Donald\u2019s other unknown cards and future draws remain unknown; the forecast uses the convention-inferred r4. No unknown card is assigned a face to establish the handoff.",
+      "bookkeeping": "The deeper forecast also exposed an ordinary invariant bug: transition validation treated every canonical effect value as unique. Ordered programs can repeat an effect after intervening changes. Validation now compares occurrence counts and still rejects missing or extra occurrences.",
+      "coverage": "A table tests the reviewed p4v0s415 turn-12 and p4v0s1 turn-18 handoffs, their actual three-action prefixes and final decisions, plus missing/ambiguous interpretation, funding, response and safety controls. Existing urgent-policy controls remain."
+    },
+    "regressions": [
+      "planner::tests::reviewed_convention_known_play_earns_teammate_handoff",
+      "planner::tests::reviewed_turn_eighteen_leaves_the_clue_to_a_teammate",
+      "h_group::tests::architecture::knowledge_transition_partition_preserves_effect_multiplicity"
+    ]
+  },
+  {
+    "id": "t16-priority-dependency-cannot-invent-duplicate-five",
+    "turn": 16,
+    "positionKey": "307b4db26fd808f70266f672577e783e1118b32a4b0780485b60a2eaa0bb797f",
+    "status": "unresolved",
+    "perspective": "Donald sees Cathy\u2019s unique r5. Her identity remains unavailable to Cathy herself; forecast draws remain unknown.",
+    "source": {
+      "conversation": "Autonomous all-replay audit requested 2026-09-27",
+      "quote": "If there are obvious bugs, then fix them autonomously.",
+      "documentation": "https://hanabi.github.io/level-25/#the-priority-prompt--the-priority-finesse"
+    },
+    "explanation": {
+      "bug": "After 4s to Alice, the projected r4 play produced a Priority obligation for Cathy\u2019s r5. The dependency checker treated Alice\u2019s unknown draw #24 as possibly another r5 because LogicalDeductions has no owner-domain for an unknown card in a different hand. That ignored the visible unique r5 and stopped the line before Cathy\u2019s play.",
+      "fix": "External unknown slots still obey their literal clues and public physical copy counts. A completely accounted identity cannot be an alternative hidden connector. Removing the visible-copy evidence retains the conditional branch.",
+      "beforeFixLines": {
+        "fixture": [
+          "T16 Donald 4s to Alice",
+          "T17 Alice discard b1",
+          "T18 Bob play g2",
+          "T19 Cathy purple to Alice",
+          "T20 Donald play r4",
+          "T21 Alice play p1",
+          "T22 Bob play g3",
+          "T23 stopped on impossible second-r5 witness in Alice\u2019s unknown draw"
+        ],
+        "engine": [
+          "T16 Donald play r4",
+          "T17 Alice green to Bob",
+          "T18 Bob play g2",
+          "T19 Cathy play r5",
+          "T20 stopped at Donald\u2019s unresolved layer identity"
+        ]
+      },
+      "comparison": "Before this fix the actual decision was TeammateClueHandoff with incomparable endpoints, not a demonstrated superior endpoint. The four-action checkpoint had score9/clues0 for 4s versus score11/clues1 for r4, but that checkpoint was context rather than the decisive comparison operand.",
+      "remainingStrategy": "Re-evaluate the complete bounded projections after removing the impossible duplicate; do not treat this entry as a strategy ruling.",
+      "correctedLines": {
+        "fixture": [
+          "T16 Donald 4s to Alice",
+          "T17 Alice discard b1",
+          "T18 Bob play g2",
+          "T19 Cathy purple to Alice",
+          "T20 Donald play r4",
+          "T21 Alice play p1",
+          "T22 Bob play g3",
+          "T23 Cathy play r5",
+          "T24 Donald unresolved blind-layer identity; forecast stops"
+        ],
+        "engine": [
+          "T16 Donald play r4",
+          "T17 Alice green to Bob",
+          "T18 Bob play g2",
+          "T19 Cathy play r5",
+          "T20 Donald unresolved blind-layer identity; forecast stops"
+        ]
+      },
+      "remainingComparison": "After the copy-count fix the engine still selects r4 by TeammateClueHandoff. Both endpoints are UnknownIdentity and marked incomparable; actualBasis is null. The four-action checkpoint has score 11/clues 1 for r4 versus score 9/clues 0 for 4s, but that checkpoint is context, not the decisive comparator. 4s obtains the g2/g3 connection and clarifies Alice's already-Fixed g4; Alice's green to Bob obtains g2/g3 only. This leaves a strategy question about efficiency versus earlier r4/r5 and the teammate handoff, not a new ruling.",
+      "scan": "Final scan after the completed-Priority guard agrees on turns 1\u201315 and disagrees at turn 16 (6.01 seconds with optimized test-profile CLI, budget not exhausted). Full projected lines and the TeammateClueHandoff comparison are unchanged from the preceding release scan. Other expert fixtures have not yet been systematically scanned.",
+      "validation": "Full checkpoint: 428 Rust tests passed, 57 failed, 30 skipped; all other stages passed. 49 failures were in the explicit baseline, 8 were new. A subsequent completed-Priority guard fixed the historical turn26 admission regression. Sequential follow-up of the 8 new failures plus 2 related regressions: 8 passed, 2 failed (historical safe-discharge comparison at the move deadline; cached/uncached complete-analysis equality with unequal budget exhaustion). Both handoff regressions passed in isolation. Fast checks after the guard passed. No claim of a full passing suite or all-replay agreement."
+    },
+    "regressions": [
+      "h_group::projection_requirements::admission_tests::reviewed_priority_dependency_respects_visible_copy_counts",
+      "h_group::tests::replay::reviewed_four_clue_does_not_invent_a_second_red_five_in_a_draw"
+    ]
+  }
+]

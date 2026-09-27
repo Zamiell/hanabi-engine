@@ -979,6 +979,22 @@ fn optimal_replay_move_26_compares_clarity_and_team_tempo() {
         target: PlayerId::new(2),
         clue: Clue::Rank(Rank::Five),
     };
+    // Cathy's Priority r5 has already left her hand. It cannot turn this
+    // later 5 clue into a Load Clue repairing that completed promise.
+    let compiled = compiled_prospective_clue(
+        deductions.view(),
+        HGroupProfile::Max,
+        PlayerId::new(2),
+        Clue::Rank(Rank::Five),
+        &[CardId::new(10)],
+    )
+    .unwrap();
+    let recipient = compiled.projection(PlayerId::new(2)).unwrap();
+    assert!(!recipient.inferred.signals.iter().any(|signal| {
+        signal.turn == 25
+            && signal.kind == HGroupMoveKind::Retraction
+            && signal.cards.contains(&CardId::new(23))
+    }));
     let candidates = h_group_clue_candidates(&deductions, HGroupProfile::Max);
     for action in [yellow, blue, five] {
         assert!(

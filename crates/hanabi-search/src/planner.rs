@@ -2092,13 +2092,19 @@ fn compare_save_principle_risks(
 /// scheduling fallback: endpoint evidence, safety, and urgent policy tiers
 /// still take precedence. An unknown or merely promised response earns nothing.
 fn has_productive_teammate_handoff(candidate: &PlannerActionEvaluation) -> bool {
-    if !candidate.certainly_playable || !matches!(candidate.action, Action::Play(_)) {
+    if !matches!(candidate.action, Action::Play(_)) {
         return false;
     }
     let [play, clue, response, ..] = candidate.projection.steps.as_slice() else {
         return false;
     };
-    play.projected.action == candidate.action
+    // A settled convention identity is sufficient too: literal clue facts
+    // alone need not identify a perfectly readable Play Clue's card.
+    (candidate.certainly_playable
+        || play
+            .interpreted_identities
+            .is_some_and(|identities| identities.len() == 1))
+        && play.projected.action == candidate.action
         && play.consequences.score_gain == 1
         && clue.projected.actor != play.projected.actor
         && matches!(clue.projected.action, Action::Clue { .. })
@@ -3073,6 +3079,29 @@ mod tests {
         );
     }
 
+    fn without_handoff_evidence(
+        candidate: &PlannerActionEvaluation,
+        missing: &str,
+    ) -> PlannerActionEvaluation {
+        let mut incomplete = candidate.clone();
+        match missing {
+            "certainty" => {
+                incomplete.certainly_playable = false;
+                incomplete.projection.steps[0].interpreted_identities = None;
+            }
+            "clue" => {
+                incomplete.projection.steps[1].projected.action =
+                    Action::Discard(hanabi_core::CardId::new(9));
+            }
+            "response" => incomplete.projection.steps.truncate(2),
+            "funding" => incomplete.projection.resources.transitions.clear(),
+            "scoring" => incomplete.projection.steps[2].consequences.score_gain = 0,
+            "safety" => incomplete.projection.steps[2].consequences.strikes = 1,
+            _ => unreachable!(),
+        }
+        incomplete
+    }
+
     #[test]
     fn reviewed_turn_eighteen_leaves_the_clue_to_a_teammate() {
         let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
@@ -3152,19 +3181,7 @@ mod tests {
             "scoring",
             "safety",
         ] {
-            let mut incomplete = candidate.clone();
-            match missing {
-                "certainty" => incomplete.certainly_playable = false,
-                "clue" => {
-                    incomplete.projection.steps[1].projected.action =
-                        Action::Discard(hanabi_core::CardId::new(9));
-                }
-                "response" => incomplete.projection.steps.truncate(2),
-                "funding" => incomplete.projection.resources.transitions.clear(),
-                "scoring" => incomplete.projection.steps[2].consequences.score_gain = 0,
-                "safety" => incomplete.projection.steps[2].consequences.strikes = 1,
-                _ => unreachable!(),
-            }
+            let incomplete = without_handoff_evidence(candidate, missing);
             assert!(!has_productive_teammate_handoff(&incomplete), "{missing}");
             assert_eq!(
                 compare_teammate_handoff(&incomplete, purple),
@@ -3181,6 +3198,87 @@ mod tests {
             (Ordering::Less, ComparisonReason::PolicyTier)
         );
         assert_eq!(analysis.planner.best_action, play);
+    }
+
+    #[test]
+    fn reviewed_convention_known_play_earns_teammate_handoff() {
+        // The user's teamwork ruling covers literal and convention certainty.
+        let cases = [
+            (
+                include_str!("../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"),
+                11,
+                18,
+                1,
+                Clue::Suit(Suit::Blue),
+                4,
+                false,
+            ),
+            (
+                include_str!("../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"),
+                17,
+                17,
+                0,
+                Clue::Rank(Rank::Four),
+                23,
+                true,
+            ),
+        ];
+        for (json, turn, card, target, clue, response, literal) in cases {
+            let replay = hanabi_protocol::HanabiLiveReplay::from_json(json).unwrap();
+            let state = replay.state_at_turn(turn).unwrap();
+            let view = state.view_for(state.current_player()).unwrap();
+            let analysis = crate::analyze_position(
+                &view,
+                SupportedConvention::HGroup(crate::HGroupProfile::Max),
+                PlannerConfig {
+                    objective: PlanningObjective::PerfectScore,
+                    ..PlannerConfig::default()
+                },
+            )
+            .unwrap();
+            let action = Action::Play(hanabi_core::CardId::new(card));
+            let play = analysis
+                .planner
+                .root_actions
+                .iter()
+                .find(|c| c.action == action)
+                .unwrap();
+            assert_eq!(play.certainly_playable, literal);
+            assert_eq!(
+                play.projection
+                    .steps
+                    .iter()
+                    .take(3)
+                    .map(|s| s.projected.action)
+                    .collect::<Vec<_>>(),
+                vec![
+                    action,
+                    Action::Clue {
+                        target: hanabi_core::PlayerId::new(target),
+                        clue
+                    },
+                    Action::Play(hanabi_core::CardId::new(response))
+                ]
+            );
+            assert!(has_productive_teammate_handoff(play));
+            for missing in [
+                "certainty",
+                "clue",
+                "response",
+                "funding",
+                "scoring",
+                "safety",
+            ] {
+                assert!(
+                    !has_productive_teammate_handoff(&without_handoff_evidence(play, missing)),
+                    "{missing}"
+                );
+            }
+            let mut ambiguous = without_handoff_evidence(play, "certainty");
+            ambiguous.projection.steps[0].interpreted_identities = Some(crate::IdentitySet::all());
+            assert!(!has_productive_teammate_handoff(&ambiguous));
+            assert_eq!(analysis.planner.best_action, action);
+        }
     }
 
     #[test]

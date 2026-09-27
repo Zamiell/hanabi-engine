@@ -115,16 +115,14 @@ pub(in crate::h_group) fn apply_bluff_effects(
     if super::super::bluff::bluff_is_queued(pending, actor, Some(focus)) {
         return;
     }
-    let Some((bluff_card, bluff_identity)) = hands[actor.index()]
-        .iter()
-        .rev()
-        .copied()
-        .filter(|card| Some(*card) != Some(focus))
-        .find_map(|card| {
-            identity_of(view, card)
-                .filter(|identity| is_playable_at(stack_heights, *identity))
-                .map(|identity| (card, identity))
-        })
+    // Bluff Prompts are illegal, and an unrelated playable elsewhere in the
+    // hand cannot stand in for the card the reactor would actually blind-play.
+    // https://hanabi.github.io/level-11/#bluff-prompts--prompt-bluffs-illegal
+    let Some(bluff_card) = finesse_position_id(&hands[actor.index()], explicitly_clued, 0) else {
+        return;
+    };
+    let Some(bluff_identity) =
+        identity_of(view, bluff_card).filter(|identity| is_playable_at(stack_heights, *identity))
     else {
         return;
     };
@@ -209,7 +207,8 @@ pub(in crate::h_group) fn apply_resolved_bluff_effects(
     };
     let connects = bluff_play_connects(clue.clue, identity);
     let legal_bluff_target = IdentitySet::all().iter().any(|candidate| {
-        clue.clue.matches(candidate)
+        identity_of(view, clue.focus).is_none_or(|visible| visible == candidate)
+            && clue.clue.matches(candidate)
             && facts[clue.focus.index()].allows(candidate)
             && (bluff_target_kind_at(stack_heights, clue.clue, candidate).is_some()
                 || super::super::bluff::bluff_through_clued_cards(
