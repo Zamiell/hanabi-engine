@@ -217,6 +217,30 @@ mod tests {
     }
 
     #[test]
+    fn played_domains_cannot_change_endgame_coverage_when_refined() {
+        let stacks = [4; 5];
+        let dead = identity(Suit::Red, Rank::One).union(identity(Suit::Blue, Rank::Four));
+        for covered_suits in 0..=5 {
+            let covered = Suit::ALL[..covered_suits]
+                .iter()
+                .map(|suit| (true, identity(*suit, Rank::Five)))
+                .collect::<Vec<_>>();
+            let check = |domain| {
+                fully_clued_endgame(
+                    stacks,
+                    0,
+                    4,
+                    covered.iter().copied().chain([(true, domain)]),
+                )
+            };
+            assert_eq!(check(dead), covered_suits == 5);
+            for card in dead.iter() {
+                assert_eq!(check(IdentitySet::singleton(card)), check(dead));
+            }
+        }
+    }
+
+    #[test]
     fn information_gain_requires_a_nonempty_strict_subset() {
         let four = identity(Suit::Purple, Rank::Four);
         let five = identity(Suit::Purple, Rank::Five);

@@ -573,7 +573,12 @@ impl ReplayReducer {
                     let identities = if self.explicitly_clued.contains(card)
                         && historical.identity(*card).is_none()
                         && identities.len() != 1
-                    {
+                        // Refining an entirely played domain cannot cover
+                        // any missing rank in fully_clued_endgame. Avoid
+                        // recursively rebuilding owner knowledge for it.
+                        && identities.iter().any(|identity| {
+                            identity.rank.number() > self.stack_heights[identity.suit.index()]
+                        }) {
                         subjective_action_context_before(
                             SubjectiveReplayRequest {
                                 source: view,
