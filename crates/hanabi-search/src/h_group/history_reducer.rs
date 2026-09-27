@@ -741,7 +741,13 @@ impl ReplayReducer {
                 })
             })
         });
-        let is_required_fix = promised_card_fix
+        let out_of_order_repairs = if rule_enabled(profile, HGroupRuleId::OutOfOrderPlay) {
+            self.out_of_order_repairs(view, entry, *giver, *target, *clue, touched)
+        } else {
+            Vec::new()
+        };
+        let is_required_fix = !out_of_order_repairs.is_empty()
+            || promised_card_fix
             || signaled_card_fix
             || hypothetical_connection_fix
             || self.required_fixes.iter().any(|obligation| {
@@ -1788,7 +1794,113 @@ impl ReplayReducer {
             }
             self.explicitly_clued.extend(touched.iter().copied());
         }
+        for connection in out_of_order_repairs {
+            self.pending_connections.cancel_where(
+                entry.turn,
+                ConnectionTransitionReason::Fixed,
+                |old| old.focus == connection.focus && old.expected == connection.expected,
+            );
+            // The Fix disambiguates the original color clue. Its collateral
+            // cannot keep the trash note derived from the rejected external
+            // Finesse, and the original focus retains its Play promise.
+            for prior in &mut self.clues {
+                if prior.focus == connection.focus && prior.turn < entry.turn {
+                    prior
+                        .non_focus_trash_identities
+                        .retain(|(card, _)| !connection.cards.contains(card));
+                    for (card, identities) in &mut prior.non_focus_identities {
+                        if connection.cards.contains(card) {
+                            *identities = IdentitySet::singleton(connection.expected);
+                        }
+                    }
+                }
+            }
+            push_signal(
+                &mut self.signals,
+                entry,
+                *giver,
+                Some(*target),
+                HGroupMoveKind::PlayClue,
+                vec![connection.focus],
+                Some(connection.focus_identity),
+            );
+            push_signal(
+                &mut self.signals,
+                entry,
+                *giver,
+                Some(*target),
+                HGroupMoveKind::Prompt,
+                connection.cards.clone(),
+                Some(connection.expected),
+            );
+            let focus = connection.focus;
+            let promise = self.pending_connections.start(entry.turn, connection);
+            self.already_playing
+                .insert_from(EffectSource::Promise(promise), focus);
+        }
         self.historical_clue_tokens = self.historical_clue_tokens.saturating_sub(1);
+    }
+
+    /// A reactor who fills the delayed focus instead of playing tells the
+    /// recipient to use their own touched connector (the OOO Corollary).
+    /// <https://hanabi.github.io/level-20/#the-out-of-order-corollary>
+    fn out_of_order_repairs(
+        &self,
+        view: &PlayerView,
+        entry: &ObservedHistoryEntry,
+        giver: PlayerId,
+        target: PlayerId,
+        clue: Clue,
+        touched: &[CardId],
+    ) -> Vec<ConnectionObligation> {
+        self.pending_connections
+            .iter()
+            .filter_map(|connection| {
+                if connection.actor != giver
+                    || !touched.contains(&connection.focus)
+                    || connection.kind != HGroupConnectionKind::Finesse
+                    || !self.pending_connections.is_active(connection)
+                    || !clue.matches(connection.focus_identity)
+                    || was_clued_before_with(view, entry.turn, connection.focus, clue)
+                {
+                    return None;
+                }
+                let prior = self.clues.iter().rev().find(|prior| {
+                    prior.focus == connection.focus
+                        && prior.target == target
+                        && prior.clue == Clue::Suit(connection.expected.suit)
+                        && prior.turn < entry.turn
+                })?;
+                let mut focus_facts = self.facts[connection.focus.index()];
+                focus_facts.add_positive_clue(clue);
+                if focus_facts.identity_mask() != 1 << connection.focus_identity.index() {
+                    return None;
+                }
+                // Public response supplies the convention evidence; no hidden
+                // face is consulted. A visible nonmatching connector cannot be
+                // skipped to manufacture a successful Prompt.
+                let card = self.hands[target.index()]
+                    .iter()
+                    .rev()
+                    .copied()
+                    .find(|card| {
+                        prior.new_non_focus.contains(card)
+                            && self.facts[card.index()].allows(connection.expected)
+                    })?;
+                if super::identity_of(view, card)
+                    .is_some_and(|identity| identity != connection.expected)
+                {
+                    return None;
+                }
+                Some(ConnectionObligation {
+                    promise: PromiseId::UNASSIGNED,
+                    actor: target,
+                    cards: vec![card],
+                    kind: HGroupConnectionKind::Prompt,
+                    ..connection.clone()
+                })
+            })
+            .collect()
     }
 
     #[allow(clippy::too_many_lines)]

@@ -6424,3 +6424,114 @@ fn reviewed_good_touch_identities_reach_priority_and_bluff_consumers() {
         downstream();
     }
 }
+
+#[test]
+fn reviewed_yellow_clue_cannot_duplicate_its_own_new_finesse() {
+    // Hypothetical continuation of reviewed p4v0s1 turn43. A Promise
+    // Clue needs an earlier Finesse; this yellow clue creates Alice's y3.
+    let f = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .unwrap();
+    let state = f.state_at_turn(42).unwrap();
+    let view = state.view_for(PlayerId::new(2)).unwrap();
+    let played = ProspectiveTransition::successful_play(
+        &view,
+        PlayerId::new(2),
+        CardId::new(22),
+        Card::new(Suit::Purple, Rank::Five),
+    );
+    let clued = ProspectiveTransition::clue_by(
+        &played,
+        PlayerId::new(3),
+        PlayerId::new(1),
+        Clue::Suit(Suit::Yellow),
+        &[CardId::new(27), CardId::new(39), CardId::new(43)],
+    );
+    let (d, r) = PerspectiveProjector::new(&clued, HGroupProfile::Max)
+        .project(PlayerId::new(0), PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    assert!(
+        !r.signals
+            .iter()
+            .any(|s| s.turn == 43 && s.kind == HGroupMoveKind::PromiseClue)
+    );
+    let notes = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+    assert!(!notes.discard_now.contains(&CardId::new(42)));
+    assert!(notes.playable_now.contains(&CardId::new(42)));
+    assert_eq!(
+        analyze_h_group_convention(&d, HGroupProfile::Max).preferred,
+        Some(Action::Clue {
+            target: PlayerId::new(1),
+            clue: Clue::Rank(Rank::Five),
+        })
+    );
+}
+
+#[test]
+fn reviewed_yellow_out_of_order_fix_uses_bobs_connector() {
+    let f = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .unwrap();
+    let state = f.state_at_turn(42).unwrap();
+    let view = state.view_for(PlayerId::new(2)).unwrap();
+    let played = ProspectiveTransition::successful_play(
+        &view,
+        PlayerId::new(2),
+        CardId::new(22),
+        Card::new(Suit::Purple, Rank::Five),
+    );
+    let clued = ProspectiveTransition::clue_by(
+        &played,
+        PlayerId::new(3),
+        PlayerId::new(1),
+        Clue::Suit(Suit::Yellow),
+        &[CardId::new(27), CardId::new(39), CardId::new(43)],
+    );
+    let fixed = ProspectiveTransition::clue_by(
+        &clued,
+        PlayerId::new(0),
+        PlayerId::new(1),
+        Clue::Rank(Rank::Five),
+        &[CardId::new(19), CardId::new(27)],
+    );
+    let (before_d, before_r) = PerspectiveProjector::new(&clued, HGroupProfile::Max)
+        .project(PlayerId::new(1), PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    let before = infer_h_group_from_replay(&before_d, before_r, HGroupProfile::Max);
+    assert!(
+        !before.playable_now.contains(&CardId::new(43)),
+        "the initial clue alone does not establish the OOO response"
+    );
+    for observer in 0..4 {
+        let (d, r) = PerspectiveProjector::new(&fixed, HGroupProfile::Max)
+            .project(PlayerId::new(observer), PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        assert!(
+            r.pending_connections
+                .iter()
+                .any(|c| c.actor == PlayerId::new(1)
+                    && c.cards == [CardId::new(43)]
+                    && c.expected == Card::new(Suit::Yellow, Rank::Three)),
+            "observer {observer}"
+        );
+        assert!(
+            !r.pending_connections
+                .iter()
+                .any(|c| c.focus == CardId::new(27)
+                    && c.actor == PlayerId::new(0)
+                    && c.expected == Card::new(Suit::Yellow, Rank::Three))
+        );
+        let notes = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+        if observer == 1 {
+            assert!(d.view().hands[1].iter().all(|card| card.identity.is_none()));
+            assert!(notes.playable_now.contains(&CardId::new(43)));
+            assert!(!notes.discard_now.contains(&CardId::new(43)));
+            assert_eq!(
+                analyze_h_group_convention(&d, HGroupProfile::Max).preferred,
+                Some(Action::Play(CardId::new(43)))
+            );
+        }
+    }
+}

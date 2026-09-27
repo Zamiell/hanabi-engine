@@ -664,6 +664,16 @@ pub(in crate::h_group) fn apply_extra_effects(
             // Source: https://hanabi.github.io/extras/discards-misplays/#the-promise-clue--the-promise-discard
             if touched.len() >= 2 {
                 let promised = effects.pending.iter().find_map(|connection| {
+                    // A Promise Clue duplicates an earlier Finesse. A
+                    // connection created by this clue cannot establish its
+                    // own prior promise and cancel the newly requested play.
+                    if effects
+                        .pending
+                        .provenance(connection.promise)
+                        .is_none_or(|origin| origin.created_turn >= entry.turn)
+                    {
+                        return None;
+                    }
                     let duplicate_touched = touched
                         .iter()
                         .copied()

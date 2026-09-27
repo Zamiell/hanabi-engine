@@ -1,5 +1,32 @@
 [
   {
+    "id": "t43-yellow-ooo-fix-and-promise-provenance",
+    "turn": 43,
+    "positionKey": "1e5e3d48c61e2647bd03debba0b63190bac01e2e46dc6050074a497653ca0d6f",
+    "status": "unresolved",
+    "perspective": "Cathy forecasting p5, Donald yellow to Bob, Alice 5s to Bob. Bob must infer his own y3 from the intervening Fix without seeing his card faces.",
+    "source": {
+      "conversation": "Autonomous replay investigation, 2026-09-27",
+      "quote": "play p5",
+      "boundary": "Documentation-backed diagnosis in a hypothetical forecast, not user approval of the yellow clue or of a different root move.",
+      "documentation": [
+        "https://hanabi.github.io/level-20/#the-out-of-order-play-clue-triple-o--ooo",
+        "https://hanabi.github.io/level-20/#the-out-of-order-corollary",
+        "https://hanabi.github.io/extras/discards-misplays/#the-promise-clue--the-promise-discard"
+      ]
+    },
+    "explanation": {
+      "promiseBug": "A newly created Finesse was counted as prior evidence for a Promise Clue in the same event. Require promise provenance strictly before the duplicating clue. Removing this false flag does not remove Alice’s independent required Out-of-Order Fix.",
+      "oooBug": "The reactor gives the required rank Fix on the delayed color focus instead of playing the external duplicate. The recipient previously retained that duplicate Finesse and consequently treated their own touched connector as trash. Recognize the public Fix response, replace the duplicate connection with a Prompt of the recipient’s previously touched compatible connector, retract the obsolete collateral-trash note, and preserve the original focus Play promise.",
+      "boundaries": "The initial color clue alone does not make Bob play y3. The repair needs an active Finesse on the fixing player, a fresh clue that identifies its delayed focus, prior same-suit collateral, and an eligible compatible connector. Visible wrong cards cannot be skipped. All four observers agree after the Fix; Bob’s faces remain hidden. Root move strategy remains under investigation."
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_yellow_clue_cannot_duplicate_its_own_new_finesse",
+      "h_group::tests::replay::reviewed_yellow_out_of_order_fix_uses_bobs_connector"
+    ],
+    "coverageNote": "The OOO regression branches from the reviewed root, checks absence of owner play before the Fix, correct connection and cancellation from every observer, hidden owner faces, and downstream y3 play. Existing Out-of-Order Fix and post-Fix play regressions pass. Broader related checks had nine passes and two pre-existing failures: first_expert_replay_reviewed_prefix_matches_engine (p4v0s415 turn5) and every_expert_replay_prefix_satisfies_state_and_knowledge_invariants (p4v0s3 turn16). Both reproduce with all production fixes from this session replaced by revision 1daf2bc. Fast checks pass after rerunning the sole failed formatting stage."
+  },
+  {
     "id": "t43-demonstrated-bluff-retracts-hidden-connector",
     "turn": 43,
     "positionKey": "1e5e3d48c61e2647bd03debba0b63190bac01e2e46dc6050074a497653ca0d6f",
