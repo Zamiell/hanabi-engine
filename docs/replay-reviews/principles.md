@@ -45,6 +45,26 @@ not a new user strategy rule. Regression:
 ambiguous interpretation controls, alongside the original turn-18
 evidence-ablation test.
 
+## A productive handoff must preserve executable continuation
+
+In `p4v0s415` turn 16, `t16-finesse-plays-both-greens-before-handoff`, the user
+explains that green to Bob plays g2 but leaves g3 waiting in hand. The
+4s-to-Alice finesse instead makes both g2 and g3 play, and is preferable. Count
+committed plays, not just touched cards or an immediate scoring response. The
+usual preference to play and delegate a clue cannot erase this difference.
+Compare equal elapsed time and include already-realized points so earlier plays
+are not mistaken for lost commitments. The implementation compares the immediate
+play/clue/response handoff at no greater clue cost: additional work bought by a
+second clue does not prove that delegating the first clue loses work. Unknown
+continuations prove no advantage.
+
+Regressions:
+`reviewed_finesse_commits_green_three_but_direct_green_leaves_it_waiting` checks
+Bob's own knowledge after g2 in both branches, with hidden faces and blank
+draws; `reviewed_finesse_continuation_outweighs_weaker_clue_handoff` checks the
+planner and missing-commitment/evidence controls. The turn-12 and turn-18
+handoff regressions retain the positive cases.
+
 ## Save Principle: declined protection constrains discard risk
 
 Source: [Save Principle](https://hanabi.github.io/beginner/save-principle/).

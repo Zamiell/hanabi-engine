@@ -262,5 +262,60 @@
       "h_group::projection_requirements::admission_tests::reviewed_priority_dependency_respects_visible_copy_counts",
       "h_group::tests::replay::reviewed_four_clue_does_not_invent_a_second_red_five_in_a_draw"
     ]
+  },
+  {
+    "id": "t16-finesse-plays-both-greens-before-handoff",
+    "turn": 16,
+    "positionKey": "307b4db26fd808f70266f672577e783e1118b32a4b0780485b60a2eaa0bb797f",
+    "status": "user-explained",
+    "perspective": "Donald comparing 4s to Alice with r4 followed by Alice green to Bob. No hidden draws are assumed.",
+    "source": {
+      "conversation": "2026-09-28 follow-up to all-replay audit",
+      "quote": "greens to bob is suboptimal because g2 plays and then g3 sits in hand. whereas with the finesse, both g2 and g3 play. so it is clearly better."
+    },
+    "explanation": {
+      "ruling": "Prefer 4s to Alice. The distinction is executable continuation: the finesse makes Bob play both g2 and g3; the direct green clue plays g2 but leaves g3 waiting. The prior assistant framing as only extra g4 clarification versus tempo missed this reason.",
+      "implementation": "Do not award a teammate-clue handoff preference when every compared branch of the alternative retains more committed plays and more realized-plus-committed points after the immediate three-action play/clue/response handoff, for no greater clue expenditure. Merely protected/touched cards do not suffice; realized points remain included so earlier plays are not penalized. Later additional clues can buy additional commitments and must not masquerade as a more productive immediate clue. This bounds the scheduling preference, not a blanket prohibition on direct clues or an assumed continuation past an unknown frontier.",
+      "relation": "Resolves the strategy question in t16-priority-dependency-cannot-invent-duplicate-five; its historical diagnostic lines and implementation finding remain preserved."
+    },
+    "regressions": [
+      "planner::tests::reviewed_finesse_continuation_outweighs_weaker_clue_handoff",
+      "h_group::tests::replay::reviewed_finesse_commits_green_three_but_direct_green_leaves_it_waiting"
+    ]
+  },
+  {
+    "id": "t27-gentlemans-discard-funds-blue-five",
+    "turn": 27,
+    "positionKey": "7891817c955836e42e3df888d18d10c278e0566822948f3a66e4b34ed37b7dbd",
+    "status": "unresolved",
+    "perspective": "Cathy knows her playable y3 and sees Bob's matching y3 on finesse position. Zero clues. Her y5 is convention-known; other own cards and future draws stay unknown.",
+    "source": {
+      "conversation": "2026-09-28 continuation after turn16 finesse ruling",
+      "quote": "continue to autonomously go through the replay and find disagreements. Do a deep analysis for each disagreement. If there are obvious bugs, then fix them autonomously. Otherwise, ask me about the correct strategy or convention.",
+      "documentation": "https://hanabi.github.io/level-10/#the-gentlemans-discard-gd"
+    },
+    "explanation": {
+      "fixtureLine": [
+        "27 Cathy play y3 #16",
+        "28 Donald discard b2 #12",
+        "29 Alice 1s to Donald",
+        "30 Bob play p2 #6",
+        "Stops before31 Cathy: UnknownIdentity / IdentityBranch"
+      ],
+      "engineLine": [
+        "27 Cathy discard y3 #16, transferring to Bob #28",
+        "28 Donald blue to Alice",
+        "29 Alice play b5 #27",
+        "30 Bob play y3 #28",
+        "Stops before31 Cathy: UnknownIdentity / IdentityBranch"
+      ],
+      "assumptions": "Both projections export Cathy's convention-known y5 #10 to teammates at turns28\u201330. The other source-hidden cards and draws remain unknown. Projected choices are not forced.",
+      "comparison": "EndpointResources with recorded actualBasis at horizon4, normalizedEndpoints. Both: score17, committed3, secured4, clueDemand1, no strikes or recorded BDR. Discard has clues1 versus play0, and protected-risk count5 versus4. Discard priority550 versus play525 is not the decisive reason.",
+      "nestedChoice": "Alice's 1s is an admitted Trash Push Discharge (MCVP1) that plays Bob's p2. Her alternative y4 projection is:29 Alice y4,30 Bob discard p2 #5,31 Cathy y5,32 Donald purple to Bob,33 Alice g4,34 Bob p2 #6, then unknown frontier. At shared horizon2 Alice's comparison chooses 1s by FundedProgress: equal score17, committed3 vs2; the y4 line temporarily exposes Bob's remaining p2 and reserves its protection. That is a modeled choice, not a ruling that the yellow continuation is wrong.",
+      "question": "Does the early clue enabling b5 and its refund compensate for delaying the committed y4/y5 chain, or should Cathy play y3? The existing accepted p4v0s1 Gentleman's Discard is a concrete choice without a universal transfer priority. The new turn16 ruling concerns a lost executable g3 continuation, whereas the yellow continuation here stays committed. The guide permits the transfer but requires a compensating benefit, without deciding this tradeoff.",
+      "scope": "From-start scan agrees1\u201326, stops27; no fixture changes."
+    },
+    "regressions": [],
+    "coverageNote": "Explanation and admission/forecast inspection only. No optimal-move assertion until the user resolves the strategy."
   }
 ]

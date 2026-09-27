@@ -6885,3 +6885,70 @@ fn reviewed_four_clue_does_not_invent_a_second_red_five_in_a_draw() {
         "Cathy's r5 must not be blocked by an impossible duplicate in an unknown draw: {projection:?}"
     );
 }
+
+#[test]
+fn reviewed_finesse_commits_green_three_but_direct_green_leaves_it_waiting() {
+    // User-reviewed p4v0s415 T16, 2026-09-28. Both hypothetical branches
+    // preserve Donald's hidden hand and leave all subsequent draws unknown.
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    let state = fixture.state_at_turn(15).unwrap();
+    let source = state.view_for(PlayerId::new(3)).unwrap();
+    for finesse in [true, false] {
+        let after = if finesse {
+            let clue = ProspectiveTransition::clue_by(
+                &source,
+                PlayerId::new(3),
+                PlayerId::new(0),
+                Clue::Rank(Rank::Four),
+                &[CardId::new(3)],
+            );
+            ProspectiveTransition::discard(
+                &clue,
+                PlayerId::new(0),
+                CardId::new(0),
+                Card::new(Suit::Blue, Rank::One),
+            )
+        } else {
+            let played = ProspectiveTransition::successful_play(
+                &source,
+                PlayerId::new(3),
+                CardId::new(17),
+                Card::new(Suit::Red, Rank::Four),
+            );
+            ProspectiveTransition::clue_by(
+                &played,
+                PlayerId::new(0),
+                PlayerId::new(1),
+                Clue::Suit(Suit::Green),
+                &[CardId::new(7), CardId::new(22)],
+            )
+        };
+        let after = ProspectiveTransition::successful_play(
+            &after,
+            PlayerId::new(1),
+            CardId::new(22),
+            Card::new(Suit::Green, Rank::Two),
+        );
+        let (d, r) = PerspectiveProjector::new(&after, HGroupProfile::Max)
+            .project(PlayerId::new(1), PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        let notes = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+        assert_eq!(
+            notes.playable_now.contains(&CardId::new(7)),
+            finesse,
+            "{notes:?}"
+        );
+        assert!(d.view().hands[1].iter().all(|card| card.identity.is_none()));
+        assert!(
+            after
+                .hands
+                .iter()
+                .flatten()
+                .filter(|card| card.id.index() >= 24)
+                .all(|card| card.identity.is_none())
+        );
+    }
+}

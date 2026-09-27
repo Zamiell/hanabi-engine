@@ -2128,15 +2128,65 @@ fn has_productive_teammate_handoff(candidate: &PlannerActionEvaluation) -> bool 
             })
 }
 
+/// Delegating a clue must not replace executable follow-up plays with merely
+/// touched cards. Compare the immediate three-action handoff, before subsequent
+/// scheduling diverges, and require no greater clue expenditure. Include realized
+/// points so playing early cannot look like losing a commitment.
+fn handoff_loses_committed_progress(
+    play: &PlannerActionEvaluation,
+    clue: &PlannerActionEvaluation,
+) -> bool {
+    let available = play
+        .projection
+        .common_horizon()
+        .min(clue.projection.common_horizon());
+    // has_productive_teammate_handoff recognizes play -> clue -> response.
+    let horizon = 3;
+    if available < horizon {
+        return false;
+    }
+    let Some((play_cost, clue_cost)) = play
+        .projection
+        .clue_cost_at(horizon)
+        .zip(clue.projection.clue_cost_at(horizon))
+    else {
+        return false;
+    };
+    let plays = play.projection.checkpoints_at(horizon);
+    let clues = clue.projection.checkpoints_at(horizon);
+    clue_cost.1 <= play_cost.0
+        && !plays.is_empty()
+        && !clues.is_empty()
+        && clues.iter().all(|clue| {
+            plays.iter().all(|play| {
+                clue.value.committed_future_plays > play.value.committed_future_plays
+                    && clue
+                        .value
+                        .score
+                        .saturating_add(clue.value.committed_future_plays)
+                        > play
+                            .value
+                            .score
+                            .saturating_add(play.value.committed_future_plays)
+            })
+        })
+}
+
 fn compare_teammate_handoff(
     left: &PlannerActionEvaluation,
     right: &PlannerActionEvaluation,
 ) -> Ordering {
     match (left.action, right.action) {
-        (Action::Play(_), Action::Clue { .. }) if has_productive_teammate_handoff(left) => {
+        (Action::Play(_), Action::Clue { .. })
+            if has_productive_teammate_handoff(left)
+                && !handoff_loses_committed_progress(left, right) =>
+        {
             Ordering::Greater
         }
-        (Action::Clue { .. }, Action::Play(_)) if has_productive_teammate_handoff(right) => {
+        (Action::Clue { .. }, Action::Play(_))
+            if has_productive_teammate_handoff(right)
+                && !handoff_loses_committed_progress(right, left) =>
+        {
             Ordering::Less
         }
         _ => Ordering::Equal,
@@ -3198,6 +3248,74 @@ mod tests {
             (Ordering::Less, ComparisonReason::PolicyTier)
         );
         assert_eq!(analysis.planner.best_action, play);
+    }
+
+    #[test]
+    fn reviewed_finesse_continuation_outweighs_weaker_clue_handoff() {
+        // p4v0s415 T16: user explains that the finesse plays both g2 and g3,
+        // whereas green to Bob plays g2 and leaves g3 waiting in hand.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(15).unwrap();
+        let analysis = crate::analyze_position(
+            &state.view_for(state.current_player()).unwrap(),
+            SupportedConvention::HGroup(crate::HGroupProfile::Max),
+            PlannerConfig {
+                objective: PlanningObjective::PerfectScore,
+                ..PlannerConfig::default()
+            },
+        )
+        .unwrap();
+        let action = Action::Clue {
+            target: hanabi_core::PlayerId::new(0),
+            clue: Clue::Rank(Rank::Four),
+        };
+        let clue = analysis
+            .planner
+            .root_actions
+            .iter()
+            .find(|c| c.action == action)
+            .unwrap();
+        let play = analysis
+            .planner
+            .root_actions
+            .iter()
+            .find(|c| c.action == Action::Play(hanabi_core::CardId::new(17)))
+            .unwrap();
+        assert!(has_productive_teammate_handoff(play));
+        assert!(handoff_loses_committed_progress(play, clue));
+        assert_eq!(compare_teammate_handoff(play, clue), Ordering::Equal);
+        assert!(
+            clue.projection
+                .steps
+                .iter()
+                .any(|s| s.projected.action == Action::Play(hanabi_core::CardId::new(7)))
+        );
+        assert_eq!(analysis.planner.best_action, action);
+        // A second clue buys additional work; it does not prove that the
+        // immediate handoff wastes the first clue's continuation.
+        let mut extra_clue = clue.clone();
+        extra_clue.projection.steps[1].projected.action = action;
+        extra_clue.projection.steps[1].consequences.clues_spent = 1;
+        assert!(!handoff_loses_committed_progress(play, &extra_clue));
+        // A play already realized is not a lost future commitment.
+        let mut earlier = play.clone();
+        for checkpoint in &mut earlier.projection.checkpoints {
+            checkpoint.value.score = 25;
+        }
+        assert!(!handoff_loses_committed_progress(&earlier, clue));
+        // More touched/protected cards alone are not executable progress.
+        let mut weaker = clue.clone();
+        for checkpoint in &mut weaker.projection.checkpoints {
+            checkpoint.value.committed_future_plays = 0;
+        }
+        assert!(!handoff_loses_committed_progress(play, &weaker));
+        assert_eq!(compare_teammate_handoff(play, &weaker), Ordering::Greater);
+        // An absent forecast cannot establish that delegating loses work.
+        weaker.projection.checkpoints.clear();
+        assert!(!handoff_loses_committed_progress(play, &weaker));
     }
 
     #[test]
