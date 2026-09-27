@@ -84,6 +84,8 @@ pub struct PlannerConfig {
     pub exact_world_limit: u64,
     /// Maximum observation-group/action nodes admitted to an exact solve.
     pub exact_node_limit: u64,
+    /// Total move-calculation budget, including inference; capped at two minutes.
+    pub move_time_limit: std::time::Duration,
 }
 
 impl Default for PlannerConfig {
@@ -92,6 +94,7 @@ impl Default for PlannerConfig {
             objective: PlanningObjective::ExpectedScore,
             exact_world_limit: 4_096,
             exact_node_limit: 50_000,
+            move_time_limit: crate::budget::MAX_MOVE_TIME,
         }
     }
 }
@@ -164,7 +167,11 @@ impl ExactActionValue {
 
 /// Deterministic evidence for one root candidate.
 #[derive(Clone, Debug, PartialEq)]
+#[allow(clippy::struct_excessive_bools)] // Independent card facts and evaluation availability.
 pub struct PlannerActionEvaluation {
+    /// A complete projection computation (which may itself stop at uncertainty).
+    /// False for unevaluated or interrupted roots; never treat them as zero-value lines.
+    pub projection_evaluated: bool,
     pub action: Action,
     pub preference: crate::ActionPreference,
     pub certainly_playable: bool,
@@ -496,6 +503,8 @@ impl SymbolicLineOutcome {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlannerResult {
     pub best_action: Action,
+    /// True when the returned move is best-so-far, not a completed comparison.
+    pub budget_exhausted: bool,
     pub phase: PlannerPhase,
     /// Exact belief size when known, otherwise the first count beyond the
     /// configured exact-world limit.
@@ -518,6 +527,7 @@ pub enum ExactSearchStatus {
     ConditionalAdmission,
     NodeLimit,
     DepthLimit,
+    TimeLimit,
 }
 
 /// The strongest applicable dimension in a symbolic comparison.
@@ -666,9 +676,9 @@ fn retain_comparison_basis(
 ///
 /// Early and midgame positions remain symbolic: hidden cards are identity
 /// domains constrained by clues, convention inferences, and remaining copy
-/// counts. Once the complete belief fits inside `exact_world_limit`, every
-/// identity permutation is enumerated and solved. Exact recursion groups
-/// worlds by the acting player's observation before choosing an action, so it
+/// counts. When world and estimated node counts fit their limits, exact
+/// search enumerates identity permutations within the move-time budget. Exact
+/// recursion groups worlds by the acting player's observation before choosing an action, so it
 /// never conditions a decision on simulator truth that the player cannot see.
 ///
 /// # Errors
@@ -680,12 +690,19 @@ pub fn plan_move(
     convention: SupportedConvention,
     config: PlannerConfig,
 ) -> Result<PlannerResult, PlannerError> {
-    let deductions = information_set.deductions();
-    let _memo = crate::h_group::begin_analysis_replay_memo();
-    let analysis = convention.analyze(deductions);
-    plan_move_with_analysis(information_set, convention, &analysis, config)
+    let control = crate::AnalysisControl::default();
+    let _budget = crate::budget::Scope::enter(config.move_time_limit, &control);
+    crate::budget::run(|| {
+        let deductions = information_set.deductions();
+        let _memo = crate::h_group::begin_analysis_replay_memo();
+        crate::budget::checkpoint();
+        let analysis = convention.analyze(deductions);
+        plan_move_with_control(information_set, convention, &analysis, config, &control)
+    })
+    .map_err(|stop| PlannerError::Stopped(stop.reason()))?
 }
 
+#[cfg(test)]
 pub(crate) fn plan_move_with_analysis(
     information_set: &InformationSet,
     convention: SupportedConvention,
@@ -708,27 +725,118 @@ pub(crate) fn plan_move_with_control(
     config: PlannerConfig,
     control: &crate::AnalysisControl,
 ) -> Result<PlannerResult, PlannerError> {
-    control.checkpoint().map_err(PlannerError::Stopped)?;
+    let _budget = crate::budget::Scope::enter(config.move_time_limit, control);
     let _memo = crate::h_group::begin_analysis_replay_memo();
     #[cfg(test)]
     let _profile = crate::test_profile::span("planner");
-    let objective = config.objective;
-    let deductions = information_set.deductions();
     let candidates = planning_candidates(analysis);
     if candidates.is_empty() {
         return Err(PlannerError::NoCandidateActions);
     }
-    let preferred = analysis.preferred_action;
-    let mut evaluations = candidates
-        .iter()
-        .copied()
-        .map(|action| symbolic_evaluation(deductions, action))
-        .collect::<Vec<_>>();
+    let mut progress = PlanningProgress {
+        evaluations: candidates
+            .iter()
+            .copied()
+            .map(|action| symbolic_evaluation(information_set.deductions(), action))
+            .collect(),
+        count: None,
+        exact_nodes: 0,
+        exact_status: ExactSearchStatus::TimeLimit,
+    };
+    match crate::budget::run(|| {
+        plan_move_inner(
+            information_set,
+            convention,
+            analysis,
+            config,
+            control,
+            &mut progress,
+        )
+    }) {
+        Ok(result) => result,
+        Err(crate::budget::Stop::MoveDeadline) => progress.fallback(analysis.preferred_action),
+        Err(stop) => Err(PlannerError::Stopped(stop.reason())),
+    }
+}
 
+struct PlanningProgress {
+    evaluations: Vec<PlannerActionEvaluation>,
+    count: Option<WorldCount>,
+    exact_nodes: u64,
+    exact_status: ExactSearchStatus,
+}
+impl PlanningProgress {
+    fn fallback(mut self, preferred: Option<Action>) -> Result<PlannerResult, PlannerError> {
+        // A contradictory belief must never become an admitted fallback merely
+        // because its enumeration timed out before finding any world.
+        let count = self
+            .count
+            .ok_or(PlannerError::Stopped(crate::AnalysisStopped::Deadline))?;
+        let completed = self
+            .evaluations
+            .iter()
+            .filter(|candidate| candidate.projection_evaluated)
+            .cloned()
+            .collect::<Vec<_>>();
+        let (best, comparisons) = compare_symbolic_candidates(&completed, preferred);
+        let best_action = best
+            .map(|index| completed[index].action)
+            .or_else(|| {
+                preferred.filter(|action| {
+                    self.evaluations
+                        .iter()
+                        .any(|candidate| candidate.action == *action)
+                })
+            })
+            .or_else(|| {
+                self.evaluations
+                    .iter()
+                    .max_by_key(|candidate| candidate.preference)
+                    .map(|candidate| candidate.action)
+            })
+            .ok_or(PlannerError::NoCandidateActions)?;
+        for candidate in &mut self.evaluations {
+            candidate.exact = None;
+        }
+        Ok(PlannerResult {
+            best_action,
+            budget_exhausted: true,
+            phase: PlannerPhase::Symbolic,
+            world_count: count,
+            exact_nodes: self.exact_nodes,
+            exact_status: self.exact_status,
+            root_actions: self.evaluations,
+            comparisons,
+        })
+    }
+}
+
+#[allow(clippy::too_many_lines)]
+fn plan_move_inner(
+    information_set: &InformationSet,
+    convention: SupportedConvention,
+    analysis: &ConventionAnalysis,
+    config: PlannerConfig,
+    control: &crate::AnalysisControl,
+    progress: &mut PlanningProgress,
+) -> Result<PlannerResult, PlannerError> {
+    control.checkpoint().map_err(PlannerError::Stopped)?;
+    let objective = config.objective;
+    let deductions = information_set.deductions();
+    let candidates = planning_candidates(analysis);
+    let preferred = analysis.preferred_action;
     let belief = &analysis.belief_constraints;
+    let exists = information_set
+        .world_count_with_control(belief, 0, control)
+        .map_err(PlannerError::Stopped)?;
+    if exists == WorldCount::Exact(0) {
+        return Err(PlannerError::ConventionBeliefConflict);
+    }
+    progress.count = Some(exists);
     let count = information_set
         .world_count_with_control(belief, config.exact_world_limit, control)
         .map_err(PlannerError::Stopped)?;
+    progress.count = Some(count);
     let counted_worlds = count.worlds();
     if count == WorldCount::Exact(0) {
         return Err(PlannerError::ConventionBeliefConflict);
@@ -750,19 +858,20 @@ pub(crate) fn plan_move_with_control(
             information_set,
             analysis,
             counted_worlds,
-            &mut evaluations,
+            &mut progress.evaluations,
             preferred,
             control,
         )?;
         control.checkpoint().map_err(PlannerError::Stopped)?;
         if let Some((best_index, tested_actions)) = proof {
             return Ok(PlannerResult {
-                best_action: evaluations[best_index].action,
+                budget_exhausted: false,
+                best_action: progress.evaluations[best_index].action,
                 phase: PlannerPhase::Exact,
                 world_count: count,
                 exact_nodes: tested_actions,
                 exact_status: ExactSearchStatus::TerminalProof,
-                root_actions: evaluations,
+                root_actions: std::mem::take(&mut progress.evaluations),
                 comparisons: Vec::new(),
             });
         }
@@ -782,33 +891,51 @@ pub(crate) fn plan_move_with_control(
         );
     let mut exact_nodes = 0;
     let mut exact_status = exact_skip_status(count, analysis, candidates.len());
+    progress.exact_status = exact_status;
     if full_exact_search {
+        progress.exact_status = ExactSearchStatus::TimeLimit;
         let (best, nodes, status) = run_exact_search(
             information_set,
             convention,
             config,
             analysis,
             counted_worlds,
-            &mut evaluations,
+            &mut progress.evaluations,
             control,
         )?;
         exact_nodes = nodes;
         exact_status = status;
+        progress.exact_status = status;
+        progress.exact_nodes = nodes;
         if let Some(index) = best {
             return Ok(PlannerResult {
-                best_action: evaluations[index].action,
+                budget_exhausted: false,
+                best_action: progress.evaluations[index].action,
                 phase: PlannerPhase::Exact,
                 world_count: count,
                 exact_nodes,
                 exact_status,
-                root_actions: evaluations,
+                root_actions: std::mem::take(&mut progress.evaluations),
                 comparisons: Vec::new(),
             });
         }
     }
 
-    project_symbolic_roots(deductions, convention, &mut evaluations, control)?;
-    symbolic_result(evaluations, preferred, count, exact_nodes, exact_status)
+    // The admitted policy move is the initial incumbent. Complete it first.
+    project_symbolic_roots(
+        deductions,
+        convention,
+        &mut progress.evaluations,
+        preferred,
+        control,
+    )?;
+    symbolic_result(
+        std::mem::take(&mut progress.evaluations),
+        preferred,
+        count,
+        exact_nodes,
+        exact_status,
+    )
 }
 
 fn run_exact_search(
@@ -834,14 +961,24 @@ fn run_exact_search(
         limit: config.exact_node_limit,
         control,
     };
-    let status = match evaluate_exact_root(
-        &worlds,
-        convention,
-        config.objective,
-        evaluations,
-        analysis.preferred_action,
-        &mut budget,
-    ) {
+    let searched = crate::budget::run(|| {
+        evaluate_exact_root(
+            &worlds,
+            convention,
+            config.objective,
+            evaluations,
+            analysis.preferred_action,
+            &mut budget,
+        )
+    });
+    let searched = match searched {
+        Ok(result) => result,
+        Err(crate::budget::Stop::MoveDeadline) => {
+            return Ok((None, budget.used, ExactSearchStatus::TimeLimit));
+        }
+        Err(crate::budget::Stop::Request(reason)) => return Err(PlannerError::Stopped(reason)),
+    };
+    let status = match searched {
         Ok((values, proven)) => {
             for (evaluation, value) in evaluations.iter_mut().zip(values) {
                 evaluation.exact = value;
@@ -869,14 +1006,20 @@ fn project_symbolic_roots(
     deductions: &LogicalDeductions,
     convention: SupportedConvention,
     evaluations: &mut [PlannerActionEvaluation],
+    preferred: Option<Action>,
     control: &crate::AnalysisControl,
 ) -> Result<(), PlannerError> {
-    // Scores order candidates; they must not prevent testing their lines.
-    for evaluation in evaluations {
+    // Project the incumbent first without changing the final comparator's
+    // stable candidate order or skipping any alternatives when time permits.
+    let mut order = (0..evaluations.len()).collect::<Vec<_>>();
+    order.sort_by_key(|index| Some(evaluations[*index].action) != preferred);
+    for index in order {
+        let evaluation = &mut evaluations[index];
         control.checkpoint().map_err(PlannerError::Stopped)?;
         (evaluation.symbolic_line, evaluation.projection) = convention
             .project_symbolic_projection(deductions.view(), evaluation.action, 32, control)
             .map_err(PlannerError::Stopped)?;
+        evaluation.projection_evaluated = true;
     }
     control.checkpoint().map_err(PlannerError::Stopped)
 }
@@ -909,6 +1052,7 @@ fn symbolic_result(
     let (best_index, comparisons) = compare_symbolic_candidates(&evaluations, preferred);
     let best_index = best_index.ok_or(PlannerError::NoCandidateActions)?;
     Ok(PlannerResult {
+        budget_exhausted: false,
         best_action: evaluations[best_index].action,
         phase: PlannerPhase::Symbolic,
         world_count,
@@ -954,6 +1098,7 @@ pub(crate) fn choose_projected_follow_up(
                 candidate.action,
                 control,
             )?;
+        evaluation.projection_evaluated = true;
         let perfect = has_unconditional_perfect_finish(&evaluation);
         evaluations.push(evaluation);
         if perfect {
@@ -1053,6 +1198,7 @@ fn prove_unanimous_terminal_perfect(
         };
         let mut unanimous = true;
         for world in worlds {
+            crate::budget::checkpoint();
             let mut advanced = world.clone();
             advanced.apply(evaluation.action)?;
             if advanced.final_score() != Some(25) {
@@ -1108,6 +1254,7 @@ fn symbolic_evaluation(
             Action::Play(_) | Action::Discard(_) => (0, 0, 0, false),
         };
     PlannerActionEvaluation {
+        projection_evaluated: false,
         action,
         preference: convention_action.preference,
         certainly_playable: assessment.is_some_and(|value| value.certainly_playable),
@@ -2558,6 +2705,87 @@ mod tests {
     use super::*;
 
     #[test]
+    fn reviewed_turn50_move_budget_returns_an_admitted_incomplete_result() {
+        // User's runtime requirement at p4v0s1 T50: cap the entire calculation,
+        // including symbolic inference, rather than only exact-world enumeration.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(49).unwrap();
+        let view = state.view_for(state.current_player()).unwrap();
+        let information = InformationSet::new(&view).unwrap();
+        let convention = SupportedConvention::HGroup(crate::HGroupProfile::Max);
+        let analysis = convention.analyze(information.deductions());
+        let started = std::time::Instant::now();
+        let result = plan_move_with_control(
+            &information,
+            convention,
+            &analysis,
+            PlannerConfig {
+                objective: PlanningObjective::PerfectScore,
+                move_time_limit: std::time::Duration::from_millis(100),
+                ..PlannerConfig::default()
+            },
+            &crate::AnalysisControl::default(),
+        )
+        .unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        assert!(result.budget_exhausted);
+        assert_eq!(result.phase, PlannerPhase::Symbolic);
+        assert!(
+            planning_candidates(&analysis)
+                .iter()
+                .any(|c| c.action == result.best_action)
+        );
+        assert!(result.root_actions.iter().all(|c| c.exact.is_none()));
+        assert!(result.root_actions.iter().any(|c| !c.projection_evaluated));
+        for comparison in result.comparisons {
+            for action in [comparison.left, comparison.right] {
+                assert!(
+                    result
+                        .root_actions
+                        .iter()
+                        .any(|c| c.action == action && c.projection_evaluated)
+                );
+            }
+        }
+        // Fallback comparisons exclude unfinished roots, even when an
+        // unevaluated root has the convention's preferred-action advantage.
+        let mut evaluations = result.root_actions;
+        assert!(evaluations.len() > 1);
+        for evaluation in &mut evaluations {
+            evaluation.projection_evaluated = false;
+        }
+        evaluations[0].projection_evaluated = true;
+        let completed = evaluations[0].action;
+        let unsearched = evaluations[1].action;
+        let fallback = PlanningProgress {
+            evaluations: evaluations.clone(),
+            count: Some(result.world_count),
+            exact_nodes: 7,
+            exact_status: ExactSearchStatus::TimeLimit,
+        }
+        .fallback(Some(unsearched))
+        .unwrap();
+        assert_eq!(fallback.best_action, completed);
+        assert_eq!(fallback.exact_nodes, 7);
+        assert!(fallback.comparisons.is_empty());
+        assert_eq!(
+            PlanningProgress {
+                evaluations,
+                count: None,
+                exact_nodes: 0,
+                exact_status: ExactSearchStatus::TimeLimit,
+            }
+            .fallback(Some(unsearched)),
+            Err(PlannerError::Stopped(crate::AnalysisStopped::Deadline))
+        );
+        // Expired private scopes must not contaminate the next request.
+        crate::budget::checkpoint();
+    }
+
+    #[test]
     fn reviewed_endgame_followup_stops_at_a_certified_perfect_finish() {
         let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
             "../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
@@ -3940,6 +4168,7 @@ mod tests {
                 objective: PlanningObjective::ExpectedScore,
                 exact_world_limit: 100_000,
                 exact_node_limit: 1_000_000,
+                ..PlannerConfig::default()
             },
         )
         .unwrap();

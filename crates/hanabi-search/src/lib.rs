@@ -3,6 +3,7 @@
 mod analysis;
 mod diagnostics;
 pub use diagnostics::{ProjectedDecision, capture_decisions};
+mod budget;
 mod control;
 pub use control::{AnalysisControl, AnalysisStopped, CancellationToken};
 mod baseline;

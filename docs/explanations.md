@@ -111,3 +111,36 @@ Detailed decision capture is enabled only around explanation analysis and is
 restored on return or panic. Ordinary gameplay does not allocate these traces.
 No selected move, scoring term, or convention rule is changed by enabling it.
 Reports can be large with `--lines all`; use JSON redirection for complete data.
+
+## Move calculation budget
+
+Every public move calculation defaults to a 120-second wall-clock budget, capped
+at 120 seconds even if a library caller requests more. `--move-time-ms N` on
+`analyze`, `live-action`, and `live-session` accepts a shorter budget
+(1–120000). The budget includes initial convention inference, belief
+enumeration, exact search, and symbolic forecasts. Existing world/node
+thresholds still avoid predictably expensive exact searches; a small number of
+worlds alone does not bound recursive convention inference.
+
+At expiry, the planner returns its best-so-far convention-admitted move, using
+completed root forecasts where available and otherwise the convention-preferred
+move. The preferred move is projected first. Interrupted projections and partial
+exact outcomes cannot establish superiority or optimality. If initial admission
+or the existence of a consistent world has not yet been established, calculation
+returns a deadline error instead of guessing a move. Explicit caller
+cancellation, request deadlines, and work limits still return errors rather than
+partial moves.
+
+JSON reports expose `planning.budgetExhausted`, `lines[].projectionEvaluated`,
+and `configuration.moveTimeMs`; live planning details also mark each root's
+projection availability. An interrupted exact solve reports `TimeLimit`.
+Symbolic timeouts retain the reason exact search was skipped. Text reports flag
+the best-so-far result and unavailable forecasts. Best-so-far choices can depend
+on machine speed; a timed-out result is not a completed replay audit.
+
+Deadline checks occur inside recursive inference as well as search loops. A
+private unwind signal crosses infallible inference interfaces and is caught at
+calculation boundaries; scoped caches/guards are restored and ordinary panics
+propagate. This requires Rust's unwind panic strategy (the repository default).
+The cap is cooperative: scheduling and final result serialization can add a
+small amount of elapsed time beyond the search deadline.

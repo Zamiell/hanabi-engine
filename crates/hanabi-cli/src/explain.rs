@@ -83,12 +83,14 @@ struct ComparisonReport {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(clippy::struct_excessive_bools)] // Independent reporting flags.
 struct LineReport {
     label: String,
     action: Value,
     selected: bool,
     fixture_action: bool,
     forced_root: bool,
+    projection_evaluated: bool,
     projection: Value,
     symbolic_line: Value,
     exact: Value,
@@ -136,6 +138,7 @@ pub(crate) fn run(
                 objective: args.objective,
                 exact_world_limit: args.exact_world_limit,
                 exact_node_limit: args.exact_node_limit,
+                move_time_limit: std::time::Duration::from_millis(args.move_time_ms),
             },
         )
     });
@@ -397,6 +400,7 @@ fn report(
                 selected: c.action == result.best_action,
                 fixture_action: Some(c.action) == fixture,
                 forced_root: convention.forced_action == Some(c.action),
+                projection_evaluated: c.projection_evaluated,
                 projection: roots[*index]["projection"].clone(),
                 symbolic_line: roots[*index]["symbolicLine"].clone(),
                 exact: roots[*index]["exact"].clone(),
@@ -435,6 +439,7 @@ fn report(
             comparisons: comparisons(&d.view, &replay.players, &d.comparisons, &d.candidates),
             alternatives: d.candidates.iter().map(|candidate|json!({"action":wire(candidate.action),
                 "label":action_label(&d.view,&replay.players,candidate.action),"selected":Some(candidate.action)==d.selected,
+                "projectionEvaluated":candidate.projection_evaluated,
                 "projection":crate::live_action::projection_evidence_json(0,&candidate.projection),
                 "endpoint":candidate.symbolic_line.position_value.map(crate::live_action::position_value_json),
                 "stopReason":format!("{:?}",candidate.symbolic_line.stop_reason)})).collect(),
@@ -455,7 +460,7 @@ fn report(
         convention: args.convention.to_string(),
         objective: args.objective.to_string(),
         elapsed_seconds: elapsed,
-        configuration: json!({"exactWorldLimit":args.exact_world_limit,"exactNodeLimit":args.exact_node_limit}),
+        configuration: json!({"moveTimeMs":args.move_time_ms,"exactWorldLimit":args.exact_world_limit,"exactNodeLimit":args.exact_node_limit}),
         engine: revision(),
         board: board(view),
         knowledge: knowledge(convention),
@@ -596,6 +601,9 @@ fn print_text(report: &Report) {
         report.planning["exactStatus"],
         report.elapsed_seconds
     );
+    if report.planning["budgetExhausted"] == true {
+        println!("Move time budget exhausted: best-so-far move; optimality not established.");
+    }
     print_board(&report.board, &report.players);
     println!("Observer knowledge is included in the JSON report; unknown cards remain unknown.");
     println!("\nCandidate actions (scores are not the final comparison):");
@@ -618,7 +626,11 @@ fn print_text(report: &Report) {
         if !line.exact.is_null() {
             println!("Exact outcome: {}", line.exact);
         }
-        print_projection(&line.evaluation.projection, &report.players, "  ");
+        if line.evaluation.projection_evaluated {
+            print_projection(&line.evaluation.projection, &report.players, "  ");
+        } else {
+            println!("  Projection not evaluated; no complete forecast is available.");
+        }
         if let Some(value) = line.evaluation.symbolic_line.position_value {
             println!(
                 "  Endpoint: score {}, tokens {}, committed plays {}, secured future plays {}, Save pressure {}",
@@ -779,6 +791,7 @@ mod tests {
             oldest_card_touched: false,
             symbolic_line: SymbolicLineOutcome::default(),
             projection: ProjectionEvidence::default(),
+            projection_evaluated: false,
             exact: None,
         }
     }

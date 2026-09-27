@@ -82,6 +82,7 @@ fn decide(
             objective: arguments.objective,
             exact_world_limit: arguments.exact_world_limit,
             exact_node_limit: arguments.exact_node_limit,
+            move_time_limit: std::time::Duration::from_millis(arguments.move_time_ms),
         },
     )
     .map_err(CliError::AnalyzePosition)?;
@@ -266,6 +267,7 @@ pub(crate) fn planner_details_json(
         "consideredWorlds": result.world_count.worlds(),
         "worldCountExact": result.world_count.is_exact(),
         "exactNodes": result.exact_nodes,
+        "budgetExhausted": result.budget_exhausted,
         "exactStatus": format!("{:?}", result.exact_status),
         "comparisons": result.comparisons.iter().map(|comparison| json!({
             "left": HanabiLiveActionCommand::from_engine_action(table_id, comparison.left),
@@ -285,6 +287,7 @@ pub(crate) fn planner_details_json(
                 "terminalProgress": evaluation.preference.advances_terminal_plan(),
                 "withinCategory": evaluation.preference.within_category(),
             },
+            "projectionEvaluated": evaluation.projection_evaluated,
             "projection": projection_evidence_json(table_id, &evaluation.projection),
             "certainlyPlayable": evaluation.certainly_playable,
             "certainlyUseless": evaluation.certainly_useless,

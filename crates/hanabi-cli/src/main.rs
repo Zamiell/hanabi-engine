@@ -97,6 +97,7 @@ fn analyze_planner(
             objective: arguments.objective,
             exact_world_limit: arguments.exact_world_limit,
             exact_node_limit: arguments.exact_node_limit,
+            move_time_limit: std::time::Duration::from_millis(arguments.move_time_ms),
         },
     )
     .map_err(CliError::AnalyzePosition)?;
@@ -106,14 +107,24 @@ fn analyze_planner(
         WorldCount::LowerBound(worlds) => (">=", worlds),
     };
     println!(
-        "Planning: deterministic {:?} planner, {}{} consistent worlds",
-        result.phase, world_prefix, worlds,
+        "Planning: {} {:?} planner, {}{} consistent worlds",
+        if result.budget_exhausted {
+            "budgeted"
+        } else {
+            "deterministic"
+        },
+        result.phase,
+        world_prefix,
+        worlds,
     );
     println!(
         "Elapsed: {:.3}s; exact nodes: {}",
         started.elapsed().as_secs_f64(),
         result.exact_nodes
     );
+    if result.budget_exhausted {
+        println!("Move time budget exhausted: best-so-far move; optimality not established.");
+    }
     println!();
     for evaluation in result.root_actions {
         let marker = if evaluation.action == result.best_action {
@@ -128,6 +139,11 @@ fn analyze_planner(
                 exact.perfect_rate() * 100.0,
                 exact.expected_score(),
                 exact.strikeout_rate() * 100.0,
+            );
+        } else if !evaluation.projection_evaluated {
+            println!(
+                "{marker}  {:<42} projection not evaluated",
+                action_label(view, players, evaluation.action)
             );
         } else {
             println!(
@@ -258,6 +274,7 @@ struct AnalyzeArguments {
     turn: u32,
     exact_world_limit: u64,
     exact_node_limit: u64,
+    move_time_ms: u64,
     convention: SupportedConvention,
     objective: PlanningObjective,
 }
@@ -265,6 +282,7 @@ struct AnalyzeArguments {
 struct LiveActionArguments {
     exact_world_limit: u64,
     exact_node_limit: u64,
+    move_time_ms: u64,
     convention: SupportedConvention,
     objective: PlanningObjective,
     include_planning_details: bool,
@@ -317,6 +335,7 @@ fn parse_analyze_arguments(
     let mut turn = None;
     let mut exact_world_limit = DEFAULT_EXACT_WORLD_LIMIT;
     let mut exact_node_limit = DEFAULT_EXACT_NODE_LIMIT;
+    let mut move_time_ms = 120_000;
     let mut convention = Some(ConventionChoice::default());
     let mut h_group_profile = None;
     let mut objective = PlanningObjective::ExpectedScore;
@@ -331,6 +350,7 @@ fn parse_analyze_arguments(
             arguments,
             &mut exact_world_limit,
             &mut exact_node_limit,
+            &mut move_time_ms,
             &mut convention,
             &mut h_group_profile,
             &mut objective,
@@ -392,6 +412,7 @@ fn parse_analyze_arguments(
         turn: turn.ok_or_else(|| CliError::Usage("missing required --turn".to_owned()))?,
         exact_world_limit,
         exact_node_limit,
+        move_time_ms,
         convention,
         objective,
     }))
@@ -402,6 +423,7 @@ fn parse_live_action_arguments(
 ) -> Result<Option<LiveActionArguments>, CliError> {
     let mut exact_world_limit = DEFAULT_EXACT_WORLD_LIMIT;
     let mut exact_node_limit = DEFAULT_EXACT_NODE_LIMIT;
+    let mut move_time_ms = 120_000;
     let mut convention = Some(ConventionChoice::HGroup);
     let mut h_group_profile = None;
     let mut include_planning_details = false;
@@ -413,6 +435,7 @@ fn parse_live_action_arguments(
             arguments,
             &mut exact_world_limit,
             &mut exact_node_limit,
+            &mut move_time_ms,
             &mut convention,
             &mut h_group_profile,
             &mut objective,
@@ -443,6 +466,7 @@ fn parse_live_action_arguments(
     Ok(Some(LiveActionArguments {
         exact_world_limit,
         exact_node_limit,
+        move_time_ms,
         convention,
         objective,
         include_planning_details,
@@ -455,11 +479,20 @@ fn parse_planning_option(
     arguments: &mut impl Iterator<Item = String>,
     exact_world_limit: &mut u64,
     exact_node_limit: &mut u64,
+    move_time_ms: &mut u64,
     convention: &mut Option<ConventionChoice>,
     h_group_profile: &mut Option<HGroupProfile>,
     objective: &mut PlanningObjective,
 ) -> Result<bool, CliError> {
     match flag {
+        "--move-time-ms" => {
+            *move_time_ms = parse_value(flag, &next_value(arguments, flag)?)?;
+            if !(1..=120_000).contains(move_time_ms) {
+                return Err(CliError::Usage(
+                    "--move-time-ms must be between 1 and 120000".to_owned(),
+                ));
+            }
+        }
         "--exact-world-limit" => {
             *exact_world_limit = parse_value(flag, &next_value(arguments, flag)?)?;
         }
@@ -521,11 +554,13 @@ fn usage() -> &'static str {
      --candidate <ACTION>   Include purple:Donald, 3:Alice, play:17, discard:12 (repeatable)\n  \
      --live-turn <N>        One-based Hanab Live turn, instead of --turn\n  \
      --format <text|json>    Explanation format (implies --explain)\n  \
+     --move-time-ms <N>      Move time budget in milliseconds (1–120000; default: 120000)\n  \
      --exact-node-limit <N>   Nodes allowed in exact endgame (default: 50000)\n  \
      --objective <expected-score|perfect-score>  Exact-planning objective (default: expected-score)\n  \
      --convention <none|h-group>  Convention framework (default: none)\n  \
      --h-group-level <1-25|max>   Required H-Group cumulative profile\n\n\
      Live-action options:\n  --exact-world-limit <N>  Worlds allowed in exact endgame (default: 4096)\n  \
+     --move-time-ms <N>      Move time budget in milliseconds (1–120000; default: 120000)\n  \
      --exact-node-limit <N>   Nodes allowed in exact endgame (default: 50000)\n  \
      --objective <expected-score|perfect-score>  Exact-planning objective (default: perfect-score)\n  \
      --convention <none|h-group>  Convention framework (default: h-group)\n  \
@@ -593,5 +628,45 @@ impl std::error::Error for CliError {
             Self::SerializeReport(error) => Some(error),
             Self::Usage(_) | Self::TerminalPosition(_) | Self::InvalidCurrentPlayer => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod budget_tests {
+    use super::*;
+
+    #[test]
+    fn cli_move_budget_is_defaulted_and_capped_for_both_entrypoints() {
+        assert_eq!(
+            parse_live_action_arguments(&mut std::iter::empty())
+                .unwrap()
+                .unwrap()
+                .move_time_ms,
+            120_000
+        );
+        for value in ["0", "120001", "-1"] {
+            assert!(
+                parse_live_action_arguments(
+                    &mut ["--move-time-ms", value].map(str::to_owned).into_iter()
+                )
+                .is_err()
+            );
+            assert!(
+                parse_analyze_arguments(
+                    &mut ["game.json", "--turn", "0", "--move-time-ms", value]
+                        .map(str::to_owned)
+                        .into_iter()
+                )
+                .is_err()
+            );
+        }
+        let args = parse_analyze_arguments(
+            &mut ["game.json", "--turn", "0", "--move-time-ms", "100"]
+                .map(str::to_owned)
+                .into_iter(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(args.move_time_ms, 100);
     }
 }

@@ -21,7 +21,10 @@ pub struct PositionAnalysis {
 ///
 /// This is the high-level convention-safe entry point for applications. It
 /// derives logical information and supplies the selected
-/// [`SupportedConvention`] to the deterministic planner.
+/// [`SupportedConvention`] to the planner. The move budget defaults to and is
+/// capped at two minutes, including inference. On expiry, a convention-admitted
+/// best-so-far move is returned with `budget_exhausted` set. If admission or
+/// belief consistency has not been established, expiry returns an error.
 ///
 /// # Errors
 ///
@@ -36,7 +39,9 @@ pub fn analyze_position(
 }
 
 /// Cooperative counterpart to [`analyze_position`]. No move is returned if
-/// cancellation or a request-wide budget interrupts candidate evaluation.
+/// explicit cancellation, request deadline, or work limit interrupts evaluation.
+/// The automatic move-time budget instead permits the best-so-far fallback
+/// described in [`analyze_position`].
 ///
 /// # Errors
 /// Returns an analysis error or the specific cancellation/budget reason.
@@ -48,18 +53,27 @@ pub fn analyze_position_with_control(
 ) -> Result<PositionAnalysis, AnalyzePositionError> {
     #[cfg(test)]
     let _profile = crate::test_profile::span("analyze_position");
+    control
+        .checkpoint()
+        .map_err(AnalyzePositionError::Stopped)?;
+    let _budget = crate::budget::Scope::enter(config.move_time_limit, control);
     let _memo = crate::h_group::begin_analysis_replay_memo();
-    control
-        .checkpoint()
-        .map_err(AnalyzePositionError::Stopped)?;
-    let information = InformationSet::new(view).map_err(AnalyzePositionError::InformationSet)?;
-    control
-        .checkpoint()
-        .map_err(AnalyzePositionError::Stopped)?;
-    let convention_analysis = convention.analyze(information.deductions());
-    control
-        .checkpoint()
-        .map_err(AnalyzePositionError::Stopped)?;
+    let (information, convention_analysis) = crate::budget::run(|| {
+        control
+            .checkpoint()
+            .map_err(AnalyzePositionError::Stopped)?;
+        let information =
+            InformationSet::new(view).map_err(AnalyzePositionError::InformationSet)?;
+        control
+            .checkpoint()
+            .map_err(AnalyzePositionError::Stopped)?;
+        let convention_analysis = convention.analyze(information.deductions());
+        control
+            .checkpoint()
+            .map_err(AnalyzePositionError::Stopped)?;
+        Ok((information, convention_analysis))
+    })
+    .map_err(|stop| AnalyzePositionError::Stopped(stop.reason()))??;
     let planner = plan_move_with_control(
         &information,
         convention,
@@ -115,6 +129,23 @@ mod tests {
             .unwrap()
             .view_for(PlayerId::new(0))
             .unwrap()
+    }
+
+    #[test]
+    fn expired_move_budget_cannot_return_uncompiled_candidates() {
+        let result = analyze_position(
+            &initial_view(),
+            SupportedConvention::None,
+            PlannerConfig {
+                move_time_limit: std::time::Duration::ZERO,
+                ..PlannerConfig::default()
+            },
+        );
+        assert_eq!(
+            result,
+            Err(AnalyzePositionError::Stopped(AnalysisStopped::Deadline))
+        );
+        crate::budget::checkpoint();
     }
 
     #[test]

@@ -942,6 +942,7 @@ fn replay_h_group_inner(
     allow_blind_reverse_empathy: bool,
 ) -> HGroupState {
     with_replay_memo(|| {
+        crate::budget::checkpoint();
         #[cfg(test)]
         let _profile = crate::test_profile::span("history_replay");
         let key = ReplayMemoKey {

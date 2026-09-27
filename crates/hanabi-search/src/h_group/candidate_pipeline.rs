@@ -73,6 +73,7 @@ fn validate_proposals(
     let mut evidence = Vec::new();
     let mut rejected = Vec::new();
     for mut proposal in proposals {
+        crate::budget::checkpoint();
         assert!(proposal.validate().is_ok(), "malformed clue proposal");
         let outcome =
             super::clue_outcome::scheduled_clue_outcome(deductions.view(), profile, &proposal);

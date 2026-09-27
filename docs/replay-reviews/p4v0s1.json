@@ -1,5 +1,28 @@
 [
   {
+    "id": "t50-two-minute-move-budget",
+    "turn": 50,
+    "positionKey": "c82a42501a969c4f55ca4c4c5d8c18d783bd7854f3ffa831cc6b8f330730c515",
+    "status": "user-explained",
+    "perspective": "Operational move-calculation budget, not a new convention or strategy ruling.",
+    "source": {
+      "conversation": "User response to the 76-minute turn-50 analysis, 2026-09-27",
+      "quote": "we need to make it so that we have a 2 minute budget max for calculating moves that use the \"in endgame and go through all possibilities\" mode."
+    },
+    "explanation": {
+      "reasoning": "The user suggested a numerical threshold on remaining card possibilities and asked to aim for a two-minute maximum move calculation. A long endgame analysis must not run for 76 minutes.",
+      "diagnosis": "The prior turn-50 run had six consistent worlds, zero exact nodes, and symbolic planning: recursive convention forecasts were the bottleneck after exact preflight rejected the solve. Existing world/node thresholds therefore cannot enforce the requested time bound.",
+      "implementation": "A shared deadline includes inference, enumeration, exact search, and symbolic forecasts. It defaults to and is capped at 120 seconds. Completed forecasts can choose a best-so-far admitted move; unfinished roots are marked unavailable, not scored as zero. Before admission and belief consistency are established, expiry returns a deadline error. No fixture moves or convention meanings change."
+    },
+    "regressions": [
+      "planner::tests::reviewed_turn50_move_budget_returns_an_admitted_incomplete_result",
+      "analysis::tests::expired_move_budget_cannot_return_uncompiled_candidates",
+      "budget::tests::deadline_unwinds_scopes_and_does_not_swallow_other_panics",
+      "budget::tests::nested_scopes_cannot_extend_budget_and_requests_take_precedence"
+    ],
+    "coverageNote": "Eight focused budget/control/exact-search checks passed. A release CLI run at the default budget stopped after 120.007 seconds (120.331 seconds including process overhead), returning fixture y5 #27 with budgetExhausted. Full check 498955ea997d4da2bdbc36b320f16abf passed every non-Rust-test stage but reported 51 Rust failures: 47 previously recorded, three deadline-related failures, and a CLI text compatibility failure fixed and rerun successfully. Historical four-Save projection and Burn-choice assertions and current turn-44 complete-perfect-forecast assertions remain intact; the bounded search does not establish all of that evidence within two minutes. No complete replay-wide agreement is claimed for timed-out results."
+  },
+  {
     "id": "t52-retire-fixes-when-cards-leave-hand",
     "turn": 52,
     "positionKey": "6c8c413671a89a9ac907f2e8d8f226b5482280632f979db551efc86679172064",

@@ -53,10 +53,18 @@ impl AnalysisControl {
         self.used.get()
     }
 
+    pub(crate) fn interrupt_handle(&self) -> RequestInterrupt {
+        RequestInterrupt {
+            cancellation: self.cancellation.clone(),
+            deadline: self.deadline,
+        }
+    }
+
     /// A work unit is a compiler invocation, projection step, or world/search
-    /// node, not elapsed time. A compiler invocation is currently atomic:
-    /// deadlines are cooperative, not hard real-time interruption guarantees.
+    /// node, not elapsed time. Recursive inference also checks cancellation and
+    /// deadlines, without consuming additional search-node work units.
     pub(crate) fn checkpoint(&self) -> Result<(), AnalysisStopped> {
+        crate::budget::checkpoint();
         if self.cancellation.0.load(Ordering::Relaxed) {
             return Err(AnalysisStopped::Cancelled);
         }
@@ -91,3 +99,23 @@ impl fmt::Display for AnalysisStopped {
     }
 }
 impl std::error::Error for AnalysisStopped {}
+
+// A non-counting handle used at fine-grained inference checkpoints.
+pub(crate) struct RequestInterrupt {
+    cancellation: CancellationToken,
+    deadline: Option<Instant>,
+}
+impl RequestInterrupt {
+    pub(crate) fn reason(&self) -> Option<AnalysisStopped> {
+        if self.cancellation.0.load(Ordering::Relaxed) {
+            Some(AnalysisStopped::Cancelled)
+        } else if self
+            .deadline
+            .is_some_and(|deadline| Instant::now() >= deadline)
+        {
+            Some(AnalysisStopped::Deadline)
+        } else {
+            None
+        }
+    }
+}

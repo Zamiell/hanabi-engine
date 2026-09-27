@@ -158,6 +158,7 @@ impl ReplayReducer {
     ) -> HGroupState {
         let view = deductions.view();
         for (entry_index, entry) in view.history.iter().enumerate() {
+            crate::budget::checkpoint();
             // An ordinary clued play can decline a fresh blind response,
             // unlike fulfilling an older Finesse. The connection manager uses
             // this only for a knowledge-gated recipient Self-Finesse fallback.
