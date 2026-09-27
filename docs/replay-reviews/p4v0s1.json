@@ -1,9 +1,28 @@
 [
   {
+    "id": "t34-user-accepts-five-save-continuation",
+    "turn": 34,
+    "positionKey": "21f7c88bc2ca51f450de56042fb925908e45893f852b2c75eb23ac814919e421",
+    "status": "user-explained",
+    "perspective": "User-supplied continuation; Bob at34 and38.",
+    "source": {
+      "conversation": "2026-09-27 fixture revision and correction",
+      "quote": "change the fixture to clue 5's to cathy. then: ... discard y4 ...",
+      "correction": "yes i meant discard p4, his chop"
+    },
+    "explanation": {
+      "action": "Replace turns34–54 with the supplied five-save continuation. Turn38 discards Bob’s p4 #5, not y4.",
+      "boundary": "Acceptance of the concrete move, not a ruling about Priority Prompts with visible unclued duplicates. Earlier position anchors through34 are unchanged. Historical later records remain stale and are not re-anchored.",
+      "validation": "All54 actions replay legally without strikes, finishing at score25."
+    },
+    "regressions": [],
+    "coverageNote": "Replay legality and from-start engine comparison; no new optimal-move assertion."
+  },
+  {
     "id": "t34-priority-prompt-versus-unseen-unclued-duplicate",
     "turn": 34,
     "positionKey": "21f7c88bc2ca51f450de56042fb925908e45893f852b2c75eb23ac814919e421",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Bob; #5, #16, #19 and #27 remain hidden, and all future draws remain unknown.",
     "source": {
       "conversation": "Autonomous replay investigation 2026-09-27",
@@ -28,7 +47,9 @@
       "question": "Does Cathy’s clued Priority Prompt take precedence over an unclued r4 visible in Bob’s hand, or does that visible duplicate redirect the signal into a Load Clue? The actual Bob hand has no r4, but he cannot assume that in his own projection.",
       "documentationBoundary": "Level25 explicitly provides Priority Prompts and redirects Priority Finesses when a connector is visible outside Finesse Position. Its examples do not explicitly settle a simultaneous compatible clued Prompt and visible unclued duplicate. Earlier reviewed r4 plays establish the actual no-duplicate position, not this hypothetical duplicate case.",
       "heldBackChange": "A proposed relaxation ignoring all hidden unclued duplicates was removed pending judgment. Existing unknown-connector dependency remains. No fixture actions changed.",
-      "clearFix": "A later5 clue makes r4 independently known from literal exclusions and Good Touch. Its play must no longer carry the earlier Priority absence dependency; focused regression verifies that release while retaining the dependency before clarification."
+      "clearFix": "A later5 clue makes r4 independently known from literal exclusions and Good Touch. Its play must no longer carry the earlier Priority absence dependency; focused regression verifies that release while retaining the dependency before clarification.",
+      "supersededBy": "t34-user-accepts-five-save-continuation",
+      "reviewBoundary": "The user accepted5s and replaced the continuation; this does not supply a general duplicate-Priority interpretation."
     },
     "regressions": [
       "h_group::tests::replay::reviewed_clarification_releases_priority_projection_dependency"
