@@ -1161,6 +1161,9 @@ fn has_higher_basic_priority(
     hands: &[Vec<CardId>],
     facts: &[ClueFacts],
     forced_playable: &CardSet,
+    explicitly_clued: &CardSet,
+    convention_facts: &ConventionFacts,
+    stack_heights: [u8; 5],
     actor: PlayerId,
     hand: &[CardId],
     candidate: CardId,
@@ -1179,7 +1182,19 @@ fn has_higher_basic_priority(
                 .enumerate()
                 .filter(|(player, _)| *player != actor.index())
                 .flat_map(|(_, other_hand)| other_hand)
-                .any(|other| identity_of(view, *other) == Some(next))
+                .any(|other| {
+                    identity_of(view, *other) == Some(next)
+                        && (forced_playable.contains(other)
+                            || (explicitly_clued.contains(other)
+                                && (convention_facts.known_identity(*other) == Some(next)
+                                    || IdentitySet::from_mask(
+                                        facts[other.index()].identity_mask(),
+                                    )
+                                    .iter()
+                                    .filter(|id| !is_trash_at(stack_heights, *id))
+                                    .collect::<Vec<_>>()
+                                        == [next])))
+                })
         });
         let terminal_chain = (candidate_identity.rank == Rank::Five
             || played_identity.rank == Rank::Five)
@@ -1190,7 +1205,9 @@ fn has_higher_basic_priority(
         let leads_self = !terminal_chain
             && next.is_some_and(|next| {
                 hand.iter().copied().any(|other| {
-                    other != card && facts[other.index()].identity_mask() == 1 << next.index()
+                    other != card
+                        && (facts[other.index()].identity_mask() == 1 << next.index()
+                            || convention_facts.known_identity(other) == Some(next))
                 })
             });
         let position = hand
@@ -1282,6 +1299,7 @@ struct ConnectionPlanningContext<'a> {
     touches: CurrentClueTouches<'a>,
     hands: &'a [Vec<CardId>],
     facts: &'a [ClueFacts],
+    facts_before: &'a [ClueFacts],
     clues: &'a [HGroupClueInterpretation],
     promptable_before: PromptableBeforeClue<'a>,
     protected_before: &'a CardSet,
@@ -1331,6 +1349,7 @@ impl ConnectionPlanningContext<'_> {
             Some(identity),
             self.hands,
             self.facts,
+            self.facts_before,
             self.clues,
             self.promptable_before.0,
             self.already_playing,
@@ -1378,6 +1397,7 @@ impl ConnectionPlanningContext<'_> {
             identity,
             self.hands,
             self.facts,
+            self.facts_before,
             self.clues,
             self.promptable_before.0,
             self.already_playing,
@@ -1407,6 +1427,7 @@ fn schedule_connection(
     focus_identity: Option<Card>,
     hands: &[Vec<CardId>],
     facts: &[ClueFacts],
+    facts_before: &[ClueFacts],
     clues: &[HGroupClueInterpretation],
     promptable_before_clue: &CardSet,
     already_playing: &CardSet,
@@ -1488,13 +1509,25 @@ fn schedule_connection(
                     clue.focus == card && clue.focus_identities == IdentitySet::singleton(expected)
                 })
         };
+        // Level1: already-known connectors are not new Prompts. Literal
+        // identity can be established on collateral without an already_playing
+        // marker. Use pre-clue facts so this clue cannot prove its own premise.
+        let already_known = |card: CardId| {
+            already_playing.contains(&card)
+                || facts_before[card.index()].identity_mask() == 1 << expected.index()
+                || convention_facts.known_identity_before(card, turn) == Some(expected)
+        };
         let gotten_match_is_still_waiting = promptable_before_clue
             .iter()
-            .any(|card| !already_playing.contains(card) && matches_expected(*card));
+            .any(|card| !already_known(*card) && matches_expected(*card));
         let expected_is_already_playing = !gotten_match_is_still_waiting
-            && already_playing
-                .iter()
-                .any(|card| !declined_direct_plays.contains(card) && matches_expected(*card));
+            && hands.iter().flatten().any(|card| {
+                !declined_direct_plays.contains(card)
+                    && already_known(*card)
+                    && (matches_expected(*card)
+                        || facts_before[card.index()].identity_mask() == 1 << expected.index()
+                        || convention_facts.known_identity_before(*card, turn) == Some(expected))
+            });
         if pending.identity_is_queued(expected) {
             let giver_is_deferring_this_connection = pending.iter().any(|connection| {
                 connection.actor == giver

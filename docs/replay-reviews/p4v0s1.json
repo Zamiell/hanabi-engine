@@ -1,9 +1,150 @@
 [
   {
+    "id": "t34-priority-prompt-versus-unseen-unclued-duplicate",
+    "turn": 34,
+    "positionKey": "21f7c88bc2ca51f450de56042fb925908e45893f852b2c75eb23ac814919e421",
+    "status": "unresolved",
+    "perspective": "Bob; #5, #16, #19 and #27 remain hidden, and all future draws remain unknown.",
+    "source": {
+      "conversation": "Autonomous replay investigation 2026-09-27",
+      "kind": "Engine evidence and a convention question, not a user ruling."
+    },
+    "explanation": {
+      "fixture": "Discard #5, actually p4; engine prefers 5s to Cathy.",
+      "fixtureLine": [
+        "34 Bob discards unknown #5; eight safe reveal branches: r1, r3, r4, y1, g1, g2, g4, p4.",
+        "For seven branches other than r4: stop before35 Cathy r4 because Bob’s hidden #16 can still be r4, which may redirect Priority.",
+        "For the hypothetical #5=r4 reveal: 35 Cathy discards r5 #33; 36 Donald p3 #14; 37 Alice discards y2 #29; 38 Bob safe-discard #16; stop at safe-reveal budget. This is an engine hypothetical, not the fixture suffix or an approved interpretation."
+      ],
+      "engineLine": [
+        "34 Bob 5s to Cathy",
+        "35 Cathy r4 #28",
+        "36 Donald p3 #14",
+        "37 Alice discards y2 #29",
+        "38 Bob safe-discard unknown #5, branching over r1/r3/r4/y1/g1/g2/g4/p4",
+        "All eight branches stop before39 Cathy discards unknown replacement #36; no future draw identity is asserted."
+      ],
+      "comparison": "ConventionPreference (heuristic): Save priority500 versus discard400. Endpoint evidence is Incomparable, with no decisive shared horizon or proven dominance. The Save secures fresh r5 and independently clarifies r4, but this is not proof that spending the clue now is optimal.",
+      "question": "Does Cathy’s clued Priority Prompt take precedence over an unclued r4 visible in Bob’s hand, or does that visible duplicate redirect the signal into a Load Clue? The actual Bob hand has no r4, but he cannot assume that in his own projection.",
+      "documentationBoundary": "Level25 explicitly provides Priority Prompts and redirects Priority Finesses when a connector is visible outside Finesse Position. Its examples do not explicitly settle a simultaneous compatible clued Prompt and visible unclued duplicate. Earlier reviewed r4 plays establish the actual no-duplicate position, not this hypothetical duplicate case.",
+      "heldBackChange": "A proposed relaxation ignoring all hidden unclued duplicates was removed pending judgment. Existing unknown-connector dependency remains. No fixture actions changed.",
+      "clearFix": "A later5 clue makes r4 independently known from literal exclusions and Good Touch. Its play must no longer carry the earlier Priority absence dependency; focused regression verifies that release while retaining the dependency before clarification."
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_clarification_releases_priority_projection_dependency"
+    ],
+    "coverageNote": "No optimal-move assertion or new convention for duplicate Priority connectors. Built-in explanations include all root reveal branches and their stopping conditions."
+  },
+  {
+    "id": "t32-priority-prompt-identifies-cathys-red-four",
+    "turn": 32,
+    "positionKey": "4d46a4f32b10bf5927ab18ee5c401156a76de5ad2748a019641ed94ded99d327",
+    "status": "user-explained",
+    "perspective": "Donald chooses r3 rather than p3; Cathy must infer her clued but rank-ambiguous red card is r4. Bob must recognize Cathy’s upcoming play when evaluating the newly drawn r5 Save deadline.",
+    "source": {
+      "conversation": "User-supplied r3 then r4 continuation; implementation investigation 2026-09-27",
+      "quote": "- r3 play\n- discard r1\n- discard p4\n- play r4",
+      "documentation": "https://hanabi.github.io/level-25/#a-priority-flowchart-for-choosing-between-2-playable-cards",
+      "boundary": "The reviewed moves and published Priority Prompt rules establish this behavior; no new user explanation is invented."
+    },
+    "explanation": {
+      "meaning": "The flowchart distinguishes known clued successors from clued successors whose owner does not know their identity. Playing into the latter can signal a Priority Prompt. Donald’s rank3 is publicly r3: yellow/green/purple are excluded by earlier clues and blue3 is dead under Good Touch.",
+      "bugs": [
+        "Priority recognition checked literal singleton rank+suit but omitted publicly known identity after Good Touch excludes dead alternatives.",
+        "It searched only visible clued cards for Prompts, falling back to an unclued Finesse Position when the receiver’s own clued connector was hidden.",
+        "Historical priority classification counted unclued successors and failed to distinguish an unknown clued successor from an already-known one.",
+        "The urgent-save occupancy check omitted forced plays such as Priority Prompts."
+      ],
+      "fix": "Retain public Good Touch knowledge, locate the receiver’s leftmost compatible clued Prompt, and recognize its pending play in the save-deadline check. Do not substitute hidden card faces.",
+      "turn29Consequence": "Both corrected turn29 lines now retain Cathy’s r4 commitment after Donald’s r3. The original timing guard remains covered as an arithmetic counterfactual; the fixture-root test now asserts equal commitments and keeps its p2 expectation.",
+      "priorQuestion": "The actual replay’s r4/r5 ambiguity is resolved by the Priority Prompt. Bob’s forecast still has a separate uncertainty about unseen duplicate r4s in his own hand; it must not assume those cards absent. See the subsequent turn34 investigation.",
+      "clarificationDependency": "Once a later 5 clue independently identifies the red card as r4 through literal exclusions and public Good Touch, its play no longer depends on the old Priority absence premise. The dependency compiler must drop that obsolete requirement."
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_red_three_priority_prompt_reaches_cathy",
+      "h_group::tests::replay::reviewed_priority_requires_a_clued_teammate_successor",
+      "planner::tests::reviewed_turn_twenty_nine_clarification_preserves_save_timing",
+      "h_group::tests::replay::reviewed_clarification_releases_priority_projection_dependency"
+    ],
+    "coverageNote": "Checks Bob, Cathy, and Donald’s independently compiled recognition and Cathy’s playable r4. Existing blind-play and unknown-hand Priority controls remain active."
+  },
+  {
+    "id": "t33-relative-workload-and-common-observer-save-handoff",
+    "turn": 33,
+    "positionKey": "9626fe7079ba1febc2dedb89e61b836f78d7b9d3b8a5007ada8235f74bdf46ae",
+    "status": "user-explained",
+    "perspective": "Alice can safely discard unknown #21 and let Bob give the same 5 Save to Cathy before she acts. Alice has y4; Bob has g5 and the visibly useful y5. Bob’s duplicate p4 does not add needed work.",
+    "source": {
+      "conversation": "Earlier reviewed Team Distribution explanation, applied to current user-supplied turn33 discard on 2026-09-27",
+      "quote": "Since Alice has 0 clued/playable cards in her hand and bob has 2, then alice should be the one drawing cards and Bob should be the one giving the clues, that is just basic teamwork.",
+      "boundary": "The quoted zero-versus-two example is historical. Current one-versus-two is an application of the same relative-workload principle, not a new quote or exact-zero restriction.",
+      "documentation": "https://hanabi.github.io/level-8/#team-distribution-principle"
+    },
+    "explanation": {
+      "workloadBug": "The handoff helper required the drawer to have zero useful clued cards, omitting the same established principle when one hand has less work but is not empty. Compare known useful workloads; do not count an unclued duplicate already secured elsewhere as extra needed work.",
+      "perspectiveBug": "The helper compared clue effects from Alice’s perspective against effects re-rooted at Bob. Hiding Bob’s cards again erased the recipient’s knowledge of r5 after5s and falsely changed owner_actions, although both clues are identical and precede Cathy’s turn. Check admission in Bob’s own view, then evaluate both outcomes from the original Alice observer.",
+      "safety": "Every safe discard identity must preserve the same admitted clue and recipient effect. Hidden future draws stay unknown; equal or unknown relative workload does not earn the preference.",
+      "historicalReviews": [
+        "t33-contextual-chop-safety-and-draw-allocation",
+        "t40-donald-draws-alice-saves"
+      ]
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_lighter_hand_can_delegate_a_save_with_one_known_play"
+    ],
+    "coverageNote": "Checks current handoff and downstream discard priority across all assessed safe reveal branches. Hiding Bob’s y5 equalizes known workloads and blocks the preference; hiding both5s also blocks it. Historical handoff tests retain their assertions and any pre-existing admission failures are reported separately."
+  },
+  {
+    "id": "t32-known-purple-three-is-not-a-new-prompt",
+    "turn": 32,
+    "positionKey": "4d46a4f32b10bf5927ab18ee5c401156a76de5ad2748a019641ed94ded99d327",
+    "status": "user-explained",
+    "perspective": "Donald after Bob’s normal purple Play Clue at30 and Cathy’s duplicate p3 discard at31. His earlier rank3 and purple clues already identify p3.",
+    "source": {
+      "conversation": "User-supplied Gentleman discard continuation and autonomous examination 2026-09-27",
+      "quote": "- discard p3\n- r3 play",
+      "documentation": "https://hanabi.github.io/level-1/#the-prompt",
+      "boundary": "The fixture supplies r3. The Prompt bug is established by Level1, not a new inferred user strategy ruling.",
+      "priorityDocumentation": "https://hanabi.github.io/level-25/#the-priority-prompt--the-priority-finesse"
+    },
+    "explanation": {
+      "bug": "The scheduler checked only already_playing markers, missing literal knowledge on a collateral card. It installed a new Prompt on p3, gave it Connection priority800, and excluded r3 entirely.",
+      "fix": "Use literal facts from before the clue plus retained earlier convention identities when checking already-known connectors. Same-clue evidence cannot prove its own prerequisite. Existing queued and declined-play handling remains in force.",
+      "scope": "Remove the false mandatory Prompt; do not assert that every ordinary strategic comparison must favor r3.",
+      "priorityBug": "After removing the false Prompt, action ordering still preferred p3 because it counted Bob’s unclued p4 as a teammate successor. Require clued or convention-promised successor evidence. The later Priority-flowchart investigation also distinguishes a known successor’s normal priority from an unknown clued successor that can be obtained through a Priority Prompt."
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_known_purple_connector_is_not_a_new_prompt",
+      "h_group::tests::replay::reviewed_priority_requires_a_clued_teammate_successor"
+    ],
+    "coverageNote": "Verifies Donald knows p3 before and after the clue and has no new active Prompt. Related tests retain ambiguous/parked/visible-reverse Prompts and reject newly touched collateral Prompts; 17 focused related tests pass. Priority regression requires r3 first in the actual reviewed position, with a negative control hiding the red successor and restoring own-chain p3 priority."
+  },
+  {
+    "id": "t29-clarification-does-not-justify-accelerating-yellow-five-save",
+    "turn": 29,
+    "positionKey": "c1acadff54e7a1fadb5390b60ec761f1caa54f70844bc54364520c7d780d97f0",
+    "status": "user-explained",
+    "perspective": "Alice weighing p2 now and Bob purple to Cathy against 5s to Cathy, which advances Bob’s safe discards and exposes y5 earlier. Own unknown cards and future draws stay unknown.",
+    "source": {
+      "conversation": "2026-09-26 strategy explanation, implementation authorized 2026-09-27",
+      "quote": "I don't think having negative 5 on the red 4 is worth accelerating Bob's hand and making yellow 5 need to be saved sooner. Do you agree?"
+    },
+    "explanation": {
+      "decision": "Prefer the fixture p2; Cathy need not identify her red4 immediately. Extra negative5 information is insufficient compensation for advancing Bob’s yellow5 protection deadline.",
+      "implementationBoundary": "Being able to fund a pending Save prevents counting it as a lost card; it does not establish that its timing is free. At equal realized score, an increase only in executable future commitments cannot invoke funded-progress dominance while exposing additional critical chops. This does not veto genuinely realized scoring progress, assert unknown draws, or eliminate r5 from Cathy’s domain.",
+      "historicalBoundary": "Retain the earlier funded-protection ruling for realized progress. The earlier r4/r5 question did not establish that immediate rank identification was necessary to prefer playing p2.",
+      "verification": "The corrected root chooses p2. Its direct comparison with 5s to Cathy is now Incomparable on endpoint evidence and resolved by ConventionPreference for the scoring play; no synthetic r4 knowledge or hidden draw is introduced."
+    },
+    "regressions": [
+      "planner::tests::reviewed_turn_twenty_nine_clarification_preserves_save_timing"
+    ],
+    "coverageNote": "Reviewed root forecast and all compared reveal branches; controls retain the value of clarification without extra exposure and genuinely realized progress."
+  },
+  {
     "id": "t29-five-save-negative-information-versus-play-handoff",
     "turn": 29,
     "positionKey": "c1acadff54e7a1fadb5390b60ec761f1caa54f70844bc54364520c7d780d97f0",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Alice at29; own unknown cards and future draws remain unknown.",
     "source": {
       "conversation": "2026-09-26 autonomous replay continuation",
@@ -38,7 +179,8 @@
       "fixesBeforeComparison": "Historical Ejection recognition now retains clue-time connector evidence; same-clue hypothetical connectors cannot count as preexisting duplicates for Time Travel Chop Move. All seven safe reveal branches retain Donald’s p4 and downstream commitments."
     },
     "regressions": [],
-    "coverageNote": "No new preferred-move or red-rank assertion pending user judgment. Corrected inference has separate table-driven regression in t29-public-connector-play-must-not-rewrite-purple-as-ejection."
+    "coverageNote": "No new preferred-move or red-rank assertion pending user judgment. Corrected inference has separate table-driven regression in t29-public-connector-play-must-not-rewrite-purple-as-ejection.",
+    "supersededBy": "t29-clarification-does-not-justify-accelerating-yellow-five-save"
   },
   {
     "id": "t29-public-connector-play-must-not-rewrite-purple-as-ejection",

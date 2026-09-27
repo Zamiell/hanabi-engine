@@ -1452,7 +1452,14 @@ pub(in crate::h_group) fn apply_priority_effects(
     let played_possibilities = IdentitySet::from_mask(facts[card.index()].identity_mask());
     let convention_facts = signals.facts();
     let fixed_cards = convention_facts.fixed_cards();
+    // A clued card's public Good Touch exclusions also establish identity;
+    // literal rank+suit is not the only way a play can be globally known.
+    let useful_possibilities = played_possibilities
+        .iter()
+        .filter(|possible| !is_trash_at(stack_heights, *possible))
+        .collect::<Vec<_>>();
     let played_is_known = played_possibilities == IdentitySet::singleton(*identity)
+        || (explicitly_clued.contains(card) && useful_possibilities == [*identity])
         || convention_facts.known_identity(*card) == Some(*identity);
     let advances_existing_connection = signals.iter().any(|signal| {
         signal.turn < entry.turn
@@ -1502,6 +1509,9 @@ pub(in crate::h_group) fn apply_priority_effects(
                         hands,
                         facts,
                         forced_playable,
+                        explicitly_clued,
+                        convention_facts,
+                        stack_heights,
                         *player,
                         actor_hand,
                         *candidate,
@@ -1557,6 +1567,22 @@ pub(in crate::h_group) fn apply_priority_effects(
                     .filter(|finesse_position| *finesse_position == connector_card)
                     .map(|candidate| (target, candidate))
             });
+            // A receiver cannot see their own Prompt card. Prefer the
+            // leftmost compatible clued card over a blind Finesse Position.
+            let subjective_prompt = (visible_connector.is_none() && view.observer != *player)
+                .then(|| {
+                    hands[view.observer.index()]
+                        .iter()
+                        .rev()
+                        .copied()
+                        .find(|candidate| {
+                            explicitly_clued.contains(candidate)
+                                && !fixed_cards.contains(candidate)
+                                && facts[candidate.index()].allows(connector)
+                        })
+                        .map(|candidate| (view.observer, candidate))
+                })
+                .flatten();
             let subjective_finesse = (visible_connector.is_none() && view.observer != *player)
                 .then(|| {
                     hands[view.observer.index()]
@@ -1567,7 +1593,10 @@ pub(in crate::h_group) fn apply_priority_effects(
                         .map(|candidate| (view.observer, candidate))
                 })
                 .flatten();
-            priority_connection = prompt.or(visible_finesse).or(subjective_finesse);
+            priority_connection = prompt
+                .or(visible_finesse)
+                .or(subjective_prompt)
+                .or(subjective_finesse);
             if let Some((_, connection)) = priority_connection {
                 forced_playable.insert(connection);
             }

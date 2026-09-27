@@ -140,6 +140,7 @@ fn priority_playable_order_key(
                 .copied()
                 .unwrap_or(Rank::Five),
         );
+        let clued = context.inferred.clued_or_promised();
         identity.rank != Rank::Five
             && context
                 .view
@@ -148,8 +149,9 @@ fn priority_playable_order_key(
                 .enumerate()
                 .filter(|(player, _)| *player != context.view.observer.index())
                 .any(|(_, hand)| {
-                    hand.iter()
-                        .any(|candidate| candidate.identity == Some(next))
+                    hand.iter().any(|candidate| {
+                        candidate.identity == Some(next) && clued.contains(&candidate.id)
+                    })
                 })
     });
     let leads_self = singleton.is_some_and(|identity| {

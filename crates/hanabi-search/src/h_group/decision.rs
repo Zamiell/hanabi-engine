@@ -2790,7 +2790,7 @@ fn target_is_occupied(view: &PlayerView, replay: &HGroupState, target: PlayerId)
             && replay.pending_connections.is_active(connection)
             && is_playable_now(view, connection.expected)
     }) || replay.hands[target.index()].iter().any(|card| {
-        replay.cards.already_playing.contains(card)
+        (replay.cards.already_playing.contains(card) || replay.cards.forced_playable.contains(card))
             && identity_of(view, *card).is_some_and(|identity| is_playable_now(view, identity))
     })
 }

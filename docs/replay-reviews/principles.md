@@ -94,6 +94,24 @@ secured or playable card, ignore unfunded Saves, or trade away ready successors
 and hand quality merely for earlier points. This is not authority to assume
 Donald's unknown r4 in his own forecast or to freeze other observers' lines.
 
+## Clarification does not make an earlier Save deadline free
+
+Current `p4v0s1`, turn29, record
+`t29-clarification-does-not-justify-accelerating-yellow-five-save`: the user
+prefers Alice playing p2 and leaving purple to Bob. Negative5 on Cathy's red4 is
+not worth accelerating Bob's hand and bringing forward the yellow5 Save. Cathy
+need not identify that red card immediately for the play to be preferable.
+
+Funding a pending Save prevents treating it as a lost card; it does not erase
+its scheduling cost. At equal realized score, extra identified future work must
+not automatically dominate while exposing additional critical chops. Preserve
+the earlier ruling for actual scoring progress; do not assume hidden identities
+or impose a blanket ban on useful clarification.
+
+Regression: `reviewed_turn_twenty_nine_clarification_preserves_save_timing`
+checks the reviewed root, all compared safe reveal branches, and controls for
+clarification without extra exposure and genuinely realized progress.
+
 ## Team Distribution: who draws when a clue is interchangeable
 
 Source:
@@ -110,6 +128,18 @@ not a prediction of their identities.
 An unfunded later part of the chain must not erase an earlier funded advantage.
 Compare the same funded prefix on both sides. Preserve clue availability,
 recipient deadlines, interpretation, and protection when handing off the clue.
+
+Current turn33 (`t33-relative-workload-and-common-observer-save-handoff`) has
+one known useful card in Alice's hand versus two useful cards in Bob's. The
+reviewed principle is relative workload, not an exact-zero requirement. Exclude
+unclued duplicates already secured elsewhere from the teammate's needed work.
+Check the later giver's admission using their own knowledge, then compare both
+clue outcomes from the original observer. Re-rooting only one outcome can hide
+what the recipient sees and manufacture a knowledge loss.
+
+`reviewed_lighter_hand_can_delegate_a_save_with_one_known_play` verifies the
+same safe Save handoff and resulting discard preference, with equal-workload and
+missing-visible-work controls.
 
 ## Clue efficiency counts newly obtained cards
 

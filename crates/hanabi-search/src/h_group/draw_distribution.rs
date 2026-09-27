@@ -110,8 +110,8 @@ pub(super) fn discard_priority(
     Some(101 + i32::from(best.score()))
 }
 
-/// Prefer drawing into an unloaded hand to adding work to a teammate's loaded
-/// hand, but only when the same direct clue can move one seat later without
+/// Prefer drawing into the hand with less known useful work, but only when
+/// the same direct clue can move one seat later without
 /// delaying its recipient. This is a scheduling tiebreak, not a bonus for every
 /// discard or permission to sacrifice a needed card.
 pub(super) fn unloaded_hand_handoff(
@@ -123,18 +123,38 @@ pub(super) fn unloaded_hand_handoff(
 ) -> bool {
     let view = deductions.view();
     let next = next_player(view.observer, view.hands.len());
-    if best.target() == next
-        || inferred.cards.iter().any(|card| {
-            card.identities
-                .iter()
-                .any(|identity| is_eventually_useful(view, identity))
-                && inferred.clued_or_promised().contains(&card.card)
+    let clued = inferred.clued_or_promised();
+    let own_work = inferred
+        .cards
+        .iter()
+        .filter(|card| {
+            clued.contains(&card.card)
+                && card
+                    .identities
+                    .iter()
+                    .any(|identity| is_eventually_useful(view, identity))
         })
-        || !view.hands[next.index()].iter().any(|card| {
-            card.identity
-                .is_some_and(|identity| is_eventually_useful(view, identity))
+        .count();
+    let next_work = view.hands[next.index()]
+        .iter()
+        .filter(|card| {
+            card.identity.is_some_and(|identity| {
+                is_eventually_useful(view, identity)
+                    && (clued.contains(&card.id)
+                        || !view.hands.iter().flatten().any(|other| {
+                            other.id != card.id
+                                && clued.contains(&other.id)
+                                && (other.identity == Some(identity)
+                                    || inferred.cards.iter().any(|note| {
+                                        note.card == other.id
+                                            && note.identities
+                                                == crate::IdentitySet::singleton(identity)
+                                    }))
+                        }))
+            })
         })
-    {
+        .count();
+    if best.target() == next || own_work >= next_work {
         return false;
     }
     let Some(domain) = super::chop_safety::discard_domain(deductions, inferred, profile, discard)
@@ -212,8 +232,10 @@ fn equivalent_clue_handoff(
         else {
             return false;
         };
-        let Some(later) = super::clue_outcome::scheduled_clue_outcome(d.view(), profile, same)
-        else {
+        // Admission belongs to the later giver, but compare both outcomes
+        // from the original observer. Re-rooting the value at the giver hides
+        // their cards a second time and can erase what the recipient sees.
+        let Some(later) = super::clue_outcome::scheduled_clue_outcome(&after, profile, same) else {
             return false;
         };
         // Known-trash collateral is not a protected future point. Discard

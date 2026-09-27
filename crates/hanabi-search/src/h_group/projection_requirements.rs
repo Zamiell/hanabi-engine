@@ -67,6 +67,23 @@ pub(super) fn compile(view: &PlayerView, notes: &HGroupInferences) -> Vec<Projec
                     && signal.cards.contains(&card.id)
             }) {
                 if let Some(identity) = signal.identity {
+                    // Later literal information can independently establish
+                    // the play. An old Priority signal must not keep a
+                    // superseded absence requirement alive after clarification.
+                    let heights = std::array::from_fn(|suit| {
+                        u8::try_from(view.play_stacks[suit].len())
+                            .expect("a Hanabi stack has at most five cards")
+                    });
+                    let useful_literal = crate::IdentitySet::from_mask(card.clues.identity_mask())
+                        .iter()
+                        .filter(|possible| !super::is_trash_at(heights, *possible))
+                        .collect::<Vec<_>>();
+                    if was_clued_before(view, view.turn, card.id)
+                        && useful_literal == [identity]
+                        && super::is_playable_at(heights, identity)
+                    {
+                        continue;
+                    }
                     requirements.push(ProjectionRequirement {
                         actor,
                         action: Action::Play(card.id),

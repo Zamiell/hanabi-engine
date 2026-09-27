@@ -247,7 +247,10 @@ impl ProjectedPositionValue {
     fn productive_preference(self, other: Self) -> bool {
         self.preserves_funded_progress(other)
             && (self.score > other.score
-                || self.committed_future_plays > other.committed_future_plays)
+                // Clarification alone is not enough to bring a critical Save
+                // forward. Funding covers its token cost, not its timing cost.
+                || (self.committed_future_plays > other.committed_future_plays
+                    && self.exposed_critical_chops <= other.exposed_critical_chops))
     }
 
     fn preserves_funded_progress(self, other: Self) -> bool {
@@ -2500,6 +2503,79 @@ impl std::error::Error for PlannerError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewed_turn_twenty_nine_clarification_preserves_save_timing() {
+        // User-reviewed p4v0s1 turn29: negative5 on Cathy's red4 is not
+        // worth accelerating Bob's discards and the yellow5 Save deadline.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(28).unwrap();
+        let analysis = crate::analyze_position(
+            &state.view_for(state.current_player()).unwrap(),
+            SupportedConvention::HGroup(crate::HGroupProfile::Max),
+            PlannerConfig {
+                objective: PlanningObjective::PerfectScore,
+                ..PlannerConfig::default()
+            },
+        )
+        .unwrap();
+        let play = Action::Play(hanabi_core::CardId::new(24));
+        let save = Action::Clue {
+            target: hanabi_core::PlayerId::new(2),
+            clue: Clue::Rank(Rank::Five),
+        };
+        let candidate = |action| {
+            analysis
+                .planner
+                .root_actions
+                .iter()
+                .find(|c| c.action == action)
+                .unwrap()
+        };
+        let plays = candidate(play).projection.checkpoints_at(6);
+        let saves = candidate(save).projection.checkpoints_at(6);
+        assert!(!plays.is_empty() && !saves.is_empty());
+        for a in plays {
+            for b in &saves {
+                assert_eq!(a.value.score, b.value.score);
+                assert!(a.value.exposed_critical_chops < b.value.exposed_critical_chops);
+                // The later Priority-Prompt fix now identifies Cathy's r4 in
+                // both actual lines. Retain the original timing regression as
+                // an arithmetic counterfactual with one extra commitment.
+                assert_eq!(
+                    a.value.committed_future_plays,
+                    b.value.committed_future_plays
+                );
+                assert!(!b.value.productive_preference(a.value));
+                let clarification = ProjectedPositionValue {
+                    committed_future_plays: a.value.committed_future_plays + 1,
+                    ..b.value
+                };
+                assert!(!clarification.productive_preference(a.value));
+                // Negative control: identifying another play without advancing
+                // a Save deadline remains useful funded progress.
+                assert!(
+                    ProjectedPositionValue {
+                        exposed_critical_chops: a.value.exposed_critical_chops,
+                        ..clarification
+                    }
+                    .productive_preference(a.value)
+                );
+                // Realized points retain the historical funded-progress rule.
+                assert!(
+                    ProjectedPositionValue {
+                        score: b.value.score + 1,
+                        ..b.value
+                    }
+                    .productive_preference(a.value)
+                );
+            }
+        }
+        assert_eq!(analysis.planner.best_action, play);
+    }
 
     #[test]
     fn reviewed_turn_nineteen_prefers_two_two_for_one_clues() {

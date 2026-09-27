@@ -6127,3 +6127,183 @@ fn reviewed_purple_connectors_survive_their_public_plays() {
         }
     }
 }
+
+#[test]
+fn reviewed_known_purple_connector_is_not_a_new_prompt() {
+    // Current p4v0s1 turn32: p3 was literally identified before Bob's
+    // normal turn30 purple Play Clue. Level1: an already-known play is
+    // not a new Prompt, so it must not exclude Donald's ordinary r3 play.
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .unwrap();
+    for turn in [29, 31] {
+        let state = fixture.state_at_turn(turn).unwrap();
+        let d = LogicalDeductions::new(state.view_for(PlayerId::new(3)).unwrap()).unwrap();
+        let inferred = infer_h_group(&d, HGroupProfile::Max);
+        assert!(inferred.playable_now.contains(&CardId::new(14)));
+        assert_eq!(
+            inferred
+                .cards
+                .iter()
+                .find(|c| c.card == CardId::new(14))
+                .unwrap()
+                .identities,
+            IdentitySet::singleton(Card::new(Suit::Purple, Rank::Three))
+        );
+        assert!(
+            inferred.connection.is_none(),
+            "turn {}: {:?}",
+            turn + 1,
+            inferred.connection
+        );
+    }
+}
+
+#[test]
+fn reviewed_priority_requires_a_clued_teammate_successor() {
+    // Current p4v0s1 turn32, Level25 Priority: r3 leads to Cathy's
+    // clued r4; p3 leads to Donald's own p4. Bob's unclued p4 does not
+    // promote p3 into the teammate category.
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .unwrap();
+    let state = fixture.state_at_turn(31).unwrap();
+    let d = LogicalDeductions::new(state.view_for(PlayerId::new(3)).unwrap()).unwrap();
+    let inferred = infer_h_group(&d, HGroupProfile::Max);
+    let first = |view: &PlayerView| {
+        super::super::play_order::ordered_playable_cards(view, &inferred, HGroupProfile::Max)[0]
+    };
+    assert_eq!(first(d.view()), CardId::new(13));
+    // Negative control: without visible evidence for the teammate's red4,
+    // Donald's known own p4 gives purple3 Priority. No hidden face is used.
+    let mut hidden_successor = d.view().clone();
+    hidden_successor.hands[2]
+        .iter_mut()
+        .find(|c| c.id == CardId::new(28))
+        .unwrap()
+        .identity = None;
+    assert_eq!(first(&hidden_successor), CardId::new(14));
+}
+
+#[test]
+fn reviewed_lighter_hand_can_delegate_a_save_with_one_known_play() {
+    // Current p4v0s1 turn33 extends the reviewed Team Distribution
+    // principle: Alice's y4 is less work than Bob's g5 and eventual y5.
+    // The same Save can be given by Bob before Cathy acts in every safe
+    // discard branch; neither Alice's unknown chop nor new draw is exposed.
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .unwrap();
+    let state = fixture.state_at_turn(32).unwrap();
+    let d = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let notes = infer_h_group(&d, HGroupProfile::Max);
+    let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+    let save = candidates
+        .iter()
+        .find(|c| {
+            c.action
+                == Action::Clue {
+                    target: PlayerId::new(2),
+                    clue: Clue::Rank(Rank::Five),
+                }
+        })
+        .unwrap();
+    assert!(super::super::draw_distribution::unloaded_hand_handoff(
+        &d,
+        &notes,
+        HGroupProfile::Max,
+        save,
+        CardId::new(21)
+    ));
+    assert!(
+        super::super::draw_distribution::discard_priority(
+            &d,
+            &notes,
+            HGroupProfile::Max,
+            &candidates,
+            CardId::new(21)
+        )
+        .is_some()
+    );
+    for hidden_cards in [vec![27], vec![19, 27]] {
+        let mut hidden_work = d.view().clone();
+        for card in &mut hidden_work.hands[1] {
+            if hidden_cards.contains(&card.id.index()) {
+                card.identity = None;
+            }
+        }
+        let hidden = LogicalDeductions::new(hidden_work).unwrap();
+        assert!(!super::super::draw_distribution::unloaded_hand_handoff(
+            &hidden,
+            &notes,
+            HGroupProfile::Max,
+            save,
+            CardId::new(21)
+        ));
+    }
+}
+
+#[test]
+fn reviewed_red_three_priority_prompt_reaches_cathy() {
+    let f = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .unwrap();
+    for observer in [1, 2, 3] {
+        let state = f.state_at_turn(33).unwrap();
+        let d = LogicalDeductions::new(state.view_for(PlayerId::new(observer)).unwrap()).unwrap();
+        let r = replay_h_group(&d, HGroupProfile::Max);
+        assert!(
+            r.signals.iter().any(|s| s.turn == 31
+                && s.kind == HGroupMoveKind::Priority
+                && s.cards == [CardId::new(28)]),
+            "observer{observer}: {:?}",
+            r.signals
+                .iter()
+                .filter(|s| s.turn == 31)
+                .collect::<Vec<_>>()
+        );
+        if observer == 2 {
+            assert!(
+                infer_h_group_from_replay(&d, r, HGroupProfile::Max)
+                    .playable_now
+                    .contains(&CardId::new(28))
+            );
+        }
+    }
+}
+
+#[test]
+fn reviewed_clarification_releases_priority_projection_dependency() {
+    let f = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s1.json"
+    ))
+    .unwrap();
+    let state = f.state_at_turn(33).unwrap();
+    let view = state.view_for(PlayerId::new(1)).unwrap();
+    let after = ProspectiveTransition::clue_by(
+        &view,
+        PlayerId::new(1),
+        PlayerId::new(2),
+        Clue::Rank(Rank::Five),
+        &[CardId::new(22), CardId::new(33)],
+    );
+    for (source, should_depend) in [(&view, true), (&after, false)] {
+        let (d, r) = PerspectiveProjector::new(source, HGroupProfile::Max)
+            .project(PlayerId::new(2), PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        let notes = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+        let dependencies = super::super::projection_requirements::compile(d.view(), &notes);
+        assert_eq!(
+            dependencies
+                .iter()
+                .any(|r| r.action == Action::Play(CardId::new(28))),
+            should_depend,
+            "{dependencies:?}"
+        );
+        assert!(notes.playable_now.contains(&CardId::new(28)));
+    }
+}
