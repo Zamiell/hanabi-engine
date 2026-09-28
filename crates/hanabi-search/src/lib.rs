@@ -21,10 +21,11 @@ pub use analysis::{
 };
 pub use baseline::{CardAssessment, ConventionAgnosticPolicy, PolicyError, assess_card};
 pub use convention::{
-    ClueExplanation, CluePrincipleCheck, ConventionAction, ConventionActionReason,
-    ConventionAnalysis, ConventionInferences, ConventionPolicyTier, ConventionRejectionReason,
-    H_GROUP_RULESET_REVISION, HGroupLevel, HGroupProfile, ParseConventionError,
-    ParseHGroupProfileError, PrincipleVerdict, RejectedConventionAction, SupportedConvention,
+    ClueExplanation, CluePrincipleCheck, ClueSafetyContinuation, ConventionAction,
+    ConventionActionReason, ConventionAnalysis, ConventionInferences, ConventionPolicyTier,
+    ConventionRejectionReason, H_GROUP_RULESET_REVISION, HGroupLevel, HGroupProfile,
+    ParseConventionError, ParseHGroupProfileError, PrincipleVerdict, RejectedConventionAction,
+    SupportedConvention,
 };
 pub use h_group::{
     ActionPreference, ActionWindow, ClueTouchBranch, ConditionalAlternative, DependencyAssessment,

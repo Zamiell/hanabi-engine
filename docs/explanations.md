@@ -70,6 +70,10 @@ The report contains:
   boundary uses that recorded evidence. Missing causal evidence is conditional
   admission; projections stop before relying on it and exact search reports
   `ConditionalAdmission` instead of treating it as proven.
+- A duplicate-touch exception retains `semanticEvidence.safetyContinuation`: the
+  actual funded actions establishing safety, the collateral cards, and the real
+  successor selected by ordinary play order. This is admission evidence, not a
+  promise about unknown future draws or an exact-search principal variation.
 - The actual pairwise comparisons, including endpoint decisions and cycles.
   Their `authority` distinguishes policy, forecast evidence, and heuristic
   preference. Higher raw scores do not necessarily win. Exact-phase outcome

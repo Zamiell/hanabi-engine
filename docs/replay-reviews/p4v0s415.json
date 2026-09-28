@@ -565,7 +565,7 @@
     "id": "t32-purple-clue-touches-two-unidentified-purple-twos",
     "turn": 32,
     "positionKey": "c02a1464d7d1f894c7444afa7a8b944b1833945b354e32ea598c9bba5e791b2e",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Donald: one clue, stacks r5/y3/g4/b4/p1, 14 cards in deck. Bob has p2 #5 slot4, p2 #6 slot3, y2 #25 slot2, p4 #34 slot1. Donald\u2019s own chop #12 is physically b2 but unknown to him.",
     "source": {
       "conversation": "2026-09-28 autonomous audit after revised turn29 continuation",
@@ -597,6 +597,87 @@
       "auditScope": "Restarted from beginning:1\u201328 agree; known29 still selects playg4 over the accepted discardg4. Following the recorded discard,30\u201331 agree.32 is the next new disagreement; no claim of parity later in this replay or other replays."
     },
     "regressions": [],
-    "coverageNote": "Built-in admission/branch reports and owner-relative inference inspected. No engine or fixture edit, and no new optimal-move assertion pending interpretation."
+    "coverageNote": "Built-in admission/branch reports and owner-relative inference inspected. No engine or fixture edit, and no new optimal-move assertion pending interpretation.",
+    "supersededBy": "t32-duplicate-touch-has-safe-future-clarification"
+  },
+  {
+    "id": "t32-duplicate-touch-has-safe-future-clarification",
+    "turn": 32,
+    "positionKey": "c02a1464d7d1f894c7444afa7a8b944b1833945b354e32ea598c9bba5e791b2e",
+    "status": "user-explained",
+    "perspective": "Donald evaluates purple to Bob using current visible cards and owner knowledge, without future draws.",
+    "source": {
+      "conversation": "2026-09-28 user explanation after turn32 Good Touch disagreement",
+      "quote": "p5 is accounted for (globally known) in alice's hand. and p1 is played. thus, the remaining purple cards are p2, p3, and p4. normally, the bad touched copy of p2 would be misplayed as p3. however, here, donald can look into the future and see that the team will clue purple to alice to use her copy of p3. then, p4 will automatically play from bob's hand without any further clues because it happens to be the leftmost purple card of the two purple cards.",
+      "conclusion": "good touch principle only matters when the duplication will actually cause confusion or a misplay. purple to bob is for sure the optimal clue on this turn."
+    },
+    "explanation": {
+      "ruling": "Allow this duplicate touch because the funded ordinary continuation removes the unsafe p3 interpretation before Bob can misplay it. This is not a blanket exception for every efficient clue. All other common principle checks remain applicable.",
+      "certificate": [
+        "32 Donald purple to Bob",
+        "33 Alice b5 refunds a clue",
+        "34 Bob plays focused p2 #5",
+        "35 Cathy purple to Alice identifies p3 #33; both Bob collateral notes become p4",
+        "Alice can play p3; Bob then uses normal play order to play leftmost real p4 #34, making duplicate p2 #6 obsolete without a further clue to Bob."
+      ],
+      "implementation": "Run a bounded ordinary-policy continuation with unknown future draws, no recursive reliance on future-repair exceptions, available clue tokens and no unresolved action identities. Require owner-readable singleton successor notes, established prerequisites and a real successor first in normal play order. Simultaneously narrow same-clue collateral notes: narrowing the first peer must not remove its identity from the second peer in the same pass.",
+      "negativeControls": "No certificate without a clue token, with the visible p3 connector removed, or when leftmost is the duplicate. Hidden owner faces remain hidden.",
+      "decision": "The integrated planner now chooses purple to Bob over discarding. Diagnostic capture retains the actual safety continuation. The current proof supports a newly touched playable focus, duplicates of it and one future successor identity; other patterns keep ordinary admission until independently certified.",
+      "waitingSafety": "The continuation audit found a second consequence of the same correlated notes: known-trash selection treated the two inferred p4 notes as proof of two physical copies and discarded leftmost p4 while awaiting p3. Same-clue collateral cannot certify its peer as disposable without independent literal identification or a later independent focused clue. The reviewed waiting turns now retain p4 and discard ordinary chop y2; after p4 plays, its peer is ordinary trash."
+    },
+    "regressions": [
+      "h_group::duplicate_touch::tests::reviewed_duplicate_touch_has_funded_safe_continuation",
+      "h_group::tests::replay::reviewed_duplicate_collateral_uses_leftmost_play_before_trash",
+      "planner::tests::reviewed_duplicate_touch_wins_with_recorded_safe_continuation"
+    ],
+    "validation": "Three new focused regressions pass, including the integrated optimal clue and diagnostic witness. Related duplicate group: 11 pass, 2 pre-existing failures also present in completed full baseline d959b3dc260947ee9c96e3a31996fb10 at revision82bd9a5846daa5ab0c4c742fbe72e94787430e75 (fifth_replay_demonstrated_bluff_eliminates_older_good_touch_duplicates; second_replay_move_twenty_two_rejects_a_good_touch_duplicate). scripts/check.sh --fast passes. Full ordinary Rust suite is deferred to CI for these localized convention fixes; CI has not been observed."
+  },
+  {
+    "id": "t37-yellow-four-refund-timing-versus-purple-three-priority",
+    "turn": 37,
+    "positionKey": "daa53f92e2c06dff76397ab4dca41a9e2f57a8d22e274c330ddb9f01d35dcdc5",
+    "status": "unresolved",
+    "perspective": "Alice knows y4 #31, p3 #33 and p5 #24. One clue, 11 cards in deck, stacks r5/y3/g4/b5/p2. Both playable cards unlock already-clued teammates.",
+    "source": {
+      "conversation": "2026-09-28 audit following safe duplicate-touch explanation",
+      "quote": "then, continue to autonomously go through all replays and find disagreements. Do a deep analysis for each disagreement. If there are obvious bugs, then fix them autonomously. Otherwise, ask me about the correct strategy or convention.",
+      "documentation": "https://hanabi.github.io/level-25/#the-priority-prompt--the-priority-finesse"
+    },
+    "explanation": {
+      "fixedDuringInvestigation": "The initial y4 forecast wrongly discarded real p4 at38, treating same-clue collateral notes as independent copies. Fixed under the reviewed duplicate-touch principle and covered by the waiting-state regression; the current comparison has no Save Principle loss.",
+      "fixtureProjection": [
+        "37 Alice y4 #31",
+        "38 Bob discard y2 #25",
+        "39 Cathy y5 #10",
+        "40 Donald discard y1 #21",
+        "41 Alice p3 #33",
+        "42 Bob p4 #34",
+        "43 Cathy discard b3 #20",
+        "44 Donald discard p1 #26",
+        "45 Alice p5 #24",
+        "46 Bob discard p2 #6"
+      ],
+      "engineProjection": [
+        "37 Alice p3 #33",
+        "38 Bob p4 #34",
+        "39 Cathy discard b3 #20",
+        "40 Donald discard y1 #21",
+        "41 Alice y4 #31",
+        "42 Bob discard p2 #6",
+        "43 Cathy y5 #10",
+        "44 Donald discard p1 #26",
+        "45 Alice p5 #24",
+        "46 Bob discard y2 #25"
+      ],
+      "frontier": "Both stop before47 with IdentityBranch/UnknownIdentity. Future draws remain unknown, including the missing g5. Known own p5 and the remaining known play are exported to teammate perspectives as convention-established identities, not actual hidden faces. No discard-identity branches or speculative draw identities occur in these two projections.",
+      "comparison": "ConventionPlayOrder, policy authority; actualBasis is null because no normalized numeric endpoint decides this comparison. Both p3 and y4 lead into clued teammates (p4 Bob and y5 Cathy), neither has higher blind-play priority, and lower rank p3 wins the normal Priority tie. This rule runs before endpoint productivity comparisons. The full shared horizon10 has equal score24, clues8, five discards, no strikes, no clue demand or committed remaining plays.",
+      "timing": "The y4 line gets the y5 refund at39 instead of43, with more tokens through41. The p3 line scores its second point at38 instead of39; y4 line reaches score23 at42 instead of43. Neither line dominates all intermediate score checkpoints. Nobody spends clues in either forecast.",
+      "question": "Should this concrete earlier y5 refund override ordinary Priority, despite no forecast clue spending before the lines converge, or should the fixture use p3? The earlier b5/p5 ruling concerns the value of a clue that obtains both cards; it does not settle this order of two already-known playable chains. No general timing exception has been asserted.",
+      "scope": "Next new disagreement in the first manifest replay; known accepted turn29 discard versus engine play remains separately recorded. Other replays have not been advanced past this review checkpoint."
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_duplicate_collateral_uses_leftmost_play_before_trash"
+    ],
+    "coverageNote": "Waiting/discard safety has focused coverage. Comparative strategy remains unresolved; no new test freezes the engine p3 preference as optimal."
   }
 ]

@@ -243,6 +243,7 @@ impl ClueProposal {
 
     pub(super) fn explanation(self) -> crate::ClueExplanation {
         crate::ClueExplanation {
+            safety_continuation: None,
             validation: Vec::new(),
             interpretation: None,
             recognition: match self.recognition {

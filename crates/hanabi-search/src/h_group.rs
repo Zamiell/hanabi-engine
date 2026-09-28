@@ -38,6 +38,7 @@ mod coverage;
 mod decision;
 mod distribution;
 mod draw_distribution;
+mod duplicate_touch;
 mod effects;
 mod epistemic;
 mod event_reducer;

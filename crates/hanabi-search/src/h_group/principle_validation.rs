@@ -276,6 +276,14 @@ fn good_touch(
                 },
             );
             touch.evidence = "The owner recognizes touched trash immediately or after the safe required response; productivity or a permitted stall is independently established.";
+        } else if outcome.is_some_and(|value| value.clue_efficiency > 0)
+            && safe_duplicate_continuation(source, profile, proposal)
+        {
+            touch.verdict = PrincipleVerdict::Exception;
+            touch.exception = Some(
+                "docs/replay-reviews/principles.md#duplicate-touches-require-a-safe-continuation",
+            );
+            touch.evidence = "A funded ordinary continuation secures the intermediate before collateral can misplay; owner knowledge and play order then consume a real successor before its duplicate.";
         } else if critical_protection_requires_bad_touch(context, replay, target, outcome) {
             touch.verdict = PrincipleVerdict::Exception;
             touch.exception = Some(
@@ -289,6 +297,17 @@ fn good_touch(
     }
 
     touch
+}
+
+fn safe_duplicate_continuation(
+    source: &super::PlayerView,
+    profile: HGroupProfile,
+    proposal: &ClueProposal,
+) -> bool {
+    super::duplicate_touch::certify(source, profile, proposal).is_some_and(|witness| {
+        crate::diagnostics::record_safety_continuation(source, proposal.action, &witness);
+        true
+    })
 }
 
 fn critical_protection_requires_bad_touch(

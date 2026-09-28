@@ -1088,6 +1088,10 @@ pub(crate) fn analyze_h_group_convention(
                 .iter()
                 .map(|candidate| {
                     let mut explanation = candidate.explanation();
+                    explanation.safety_continuation = crate::diagnostics::safety_continuation(
+                        deductions.view(),
+                        candidate.action,
+                    );
                     explanation.interpretation =
                         crate::diagnostics::meaning(deductions.view(), candidate.action);
                     explanation
@@ -1745,11 +1749,15 @@ pub(super) fn convention_known_trash_discard(
                                 other.id != card.id
                                     && gotten.contains(&other.id)
                                     && (other.identity == Some(identity)
-                                        || inferred.cards.iter().any(|other_note| {
-                                            other_note.card == other.id
-                                                && other_note.identities
-                                                    == IdentitySet::singleton(identity)
-                                        }))
+                                        || (other.identity.is_none()
+                                            && independent_duplicate_note(
+                                                inferred, card, other, identity,
+                                            )
+                                            && inferred.cards.iter().any(|other_note| {
+                                                other_note.card == other.id
+                                                    && other_note.identities
+                                                        == IdentitySet::singleton(identity)
+                                            })))
                             })
                     })
             })
@@ -1767,6 +1775,28 @@ pub(super) fn convention_known_trash_discard(
         })
         .or_else(|| hand.iter().find(|card| is_trash(card)))
         .map(|card| card.id)
+}
+
+/// Same-clue collateral can converge on the same successor without proving
+/// two physical copies. Neither peer may certify the other's disposal before
+/// an independent clue or literal identification establishes the duplicate.
+fn independent_duplicate_note(
+    inferred: &HGroupInferences,
+    card: &hanabi_core::ObservedCard,
+    other: &hanabi_core::ObservedCard,
+    identity: Card,
+) -> bool {
+    let shared = inferred.clues.iter().find(|clue| {
+        clue.new_non_focus.contains(&card.id) && clue.new_non_focus.contains(&other.id)
+    });
+    shared.is_none_or(|shared| {
+        other.clues.identity_mask() == 1 << identity.index()
+            || inferred.clues.iter().any(|clue| {
+                clue.turn > shared.turn
+                    && clue.focus == other.id
+                    && clue.focus_identities == IdentitySet::singleton(identity)
+            })
+    })
 }
 
 /// Remaining cards whose owners still need a clue to complete the stacks.

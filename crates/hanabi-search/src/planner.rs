@@ -2771,6 +2771,51 @@ mod tests {
     use super::*;
 
     #[test]
+    fn reviewed_duplicate_touch_wins_with_recorded_safe_continuation() {
+        // User-reviewed p4v0s415 T32: obtain p3 elsewhere before Bob's
+        // indistinguishable collateral plays; normal order consumes real p4.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(31).unwrap();
+        let (analysis, _) = crate::diagnostics::capture_decisions(|| {
+            crate::analyze_position(
+                &state.view_for(state.current_player()).unwrap(),
+                SupportedConvention::HGroup(crate::HGroupProfile::Max),
+                PlannerConfig {
+                    objective: PlanningObjective::PerfectScore,
+                    ..PlannerConfig::default()
+                },
+            )
+            .unwrap()
+        });
+        let purple = Action::Clue {
+            target: hanabi_core::PlayerId::new(1),
+            clue: Clue::Suit(hanabi_core::Suit::Purple),
+        };
+        assert_eq!(analysis.planner.best_action, purple);
+        let witness = analysis
+            .convention_analysis
+            .clue_explanations
+            .iter()
+            .find(|explanation| explanation.action == purple)
+            .unwrap()
+            .safety_continuation
+            .as_ref()
+            .expect("retain the actual admission proof for explanations");
+        assert_eq!(witness.actions.len(), 4);
+        assert_eq!(witness.successor, hanabi_core::CardId::new(34));
+        assert_eq!(
+            witness.actions.last().unwrap().action,
+            Action::Clue {
+                target: hanabi_core::PlayerId::new(0),
+                clue: Clue::Suit(hanabi_core::Suit::Purple),
+            }
+        );
+    }
+
+    #[test]
     fn reviewed_delayed_five_play_prefers_useful_purple_clarification() {
         // User-reviewed p4v0s415 T28: b5 can wait for g4; 5s also identifies p5.
         let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(

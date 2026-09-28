@@ -300,6 +300,12 @@ fn candidates(
                 "recipientInterpretation": c.interpretation.as_ref().map(|i|json!({"focus":i.focus.index(),"focusWasChop":i.focus_was_chop,
                     "kind":format!("{:?}",i.kind),"identities":identities(i.focus_identities),"playIdentities":identities(i.play_identities),
                     "saveIdentities":identities(i.save_identities),"touched":i.touched.iter().map(|id|id.index()).collect::<Vec<_>>()})),
+                "safetyContinuation":c.safety_continuation.as_ref().map(|w| json!({
+                    "firstTurn":w.first_turn + 1,
+                    "actions":w.actions.iter().enumerate().map(|(i, s)|json!({"turn":w.first_turn as usize+i+1,"actor":s.actor.index(),"action":HanabiLiveActionCommand::from_engine_action(0,s.action)})).collect::<Vec<_>>(),
+                    "collateral":w.collateral.iter().map(|c|c.index()).collect::<Vec<_>>(),
+                    "successor":w.successor.index(), "expected":crate::live_action::identity_json(w.expected)
+                })),
                 "connectionSteps":c.connection_steps, "actionCoverage":c.action_coverage, "documentation":c.kind.and_then(convention_url),
                 "note":"Recipient knowledge and connection promises are retained with projected decisions; unresolved meanings are not reconstructed."})),
             exact: evaluated.map_or(Value::Null, exact),

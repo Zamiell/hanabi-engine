@@ -1215,6 +1215,12 @@ fn compile_convention_card_inferences(
                 });
             }
         }
+        // Peers touched by the same clue must narrow simultaneously. A
+        // singleton derived while processing one collateral card cannot
+        // exclude that identity from the next merely because of vector order.
+        // In the reviewed p4v0s415 line both purples become possible p4s;
+        // ordinary leftmost play order resolves the remaining duplication.
+        let before_collateral = knowledge.cards.clone();
         for (non_focus, good_touch) in &clue.non_focus_identities {
             // A resolved Bluff replaces the provisional focus. Its former
             // singleton cannot continue excluding that identity from collateral.
@@ -1223,8 +1229,7 @@ fn compile_convention_card_inferences(
             } else {
                 *good_touch
             };
-            let convention_dupes = knowledge
-                .cards
+            let convention_dupes = before_collateral
                 .iter()
                 .filter(|other| other.card != *non_focus && other.identities.len() == 1)
                 .fold(IdentitySet::default(), |duplicates, other| {

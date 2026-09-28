@@ -366,3 +366,33 @@ Regressions:
 `reviewed_delayed_five_clue_commits_play_and_identifies_purple_five` and
 `reviewed_delayed_five_play_prefers_useful_purple_clarification`, including
 missing-commitment, missing-clarification, funding and safety controls.
+
+## Duplicate touches require a safe continuation
+
+In `p4v0s415` turn32 (`t32-duplicate-touch-has-safe-future-clarification`), the
+user explains why purple to Bob is optimal despite touching both p2s. Purple1
+has played and Alice's p5 is globally known. Bob's collateral would ordinarily
+be misplayed as p3, but the team can first clue purple to Alice for her p3. Both
+collateral notes then become p4. Bob's normal order selects the leftmost real p4
+before the duplicate p2, making the duplicate harmless without another clue to
+Bob. Good Touch protects against confusion and wrong plays; this proven
+continuation is an exception to the usual duplicate prohibition.
+
+Admission must establish that continuation from the clue giver's current
+knowledge: the clue is funded, intermediate actions are safe, the prerequisite
+becomes established in its owner's knowledge, and ordinary play order consumes
+the real successor first. Mere visibility of a possible connector is not a
+proof. Future draws remain unknown. Do not assume a recursive chain of other
+unproven exceptions or bypass Minimum Clue Value and response safety.
+
+The certificate, downstream inference/play-order test and integrated planner
+test listed in the review record cover this position. Negative controls remove
+funding, hide the connector, and put the duplicate first. Collateral from the
+same clue must narrow together; one peer's new note is not independent evidence
+for excluding that identity from the next peer during the same inference pass.
+
+These correlated notes also cannot establish that either card is a disposable
+spare before the successor plays. An independent literal identification or later
+focused clue can establish a duplicate; two notes derived from the same
+collateral promise cannot. The regression checks the waiting positions after 35
+and 37 as well as play order after 41, and a literal-identification control.

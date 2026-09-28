@@ -7025,3 +7025,78 @@ fn reviewed_known_playable_discard_from_fully_clued_hand_transfers() {
         }
     }
 }
+
+#[test]
+fn reviewed_duplicate_collateral_uses_leftmost_play_before_trash() {
+    // p4v0s415 T32, user review: purple to Alice secures p3, leaving
+    // Bob's two collateral purples inferred as p4. The newer real p4
+    // plays before the older duplicate p2; playing it makes both trash.
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    for completed in [35, 37, 41] {
+        let view = fixture
+            .state_at_turn(completed)
+            .unwrap()
+            .view_for(PlayerId::new(1))
+            .unwrap();
+        let d = LogicalDeductions::new(view).unwrap();
+        let inferred = infer_h_group(&d, HGroupProfile::Max);
+        assert_ne!(
+            super::super::decision::convention_known_trash_discard(d.view(), &inferred),
+            Some(CardId::new(34)),
+            "same-clue peer is not independent evidence of a spare p4 at {completed}"
+        );
+        if completed == 37 {
+            assert_eq!(
+                select_h_group_action(&d, HGroupProfile::Max),
+                Some(Action::Discard(CardId::new(25)))
+            );
+            // Counterfactual independent identification is sufficient: the
+            // restriction concerns shared inference, not every duplicate.
+            let mut identified = d.view().clone();
+            identified.hands[1]
+                .iter_mut()
+                .find(|card| card.id == CardId::new(6))
+                .unwrap()
+                .clues
+                .add_positive_clue(Clue::Rank(Rank::Four));
+            assert_eq!(
+                super::super::decision::convention_known_trash_discard(&identified, &inferred),
+                Some(CardId::new(34))
+            );
+        }
+    }
+    let state = fixture.state_at_turn(41).unwrap();
+    let view = state.view_for(PlayerId::new(1)).unwrap();
+    assert!(view.hands[1].iter().all(|card| card.identity.is_none()));
+    let d = LogicalDeductions::new(view).unwrap();
+    let inferred = infer_h_group(&d, HGroupProfile::Max);
+    for card in [CardId::new(6), CardId::new(34)] {
+        assert_eq!(
+            inferred
+                .cards
+                .iter()
+                .find(|note| note.card == card)
+                .unwrap()
+                .identities,
+            IdentitySet::singleton(Card::new(Suit::Purple, Rank::Four))
+        );
+    }
+    assert_eq!(
+        super::super::preferred_due_play_card(d.view(), &inferred, HGroupProfile::Max),
+        Some(CardId::new(34))
+    );
+    let after = fixture
+        .state_at_turn(42)
+        .unwrap()
+        .view_for(PlayerId::new(1))
+        .unwrap();
+    let d = LogicalDeductions::new(after).unwrap();
+    assert!(
+        !infer_h_group(&d, HGroupProfile::Max)
+            .playable_now
+            .contains(&CardId::new(6))
+    );
+}

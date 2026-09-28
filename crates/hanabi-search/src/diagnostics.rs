@@ -20,7 +20,37 @@ pub struct ProjectedDecision {
 struct Capture {
     root: Option<Action>,
     decisions: Vec<ProjectedDecision>,
+    safety_continuations:
+        std::collections::HashMap<(PlayerView, Action), crate::ClueSafetyContinuation>,
     meanings: std::collections::HashMap<(PlayerView, Action), crate::HGroupClueInterpretation>,
+}
+
+pub(crate) fn record_safety_continuation(
+    view: &PlayerView,
+    action: Action,
+    witness: &crate::ClueSafetyContinuation,
+) {
+    CAPTURE.with(|state| {
+        if let Some(capture) = state.borrow_mut().as_mut() {
+            capture
+                .safety_continuations
+                .insert((view.clone(), action), witness.clone());
+        }
+    });
+}
+
+pub(crate) fn safety_continuation(
+    view: &PlayerView,
+    action: Action,
+) -> Option<crate::ClueSafetyContinuation> {
+    CAPTURE.with(|state| {
+        state
+            .borrow()
+            .as_ref()?
+            .safety_continuations
+            .get(&(view.clone(), action))
+            .cloned()
+    })
 }
 
 pub(crate) fn record_meaning(

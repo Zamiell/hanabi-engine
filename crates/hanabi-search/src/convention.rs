@@ -259,8 +259,20 @@ pub struct ConventionAnalysis {
     pub belief_constraints: BeliefConstraints,
 }
 
+/// Bounded evidence that a duplicate touch becomes harmless before it can
+/// cause a wrong play. Recorded only while decision diagnostics are captured.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ClueSafetyContinuation {
+    pub first_turn: u32,
+    pub actions: Vec<crate::ProjectedAction>,
+    pub collateral: Vec<hanabi_core::CardId>,
+    pub successor: hanabi_core::CardId,
+    pub expected: hanabi_core::Card,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClueExplanation {
+    pub safety_continuation: Option<ClueSafetyContinuation>,
     pub validation: Vec<CluePrincipleCheck>,
     pub interpretation: Option<crate::HGroupClueInterpretation>,
     pub recognition: &'static str,

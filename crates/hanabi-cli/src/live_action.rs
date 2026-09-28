@@ -471,7 +471,7 @@ fn identity_set_json(identities: IdentitySet) -> Vec<Value> {
     identities.iter().map(identity_json).collect()
 }
 
-fn identity_json(card: Card) -> Value {
+pub(crate) fn identity_json(card: Card) -> Value {
     json!({"suit": card.suit.to_string(), "rank": card.rank.number()})
 }
 
