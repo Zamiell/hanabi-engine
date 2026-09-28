@@ -2409,7 +2409,7 @@ fn first_replay_final_clue_does_not_override_an_available_play() {
     // Human-reviewed p4v0s415 turn 45: Alice can advance p4 -> p5 herself.
     // The final-clue-over-idle-discard preference must not override a play.
     let fixture = HanabiLiveReplay::from_json(include_str!(
-        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        "fixtures/game-p4v0s415-before-turn27-revision.json"
     ))
     .unwrap();
     let state = fixture.state_at_turn(44).unwrap();
@@ -2478,7 +2478,7 @@ fn first_replay_playable_five_save_does_not_eject() {
     // choosing rank over color therefore does not forgo a play (RCE premise).
     // https://hanabi.github.io/extras/ejections/#the-rank-choice-ejection-with-a-number-2-or-a-number-5-rce
     let fixture = HanabiLiveReplay::from_json(include_str!(
-        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        "fixtures/game-p4v0s415-before-turn27-revision.json"
     ))
     .unwrap();
     let before = fixture.state_at_turn(33).unwrap();
@@ -3418,15 +3418,14 @@ fn assert_expert_replay_matches_engine(seed: &str, replay: &HanabiLiveReplay) {
     }
 }
 
-/// The user approved moves through 36. The generated suffix awaits review;
-/// it is validated for legality, not frozen as optimal strategy.
+/// The active fixture contains the user-reviewed continuation through turn 46.
 #[test]
 fn first_expert_replay_reviewed_prefix_matches_engine() {
     let replay = HanabiLiveReplay::from_json(include_str!(
         "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
     ))
     .expect("active replay is valid");
-    replay.replay().expect("generated continuation is legal");
+    replay.replay().expect("reviewed continuation is legal");
     assert_expert_replay_matches_engine("p4v0s415", &replay);
 }
 
@@ -3436,7 +3435,7 @@ fn first_replay_three_bluff_does_not_chop_move_recipient_cards() {
     // #18's historical rank-3 promise cannot account for p3 after #18 played b3.
     // https://hanabi.github.io/level-13/#the-3-bluff
     let fixture = HanabiLiveReplay::from_json(include_str!(
-        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        "fixtures/game-p4v0s415-before-turn27-revision.json"
     ))
     .unwrap();
     for turn in [30, 31, 39] {
@@ -3472,7 +3471,7 @@ fn first_replay_turn_thirty_one_bluff_keeps_secured_duplicate_playable() {
     // other g4 is already secured. Both p2s are visible in Bob's hand.
     // https://hanabi.github.io/level-13/#the-3-bluff
     let fixture = HanabiLiveReplay::from_json(include_str!(
-        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        "fixtures/game-p4v0s415-before-turn27-revision.json"
     ))
     .unwrap();
     let state = fixture.state_at_turn(30).unwrap();
@@ -3508,7 +3507,7 @@ fn first_replay_resolved_three_bluff_does_not_create_hesitation_play() {
     // This asserts interpretation, not that the alternative is optimal.
     // https://hanabi.github.io/level-13/#the-3-bluff
     let fixture = HanabiLiveReplay::from_json(include_str!(
-        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        "fixtures/game-p4v0s415-before-turn27-revision.json"
     ))
     .unwrap();
     let mut state = fixture.state_at_turn(29).unwrap();
@@ -3544,7 +3543,7 @@ fn first_replay_move_thirty_bluff_must_not_touch_played_purple_one() {
     // p3 #33 AND p1 #26, although p1 #19 already played on turn 21.
     // https://hanabi.github.io/beginner/good-touch-principle/
     let fixture = HanabiLiveReplay::from_json(include_str!(
-        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        "fixtures/game-p4v0s415-before-turn27-revision.json"
     ))
     .unwrap();
     let state = fixture.state_at_turn(29).unwrap();

@@ -287,7 +287,7 @@
     "id": "t27-gentlemans-discard-funds-blue-five",
     "turn": 27,
     "positionKey": "7891817c955836e42e3df888d18d10c278e0566822948f3a66e4b34ed37b7dbd",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Cathy knows her playable y3 and sees Bob's matching y3 on finesse position. Zero clues. Her y5 is convention-known; other own cards and future draws stay unknown.",
     "source": {
       "conversation": "2026-09-28 continuation after turn16 finesse ruling",
@@ -316,6 +316,85 @@
       "scope": "From-start scan agrees1\u201326, stops27; no fixture changes."
     },
     "regressions": [],
-    "coverageNote": "Explanation and admission/forecast inspection only. No optimal-move assertion until the user resolves the strategy."
+    "coverageNote": "Explanation and admission/forecast inspection only. No optimal-move assertion until the user resolves the strategy.",
+    "supersededBy": "t27-user-gentlemans-discard-and-four-finesse",
+    "historicalFixture": "crates/hanabi-search/src/h_group/tests/fixtures/game-p4v0s415-before-turn27-revision.json"
+  },
+  {
+    "id": "t27-user-gentlemans-discard-and-four-finesse",
+    "turn": 27,
+    "positionKey": "7891817c955836e42e3df888d18d10c278e0566822948f3a66e4b34ed37b7dbd",
+    "status": "user-explained",
+    "perspective": "User-supplied recorded continuation. Cathy transfers her known y3 to Bob; future draws are replay events, not knowledge available at turn 27.",
+    "source": {
+      "conversation": "2026-09-28 fixture revision and corrections",
+      "quote": "change the fixture to gentleman's discard.",
+      "turn30Correction": "bob should play y3.",
+      "turn36Correction": "yes i meant 4s to bob for the finesse",
+      "requestedEnding": [
+        "y5 play",
+        "4s to donald",
+        "b5 play",
+        "p2 discard",
+        "p3 play",
+        "b2 discard",
+        "p3 discard",
+        "p4 play",
+        "green to bob",
+        "5s to bob",
+        "p5 play",
+        "p5 play",
+        "g5 play"
+      ]
+    },
+    "explanation": {
+      "ruling": "Replace the continuation from turn27 with the requested Gentleman\u2019s Discard line. The user explicitly corrects turn30 to Bob y3 and turn36 to 4s to Bob for a finesse. This accepts the concrete discard, not the assistant\u2019s prior blue-clue projection or a universal transfer premium.",
+      "line": [
+        "27 Cathy discard y3 #16",
+        "28 Donald 5s to Alice",
+        "29 Alice discard g4 #3",
+        "30 Bob play y3 #28",
+        "31 Cathy play g4 #32",
+        "32 Donald purple to Bob",
+        "33 Alice play y4 #31",
+        "34 Bob play p2 #5 from slot4",
+        "35 Cathy play y5 #10",
+        "36 Donald 4s to Bob (finesse)",
+        "37 Alice play b5 #27",
+        "38 Bob discard p2 #6",
+        "39 Cathy play p3 #38",
+        "40 Donald discard b2 #12",
+        "41 Alice discard p3 #33",
+        "42 Bob play p4 #34",
+        "43 Cathy green to Bob",
+        "44 Donald 5s to Bob",
+        "45 Alice play p5 #24",
+        "46 Bob play g5 #44"
+      ],
+      "endingCorrection": "The supplied ending repeats p5. The assistant proposed keeping Alice\u2019s single p5 followed by Bob\u2019s g5; applied that obvious duplicate-entry correction with the user\u2019s affirmative response. Their explicit explanation addresses 4s to Bob; no broader ending convention was supplied.",
+      "preservation": "Turns1\u201326 and all earlier review anchors are unchanged. Preserve the former complete fixture for six position-specific historical regression tests, without changing their assertions.",
+      "validation": "All46 actions replay to PerfectScore25 with zero strikes. Turn34 plays #5 from slot4; #6 remains for the turn38 discard."
+    },
+    "regressions": [
+      "h_group::tests::replay::first_expert_replay_reviewed_prefix_matches_engine"
+    ],
+    "coverageNote": "Full reviewed parity test retained, not run for this fixture edit. Rules legality and physical copy/slot mapping validated; no new convention assertion added."
+  },
+  {
+    "id": "t36-four-to-bob-for-finesse",
+    "turn": 36,
+    "positionKey": "de8f3bc9263157725489ad6e9d7b80325ec981e5ca86e88758249debd655afee",
+    "status": "user-explained",
+    "perspective": "Donald giving rank4 to Bob in the revised recorded continuation.",
+    "source": {
+      "conversation": "2026-09-28 fixture correction",
+      "quote": "yes i meant 4s to bob for the finesse"
+    },
+    "explanation": {
+      "ruling": "The clue is 4s to Bob, intended as a finesse. Recorded continuation: Alice b5, Bob discard duplicate p2, Cathy p3, Donald discard b2, Alice discard p3, Bob p4.",
+      "related": "t27-user-gentlemans-discard-and-four-finesse"
+    },
+    "regressions": [],
+    "coverageNote": "Recorded human interpretation; engine inference/parity has not been tested at this new position."
   }
 ]
