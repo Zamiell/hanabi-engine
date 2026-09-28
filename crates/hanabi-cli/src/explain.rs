@@ -634,10 +634,11 @@ fn print_text(report: &Report) {
         }
         if let Some(value) = line.evaluation.symbolic_line.position_value {
             println!(
-                "  Endpoint: score {}, tokens {}, committed plays {}, secured future plays {}, Save pressure {}",
+                "  Endpoint: score {}, tokens {}, committed plays {}, identified future cards {}, secured future plays {}, Save pressure {}",
                 value.score,
                 value.clues,
                 value.committed_future_plays,
+                value.identified_future_plays,
                 value.secured_future_plays,
                 value.save_pressure
             );

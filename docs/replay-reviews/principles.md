@@ -344,3 +344,25 @@ actual and projected continuation from three perspectives, including Cathy’s
 hidden hand and downstream playability. The earlier
 `fourth_replay_gentlemans_discard_is_not_a_self_created_sacrifice` retains its
 pre-event protection checks.
+
+## A saved card can already have an executable continuation
+
+In `p4v0s415` turn28
+(`t28-five-clue-secures-delayed-blue-play-and-purple-clarification`), the user
+explains that 5s to Alice obtains b5 after her already-known g4 plays. Alice's
+remaining g5/b5 ambiguity does not require another clue. This is productive play
+acquisition, not a passive Early Save. Merely seeing missing predecessors is
+insufficient: their plays must already be established.
+
+The same clue identifies her previously purple-clued p5 for later. With both
+lines funded and committed progress preserved, this useful clarification is
+better than obtaining an unnecessary immediate b5 refund. Keep identified future
+cards separate from executable commitments: this does not invent p5's missing
+connectors. Preserve the earlier negative5 ruling against accelerating a
+critical Save merely for clarification. Unknown hands and future draws remain
+unknown; no universal transfer preference follows from this ruling.
+
+Regressions:
+`reviewed_delayed_five_clue_commits_play_and_identifies_purple_five` and
+`reviewed_delayed_five_play_prefers_useful_purple_clarification`, including
+missing-commitment, missing-clarification, funding and safety controls.

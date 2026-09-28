@@ -198,6 +198,7 @@ pub(super) fn evaluate(
             .count(),
     );
     value.secured_future_plays = narrow(secured.len());
+    value.identified_future_plays = narrow(committed.len());
     // All prerequisites must also be established, not just visible, saved,
     // or guessed on a future draw. Count identities once across the team.
     value.committed_future_plays = narrow(
@@ -507,11 +508,14 @@ fn add_root_opportunities(
             .newly_playable
             .iter()
             .any(|(owner, _)| *owner == target)
+            || establishes_queued_play(source, profile, target, &outcome)?
         {
             // A Save-shaped clue can also obtain an immediate play. It is
             // not a passive Early Save merely because Save has interpretation
             // precedence. Negative clue information can release an untouched
-            // card too. Waiting sacrifices real progress in either case.
+            // card too. A card executable after already-established plays
+            // is equally productive; its remaining identity ambiguity does
+            // not turn this into passive protection.
             return Some(());
         }
         let next_chop = source.hands[target.index()]
@@ -567,6 +571,73 @@ fn add_root_opportunities(
     Some(())
 }
 
+/// An ambiguous saved card can become playable without another clue when
+/// every possible identity has all its predecessors already committed.
+/// Visible but unestablished cards are insufficient evidence. This credits a
+/// newly acquired delayed play; clarifying an older waiting card alone does
+/// not make an otherwise passive Save productive.
+fn establishes_queued_play(
+    source: &PlayerView,
+    profile: HGroupProfile,
+    target: PlayerId,
+    outcome: &super::LineOutcome,
+) -> Option<bool> {
+    let mut established = IdentitySet::default();
+    for player in 0..source.hands.len() {
+        let (d, replay) = PerspectiveProjector::new(source, profile).project(
+            PlayerId::new(narrow(player)),
+            PerspectiveDepth::NestedRecipients,
+        )?;
+        let inferred = infer_h_group_from_replay(&d, replay, profile);
+        for card in &inferred.cards {
+            if let Some(identity) = card
+                .promised_identity
+                .or_else(|| {
+                    (card.identities.len() == 1)
+                        .then(|| card.identities.iter().next())
+                        .flatten()
+                })
+                .filter(|identity| {
+                    super::identity_of(source, card.card).is_none_or(|actual| actual == *identity)
+                })
+            {
+                established = established.union(IdentitySet::singleton(identity));
+            }
+        }
+    }
+    Some(queued_play_from_knowledge(
+        source,
+        target,
+        outcome,
+        established,
+    ))
+}
+
+fn queued_play_from_knowledge(
+    source: &PlayerView,
+    target: PlayerId,
+    outcome: &super::LineOutcome,
+    established: IdentitySet,
+) -> bool {
+    let executable = |domain: IdentitySet| {
+        !domain.is_empty()
+            && domain.iter().all(|identity| {
+                is_eventually_useful(source, identity)
+                    && ((source.play_stacks[identity.suit.index()].len() + 1)
+                        ..usize::from(identity.rank.number()))
+                        .all(|rank| {
+                            established.contains(Card::new(identity.suit, Rank::ALL[rank - 1]))
+                        })
+            })
+    };
+    outcome.knowledge_changes.iter().any(|change| {
+        change.owner == target
+            && !was_clued_before(source, source.turn, change.card)
+            && !executable(change.before)
+            && executable(change.after)
+    })
+}
+
 fn consecutive_save_pressure(tokens: u8) -> u8 {
     1 + 2_u8.saturating_sub(tokens)
 }
@@ -574,6 +645,51 @@ fn consecutive_save_pressure(tokens: u8) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewed_delayed_five_clue_commits_play_and_identifies_purple_five() {
+        // p4v0s415 T28, user review: 5s obtains b5 after established g4,
+        // while filling in p5. No unseen replacement draw is assumed.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(27).unwrap();
+        let source = state.view_for(state.current_player()).unwrap();
+        let target = PlayerId::new(0);
+        let action = Action::Clue {
+            target,
+            clue: Clue::Rank(Rank::Five),
+        };
+        let d = LogicalDeductions::new(source.clone()).unwrap();
+        let proposals = h_group_clue_candidates(&d, HGroupProfile::Max);
+        let candidate = proposals
+            .iter()
+            .find(|candidate| candidate.action == action)
+            .unwrap();
+        let outcome = super::super::clue_outcome::scheduled_clue_outcome(
+            &source,
+            HGroupProfile::Max,
+            candidate,
+        )
+        .unwrap();
+        assert!(establishes_queued_play(&source, HGroupProfile::Max, target, &outcome).unwrap());
+        let g4 = IdentitySet::singleton(Card::new(Suit::Green, Rank::Four));
+        assert!(queued_play_from_knowledge(&source, target, &outcome, g4));
+        assert!(
+            !queued_play_from_knowledge(&source, target, &outcome, IdentitySet::default()),
+            "merely seeing the g4 cannot establish the delayed play"
+        );
+        let mut value = ProjectedPositionValue::default();
+        add_root_opportunities(&source, HGroupProfile::Max, action, &mut value).unwrap();
+        assert_eq!(value.save_pressure, 0);
+        assert_eq!(value.foregone_touch_opportunities, 0);
+        assert!(
+            source.hands[source.observer.index()]
+                .iter()
+                .all(|card| card.identity.is_none())
+        );
+    }
 
     #[test]
     fn reviewed_red_line_save_credits_negative_information_play() {

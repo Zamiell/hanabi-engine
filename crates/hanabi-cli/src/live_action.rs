@@ -362,6 +362,7 @@ pub(crate) fn position_value_json(value: hanabi_search::ProjectedPositionValue) 
         "securedCardQuality": quality(value.secured_card_quality),
         "exposedChopQuality": quality(value.exposed_chop_quality),
         "committedFuturePlays": value.committed_future_plays,
+        "identifiedFuturePlays": value.identified_future_plays,
         "protectedBottomDeckRisks": value.protected_bottom_deck_risks,
         "visibleSuccessors": value.visible_successors,
         "finesseOpportunities": value.finesse_opportunities,

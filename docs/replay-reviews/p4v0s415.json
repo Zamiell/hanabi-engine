@@ -425,7 +425,7 @@
     "id": "t28-five-save-versus-blue-refund-evaluation",
     "turn": 28,
     "positionKey": "708c208e5366c5eee53b40e7ac1093d5e9fc1481963f295d4d4f792fde80fdda",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Donald after Cathy\u2019s Gentleman\u2019s Discard. His own hidden hand and all subsequent draws remain unknown. User has already selected 5s to Alice; the pending question concerns its general strategic benefit, not permission to use the move.",
     "source": {
       "conversation": "2026-09-28 continuation after revised fixture",
@@ -456,6 +456,66 @@
       "scope": "Current from-start scan agrees1\u201327 and stops28. Other replays not advanced in this scan."
     },
     "regressions": [],
-    "coverageNote": "Built-in root and nested decision explanations inspected; pending strategy evaluation has no new optimal-move assertion."
+    "coverageNote": "Built-in root and nested decision explanations inspected; pending strategy evaluation has no new optimal-move assertion.",
+    "supersededBy": "t28-five-clue-secures-delayed-blue-play-and-purple-clarification"
+  },
+  {
+    "id": "t28-five-clue-secures-delayed-blue-play-and-purple-clarification",
+    "turn": 28,
+    "positionKey": "708c208e5366c5eee53b40e7ac1093d5e9fc1481963f295d4d4f792fde80fdda",
+    "status": "user-explained",
+    "perspective": "Donald comparing 5s to Alice with blue to Alice. Alice already knows playable g4; 5s leaves the new five ambiguous g5/b5 until g4 plays. Donald sees b5, but Alice does not know that face. Future draws stay unknown.",
+    "source": {
+      "conversation": "2026-09-28 user explanation after turn28 disagreement",
+      "quote": "b5 does not need to be played right now. after a 5s clue, it can play after g4 plays, so it will essentially play no matter what. in that sense, 5's to alice is a play clue. and the benefit of 5s is that it fills in the p5 for later."
+    },
+    "explanation": {
+      "ruling": "Prefer 5s: the delayed b5 is executable once already-committed g4 plays, and the clue additionally identifies the previously purple-clued p5. An immediate b5 refund is not needed here.",
+      "implementation": "Do not charge passive Early Save pressure when a clue narrows an owner domain to plays whose every predecessor is already established. Track identified useful future cards separately from immediately executable commitments; useful clarification can beat surplus tokens only while both lines fund their reserves, preserve committed progress and protection, and do not advance critical exposure.",
+      "boundaries": "Visible but uncommitted prerequisites are insufficient. Identifying p5 does not invent its missing connectors or count it as currently executable. Keep unknown hands/draws hidden. This does not grant a universal Gentleman\u2019s Discard preference or override the earlier p4v0s1 negative5/Save-timing ruling.",
+      "related": "t28-five-save-versus-blue-refund-evaluation"
+    },
+    "regressions": [
+      "h_group::frontier_value::tests::reviewed_delayed_five_clue_commits_play_and_identifies_purple_five",
+      "planner::tests::reviewed_delayed_five_play_prefers_useful_purple_clarification"
+    ],
+    "coverageNote": "Delayed-domain inference, removal-of-g4-commitment control, downstream resources/choice, and missing-clarification, funding, critical-exposure and lost-commitment controls."
+  },
+  {
+    "id": "t29-gentlemans-discard-token-timing-versus-earlier-play",
+    "turn": 29,
+    "positionKey": "3885eaad7d4cb8977da19779ecac1482260183ac9fb38373c1cd3305d3288929",
+    "status": "unresolved",
+    "perspective": "Alice after Donald\u2019s reviewed 5s clue. Existing user continuation chooses the g4 transfer; this is a question about its comparative benefit, not about transfer legality.",
+    "source": {
+      "conversation": "2026-09-28 autonomous replay continuation after delayed-five fix",
+      "quote": "then continue to autonomously go through the replay and find disagreements. Do a deep analysis for each disagreement. If there are obvious bugs, then fix them autonomously. Otherwise, ask me about the correct strategy or convention.",
+      "documentation": "https://hanabi.github.io/level-10/#the-gentlemans-discard-gd"
+    },
+    "explanation": {
+      "fixtureProjection": [
+        "29 Alice discard g4 #3",
+        "30 Bob play y3 #28",
+        "31 Cathy play g4 #32",
+        "32 Donald discard b2 #12",
+        "Stops before33 Alice: UnknownIdentity / IdentityBranch; next action window is Play."
+      ],
+      "engineProjection": [
+        "29 Alice play g4 #3",
+        "30 Bob play y3 #28",
+        "31 Cathy discard b3 #20",
+        "32 Donald discard b2 #12",
+        "Stops before33 Alice: UnknownIdentity / IdentityBranch; next action window is Play."
+      ],
+      "assumptions": "Both lines export Alice\u2019s convention-known p5 #24 and y4 #31 into teammate projections, not the identity of her ambiguous g5/b5 or future draws. Neither has identity branches, strikes, or a recorded BDR loss. Forecast actions are selected, not all forced.",
+      "comparison": "ProgressTiming at horizon4, zero clues spent in each. Both score17, clues2, clueDemand1, committed2, identified3, secured3, protection3, blocked1, no exposed critical chops and no Save pressure. Play has score16 vs15 immediately after29 and17 vs16 after30; the scores converge at31. Discard supplies one token at29 rather than31, but Bob spends none at30. Both draw in the same seats at29,30,31,32. Cathy retains her blind now-dead g4 in the play line, rather than her older b3 in the transfer line.",
+      "furtherInspection": "The recorded turn32 purple-to-Bob clue depends on the later p4 #34 draw. In this forecast that draw is unknown; the projected clue touches only the two visible p2s and fails Good Touch. Do not inject the recorded future draw to force that continuation. Both lines have the same ambiguous-five frontier, so stopping does not prove a long-term advantage either way.",
+      "question": "Should the earlier token itself favor the Gentleman\u2019s Discard when nobody uses it before Cathy\u2019s turn, or is there another concrete benefit that outweighs earlier g4 scoring? The user supplied the transfer; the guide permits it with a compensating side benefit but does not decide this timing tradeoff. The latest b5/p5 ruling distinguishes the preceding clues, not these two g4 actions.",
+      "scope": "Restarted p4v0s415 scan agrees through28 and stops29; other replays not advanced."
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_known_playable_discard_from_fully_clued_hand_transfers"
+    ],
+    "coverageNote": "Transfer meaning covered. Comparative strategy is unresolved; no new assertion freezes the engine\u2019s play preference."
   }
 ]

@@ -223,6 +223,9 @@ pub struct ProjectedPositionValue {
     /// predecessor already played or established too. Unlike secured cards,
     /// these do not need another identity/connection clue to become plays.
     pub committed_future_plays: u8,
+    /// Useful identities established for their owners, including cards whose
+    /// predecessors still need to be obtained. Never counted as ready plays.
+    pub identified_future_plays: u8,
     pub secured_card_quality: crate::SecuredCardQuality,
     /// Needed cards newly exposed by a worsening chop-protection exchange,
     /// including behind a queued play. Not an executed discard.
@@ -249,15 +252,20 @@ pub struct ProjectedPositionValue {
 
 impl ProjectedPositionValue {
     /// At the same elapsed turn, realized points and executable commitments
-    /// outrank manufacturing surplus tokens. Protected cards and speculative
-    /// connections are deliberately not counted as executable points.
+    /// outrank manufacturing surplus tokens. With that work preserved, useful
+    /// identity clarification is also progress, without being counted as an
+    /// executable point or excusing an earlier critical Save.
     fn productive_preference(self, other: Self) -> bool {
         self.preserves_funded_progress(other)
             && (self.score > other.score
                 // Clarification alone is not enough to bring a critical Save
                 // forward. Funding covers its token cost, not its timing cost.
                 || (self.committed_future_plays > other.committed_future_plays
-                    && self.exposed_critical_chops <= other.exposed_critical_chops))
+                    && self.exposed_critical_chops <= other.exposed_critical_chops)
+                || (self.score.saturating_add(self.identified_future_plays)
+                    > other.score.saturating_add(other.identified_future_plays)
+                    && self.exposed_critical_chops <= other.exposed_critical_chops
+                    && self.foregone_touch_opportunities <= other.foregone_touch_opportunities))
     }
 
     fn preserves_funded_progress(self, other: Self) -> bool {
@@ -445,6 +453,8 @@ impl ProjectedPositionValue {
             && self.conditional_prompt_chains >= other.conditional_prompt_chains
             && self.score >= other.score
             && self.clues >= other.clues
+            && self.score.saturating_add(self.identified_future_plays)
+                >= other.score.saturating_add(other.identified_future_plays)
             && self.exposed_critical_chops <= other.exposed_critical_chops
             && self.blocked_clued_cards <= other.blocked_clued_cards
             && self.score.saturating_add(self.secured_future_plays)
@@ -2759,6 +2769,74 @@ impl std::error::Error for PlannerError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewed_delayed_five_play_prefers_useful_purple_clarification() {
+        // User-reviewed p4v0s415 T28: b5 can wait for g4; 5s also identifies p5.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(27).unwrap();
+        let analysis = crate::analyze_position(
+            &state.view_for(state.current_player()).unwrap(),
+            SupportedConvention::HGroup(crate::HGroupProfile::Max),
+            PlannerConfig {
+                objective: PlanningObjective::PerfectScore,
+                ..PlannerConfig::default()
+            },
+        )
+        .unwrap();
+        let five = Action::Clue {
+            target: hanabi_core::PlayerId::new(0),
+            clue: Clue::Rank(Rank::Five),
+        };
+        let blue = Action::Clue {
+            target: hanabi_core::PlayerId::new(0),
+            clue: Clue::Suit(hanabi_core::Suit::Blue),
+        };
+        let endpoint = |action| {
+            analysis
+                .planner
+                .root_actions
+                .iter()
+                .find(|c| c.action == action)
+                .unwrap()
+                .projection
+                .checkpoints_at(4)[0]
+                .value
+        };
+        let a = endpoint(five);
+        let b = endpoint(blue);
+        assert_eq!(a.save_pressure, 0);
+        assert_eq!(a.score, b.score);
+        assert_eq!(a.committed_future_plays, b.committed_future_plays);
+        assert!(a.identified_future_plays > b.identified_future_plays);
+        assert!(a.productive_preference(b), "{a:?} vs {b:?}");
+        assert!(
+            !ProjectedPositionValue {
+                identified_future_plays: b.identified_future_plays,
+                ..a
+            }
+            .productive_preference(b)
+        );
+        assert!(!ProjectedPositionValue { clues: 0, ..a }.productive_preference(b));
+        assert!(
+            !ProjectedPositionValue {
+                exposed_critical_chops: b.exposed_critical_chops + 1,
+                ..a
+            }
+            .productive_preference(b)
+        );
+        assert!(
+            !ProjectedPositionValue {
+                committed_future_plays: b.committed_future_plays - 1,
+                ..a
+            }
+            .productive_preference(b)
+        );
+        assert_eq!(analysis.planner.best_action, five);
+    }
 
     #[test]
     fn reviewed_turn50_move_budget_returns_an_admitted_incomplete_result() {

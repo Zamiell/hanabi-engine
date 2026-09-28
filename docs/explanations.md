@@ -86,6 +86,9 @@ The report contains:
   evidence remain explicit. Assumptions retain their originating turn, focus,
   and prerequisite response decision; they cannot establish that same response.
   Missing interpretations are null, not invented from the deck.
+- Endpoint values distinguish secured cards, identified future cards, and
+  executable committed plays. An identified card can still have missing
+  predecessors; it is not an extra immediate point.
 - Endpoint values, stopping reasons, and pending unknown discards. A selected
   forecast action is not necessarily forced; pending BDR is a possible risk, not
   proof of an inevitable loss. `forcedRoot` records the root convention
