@@ -378,13 +378,14 @@
     "regressions": [
       "h_group::tests::replay::first_expert_replay_reviewed_prefix_matches_engine"
     ],
-    "coverageNote": "Full reviewed parity test retained, not run for this fixture edit. Rules legality and physical copy/slot mapping validated; no new convention assertion added."
+    "coverageNote": "Full reviewed parity test retained, not run for this fixture edit. Rules legality and physical copy/slot mapping validated; no new convention assertion added.",
+    "continuationNote": "The accepted turn27 transfer and prefix through32 remain current. The recorded continuation from33 is superseded by t29-user-retains-gentlemans-discard-and-revises-continuation; preserve the historical 4s finesse explanation rather than re-anchor it."
   },
   {
     "id": "t36-four-to-bob-for-finesse",
     "turn": 36,
     "positionKey": "de8f3bc9263157725489ad6e9d7b80325ec981e5ca86e88758249debd655afee",
-    "status": "user-explained",
+    "status": "superseded",
     "perspective": "Donald giving rank4 to Bob in the revised recorded continuation.",
     "source": {
       "conversation": "2026-09-28 fixture correction",
@@ -395,7 +396,8 @@
       "related": "t27-user-gentlemans-discard-and-four-finesse"
     },
     "regressions": [],
-    "coverageNote": "Recorded human interpretation; engine inference/parity has not been tested at this new position."
+    "coverageNote": "Recorded human interpretation; engine inference/parity has not been tested at this new position.",
+    "supersededBy": "t29-user-retains-gentlemans-discard-and-revises-continuation"
   },
   {
     "id": "t29-known-playable-gentlemans-discard-is-not-sacrifice",
@@ -485,7 +487,7 @@
     "id": "t29-gentlemans-discard-token-timing-versus-earlier-play",
     "turn": 29,
     "positionKey": "3885eaad7d4cb8977da19779ecac1482260183ac9fb38373c1cd3305d3288929",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Alice after Donald\u2019s reviewed 5s clue. Existing user continuation chooses the g4 transfer; this is a question about its comparative benefit, not about transfer legality.",
     "source": {
       "conversation": "2026-09-28 autonomous replay continuation after delayed-five fix",
@@ -516,6 +518,47 @@
     "regressions": [
       "h_group::tests::replay::reviewed_known_playable_discard_from_fully_clued_hand_transfers"
     ],
-    "coverageNote": "Transfer meaning covered. Comparative strategy is unresolved; no new assertion freezes the engine\u2019s play preference."
+    "coverageNote": "Transfer meaning covered. Comparative strategy is unresolved; no new assertion freezes the engine\u2019s play preference.",
+    "supersededBy": "t29-user-retains-gentlemans-discard-and-revises-continuation"
+  },
+  {
+    "id": "t29-user-retains-gentlemans-discard-and-revises-continuation",
+    "turn": 29,
+    "positionKey": "3885eaad7d4cb8977da19779ecac1482260183ac9fb38373c1cd3305d3288929",
+    "status": "user-explained",
+    "perspective": "Alice retains the g4 Gentleman\u2019s Discard; the user replaces the recorded continuation through the perfect finish.",
+    "source": {
+      "conversation": "2026-09-28 fixture revision after turn29 comparison",
+      "quote": "change the fixture to discard g4. then:",
+      "continuationExcerpt": [
+        "y3 play",
+        "g4 play",
+        "purple to bob",
+        "play b5",
+        "play p2",
+        "purple to alice",
+        "discard b2",
+        "y4 play",
+        "discard y2",
+        "play y5",
+        "discard y1",
+        "play p3",
+        "play p4",
+        "green to bob",
+        "5s to bob",
+        "play p5",
+        "play g5"
+      ]
+    },
+    "explanation": {
+      "ruling": "Retain Alice\u2019s g4 discard at29 and apply the supplied continuation. The first changed action is33 (b5 rather than y4). This is a concrete fixture choice; the user has not stated a general rule that an unused early token should outweigh earlier scoring.",
+      "copyMapping": "Bob plays oldest p2 #5 at34, preserving the previously specified slot4 copy. Alice plays her older, already-clued y4 #31 at37 rather than her newly drawn y4 #36. Donald discards y1 #21 at40.",
+      "validation": "46 actions, legal replay, score25, zero strikes, Finished(PerfectScore). Prefix through32 is unchanged.",
+      "reviewAnchors": "Turn36\u2019s former 4s-to-Bob finesse no longer occurs; its historical record is superseded without changing its hash. Earlier review positions through29 retain their anchors. Existing focused tests reference unchanged prefixes; no test assertions are altered."
+    },
+    "regressions": [
+      "h_group::tests::replay::first_expert_replay_reviewed_prefix_matches_engine"
+    ],
+    "coverageNote": "Recorded parity test retained but not rerun for this fixture-only edit. Complete rules replay and affected card/slot mapping validated; no new optimal-strategy assertion."
   }
 ]
