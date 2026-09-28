@@ -325,3 +325,22 @@ Finesse, including the inferred identity subsequently exported to teammates.
 reviewed positions with hidden owner faces, then exercises each downstream
 recognition and action/export regression. Existing prior-obligation and
 unresolved-response controls remain in place.
+
+## Fully clued does not erase a known playable transfer
+
+In `p4v0s415` turns29–31
+(`t29-known-playable-gentlemans-discard-is-not-sacrifice`), the user supplies
+Alice’s g4 Gentleman’s Discard followed by Cathy’s g4 play. Alice’s hand is
+fully clued, but she knows the discarded g4 is playable. The rare Sacrifice
+Discard of a future card must not suppress this ordinary transfer. Use
+pre-discard owner knowledge; the revealed face alone does not establish what the
+actor knew. This complements the earlier known-trash Anxiety ruling: a count of
+touched cards does not establish that the actor has no useful action. It also
+complements the `p4v0s3` pre-event protection regression; a discard cannot
+manufacture its own locked-hand precondition.
+
+`reviewed_known_playable_discard_from_fully_clued_hand_transfers` checks the
+actual and projected continuation from three perspectives, including Cathy’s
+hidden hand and downstream playability. The earlier
+`fourth_replay_gentlemans_discard_is_not_a_self_created_sacrifice` retains its
+pre-event protection checks.

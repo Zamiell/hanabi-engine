@@ -555,11 +555,20 @@ pub(in crate::h_group) fn apply_phantom_effects(
     let not_generation = !effects.signals.iter().any(|signal| {
         signal.turn == entry.turn && signal.kind == HGroupMoveKind::GenerationDiscard
     });
+    // A Sacrifice gives up an unplayable future card to escape a locked
+    // hand. A known playable card can instead leave by playing; voluntarily
+    // discarding it retains its ordinary transfer meaning. Use the owner's
+    // pre-discard knowledge, never the identity revealed by this discard.
+    let known_playable = context
+        .actor_before
+        .discarded_identity
+        .is_some_and(|known| is_playable_at(stack_heights, known));
     if locked
         && discarded_was_clued
         && non_critical
         && !is_trash_at(stack_heights, *identity)
         && not_generation
+        && !known_playable
     {
         push_signal(
             effects.signals,

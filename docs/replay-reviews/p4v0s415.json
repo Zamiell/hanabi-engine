@@ -396,5 +396,66 @@
     },
     "regressions": [],
     "coverageNote": "Recorded human interpretation; engine inference/parity has not been tested at this new position."
+  },
+  {
+    "id": "t29-known-playable-gentlemans-discard-is-not-sacrifice",
+    "turn": 29,
+    "positionKey": "3885eaad7d4cb8977da19779ecac1482260183ac9fb38373c1cd3305d3288929",
+    "status": "user-explained",
+    "perspective": "Alice knows g4 from her green and rank4 clues. Cathy holds the other g4 on finesse position. Applies in actual replay and Donald\u2019s forecast after 5s to Alice without revealing Donald\u2019s hand or future draws.",
+    "source": {
+      "conversation": "2026-09-28 revised continuation, then autonomous replay audit",
+      "quote": "g4 discard",
+      "continuationExcerpt": "g4 play",
+      "related": "t27-user-gentlemans-discard-and-four-finesse",
+      "documentation": "https://hanabi.github.io/level-22/#the-sacrifice-discard"
+    },
+    "explanation": {
+      "ruling": "The supplied continuation discards Alice\u2019s known playable g4 at29 and has Cathy play the transferred g4 at31. Fully clued does not erase the ordinary transfer meaning of this voluntary known-playable discard.",
+      "bug": "Sacrifice recognition checked that all cards were protected and the discarded card noncritical, then suppressed Gentleman\u2019s Discard interpretation. It did not exclude a card the actor already knew was playable. Cathy consequently discarded b3 in the 5s-to-Alice forecast, and the planner preferred Alice play g4 herself.",
+      "fix": "Exclude a known-playable discarded card from Sacrifice recognition using existing pre-discard actor knowledge; do not infer prior knowledge from the revealed face. Retain other Sacrifice preconditions.",
+      "boundary": "No blanket priority for transfers or changes to hidden-card knowledge. This fixes the meaning of the reviewed discard, not an independent strategy bonus."
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_known_playable_discard_from_fully_clued_hand_transfers",
+      "h_group::tests::replay::fourth_replay_gentlemans_discard_is_not_a_self_created_sacrifice"
+    ]
+  },
+  {
+    "id": "t28-five-save-versus-blue-refund-evaluation",
+    "turn": 28,
+    "positionKey": "708c208e5366c5eee53b40e7ac1093d5e9fc1481963f295d4d4f792fde80fdda",
+    "status": "unresolved",
+    "perspective": "Donald after Cathy\u2019s Gentleman\u2019s Discard. His own hidden hand and all subsequent draws remain unknown. User has already selected 5s to Alice; the pending question concerns its general strategic benefit, not permission to use the move.",
+    "source": {
+      "conversation": "2026-09-28 continuation after revised fixture",
+      "quote": "Continue to autonomously go through the replays and find disagreements. Do a deep analysis for each disagreement. If there are obvious bugs, then fix them autonomously. Otherwise, ask me about the correct strategy or convention.",
+      "related": "t27-user-gentlemans-discard-and-four-finesse"
+    },
+    "explanation": {
+      "fixtureProjection": [
+        "28 Donald 5s to Alice",
+        "29 Alice play g4 #3",
+        "30 Bob play y3 #28",
+        "31 Cathy discard b3 #20",
+        "Stops before32 Donald: UnknownIdentity / IdentityBranch"
+      ],
+      "engineProjection": [
+        "28 Donald blue to Alice",
+        "29 Alice play b5 #27",
+        "30 Bob play y3 #28",
+        "31 Cathy discard b3 #20",
+        "Stops before32 Donald: UnknownIdentity / IdentityBranch"
+      ],
+      "assumptions": "Root projections have no identity assumptions or conditional branches. Both have no strikes/recorded bottom-deck loss. Unknown future draws remain unknown. These are modeled selections, not forced actions.",
+      "comparison": "EndpointResources at normalized horizon4. Both score17, committed3, secured4, protection5. Blue: clues2, clueDemand1, savePressure0. 5s: clues1, clueDemand3, savePressure2, foregoneTouchOpportunities1. Rank5 identifies the other purple card as p5, but the newly saved focus remains g5/b5 to Alice. Blue directly identifies b5. Save pressure is an Early Save contingency for a possible later critical draw, not a known pending loss. Raw priorities433 vs420 are not the decisive reason.",
+      "transferFix": "The initially missing Cathy g4 response was a false Sacrifice classification, fixed and covered by t29-known-playable-gentlemans-discard-is-not-sacrifice. No fixture was changed.",
+      "nestedComparison": "After5s, Alice may discard g4 -> Bob y3 -> Cathy g4, or play g4 -> Bob y3 -> Cathy discard b3. The former now correctly transfers to Cathy. At shared horizon3 both score17, clues1, committed2, secured3, protection3. ProgressTiming chooses the play because it scores g4 two turns earlier. Both stop before32 Donald at IdentityBranch. Nested projections export Alice\u2019s convention-known p5 and y4, not her unknown b5 face or her future draw.",
+      "additionalInspection": "In the actual Alice-rooted turn29 analysis both paths additionally forecast Donald discard b2 at32, then stop before33 at IdentityBranch. The recorded purple-to-Bob alternative is rejected for touching both p2s in this projected world; Bob\u2019s future p4 draw is unknown and must not be supplied to force the recorded clue.",
+      "question": "Which concrete benefit should outweigh the immediate blue-five refund and earlier g4 scoring: identifying Alice\u2019s purple card as p5 for later clues, timing the yellow continuation, or another benefit? Existing user statements prescribe the moves but do not provide this comparison\u2019s reason. The guide permits a Gentleman\u2019s Discard with a compensating benefit; it does not establish a universal transfer preference. Do not invent a bonus or assume the later p4/p3 draws.",
+      "scope": "Current from-start scan agrees1\u201327 and stops28. Other replays not advanced in this scan."
+    },
+    "regressions": [],
+    "coverageNote": "Built-in root and nested decision explanations inspected; pending strategy evaluation has no new optimal-move assertion."
   }
 ]

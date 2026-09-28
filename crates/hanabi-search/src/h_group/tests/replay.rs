@@ -6951,3 +6951,77 @@ fn reviewed_finesse_commits_green_three_but_direct_green_leaves_it_waiting() {
         );
     }
 }
+
+#[test]
+fn reviewed_known_playable_discard_from_fully_clued_hand_transfers() {
+    // p4v0s415 T29: the user discards Alice's known g4 and Cathy plays
+    // the transferred g4 on T31. A fully clued hand does not turn this
+    // voluntary transfer into a sacrifice of an unplayable future card.
+    let fixture = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap();
+    let green_four = Card::new(Suit::Green, Rank::Four);
+    let source = fixture
+        .state_at_turn(27)
+        .unwrap()
+        .view_for(PlayerId::new(3))
+        .unwrap();
+    let clued = ProspectiveTransition::clue_by(
+        &source,
+        PlayerId::new(3),
+        PlayerId::new(0),
+        Clue::Rank(Rank::Five),
+        &[CardId::new(24), CardId::new(27)],
+    );
+    let discarded =
+        ProspectiveTransition::discard(&clued, PlayerId::new(0), CardId::new(3), green_four);
+    let projected = ProspectiveTransition::successful_play(
+        &discarded,
+        PlayerId::new(1),
+        CardId::new(28),
+        Card::new(Suit::Yellow, Rank::Three),
+    );
+    for view in [
+        fixture
+            .state_at_turn(30)
+            .unwrap()
+            .view_for(PlayerId::new(3))
+            .unwrap(),
+        projected,
+    ] {
+        for observer in [PlayerId::new(0), PlayerId::new(2), PlayerId::new(3)] {
+            let (deductions, replay) = PerspectiveProjector::new(&view, HGroupProfile::Max)
+                .project(observer, PerspectiveDepth::NestedRecipients)
+                .unwrap();
+            let inferred = infer_h_group_from_replay(&deductions, replay, HGroupProfile::Max);
+            let signals = inferred
+                .signals
+                .iter()
+                .filter(|s| s.turn == 28)
+                .collect::<Vec<_>>();
+            assert!(
+                !signals
+                    .iter()
+                    .any(|s| s.kind == HGroupMoveKind::SacrificeDiscard),
+                "{observer:?}: {signals:?}"
+            );
+            assert!(
+                signals
+                    .iter()
+                    .any(|s| s.kind == HGroupMoveKind::GentlemansDiscard
+                        && s.target == Some(PlayerId::new(2))
+                        && s.cards == [CardId::new(32)]),
+                "{observer:?}: {signals:?}"
+            );
+            if observer == PlayerId::new(2) {
+                assert!(inferred.playable_now.contains(&CardId::new(32)));
+                assert!(
+                    deductions.view().hands[2]
+                        .iter()
+                        .all(|card| card.identity.is_none())
+                );
+            }
+        }
+    }
+}
