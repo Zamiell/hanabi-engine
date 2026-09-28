@@ -560,5 +560,43 @@
       "h_group::tests::replay::first_expert_replay_reviewed_prefix_matches_engine"
     ],
     "coverageNote": "Recorded parity test retained but not rerun for this fixture-only edit. Complete rules replay and affected card/slot mapping validated; no new optimal-strategy assertion."
+  },
+  {
+    "id": "t32-purple-clue-touches-two-unidentified-purple-twos",
+    "turn": 32,
+    "positionKey": "c02a1464d7d1f894c7444afa7a8b944b1833945b354e32ea598c9bba5e791b2e",
+    "status": "unresolved",
+    "perspective": "Donald: one clue, stacks r5/y3/g4/b4/p1, 14 cards in deck. Bob has p2 #5 slot4, p2 #6 slot3, y2 #25 slot2, p4 #34 slot1. Donald\u2019s own chop #12 is physically b2 but unknown to him.",
+    "source": {
+      "conversation": "2026-09-28 autonomous audit after revised turn29 continuation",
+      "quote": "then continue to autonomously go through the replay and find disagreements. Do a deep analysis for each disagreement. If there are obvious bugs, then fix them autonomously. Otherwise, ask me about the correct strategy or convention.",
+      "documentation": [
+        "https://hanabi.github.io/beginner/good-touch-principle/",
+        "https://hanabi.github.io/level-17/#the-duplicitous-value-clue"
+      ],
+      "related": "t29-user-retains-gentlemans-discard-and-revises-continuation"
+    },
+    "explanation": {
+      "issue": "The fixture\u2019s purple-to-Bob clue is rejected by common Good Touch validation. It touches both unprotected p2s and p4. MCVP passes with two useful identities acquired; response safety passes for the immediate p2. This is an admission disagreement, not a losing numeric comparison.",
+      "fixtureProjection": "No engine projection exists: the root clue is rejected before forecast. The recorded continuation is not a forecast and must not be substituted for one.",
+      "engineProjection": [
+        "32 Donald discard unknown chop #12 (actual b2)",
+        "33 Alice play b5 #27",
+        "34 Bob discard p2 #5",
+        "35 Cathy purple to Alice",
+        "36 Donald purple to Bob",
+        "37 Alice play y4 #31",
+        "38 Bob play p2 #6",
+        "39 Cathy play y5 #10",
+        "40 Donald discard unknown chop #21; SafeDiscardReveal frontier"
+      ],
+      "branches": "The full listed line is shared by eight possible first-discard reveals: y1/y4/g1/g2/b1/b2/b4/p1. The ninth possible reveal, p4, shares32\u201335 then stops before36 because purple-to-Bob response safety is conditional. These are explicit alternatives, not a claim Donald knows he holds b2. Future draws stay unknown; no identity assumptions are recorded.",
+      "recipientEvidence": "Read-only inference on the recorded replay: after32 Bob identifies #5 as p2 and #6/#34 as p3-or-p4, excluding the true p2 identity from #6. After his p2 play and Cathy\u2019s purple clue to Alice at35, both collateral cards become inferred p4. After Alice\u2019s recorded p3 play at41, #6 (actual p2) is Bob\u2019s only inferred playable card; #34 has broadened to p1/p2/p4. This later inspection uses the actual intervening replay and is not a Donald-rooted projection.",
+      "distinctionFromReviewedCollateral": "In the earlier p4v0s1 normal purple clue, the recipient recognizes collateral as known trash using already-secured duplicate evidence. Here Bob does not recognize the extra p2 as trash. Duplicitous Value examples demonstrate an unexpectedly duplicated focused play; this focus plays as the expected p2, leaving an unidentified collateral duplicate. No matching documented exception was established.",
+      "question": "What permits the intentional duplicate touch here, and how should Bob distinguish the older duplicate p2 from the newer real p4 before playing? The user has selected the concrete clue, but no interpretation resolving this collateral ambiguity is yet recorded. Do not bypass Good Touch merely because MCVP passes.",
+      "auditScope": "Restarted from beginning:1\u201328 agree; known29 still selects playg4 over the accepted discardg4. Following the recorded discard,30\u201331 agree.32 is the next new disagreement; no claim of parity later in this replay or other replays."
+    },
+    "regressions": [],
+    "coverageNote": "Built-in admission/branch reports and owner-relative inference inspected. No engine or fixture edit, and no new optimal-move assertion pending interpretation."
   }
 ]
