@@ -735,5 +735,36 @@
     },
     "regressions": [],
     "coverageNote": "Built-in admission and exhaustive safe-discard reveal projections inspected. No new optimal-move assertion or fixture change pending the convention ruling."
+  },
+  {
+    "id": "t43-equivalent-winning-play-clues-prefer-color",
+    "turn": 43,
+    "positionKey": "cf0a3d92c55525bddd8cd2677ed64d3deb60ec35b5f764e1dd825a4839223968",
+    "status": "user-explained",
+    "perspective": "Cathy before either green or 5s to Bob. Bob has an unclued g5; Alice has the already-known p5. The preceding assistant report concerned Donald at turn44 AFTER green; the user did not explicitly name a turn, so this record applies the supplied reasoning only to the verified matching setup at43. Whether a repeat clue at44 is intended remains pending clarification.",
+    "source": {
+      "conversation": "2026-09-29 clarification after turn44 report",
+      "quote": "greens to bob is not a burn, it is a play clue on g5 in the exact same way that 5s to bob is. ... both should project to get a perfect score ... the negative clues are not worth considering since all cards are accounted for after the clue is given ... thus, the engine should just default to color clues over play clues."
+    },
+    "explanation": {
+      "ruling": "Compare the color and rank Play Clues as equivalent winning outcomes. Negative information has no remaining strategic value after all needed cards are accounted for; prefer the color clue as fallback. The wording color clues over play clues is understood as color over rank here, since both are Play Clues.",
+      "currentBehavior": "Already implemented at this position: both admitted as PlayClue, each obtains g5, both unconditional perfect endpoints compare Equivalent, and ConventionPreference chooses green. No production fix was needed.",
+      "colorProjection": [
+        "43 Cathy green to Bob",
+        "44 Donald discard unknown chop #26 (actual p1)",
+        "45 Alice play p5 #24",
+        "46 Bob play g5 #44; Terminal score25"
+      ],
+      "rankProjection": [
+        "43 Cathy 5s to Bob",
+        "44 Donald discard unknown chop #26 (actual p1)",
+        "45 Alice play p5 #24",
+        "46 Bob play g5 #44; Terminal score25"
+      ],
+      "boundary": "This is a comparison before either clue. It does not silently authorize treating a subsequent repeat clue as newly obtaining g5 or changing the fixture at44."
+    },
+    "regressions": [
+      "planner::tests::reviewed_equivalent_winning_play_clues_prefer_color"
+    ]
   }
 ]

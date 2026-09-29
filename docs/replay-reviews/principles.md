@@ -417,3 +417,16 @@ seeing the refund. Compare the equal established prefix before the actor
 returns; do not require an entire rotation when the benefit is already proved.
 The same regression checks the three-action prefix through Cathy and keeps later
 unknown actions unknown.
+
+## Equivalent winning play clues prefer color
+
+In `p4v0s415` turn43 (`t43-equivalent-winning-play-clues-prefer-color`), green
+and 5s to Bob both obtain g5 and finish perfectly with Alice's already-known p5.
+The user explains that negative information has no remaining value once all
+needed cards are accounted for. Treat the winning outcomes as equivalent and
+prefer the color clue as a fallback over the rank clue. Both are Play Clues.
+This does not turn a later repeat clue into a new play acquisition.
+
+`reviewed_equivalent_winning_play_clues_prefer_color` checks both complete
+projected lines, equivalent perfect endpoints, and the color preference. An
+unfinished-forecast control prevents treating an unproved finish as equivalent.

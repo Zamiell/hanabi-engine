@@ -2857,6 +2857,68 @@ mod tests {
     use super::*;
 
     #[test]
+    fn reviewed_equivalent_winning_play_clues_prefer_color() {
+        // p4v0s415 T43: either clue obtains Bob's g5; with Alice's p5
+        // already accounted for, negative information has no remaining value.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(42).unwrap();
+        let analysis = crate::analyze_position(
+            &state.view_for(state.current_player()).unwrap(),
+            SupportedConvention::HGroup(crate::HGroupProfile::Max),
+            PlannerConfig {
+                objective: PlanningObjective::PerfectScore,
+                ..PlannerConfig::default()
+            },
+        )
+        .unwrap();
+        let clue = |clue| Action::Clue {
+            target: hanabi_core::PlayerId::new(1),
+            clue,
+        };
+        let green = clue(Clue::Suit(hanabi_core::Suit::Green));
+        let five = clue(Clue::Rank(Rank::Five));
+        let candidate = |action| {
+            analysis
+                .planner
+                .root_actions
+                .iter()
+                .find(|c| c.action == action)
+                .unwrap()
+        };
+        let (a, b) = (candidate(green), candidate(five));
+        for line in [a, b] {
+            assert!(has_unconditional_perfect_finish(line));
+            let actions: Vec<_> = line
+                .projection
+                .steps
+                .iter()
+                .map(|step| (step.projected.actor.index(), step.projected.action))
+                .collect();
+            assert_eq!(
+                actions,
+                vec![
+                    (2, line.action),
+                    (3, Action::Discard(hanabi_core::CardId::new(26))),
+                    (0, Action::Play(hanabi_core::CardId::new(24))),
+                    (1, Action::Play(hanabi_core::CardId::new(44))),
+                ]
+            );
+        }
+        assert_eq!(compare_endpoints(a, b), EndpointComparison::Equivalent);
+        assert_eq!(analysis.planner.best_action, green);
+        let mut unfinished = b.clone();
+        unfinished.projection.frontier = crate::PlanFrontier::Limit;
+        assert!(!has_unconditional_perfect_finish(&unfinished));
+        assert_eq!(
+            compare_endpoints(a, &unfinished),
+            EndpointComparison::PreferLeft(ComparisonReason::PerfectFinish)
+        );
+    }
+
+    #[test]
     fn reviewed_same_priority_play_prefers_scheduled_five_refund() {
         // User-reviewed p4v0s415 T37: both plays lead into teammates.
         // y4 obtains y5 before Alice returns; p3 does not obtain p5 because
