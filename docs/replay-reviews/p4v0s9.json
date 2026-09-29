@@ -1,0 +1,74 @@
+[
+  {
+    "id": "t1-hard-three-shared-first-response",
+    "turn": 1,
+    "positionKey": "c3107a386cbafa4cda77c9ee515e60671b3816cc06c8d02953282a0972d88cd0",
+    "status": "unresolved",
+    "perspective": "Alice considering the recorded Hard 3 Self-Bluff; Bob must infer his response without seeing his own hand.",
+    "source": {
+      "conversation": "2026-09-29 autonomous replay audit",
+      "quote": "If there are obvious bugs, then fix them autonomously. Otherwise, ask me about the correct strategy or convention.",
+      "existingAuthority": "The reviewed fixture and pre-existing level_thirteen_admits_the_opening_hard_three_self_bluff assert 3s to Bob, followed by his newest card #7. This record adds no new user strategy ruling.",
+      "documentation": "https://hanabi.github.io/level-13/#the-hard-3-bluff"
+    },
+    "explanation": {
+      "bug": "Common response safety rejected the clue because Bob had no obligation. In his own view, all five possible focused 3s have hypotheses whose first step is his #7, a currently playable 1. Ambiguous second connections caused the engine to omit this shared immediate response.",
+      "fix": "The owner knowledge compiler preserves the shared first Finesse step of an immediate rank3 self-response only when every possible focus identity is covered and every hypothesis requires the same singleton playable slot. It neither chooses a suit nor commits a second connector. Common clue validation remains in force.",
+      "result": "The engine now admits and chooses the recorded 3s to Bob, and projects Bob playing y1.",
+      "reviewStatus": "Implementation issue resolved using existing regression authority; status unresolved does not claim a new human explanation. The subsequent turn3 strategy comparison remains open."
+    },
+    "regressions": [
+      "h_group::tests::reviewed_hard_three_retains_only_the_shared_first_response"
+    ],
+    "coverageNote": "Checks owner identities, obligation, no second obligation, admission, action, and controls removing coverage, changing slot, adding direct/unsafe interpretations and an alternative hypothesis for the same focus. The older multi-turn test advances beyond opening admission but still fails its turn3 convention-policy choice assertion."
+  },
+  {
+    "id": "t3-two-ones-versus-later-red-two-clarification",
+    "turn": 3,
+    "positionKey": "715bfb4430263bb4d426e1a36bf62690c09c8d05b7a13e78fefd6e5e0cc5ff90",
+    "status": "unresolved",
+    "perspective": "Cathy after Bob plays y1. Cathy sees Alice r2/b1/y4/g2, Bob y3/r3/g1/g2, and Donald g1/r1/r3/b2; her own cards and future draws remain unknown.",
+    "source": {
+      "conversation": "2026-09-29 autonomous replay audit",
+      "quote": "Do a deep analysis for each disagreement. If there are obvious bugs, then fix them autonomously. Otherwise, ask me about the correct strategy or convention.",
+      "documentation": [
+        "https://hanabi.github.io/beginner/play-clues/",
+        "https://hanabi.github.io/level-4/#the-order-chop-move-ocm"
+      ]
+    },
+    "explanation": {
+      "fixtureLine": [
+        "3 Cathy 1s to Donald",
+        "4 Donald r1 #13 (Order Chop Move on Alice)",
+        "5 Alice 2s to Bob",
+        "6 Bob 2s to Alice",
+        "7 Cathy blue to Alice",
+        "8 Donald g1 #12",
+        "9 Alice b1 #1",
+        "10 Bob g2 #16",
+        "11 Cathy 2s to Alice (Discharge)",
+        "12 Donald b2 #15",
+        "13 Alice discard duplicate g2 #3",
+        "14 Bob discard g1 #6",
+        "Stops before15 Cathy unknown discard #8 (IdentityBranch)."
+      ],
+      "engineLine": [
+        "3 Cathy 1s to Bob",
+        "4 Donald blue to Alice",
+        "5 Alice b1 #1",
+        "6 Bob g1 #6",
+        "7 Cathy red to Alice (Bluff)",
+        "8 Donald b2 #15",
+        "9 Alice green to Bob",
+        "10 Bob g2 #16",
+        "Stops before11 Cathy unknown discard #8 (IdentityBranch)."
+      ],
+      "comparison": "Both admitted. Fixture clue obtains two plays versus one for Bob. At the actual shared horizon of8 actions (through10), both forecasts have score5, clues3, demand1, committed0, secured future3 and protected BDR4, no exposed critical chops. Bob line has identified future1 (Alice r2) vs0 and blocked2 vs3. FundedProgress therefore prefers Bob; numeric base convention preference favors Donald434 vs428. The pairwise graph includes a weak-fallback cycle, but the selector preserves this forecast preference rather than allowing a weak edge to reverse it. Neither unfinished forecast proves optimality.",
+      "uncertainty": "No hidden draws or card-identity assumptions are inserted. The fixture forecast cannot assume Cathy holds p1/p4, so it does not reproduce Alice purple-to-Cathy at5 from the actual continuation. It instead chooses2s to Bob; this later causes Alice rank2 ambiguity and a duplicate g2 Discharge. Compared normalized eight-action values, not the longer fixture endpoint score6 versus the shorter engine endpoint score5.",
+      "question": "Should the two plays plus Order Chop Move make 1s to Donald preferable despite the forecast's later r2 clarification, or should a specific follow-up in these lines differ? The guide establishes clue meaning and OCM but does not decide this tradeoff. Existing regression asserts the fixture choice without an explanation of this comparison; do not force parity with a fixture-specific bonus.",
+      "auditScope": "Initial complete p4v0s415 rerun matches all actions except previously recorded29, with no capped calculations. After the opening inference fix, restarted p4v0s9 and matched1\u20132; this is its next unresolved position. Other replays remain pending."
+    },
+    "regressions": [],
+    "coverageNote": "No new strategy assertion or fixture change pending human explanation."
+  }
+]

@@ -1080,3 +1080,37 @@ fn focus_rules_cover_retouched_single_and_leftmost_new_cards() {
         Some(CardId::new(2))
     );
 }
+
+#[test]
+fn reviewed_hard_three_retains_only_the_shared_first_response() {
+    // Reviewed p4v0s9 T1: all five possible 3s require Bob's newest
+    // card first. The second connector remains ambiguous and is not promised.
+    let fixture = expert_replay_p4v0s9();
+    let state = fixture.state_at_turn(1).unwrap();
+    let deductions = LogicalDeductions::new(state.view_for(PlayerId::new(1)).unwrap()).unwrap();
+    let replay = replay_h_group(&deductions, HGroupProfile::Max);
+    let notes = convention_card_inferences(&deductions, &replay);
+    let first = notes.iter().find(|note| note.card == CardId::new(7)).unwrap();
+    assert!(first.finessed && first.play_obligation.is_some());
+    assert!(first.identities.iter().all(|identity| identity.rank == Rank::One));
+    assert!(notes.iter().find(|note| note.card == CardId::new(6)).unwrap().play_obligation.is_none());
+    for control in 0..5 {
+        let mut altered = replay.clone();
+        let clue = altered.clues.last_mut().unwrap();
+        match control {
+            0 => { clue.hypotheses.pop(); }
+            1 => clue.hypotheses[0].connection_steps[0].cards = vec![CardId::new(6)],
+            2 => clue.hypotheses[0].connection_steps.clear(),
+            3 => clue.hypotheses[0].connection_steps[0].expected = Card::new(Suit::Red, Rank::Two),
+            _ => { let mut alternative = clue.hypotheses[0].clone(); alternative.connection_steps.clear(); clue.hypotheses.push(alternative); }
+        }
+        let knowledge = build_convention_knowledge(&deductions, &altered);
+        let notes = knowledge.project(&deductions);
+        assert!(notes.iter().find(|note| note.card == CardId::new(7)).unwrap().play_obligation.is_none(), "control {control}");
+    }
+    let before = fixture.state_at_turn(0).unwrap();
+    let giver = LogicalDeductions::new(before.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    assert!(h_group_clue_candidates(&giver, HGroupProfile::Max).iter()
+        .any(|candidate| candidate.action == replay_action_at_turn(&fixture, 0)));
+    assert_eq!(select_h_group_action(&deductions, HGroupProfile::Max), Some(Action::Play(CardId::new(7))));
+}

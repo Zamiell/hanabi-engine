@@ -681,6 +681,69 @@ impl<'a> ConventionKnowledgeCompiler<'a> {
         }
     }
 
+    /// A Hard 3 Self-Bluff can remain superposed with a Double Finesse.
+    /// If every interpretation starts with the same safe slot, ambiguity in
+    /// the second connector does not remove that immediate obligation.
+    fn apply_shared_three_bluff_response(&mut self) {
+        let view = self.deductions.view();
+        for clue in &self.replay.clues {
+            if clue.turn + 1 != view.turn
+                || clue.target != view.observer
+                || clue.clue != Clue::Rank(Rank::Three)
+                || super::super::next_player(clue.giver, view.hands.len()) != view.observer
+                || clue.kind != super::super::HGroupClueKind::Play
+                || clue.focus_identities.is_empty()
+            {
+                continue;
+            }
+            let Some(first) = clue
+                .hypotheses
+                .first()
+                .and_then(|h| h.connection_steps.first())
+            else {
+                continue;
+            };
+            if first.cards.len() != 1 || first.actor != view.observer {
+                continue;
+            }
+            let card = first.cards[0];
+            let mut identities = IdentitySet::from_mask(0);
+            let covered = clue
+                .focus_identities
+                .iter()
+                .all(|identity| clue.hypotheses.iter().any(|h| h.focus_identity == identity));
+            let complete = covered
+                && clue.hypotheses.iter().all(|hypothesis| {
+                    let Some(step) = hypothesis.connection_steps.first() else {
+                        return false;
+                    };
+                    if hypothesis.required_fix.is_some()
+                        || step.actor != view.observer
+                        || step.cards != [card]
+                        || step.kind != HGroupConnectionKind::Finesse
+                        || !super::super::is_playable_now(view, step.expected)
+                    {
+                        return false;
+                    }
+                    identities = identities.union(IdentitySet::singleton(step.expected));
+                    true
+                });
+            if complete {
+                self.knowledge
+                    .update(card, KnowledgeSource::Clue(clue.turn), |note| {
+                        let narrowed = note.identities.intersection(identities);
+                        if !narrowed.is_empty() {
+                            note.identities = narrowed;
+                            note.finessed = true;
+                            note.play_obligation = Some(HGroupPlayObligation::Connection(
+                                HGroupConnectionKind::Finesse,
+                            ));
+                        }
+                    });
+            }
+        }
+    }
+
     fn apply_implicit_saves(&mut self) {
         let view = self.deductions.view();
         for (saved, identities) in &self.replay.implicit_saves {
@@ -1281,6 +1344,7 @@ fn compile_convention_card_inferences(
     compiler.apply_connection_promises();
     compiler.apply_current_focus();
     compiler.apply_forced_plays();
+    compiler.apply_shared_three_bluff_response();
     compiler.apply_implicit_saves();
     compiler.apply_resolved_discharge_trash();
     for deduction in &replay.strategic_deductions {
