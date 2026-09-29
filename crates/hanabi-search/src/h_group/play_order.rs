@@ -32,6 +32,30 @@ pub(super) fn ordered_playable_cards(
     cards
 }
 
+/// Both plays in this category hand a known continuation to a teammate.
+/// Lower rank/age remain defaults, but are not a stronger obligation.
+pub(super) fn has_teammate_play_priority(
+    view: &PlayerView,
+    inferred: &HGroupInferences,
+    profile: HGroupProfile,
+    card: CardId,
+) -> bool {
+    if !rule_enabled(profile, HGroupRuleId::Priority) || inferred.phase == HGroupPhase::EndGame {
+        return false;
+    }
+    let gotten = inferred.gotten();
+    let context = PlayableOrderContext {
+        view,
+        inferred,
+        profile,
+        own_hand: &view.hands[view.observer.index()],
+        initial_cards: (if view.hands.len() <= 3 { 5 } else { 4 }) * view.hands.len(),
+        gotten: &gotten,
+    };
+    let key = playable_order_key(&context, card);
+    key.0 && key.1 && key.2 && !key.3
+}
+
 type PlayableOrderKey = (bool, bool, bool, bool, bool, usize, u8, u8);
 
 struct PlayableOrderContext<'a> {

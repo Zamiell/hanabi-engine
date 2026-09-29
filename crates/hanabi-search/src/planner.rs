@@ -558,6 +558,7 @@ pub enum ComparisonReason {
     ConditionalStrikes,
     EndpointResources,
     ConventionPlayOrder,
+    PriorityRefundTiming,
     ConditionalOpportunity,
     SpeculativeFinesse,
     SavePressure,
@@ -594,6 +595,7 @@ impl ComparisonReason {
             | Self::ForecastBottomDeckRisk
             | Self::FundedProgress
             | Self::ClueEfficiency
+            | Self::PriorityRefundTiming
             | Self::ProgressTiming
             | Self::KnownStrikes
             | Self::ConditionalStrikes
@@ -1489,6 +1491,75 @@ fn has_unconditional_perfect_finish(candidate: &PlannerActionEvaluation) -> bool
             .is_some_and(|point| point.value.score == 25)
 }
 
+/// A small timing preference within teammate-leading Priority, using actual
+/// scheduled plays before the actor returns, never merely a reachable five.
+fn compare_priority_refund_timing(
+    left: &PlannerActionEvaluation,
+    right: &PlannerActionEvaluation,
+    basis: &mut Option<ComparisonBasis>,
+) -> Option<EndpointComparison> {
+    if !left.preference.teammate_play_priority || !right.preference.teammate_play_priority {
+        return None;
+    }
+    let a = left.symbolic_line.first_rotation?;
+    let b = right.symbolic_line.first_rotation?;
+    let horizon = usize::from(a.actions);
+    if horizon == 0
+        || a.actions != b.actions
+        || a.value.score != b.value.score
+        || a.value.committed_future_plays != b.value.committed_future_plays
+    {
+        return None;
+    }
+    let refund = |candidate: &PlannerActionEvaluation| {
+        if candidate.projection.steps.len() < horizon
+            || candidate
+                .projection
+                .checkpoints
+                .iter()
+                .take(horizon)
+                .any(|c| c.value.exposed_critical_chops != 0 || c.value.save_pressure != 0)
+        {
+            return None;
+        }
+        Some(
+            candidate
+                .projection
+                .steps
+                .iter()
+                .take(horizon)
+                .filter(|step| matches!(step.projected.action, Action::Play(_)))
+                .map(|step| step.consequences.clues_gained)
+                .sum::<u8>(),
+        )
+    };
+    let refunds = (refund(left)?, refund(right)?);
+    let preferred = if refunds.0 > refunds.1
+        && a.value.clues > b.value.clues
+        && a.value.preserves_funded_progress(b.value)
+    {
+        EndpointComparison::PreferLeft(ComparisonReason::PriorityRefundTiming)
+    } else if refunds.1 > refunds.0
+        && b.value.clues > a.value.clues
+        && b.value.preserves_funded_progress(a.value)
+    {
+        EndpointComparison::PreferRight(ComparisonReason::PriorityRefundTiming)
+    } else {
+        return None;
+    };
+    retain_comparison_basis(
+        basis,
+        "priorityRefundTiming",
+        horizon,
+        || vec![a],
+        || vec![b],
+    );
+    if let Some(basis) = basis {
+        basis.scheduled_refunds = Some(refunds);
+    }
+    Some(preferred)
+}
+
 #[allow(clippy::too_many_lines)]
 fn compare_endpoint_evidence(
     left: &PlannerActionEvaluation,
@@ -1527,6 +1598,9 @@ fn compare_endpoint_evidence(
             return EndpointComparison::PreferRight(ComparisonReason::BottomDeckRisk);
         }
         Ordering::Equal => {}
+    }
+    if let Some(preference) = compare_priority_refund_timing(left, right, basis) {
+        return preference;
     }
     // Globally known transferred cards follow ordinary Priority, not urgent
     // blind-play priority. Preserve the convention's scheduled order rather
@@ -2769,6 +2843,84 @@ impl std::error::Error for PlannerError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewed_same_priority_play_prefers_scheduled_five_refund() {
+        // User-reviewed p4v0s415 T37: both plays lead into teammates.
+        // y4 obtains y5 before Alice returns; p3 does not obtain p5 because
+        // Alice must first play y4 on her following turn.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(36).unwrap();
+        let (analysis, _) = crate::diagnostics::capture_decisions(|| {
+            crate::analyze_position(
+                &state.view_for(state.current_player()).unwrap(),
+                SupportedConvention::HGroup(crate::HGroupProfile::Max),
+                PlannerConfig {
+                    objective: PlanningObjective::PerfectScore,
+                    ..PlannerConfig::default()
+                },
+            )
+            .unwrap()
+        });
+        let yellow = Action::Play(hanabi_core::CardId::new(31));
+        let purple = Action::Play(hanabi_core::CardId::new(33));
+        let candidate = |action| {
+            analysis
+                .planner
+                .root_actions
+                .iter()
+                .find(|c| c.action == action)
+                .unwrap()
+        };
+        let (a, b) = (candidate(yellow), candidate(purple));
+        assert_eq!(analysis.planner.best_action, yellow);
+        assert!(a.preference.teammate_play_priority && b.preference.teammate_play_priority);
+        assert_eq!(
+            a.projection.steps[2].projected.action,
+            Action::Play(hanabi_core::CardId::new(10))
+        );
+        assert_eq!(b.projection.steps[4].projected.action, yellow);
+        let (comparison, _) = crate::diagnostics::capture_decisions(|| {
+            let mut basis = None;
+            let result = compare_endpoint_evidence(a, b, &mut basis);
+            (result, basis.unwrap())
+        });
+        assert_eq!(
+            comparison.0,
+            EndpointComparison::PreferLeft(ComparisonReason::PriorityRefundTiming)
+        );
+        assert_eq!(comparison.1.horizon, 4);
+        assert_eq!(comparison.1.scheduled_refunds, Some((1, 0)));
+        for control in 0..4 {
+            let mut altered = a.clone();
+            match control {
+                0 => altered.preference.teammate_play_priority = false,
+                1 => altered.projection.steps[2].consequences.clues_gained = 0,
+                2 => {
+                    altered.projection.checkpoints[0]
+                        .value
+                        .exposed_critical_chops = 1;
+                }
+                _ => {
+                    altered
+                        .symbolic_line
+                        .first_rotation
+                        .as_mut()
+                        .unwrap()
+                        .value
+                        .committed_future_plays -= 1;
+                }
+            }
+            assert_eq!(
+                compare_priority_refund_timing(&altered, b, &mut None),
+                None,
+                "control {control}"
+            );
+        }
+    }
 
     #[test]
     fn reviewed_duplicate_touch_wins_with_recorded_safe_continuation() {

@@ -396,3 +396,18 @@ spare before the successor plays. An independent literal identification or later
 focused clue can establish a duplicate; two notes derived from the same
 collateral promise cannot. The regression checks the waiting positions after 35
 and 37 as well as play order after 41, and a literal-identification control.
+
+## Same-Priority plays can prefer an earlier five refund
+
+In `p4v0s415` turn37 (`t37-same-priority-prefers-earlier-five-refund`), Alice's
+p3 and y4 both lead into clued teammates. With no chop to protect, they should
+be evaluated similarly; lower rank is a fallback rather than an absolute
+ordering between them. The user slightly prefers y4 because Cathy plays y5
+before Alice returns. Playing p3 leads through Bob's p4, but Alice still plays
+y4 next, so her own p5 supplies no equally early refund.
+
+Use the actual scheduled continuation, not mere reachability of a five. Require
+preserved progress and protection, equal elapsed turns, and an extra usable
+refund. Higher-priority obligations and losses still take precedence. The
+regression checks both real lines and removes refund evidence, same-category
+status, protection, and progress in negative controls.

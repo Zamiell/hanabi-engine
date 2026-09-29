@@ -854,16 +854,17 @@ fn analyze_h_group_actions_from_analysis(
             CompiledHGroupAction {
                 action,
                 kind: classify_h_group_action(action, inferred, clue),
-                preference: ActionPreference::new(
-                    terminal_progress.map_or(priority, TerminalPlanProgress::within_category),
-                    terminal_progress.is_some(),
-                )
-                .with_play_order(match action {
-                    Action::Play(card) => {
-                        semantic_play_order(deductions.view(), inferred, profile, card, &play_order)
-                    }
-                    _ => None,
-                }),
+                preference: scheduled_play_preference(
+                    ActionPreference::new(
+                        terminal_progress.map_or(priority, TerminalPlanProgress::within_category),
+                        terminal_progress.is_some(),
+                    ),
+                    deductions.view(),
+                    inferred,
+                    profile,
+                    action,
+                    &play_order,
+                ),
             }
         })
         .collect::<Vec<_>>();
@@ -921,11 +922,8 @@ fn analyze_h_group_actions_from_analysis(
         HGroupActionKind::PromisedPlay | HGroupActionKind::Connection => {
             matches!(analysis.action, Action::Play(_))
         }
-        HGroupActionKind::Clue {
-            target,
-            save: _,
-            immediate_play: _,
-        } => matches!(analysis.action, Action::Clue { target: actual, .. } if actual == target),
+        HGroupActionKind::Clue { target, .. } =>
+            matches!(analysis.action, Action::Clue { target: actual, .. } if actual == target),
         HGroupActionKind::Fallback => true,
     }));
     let decision = HGroupActionSet {
@@ -2677,6 +2675,24 @@ fn deferred_teamwork_action_count(candidate: &CompiledClueAction) -> u8 {
 /// parked for a new setup.
 fn completed_connection_focus_is_due(inferred: &HGroupInferences) -> bool {
     !inferred.completed_connection_focuses.is_empty()
+}
+
+fn scheduled_play_preference(
+    preference: ActionPreference,
+    view: &PlayerView,
+    inferred: &HGroupInferences,
+    profile: HGroupProfile,
+    action: Action,
+    ordered: &[CardId],
+) -> ActionPreference {
+    let Action::Play(card) = action else {
+        return preference;
+    };
+    preference
+        .with_teammate_play_priority(super::play_order::has_teammate_play_priority(
+            view, inferred, profile, card,
+        ))
+        .with_play_order(semantic_play_order(view, inferred, profile, card, ordered))
 }
 
 /// A permitted pause of a demonstrated layer is a strategic alternative, not

@@ -636,7 +636,7 @@
     "id": "t37-yellow-four-refund-timing-versus-purple-three-priority",
     "turn": 37,
     "positionKey": "daa53f92e2c06dff76397ab4dca41a9e2f57a8d22e274c330ddb9f01d35dcdc5",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Alice knows y4 #31, p3 #33 and p5 #24. One clue, 11 cards in deck, stacks r5/y3/g4/b5/p2. Both playable cards unlock already-clued teammates.",
     "source": {
       "conversation": "2026-09-28 audit following safe duplicate-touch explanation",
@@ -679,6 +679,29 @@
     "regressions": [
       "h_group::tests::replay::reviewed_duplicate_collateral_uses_leftmost_play_before_trash"
     ],
-    "coverageNote": "Waiting/discard safety has focused coverage. Comparative strategy remains unresolved; no new test freezes the engine p3 preference as optimal."
+    "coverageNote": "Waiting/discard safety has focused coverage. Comparative strategy remains unresolved; no new test freezes the engine p3 preference as optimal.",
+    "supersededBy": "t37-same-priority-prefers-earlier-five-refund"
+  },
+  {
+    "id": "t37-same-priority-prefers-earlier-five-refund",
+    "turn": 37,
+    "positionKey": "daa53f92e2c06dff76397ab4dca41a9e2f57a8d22e274c330ddb9f01d35dcdc5",
+    "status": "user-explained",
+    "perspective": "Alice has known p3 and y4, both leading into clued teammates; no chop needs protection.",
+    "source": {
+      "conversation": "2026-09-29 user explanation of Priority tie",
+      "quote": "alice has 2 cards that lead into others hands, p3 and y4. here, both cards have Priority, and no chops need to be protected, so the plays of p3 and y4 should be evaluated extremely similarly.",
+      "reasoning": "if alice plays p3, it would leads into p4 and p5 in her own hand, but alice wouldn't play p5 in next round, she would always be playing y4 on the next round because it leads into y5. this line would not play a 5 and get a clue back. conversely, if alice plays y4, y5 could be played, which would give the team a clue back. thus, the engine should slightly prefer y4."
+    },
+    "explanation": {
+      "ruling": "Within the same teammate-leading Priority category, prefer the actually scheduled earlier five refund when productive progress and protection are preserved. Lower rank is a default tie breaker, not a stronger obligation between these plays.",
+      "conditions": "Both first rotations must be established, equal in elapsed turns, score and committed future plays; no exposed critical chop or Save pressure. The winning branch must actually receive an extra play refund and have more usable clues while preserving funded progress. Missing/unknown continuations do not earn the preference. Higher urgency, losses and differing Priority categories are not overridden.",
+      "projection": "y4 -> Bob discard y2 -> Cathy y5 -> Donald discard y1 earns the refund before Alice returns. p3 -> Bob p4 -> Cathy discard b3 -> Donald discard y1 does not. Alice next plays y4 in the p3 branch; a merely reachable p5 cannot be credited as a scheduled refund.",
+      "implementation": "Keep canonical ordering metadata for fallback and recognition. Retain same-category information so the planner can compare forecast refund timing before the lower-rank tiebreak, with diagnostic horizon and operands."
+    },
+    "regressions": [
+      "planner::tests::reviewed_same_priority_play_prefers_scheduled_five_refund"
+    ],
+    "validation": "Focused regression and negative controls pass. Priority-related group:14 passed,1 existing baseline failure (recognizes_expert_replay_priority_blue_three_line, also recorded in completed full run d959b3dc260947ee9c96e3a31996fb10). scripts/check.sh --fast passes; full ordinary suite deferred to CI, not observed."
   }
 ]

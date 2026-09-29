@@ -9,6 +9,7 @@ pub struct ActionPreference {
     advances_terminal_plan: bool,
     within_category: i32,
     play_order: Option<core::cmp::Reverse<usize>>,
+    pub(crate) teammate_play_priority: bool,
 }
 
 impl ActionPreference {
@@ -18,6 +19,7 @@ impl ActionPreference {
             advances_terminal_plan,
             within_category,
             play_order: None,
+            teammate_play_priority: false,
         }
     }
 
@@ -26,6 +28,11 @@ impl ActionPreference {
             Some(order) => Some(core::cmp::Reverse(order)),
             None => None,
         };
+        self
+    }
+
+    pub(crate) const fn with_teammate_play_priority(mut self, value: bool) -> Self {
+        self.teammate_play_priority = value;
         self
     }
 
