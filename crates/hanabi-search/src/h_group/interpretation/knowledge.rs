@@ -1132,6 +1132,10 @@ fn compile_convention_card_inferences(
                         if !demonstrated_queued_identity.is_empty() && !direct_focus_is_live {
                             narrowed = demonstrated_queued_identity;
                         } else if !queued_interpretation_is_live
+                            // A completed connector still supports the delayed
+                            // alternative. Resolving its obligation must not
+                            // turn an ambiguous clue into a direct-only clue.
+                            && demonstrated_queued_identity.is_empty()
                             && !has_existing_prompt_for_delayed_identity
                             && !loaded_color_clue_remains_ambiguous
                             && !external_finesse_remains_live

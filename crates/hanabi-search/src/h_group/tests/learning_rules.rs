@@ -1155,3 +1155,71 @@ fn reviewed_projected_twos_respect_givers_ambiguous_good_touch() {
         assert!(!h_group_clue_candidates(&d, HGroupProfile::Max).iter().any(|candidate| candidate.action == action));
     }
 }
+
+#[test]
+fn reviewed_five_pull_requires_the_recipients_response() {
+    // p4v0s9 T5: the hypothetical 5s-to-Cathy proposal claims to pull p1 #10.
+    // The shared recipient interpreter currently reads a Stall. A proposed
+    // convention cannot bypass response safety merely because it has a 5 label.
+    let state = expert_replay_p4v0s9().state_at_turn(4).unwrap();
+    let d = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let action = Action::Clue { target: PlayerId::new(2), clue: Clue::Rank(Rank::Five) };
+    let replay = replay_h_group(&d, HGroupProfile::Max);
+    let proposals = crate::h_group::interpretation::h_group_clue_candidates_from_replay_inner(
+        &d, HGroupProfile::Max, &replay,
+    );
+    let pull = proposals.iter().find(|candidate| candidate.action == action).unwrap();
+    assert_eq!(pull.required_response, Some((PlayerId::new(2), CardId::new(10))));
+    let compiled = crate::h_group::candidate_pipeline::compile(&d, HGroupProfile::Max, &replay);
+    assert!(compiled.rejected.iter().any(|candidate| candidate.action == action
+        && candidate.reason == crate::ConventionRejectionReason::UnprovenResponse));
+    let clues = h_group_clue_candidates(&d, HGroupProfile::Max);
+    assert!(!clues.iter().any(|candidate| candidate.action == action));
+    assert!(clues.iter().any(|candidate| candidate.action == replay_action_at_turn(&expert_replay_p4v0s9(), 4)));
+}
+
+#[test]
+fn reviewed_first_touch_of_chop_moved_collateral_keeps_good_touch() {
+    // p4v0s9 T6: rank2 first touches Alice's OCM-protected r2 #0
+    // alongside focus g2 #3. Branch follows the reported T6 projection.
+    let mut state = expert_replay_p4v0s9().state_at_turn(6).unwrap();
+    let before = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let replay = replay_h_group(&before, HGroupProfile::Max);
+    let clue = replay.clues.iter().find(|clue| clue.turn == 5).unwrap();
+    assert!(clue.non_focus_identities.iter().any(|(card, _)| *card == CardId::new(0)));
+    for action in [
+        Action::Clue { target: PlayerId::new(0), clue: Clue::Suit(Suit::Blue) },
+        Action::Play(CardId::new(12)),
+        Action::Play(CardId::new(1)),
+        Action::Clue { target: PlayerId::new(3), clue: Clue::Suit(Suit::Blue) },
+        Action::Play(CardId::new(10)),
+        Action::Play(CardId::new(15)),
+    ] { state.apply(action).unwrap(); }
+    let d = LogicalDeductions::new(state.view_for(PlayerId::new(0)).unwrap()).unwrap();
+    let inferred = infer_h_group(&d, HGroupProfile::Max);
+    assert!(inferred.cards.iter().find(|note| note.card == CardId::new(3)).unwrap()
+        .identities.contains(Card::new(Suit::Green, Rank::Two)),
+        "the demonstrated g1 before Alice's first turn must not erase delayed g2");
+    state.apply(Action::Play(CardId::new(3))).unwrap();
+    for masked in [false, true] {
+        let mut view = state.view_for(PlayerId::new(0)).unwrap();
+        if masked {
+            for (owner, hand) in view.hands.iter_mut().enumerate() {
+                for card in hand {
+                    if owner == 1 || card.id.index() >= 18 { card.identity = None; }
+                }
+            }
+        }
+        let d = LogicalDeductions::new(view).unwrap();
+        let inferred = infer_h_group(&d, HGroupProfile::Max);
+        let note = inferred.cards.iter().find(|note| note.card == CardId::new(0)).unwrap();
+        assert!(!note.identities.contains(Card::new(Suit::Green, Rank::Two)));
+        assert!(note.identities.contains(Card::new(Suit::Red, Rank::Two)));
+        assert!(inferred.playable_now.contains(&CardId::new(0)));
+        // The untouched chop-moved card had no such Good Touch promise.
+        let untouched = expert_replay_p4v0s9().state_at_turn(5).unwrap();
+        let d = LogicalDeductions::new(untouched.view_for(PlayerId::new(0)).unwrap()).unwrap();
+        let inferred = infer_h_group(&d, HGroupProfile::Max);
+        assert!(!inferred.playable_now.contains(&CardId::new(0)));
+    }
+}

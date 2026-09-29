@@ -2242,6 +2242,23 @@ pub(super) fn advanced_clue_candidates(
                     .find(|card| !gotten.contains(&card.id))
                     .map(|card| (actor, card.id));
             }
+            if kind == HGroupMoveKind::FivePull {
+                // The pull is a behavioral promise, not merely a label on a
+                // saved 5. Send its first response through the same owner-view
+                // safety check as other blind plays. A connecting pull must
+                // first demonstrate the forward Finesse.
+                // https://hanabi.github.io/level-19/#the-5-pull-prompt--the-5-pull-finesse
+                proposal.required_response = five_pulled.and_then(|pulled| {
+                    let identity = identity_of(view, pulled)?;
+                    if is_playable_now(view, identity) {
+                        Some((target, pulled))
+                    } else {
+                        let actor = next_player(view.current_player, view.hands.len());
+                        finesse_position(&view.hands[actor.index()], gotten, 0)
+                            .map(|card| (actor, card.id))
+                    }
+                });
+            }
             candidates.push(proposal);
         }
     }

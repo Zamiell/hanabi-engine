@@ -120,5 +120,133 @@
     ],
     "coverageNote": "Checks the hypothetical branch in ordinary and masked forecast views, owner ambiguity, common Good Touch rejection, downstream admission, and a control where the old card is clarified to y2.",
     "validation": "New regression passes. Proven-safe duplicate continuation, owner collateral ordering and integrated duplicate clue tests pass. scripts/check.sh --fast passes. Broad reviewed_ selection:72 passed,18 failed,1 ignored;16 failures occur in full baseline d959b3dc260947ee9c96e3a31996fb10 (revision82bd9a5846daa5ab0c4c742fbe72e94787430e75). The other two, every_reviewed_root_is_projected_despite_unequal_priorities and reviewed_same_priority_play_prefers_scheduled_five_refund, pass isolated reruns (36.64s and28.49s). No full suite or observed CI pass claimed."
+  },
+  {
+    "id": "t5-five-pull-must-verify-its-response",
+    "turn": 5,
+    "positionKey": "06779f0a9eef24ffc3e96e055dba65017aa41afea8a27164809900bd7b45b665",
+    "status": "unresolved",
+    "perspective": "Alice at current turn5, considering fixture purple to Cathy and hypothetical 5s to Cathy. Cathy must respond using her own hidden-hand knowledge.",
+    "source": {
+      "conversation": "2026-09-30 autonomous replay audit",
+      "quote": "If there are obvious bugs, then fix them autonomously. Otherwise, ask me about the correct strategy or convention.",
+      "documentation": "https://hanabi.github.io/level-19/#the-5-pull",
+      "authority": "Ordinary software invariant: a proposed blind response must be verified in the responder view; no new human strategy ruling."
+    },
+    "explanation": {
+      "bug": "The advanced generator labels 5s to Cathy FivePull and intends p1 #10. Recipient replay instead emits FiveStall with no pull obligation. The proposal omitted required_response, bypassing the existing common owner-response validator. Its forecast could therefore credit a different later Bluff as if the original pull had been established.",
+      "fix": "Declare the first required response for FivePull proposals: the recipient and pulled card when immediately playable, otherwise the forward finesse reactor and connector. Common response safety rejects this unproved proposal. No fixture change or score bonus.",
+      "limitation": "This repairs admission soundness, not complete Five Pull recognition. Existing replay recognition can read a Stall instead of the proposed Pull. Unsupported proposals must not be treated as proved responses.",
+      "beforeFixtureLine": [
+        "5 Alice purple to Cathy",
+        "6 Bob 5s to Cathy",
+        "7 Cathy play p1",
+        "8 Donald play g1",
+        "9 Alice blue to Donald",
+        "10 Bob play g2",
+        "11 Cathy discard r1",
+        "12 Donald discard r3",
+        "Stops before13 Alice unknown discard #1."
+      ],
+      "beforeEngineLine": [
+        "5 Alice 5s to Cathy",
+        "6 Bob blue to Donald",
+        "7 Cathy play p1",
+        "8 Donald play g1",
+        "9 Alice purple to Donald",
+        "10 Bob play g2",
+        "11 Cathy discard r1",
+        "12 Donald discard r3",
+        "Stops before13 Alice unknown discard #1."
+      ],
+      "beforeComparison": "Same eight-action score5/clues5 and five secured future cards. EndpointResources preferred the alternative secured p3 with a visible p4 successor over the fixture secured p4. This comparison relied on the unverified FivePull proposal; it is not a user ruling.",
+      "result": "Restarted replay matches turns1-5 after admission correction; the next disagreement is turn6."
+    },
+    "regressions": [
+      "h_group::tests::reviewed_five_pull_requires_the_recipients_response"
+    ],
+    "coverageNote": "Checks declared responder/slot, common UnprovenResponse rejection, downstream admission and preservation of the normal purple clue. Related reviewed Five Stall precedence test covers the distinct legitimate Stall category."
+  },
+  {
+    "id": "t6-first-clue-on-chop-moved-collateral",
+    "turn": 6,
+    "positionKey": "7bb2b478e399002f0d69e16b92e713db7996131929dac38a4d716f5d3618ae88",
+    "status": "unresolved",
+    "perspective": "Alice interpreting Bob\u2019s recorded 2s clue after her r2 #0 was protected by Donald\u2019s Order Chop Move.",
+    "source": {
+      "conversation": "2026-09-30 autonomous replay audit",
+      "quote": "If there are obvious bugs, then fix them autonomously.",
+      "documentation": "https://hanabi.github.io/level-6/#chop-moves--tempo-clues",
+      "authority": "Documentation establishes first actual clue on a chop-moved card as a normal Play Clue; no new human strategy ruling."
+    },
+    "explanation": {
+      "bug": "Collateral Good Touch creation excluded all gotten cards, including chop-moved but never clued r2 #0. In the rank2 forecast, after Alice plays g2 #3, #0 still permits g2 and is not considered playable; Alice discards y4 instead. The rival blue line was preferred by SavePrinciple because the flawed continuation also discarded Donald\u2019s r3.",
+      "fix": "Distinguish prior actual/invisible play promises from mere chop protection when recording first-touch collateral. Preserve ongoing Good Touch narrowing after the focus plays.",
+      "assumptions": "Regression branches from recorded turn6 through the reported blue-Alice/green1/blue1/blue-Donald/purple1/blue2/green2 sequence; it verifies both ordinary owner view and original-Bob-masked forecast view. No hidden faces or draws establish Alice\u2019s inference.",
+      "relatedHistoricalBug": "The focused g2 #3 lost its actual g2 possibility after the queued g1 played before Alice\u2019s first response turn. The compiler detected the demonstrated delayed identity but, because direct r2/y2 alternatives remained, subsequently narrowed back to direct-at-clue identities. Keep demonstrated alternatives when the pending connector completes; do not invent new identities outside the original clue domain.",
+      "result": "After both inference corrections, Alice now plays her remaining r2 at17. Restarted replay still agrees1-5 and differs6, with SavePrinciple preferring blue to Alice over2s."
+    },
+    "regressions": [
+      "h_group::tests::reviewed_first_touch_of_chop_moved_collateral_keeps_good_touch"
+    ],
+    "coverageNote": "Checks first-touch collateral provenance, removal of played g2, retention of r2, downstream playable status, and a pre-clue chop-move-only negative control. Also checks that the focused g2 remains possible after g1 is demonstrated before the recipient\u2019s first response."
+  },
+  {
+    "id": "t6-two-for-one-versus-uncertain-red-three-coverage",
+    "turn": 6,
+    "positionKey": "7bb2b478e399002f0d69e16b92e713db7996131929dac38a4d716f5d3618ae88",
+    "status": "unresolved",
+    "perspective": "Bob knows his two touched cards have rank3 but does not know their suits. Donald\u2019s r3 is visible; the actual other r3 in Bob\u2019s hand is not available as exact knowledge to his forecast.",
+    "source": {
+      "conversation": "2026-09-30 autonomous replay audit",
+      "quote": "Otherwise, ask me about the correct strategy or convention.",
+      "documentation": [
+        "https://hanabi.github.io/beginner/save-principle/",
+        "https://hanabi.github.io/beginner/minimum-clue-value-principle/"
+      ]
+    },
+    "explanation": {
+      "fixtureLine": [
+        "6 Bob 2s to Alice",
+        "7 Cathy blue to Alice",
+        "8 Donald play g1",
+        "9 Alice play b1",
+        "10 Bob blue to Donald",
+        "11 Cathy play p1",
+        "12 Donald play b2",
+        "13 Alice play g2",
+        "14 Bob 5s to Cathy",
+        "15 Cathy discard r1",
+        "16 Donald discard r3",
+        "17 Alice play r2",
+        "Stops before18 Bob unknown discard #6."
+      ],
+      "engineLine": [
+        "6 Bob blue to Alice",
+        "7 Cathy play p1",
+        "8 Donald play g1",
+        "9 Alice play b1",
+        "10 Bob red to Alice",
+        "11 Cathy blue to Donald",
+        "12 Donald play b2",
+        "13 Alice play r2",
+        "14 Bob green to Alice",
+        "15 Cathy discard r1",
+        "16 Donald 5s to Cathy",
+        "17 Alice play g2",
+        "Stops before18 Bob unknown discard #6."
+      ],
+      "comparison": "SavePrinciple compares the equal12-action horizon. Fixture line discards Donald\u2019s r3 at16 while clued r2 is about to play; source Bob has no known replacement, so this is tagged UniqueDelayedPlayable with BDR. Blue line keeps r3. Both reach score8, two secured future cards, no strikes, before the same unknown Bob discard. Fixture retains3 clues versus1 and no remaining clue demand versus1. Those resource benefits lose to the earlier SavePrinciple comparison. ActualBasis is not recorded for this policy-stage comparator; code confirms equal-horizon critical loss then Save violation counts. Neither forecast proves optimality.",
+      "followUpInspection": "Cathy\u2019s projected choice at7 also compares p1 against blue to Alice using SavePrinciple. Later red/3s to Donald are not admitted; Bob\u2019s own clued3s remain ambiguous, and a possible duplicate is not a new safe ordinary touch. The engine does not know that Donald\u2019s r3 is actually redundant. The fixed r2 collateral and delayed g2 identities no longer account for the difference.",
+      "question": "Should the efficient2s clue outrank this conservative future r3-discard penalty when Bob may already hold its clued replacement, or does a specific projected follow-up need a different convention interpretation? Existing rules cover known replacements and prioritizing plays with preserved safety, not how strongly this uncertain replacement should affect this comparative forecast.",
+      "scope": "Initial scan covered p4v0s415 with retained turn29 difference. Capped matching positions31/32/34/35 all complete on isolated recheck after fixes, in37.0/38.4/4.9/67.3 seconds respectively, and match. Other p4v0s415 positions were checked before these fixes. Restarted p4v0s9 agrees1-5 and stops6. p4v0s2/p4v0s3/p4v0s1 not advanced this turn.",
+      "assumptions": "No future draws or hidden Bob identities assumed. Projected discards are policy choices, not forced game actions."
+    },
+    "regressions": [
+      "h_group::tests::reviewed_five_pull_requires_the_recipients_response",
+      "h_group::tests::reviewed_first_touch_of_chop_moved_collateral_keeps_good_touch"
+    ],
+    "coverageNote": "Inference/admission bugs covered. No test asserts an unreviewed strategy resolution.",
+    "validation": "Two new regressions and related Five Stall precedence, safe duplicate collateral, unclued suffix, older response and queued green controls pass. scripts/check.sh --fast passes. Related second_replay_direct_blue_two_play_clue_persists_until_played fails at learning_rules.rs:222, the same fresh blue clue misclassified as Fix assertion as full baseline d959b3dc260947ee9c96e3a31996fb10 at revision82bd9a5846daa5ab0c4c742fbe72e94787430e75. Full suite deferred to CI; CI not observed."
   }
 ]

@@ -917,10 +917,16 @@ impl ReplayReducer {
         let gotten = protected_cards(&self.explicitly_clued, &active_invisible, &self.chop_moved);
         let hand = &self.hands[target.index()];
         let old_chop = chop(hand, &gotten);
+        // Chop movement protects a card but does not give it a Good Touch
+        // promise. Its first physical clue must create the same continuing
+        // collateral promise as a first clue on any other unpromised card.
+        // https://hanabi.github.io/level-6/#chop-moves--tempo-clues
         let newly_touched = touched
             .iter()
             .copied()
-            .filter(|card| !gotten.contains(card))
+            .filter(|card| {
+                !self.explicitly_clued.contains(card) && !active_invisible.contains(card)
+            })
             .collect::<Vec<_>>();
         let previously_promptable = self
             .explicitly_clued
