@@ -1501,10 +1501,22 @@ fn compare_priority_refund_timing(
     if !left.preference.teammate_play_priority || !right.preference.teammate_play_priority {
         return None;
     }
-    let a = left.symbolic_line.first_rotation?;
-    let b = right.symbolic_line.first_rotation?;
-    let horizon = usize::from(a.actions);
-    if horizon == 0
+    let before_return = |candidate: &PlannerActionEvaluation| {
+        let actor = candidate.projection.steps.first()?.projected.actor;
+        Some(
+            candidate
+                .projection
+                .steps
+                .iter()
+                .skip(1)
+                .position(|step| step.projected.actor == actor)
+                .map_or(candidate.projection.steps.len(), |index| index + 1),
+        )
+    };
+    let horizon = before_return(left)?.min(before_return(right)?);
+    let a = *left.projection.checkpoints.get(horizon.checked_sub(1)?)?;
+    let b = *right.projection.checkpoints.get(horizon - 1)?;
+    if usize::from(a.actions) != horizon
         || a.actions != b.actions
         || a.value.score != b.value.score
         || a.value.committed_future_plays != b.value.committed_future_plays
@@ -2894,6 +2906,20 @@ mod tests {
         );
         assert_eq!(comparison.1.horizon, 4);
         assert_eq!(comparison.1.scheduled_refunds, Some((1, 0)));
+        // Earlier observers stop before Donald's unresolved discard. The
+        // already-executed y5 refund remains valid at the shared prefix.
+        let (mut short_a, mut short_b) = (a.clone(), b.clone());
+        for short in [&mut short_a, &mut short_b] {
+            short.projection.steps.truncate(3);
+            short.projection.checkpoints.truncate(3);
+            short.symbolic_line.first_rotation = None;
+        }
+        assert_eq!(
+            compare_priority_refund_timing(&short_a, &short_b, &mut None),
+            Some(EndpointComparison::PreferLeft(
+                ComparisonReason::PriorityRefundTiming
+            ))
+        );
         for control in 0..4 {
             let mut altered = a.clone();
             match control {
@@ -2905,11 +2931,7 @@ mod tests {
                         .exposed_critical_chops = 1;
                 }
                 _ => {
-                    altered
-                        .symbolic_line
-                        .first_rotation
-                        .as_mut()
-                        .unwrap()
+                    altered.projection.checkpoints[3]
                         .value
                         .committed_future_plays -= 1;
                 }

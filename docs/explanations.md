@@ -153,9 +153,9 @@ The cap is cooperative: scheduling and final result serialization can add a
 small amount of elapsed time beyond the search deadline.
 
 `PriorityRefundTiming` compares two plays that both lead into clued teammates.
-Its `actualBasis` uses the equal first-rotation horizon and retains both
-position values. At this stage, `scheduledRefunds` counts the play refunds
-actually scheduled within that horizon. It does not credit a five merely because
-a chain could eventually reach it. This narrow preference precedes the ordinary
-lower-rank play-order tiebreak while preserving urgency, protection and
+Its `actualBasis` uses the equal known prefix before the actor returns and
+retains both position values. At this stage, `scheduledRefunds` counts the play
+refunds actually scheduled within that horizon. It does not credit a five merely
+because a chain could eventually reach it. This narrow preference precedes the
+ordinary lower-rank play-order tiebreak while preserving urgency, protection and
 progress.

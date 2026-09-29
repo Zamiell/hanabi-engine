@@ -411,3 +411,9 @@ preserved progress and protection, equal elapsed turns, and an extra usable
 refund. Higher-priority obligations and losses still take precedence. The
 regression checks both real lines and removes refund evidence, same-category
 status, protection, and progress in negative controls.
+
+An earlier observer may stop before an unresolved teammate action even after
+seeing the refund. Compare the equal established prefix before the actor
+returns; do not require an entire rotation when the benefit is already proved.
+The same regression checks the three-action prefix through Cathy and keeps later
+unknown actions unknown.

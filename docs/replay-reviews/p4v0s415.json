@@ -695,13 +695,45 @@
     },
     "explanation": {
       "ruling": "Within the same teammate-leading Priority category, prefer the actually scheduled earlier five refund when productive progress and protection are preserved. Lower rank is a default tie breaker, not a stronger obligation between these plays.",
-      "conditions": "Both first rotations must be established, equal in elapsed turns, score and committed future plays; no exposed critical chop or Save pressure. The winning branch must actually receive an extra play refund and have more usable clues while preserving funded progress. Missing/unknown continuations do not earn the preference. Higher urgency, losses and differing Priority categories are not overridden.",
+      "conditions": "Both branches must establish an equal elapsed prefix before the actor returns, with equal score and committed future plays, no exposed critical chop or Save pressure, and preserved funded progress. The winner must actually receive an extra play refund and have more usable clues. Unknown later actions do not erase a refund already established in that shared prefix; no refund beyond the known prefix is credited. Higher urgency, losses and differing Priority categories are not overridden.",
       "projection": "y4 -> Bob discard y2 -> Cathy y5 -> Donald discard y1 earns the refund before Alice returns. p3 -> Bob p4 -> Cathy discard b3 -> Donald discard y1 does not. Alice next plays y4 in the p3 branch; a merely reachable p5 cannot be credited as a scheduled refund.",
-      "implementation": "Keep canonical ordering metadata for fallback and recognition. Retain same-category information so the planner can compare forecast refund timing before the lower-rank tiebreak, with diagnostic horizon and operands."
+      "implementation": "Keep canonical ordering metadata for fallback and recognition. Retain same-category information so the planner can compare forecast refund timing before the lower-rank tiebreak, with diagnostic horizon and operands.",
+      "shortForecast": "Earlier-rooted turn37 forecasts stop after Cathy before Donald\u2019s unresolved discard. They have already established equal score21 and one extra clue from y5, so requiring a full rotation incorrectly lost the reviewed preference. The regression also checks this equal three-action prefix."
     },
     "regressions": [
       "planner::tests::reviewed_same_priority_play_prefers_scheduled_five_refund"
     ],
     "validation": "Focused regression and negative controls pass. Priority-related group:14 passed,1 existing baseline failure (recognizes_expert_replay_priority_blue_three_line, also recorded in completed full run d959b3dc260947ee9c96e3a31996fb10). scripts/check.sh --fast passes; full ordinary suite deferred to CI, not observed."
+  },
+  {
+    "id": "t44-secured-win-burn-before-endgame-threshold",
+    "turn": 44,
+    "positionKey": "9555cf171107f3f7236ab213179a466ec7b68d162647a5827b9cd891b2f83b9a",
+    "status": "unresolved",
+    "perspective": "Donald: score23, three clues, five cards in deck. Alice has known p5 and Bob has known g5; all other identities are obsolete. Own chop #26 is unknown to Donald (actual p1).",
+    "source": {
+      "conversation": "2026-09-29 autonomous audit after same-Priority refund fix",
+      "quote": "then continue to autonomously go through all replays and find disagreements. Do a deep analysis for each disagreement. If there are obvious bugs, then fix them autonomously. Otherwise, ask me about the correct strategy or convention.",
+      "documentation": [
+        "https://hanabi.github.io/level-8/#the-end-game",
+        "https://hanabi.github.io/level-8/#burning-end-game-stalling"
+      ],
+      "related": "p4v0s1 t52-retire-fixes-when-cards-leave-hand covers Burns with an empty deck, not this high-pace position."
+    },
+    "explanation": {
+      "issue": "The fixture 5s-to-Bob clue repeats his known g5. The diagnostic exclusion is RepeatsKnownIdentity (post-admission classification, no retained common principle verdict). Only the chop discard is admitted, so there is no numeric pairwise ranking to explain.",
+      "fixtureProjection": "Unavailable because the clue is rejected before planning. Recorded continuation, explicitly not an engine forecast:44 Donald 5s to Bob,45 Alice p5,46 Bob g5, score25.",
+      "engineProjection": [
+        "44 Donald discard unknown chop #26 (actual p1)",
+        "45 Alice play p5 #24",
+        "46 Bob play g5 #44; Terminal, score25, zero strikes"
+      ],
+      "branches": "Eight safe chop reveals r2/r3/g1/g2/b1/p1/p3/p4 all produce exactly the same three-action perfect finish. No future draw identity is assumed.",
+      "whyRejected": "The green clue has already identified g5. There are no new plays or Saves to acquire. The current Burn admission requires locked-hand/eight-clue/endgame context, none present here. The engine phase is Normal: pace =5 deck+4 players-2 remaining plays=7, not below4. The guide explicitly says not to Burn before the End-Game threshold. The older fully-clued Burn ruling had an empty deck and does not establish a general imminent-victory exception.",
+      "question": "Does an already-secured perfect finish permit a harmless Burn before the ordinary End-Game threshold? If so, should the engine prefer it over an equally winning safe discard, or treat both as acceptable? Do not assume the user intends a new exception merely from the supplied fixture move.",
+      "auditScope": "Restarted first manifest replay from beginning. Known turn29 difference remains. Turns32,35,38,39 matched best-so-far at the120-second cap and are incomplete comparisons. Corrected37 and40\u201343 match;44 is the next new convention question. Other replays remain pending."
+    },
+    "regressions": [],
+    "coverageNote": "Built-in admission and exhaustive safe-discard reveal projections inspected. No new optimal-move assertion or fixture change pending the convention ruling."
   }
 ]
