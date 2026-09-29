@@ -2857,6 +2857,77 @@ mod tests {
     use super::*;
 
     #[test]
+    fn reviewed_secured_finish_prefers_fill_in_burn() {
+        // User-reviewed p4v0s415 T44: Donald fills in Bob's g5 while
+        // Alice's p5 and Bob's g5 finish; a discard gains no useful resource.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(43).unwrap();
+        let analysis = crate::analyze_position(
+            &state.view_for(state.current_player()).unwrap(),
+            SupportedConvention::HGroup(crate::HGroupProfile::Max),
+            PlannerConfig {
+                objective: PlanningObjective::PerfectScore,
+                ..PlannerConfig::default()
+            },
+        )
+        .unwrap();
+        let fill = Action::Clue {
+            target: hanabi_core::PlayerId::new(1),
+            clue: Clue::Rank(Rank::Five),
+        };
+        let repeat = Action::Clue {
+            target: hanabi_core::PlayerId::new(1),
+            clue: Clue::Suit(hanabi_core::Suit::Green),
+        };
+        let candidate = |action| {
+            analysis
+                .planner
+                .root_actions
+                .iter()
+                .find(|candidate| candidate.action == action)
+                .unwrap()
+        };
+        assert_eq!(analysis.planner.best_action, fill);
+        for action in [fill, repeat] {
+            let line = candidate(action);
+            assert!(has_unconditional_perfect_finish(line));
+            assert_eq!(
+                compare_endpoints(candidate(fill), line),
+                EndpointComparison::Equivalent
+            );
+        }
+        let discard = candidate(Action::Discard(hanabi_core::CardId::new(26)));
+        assert_eq!(discard.projection.discard_branches.len(), 8);
+        for branch in &discard.projection.discard_branches {
+            assert_eq!(branch.continuation.frontier, crate::PlanFrontier::Terminal);
+            assert_eq!(
+                branch.continuation.checkpoints.last().unwrap().value.score,
+                25
+            );
+            assert_eq!(branch.continuation.maximum_strikes(), 0);
+        }
+        // Even when endpoints are treated equally, the funded Burn has the
+        // terminal-plan preference; surplus discard tokens are unnecessary.
+        assert_eq!(
+            symbolic_fallback_comparison(candidate(fill), discard, None).0,
+            Ordering::Greater
+        );
+        let line = candidate(fill);
+        assert_eq!(line.projection.steps.len(), 3);
+        assert_eq!(
+            line.projection.steps[1].projected.action,
+            Action::Play(hanabi_core::CardId::new(24))
+        );
+        assert_eq!(
+            line.projection.steps[2].projected.action,
+            Action::Play(hanabi_core::CardId::new(44))
+        );
+    }
+
+    #[test]
     fn reviewed_equivalent_winning_play_clues_prefer_color() {
         // p4v0s415 T43: either clue obtains Bob's g5; with Alice's p5
         // already accounted for, negative information has no remaining value.
@@ -2901,7 +2972,17 @@ mod tests {
                 actions,
                 vec![
                     (2, line.action),
-                    (3, Action::Discard(hanabi_core::CardId::new(26))),
+                    (
+                        3,
+                        if line.action == green {
+                            five
+                        } else {
+                            Action::Clue {
+                                target: hanabi_core::PlayerId::new(0),
+                                clue: Clue::Suit(hanabi_core::Suit::Purple),
+                            }
+                        }
+                    ),
                     (0, Action::Play(hanabi_core::CardId::new(24))),
                     (1, Action::Play(hanabi_core::CardId::new(44))),
                 ]

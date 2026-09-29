@@ -709,7 +709,7 @@
     "id": "t44-secured-win-burn-before-endgame-threshold",
     "turn": 44,
     "positionKey": "9555cf171107f3f7236ab213179a466ec7b68d162647a5827b9cd891b2f83b9a",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Donald: score23, three clues, five cards in deck. Alice has known p5 and Bob has known g5; all other identities are obsolete. Own chop #26 is unknown to Donald (actual p1).",
     "source": {
       "conversation": "2026-09-29 autonomous audit after same-Priority refund fix",
@@ -734,7 +734,8 @@
       "auditScope": "Restarted first manifest replay from beginning. Known turn29 difference remains. Turns32,35,38,39 matched best-so-far at the120-second cap and are incomplete comparisons. Corrected37 and40\u201343 match;44 is the next new convention question. Other replays remain pending."
     },
     "regressions": [],
-    "coverageNote": "Built-in admission and exhaustive safe-discard reveal projections inspected. No new optimal-move assertion or fixture change pending the convention ruling."
+    "coverageNote": "Built-in admission and exhaustive safe-discard reveal projections inspected. No new optimal-move assertion or fixture change pending the convention ruling.",
+    "supersededBy": "t44-secured-finish-prefers-fill-in-burn"
   },
   {
     "id": "t43-equivalent-winning-play-clues-prefer-color",
@@ -761,10 +762,38 @@
         "45 Alice play p5 #24",
         "46 Bob play g5 #44; Terminal score25"
       ],
-      "boundary": "This is a comparison before either clue. It does not silently authorize treating a subsequent repeat clue as newly obtaining g5 or changing the fixture at44."
+      "boundary": "This is a comparison before either clue. It does not silently authorize treating a subsequent repeat clue as newly obtaining g5 or changing the fixture at44.",
+      "updatedContinuation": "After the turn44 ruling, Donald Burns instead of discarding: 5s to Bob after green; purple to Alice after 5s. Both still finish perfectly; turn43 still prefers green."
     },
     "regressions": [
       "planner::tests::reviewed_equivalent_winning_play_clues_prefer_color"
+    ]
+  },
+  {
+    "id": "t44-secured-finish-prefers-fill-in-burn",
+    "turn": 44,
+    "positionKey": "9555cf171107f3f7236ab213179a466ec7b68d162647a5827b9cd891b2f83b9a",
+    "status": "user-explained",
+    "perspective": "Donald after Cathy has already clued green to Bob. g5 is known, Alice has p5, and those two plays complete the stacks. Neither a discard nor its extra token is required.",
+    "source": {
+      "conversation": "2026-09-29 user resolution of turn44 Burn question",
+      "quote": "donald should stall by cluing 5 in this situation to \"fill in\" the green 5. discarding would also get a perfect score but in end-game situations like this, the engine should default to giving a burn clue, and 5s is better than cluing green again because it fills in the 5"
+    },
+    "explanation": {
+      "ruling": "Prefer a harmless Burn over a safe discard when all remaining work is known and a funded schedule finishes without another discard. Filling in a useful known card is preferable to repeating its existing clue, including when the fill is rank and the repeat is color. This secured-finish context is sufficient here despite five cards remaining and the ordinary pace threshold not being crossed. It is not a claim that the clue newly obtains g5.",
+      "line": [
+        "44 Donald 5s to Bob (Burn, fills rank)",
+        "45 Alice play p5",
+        "46 Bob play g5; score25"
+      ],
+      "alternatives": "Repeating green also finishes perfectly. All eight safe discard-reveal branches finish at25, but obtaining an unused token is not preferred to the Burn.",
+      "implementation": "A shared conservative certificate uses public focused-play/clue knowledge, independently identified duplicates, and an explicitly funded no-discard schedule. Admission and common Minimum Clue Value validation consume the same exception. The existing terminal-plan preference can then outrank the discard. Both Burn generation paths rank useful fill-in above repetition, without a competing color bonus. No hidden faces or future draws prove the finish.",
+      "boundaries": "If required cards are not known, funding is absent, or the final-turn clock is too short, this additional Burn permission is not established. Existing endgame and forced-stall rules remain separate."
+    },
+    "regressions": [
+      "planner::tests::reviewed_secured_finish_prefers_fill_in_burn",
+      "planner::tests::reviewed_equivalent_winning_play_clues_prefer_color",
+      "h_group::decision::secured_finish_tests::reviewed_burn_certificate_requires_public_cards_funding_and_time"
     ]
   }
 ]

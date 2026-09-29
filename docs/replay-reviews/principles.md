@@ -430,3 +430,18 @@ This does not turn a later repeat clue into a new play acquisition.
 `reviewed_equivalent_winning_play_clues_prefer_color` checks both complete
 projected lines, equivalent perfect endpoints, and the color preference. An
 unfinished-forecast control prevents treating an unproved finish as equivalent.
+
+## Burn when a perfect finish is already secured
+
+In `p4v0s415` turn44 (`t44-secured-finish-prefers-fill-in-burn`), the user
+prefers Donald's 5s Burn to a safe discard. Alice's p5 and Bob's known g5 finish
+the game either way. A funded finish using already-known cards permits this Burn
+even before the ordinary deck/pace threshold. The extra discard token has no
+remaining use. Filling in g5's rank is preferable to repeating green; the color
+fallback for equivalent Play Clues does not reverse that preference.
+
+This is a stall exception, not a new card acquired by the clue. Require public
+owner knowledge, sufficient tokens, and enough turns for the schedule; unknown
+faces or future draws cannot establish completion. The focused turn44 and turn43
+planner regressions verify the finish and preference; certificate controls
+remove card knowledge, funding, and time.

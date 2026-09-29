@@ -478,7 +478,8 @@ fn permits_stall(
         || source.hands[source.observer.index()]
             .iter()
             .all(|card| gotten.contains(&card.id))
-        || source.deck_size <= source.hands.len();
+        || source.deck_size <= source.hands.len()
+        || super::decision::secured_finish_without_discard(source, replay);
     matches!(
         proposal.move_kind(),
         Some(

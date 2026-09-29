@@ -50,7 +50,20 @@ pub(super) fn h_group_clue_candidates(
     analysis_clue_candidates(deductions, profile, &analysis).to_vec()
 }
 
-#[allow(clippy::too_many_lines)]
+// Prefer filling in a useful known card over repeating its existing clue.
+// Trash collateral and color-versus-rank do not improve a Burn.
+fn burn_clue_score(view: &PlayerView, target: PlayerId, clue: Clue, playable: bool) -> u16 {
+    let fill_in = view.hands[target.index()].iter().any(|card| {
+        !card.clues.has_positive_clue(clue)
+            && card.identity.is_some_and(|identity| {
+                clue.matches(identity)
+                    && usize::from(identity.rank.number())
+                        > view.play_stacks[identity.suit.index()].len()
+            })
+    });
+    (if playable { 25 } else { 20 }) + u16::from(fill_in)
+}
+
 pub(super) fn h_group_clue_candidates_from_replay(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
@@ -113,10 +126,7 @@ pub(super) fn h_group_clue_candidates_from_replay_inner(
                 Some(ClueProposal::new(
                     action,
                     Some(HGroupMoveKind::Burn),
-                    // No information is being communicated, so the ordinary
-                    // color-vs-rank information tiebreaker does not apply.
-                    // Harmless collateral touches do not undo a re-clue.
-                    ClueValue::new(if playable { 25 } else { 20 }),
+                    ClueValue::new(burn_clue_score(view, target, clue, playable)),
                     CluePurpose::Advanced,
                     ClueSchedule::new(false, false),
                     0,
@@ -1099,7 +1109,8 @@ pub(super) fn advanced_clue_candidates(
     let actor_locked = replay.hands[view.observer.index()]
         .iter()
         .all(|card| gotten.contains(card) || replay.cards.chop_moved.contains(card));
-    let endgame_stalling = view.deck_size <= view.hands.len();
+    let secured_finish = super::decision::secured_finish_without_discard(view, replay);
+    let endgame_stalling = view.deck_size <= view.hands.len() || secured_finish;
     let stalling = replay.early_game
         || actor_locked
         || view.clue_tokens == MAX_CLUE_TOKENS
@@ -1998,7 +2009,10 @@ pub(super) fn advanced_clue_candidates(
                 // Level 8 recommends re-cluing already playable cards when
                 // Burning. This is clearer than re-cluing a delayed promise.
                 // https://hanabi.github.io/level-8/#burning-end-game-stalling
-                Some((HGroupMoveKind::Burn, if playable > 0 { 25 } else { 20 }))
+                Some((
+                    HGroupMoveKind::Burn,
+                    burn_clue_score(view, target, clue, playable > 0),
+                ))
             }
         } else {
             None
@@ -2178,43 +2192,48 @@ pub(super) fn advanced_clue_candidates(
             } else {
                 0
             };
-            let mut proposal =
-                ClueProposal::new(
-                    action,
-                    Some(kind),
-                    ClueValue::new(score + efficiency + u16::from(matches!(clue, Clue::Suit(_)))),
-                    if matches!(kind, HGroupMoveKind::SaveClue | HGroupMoveKind::FakeSave) {
-                        CluePurpose::Save
-                    } else if kind == HGroupMoveKind::LieComponentFinesse {
-                        CluePurpose::Play
-                    } else {
-                        CluePurpose::Advanced
-                    },
-                    ClueSchedule::new(
-                        kind == HGroupMoveKind::FakeSave || urgently_protects_critical_chop,
-                        // A Fill-In Stall may touch a playable card, but it does not
-                        // acquire that play. Do not grant it scheduling credit.
-                        playable > 0
-                            && !matches!(
-                                kind,
-                                HGroupMoveKind::Stall
-                                    | HGroupMoveKind::FillInClue
-                                    | HGroupMoveKind::Burn
-                            ),
-                    ),
-                    if kind == HGroupMoveKind::LieComponentFinesse {
-                        clue_focus
-                            .and_then(|focus| identity_of(view, focus))
-                            .map_or(0, |identity| {
-                                u8::try_from(usize::from(identity.rank.number()).saturating_sub(
+            let mut proposal = ClueProposal::new(
+                action,
+                Some(kind),
+                ClueValue::new(
+                    score
+                        + efficiency
+                        + u16::from(kind != HGroupMoveKind::Burn && matches!(clue, Clue::Suit(_))),
+                ),
+                if matches!(kind, HGroupMoveKind::SaveClue | HGroupMoveKind::FakeSave) {
+                    CluePurpose::Save
+                } else if kind == HGroupMoveKind::LieComponentFinesse {
+                    CluePurpose::Play
+                } else {
+                    CluePurpose::Advanced
+                },
+                ClueSchedule::new(
+                    kind == HGroupMoveKind::FakeSave || urgently_protects_critical_chop,
+                    // A Fill-In Stall may touch a playable card, but it does not
+                    // acquire that play. Do not grant it scheduling credit.
+                    playable > 0
+                        && !matches!(
+                            kind,
+                            HGroupMoveKind::Stall
+                                | HGroupMoveKind::FillInClue
+                                | HGroupMoveKind::Burn
+                        ),
+                ),
+                if kind == HGroupMoveKind::LieComponentFinesse {
+                    clue_focus
+                        .and_then(|focus| identity_of(view, focus))
+                        .map_or(0, |identity| {
+                            u8::try_from(
+                                usize::from(identity.rank.number()).saturating_sub(
                                     view.play_stacks[identity.suit.index()].len() + 1,
-                                ))
-                                .expect("a standard connection has at most four steps")
-                            })
-                    } else {
-                        0
-                    },
-                );
+                                ),
+                            )
+                            .expect("a standard connection has at most four steps")
+                        })
+                } else {
+                    0
+                },
+            );
             if kind == HGroupMoveKind::Bluff {
                 let actor = next_player(view.current_player, view.hands.len());
                 proposal.required_response = view.hands[actor.index()]

@@ -1905,6 +1905,60 @@ fn completion_without_discard(view: &PlayerView, cards: &[(PlayerId, Card)]) -> 
     funded_completion_schedule(view, cards.to_vec(), Vec::new(), None)
 }
 
+/// A secured finish permits Burning even before the usual deck/pace threshold.
+/// Use public clue facts and focused play promises only: visible faces and unknown draws cannot establish
+/// that the owner knows a remaining card. The schedule charges every idle turn.
+pub(super) fn secured_finish_without_discard(view: &PlayerView, replay: &HGroupState) -> bool {
+    let remaining: Vec<_> = Suit::ALL
+        .into_iter()
+        .flat_map(|suit| {
+            Rank::ALL
+                .into_iter()
+                .skip(view.play_stacks[suit.index()].len())
+                .map(move |rank| Card::new(suit, rank))
+        })
+        .collect();
+    let live_mask = remaining
+        .iter()
+        .fold(0, |mask, card| mask | (1 << card.index()));
+    let plays: Option<Vec<_>> = remaining
+        .iter()
+        .map(|identity| {
+            view.hands.iter().enumerate().find_map(|(owner, hand)| {
+                hand.iter()
+                    .any(|card| {
+                        let accounted = view
+                            .hands
+                            .iter()
+                            .flatten()
+                            .filter(|other| {
+                                other.id != card.id && other.clues.identity_mask().is_power_of_two()
+                            })
+                            .fold(0, |mask, other| mask | other.clues.identity_mask());
+                        card.clues.identity_mask() & live_mask & !accounted == 1 << identity.index()
+                            && (card.clues.identity_mask() == 1 << identity.index()
+                                || replay
+                                    .clues
+                                    .iter()
+                                    .rev()
+                                    .find(|clue| clue.focus == card.id)
+                                    .is_some_and(|clue| {
+                                        matches!(
+                                            clue.kind,
+                                            HGroupClueKind::Play | HGroupClueKind::PlayOrSave
+                                        ) && clue.play_identities.contains(*identity)
+                                    }))
+                    })
+                    .then_some((
+                        PlayerId::new(u8::try_from(owner).expect("player count")),
+                        *identity,
+                    ))
+            })
+        })
+        .collect();
+    plays.is_some_and(|plays| completion_without_discard(view, &plays))
+}
+
 fn burn_progress(
     deductions: &LogicalDeductions,
     profile: HGroupProfile,
@@ -1913,7 +1967,8 @@ fn burn_progress(
 ) -> Option<TerminalPlanProgress> {
     let view = deductions.view();
     let plan = endgame_completion_plan(deductions, profile, analysis)?;
-    if view.deck_size > view.hands.len()
+    if (view.deck_size > view.hands.len()
+        && !secured_finish_without_discard(view, &analysis.replay))
         || !analysis.inferences.playable_now.is_empty()
         || !plan.unresolved_cards.is_empty()
         || !completion_without_discard(view, &plan.known_plays)
@@ -3119,5 +3174,51 @@ mod urgent_protection_tests {
         let recipient = compiled.projection(PlayerId::new(2)).unwrap();
         assert!(recipient.inferred.gotten().contains(&CardId::new(22)));
         assert!(!recipient.inferred.playable_now.contains(&CardId::new(22)));
+    }
+}
+
+#[cfg(test)]
+mod secured_finish_tests {
+    use super::*;
+
+    #[test]
+    fn reviewed_burn_certificate_requires_public_cards_funding_and_time() {
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(43).unwrap();
+        let view = state.view_for(state.current_player()).unwrap();
+        let deductions = LogicalDeductions::new(view.clone()).unwrap();
+        let notes = replay_h_group(&deductions, HGroupProfile::Max);
+        assert!(secured_finish_without_discard(&view, &notes));
+        // Removing visible faces leaves the same public proof.
+        let mut hidden = view.clone();
+        for card in hidden.hands.iter_mut().flatten() {
+            card.identity = None;
+        }
+        assert!(secured_finish_without_discard(&hidden, &notes));
+        for id in [24, 44] {
+            let mut missing = view.clone();
+            missing
+                .hands
+                .iter_mut()
+                .flatten()
+                .find(|card| card.id == CardId::new(id))
+                .unwrap()
+                .clues = hanabi_core::ClueFacts::default();
+            let mut missing_notes = notes.clone();
+            missing_notes
+                .clues
+                .retain(|clue| clue.focus != CardId::new(id));
+            assert!(!secured_finish_without_discard(&missing, &missing_notes));
+        }
+        let mut unfunded = view.clone();
+        unfunded.clue_tokens = 0;
+        assert!(!secured_finish_without_discard(&unfunded, &notes));
+        let mut late = view;
+        late.deck_size = 0;
+        late.final_turns_remaining = Some(2);
+        assert!(!secured_finish_without_discard(&late, &notes));
     }
 }
