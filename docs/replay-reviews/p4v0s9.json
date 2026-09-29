@@ -26,7 +26,7 @@
     "id": "t3-two-ones-versus-later-red-two-clarification",
     "turn": 3,
     "positionKey": "715bfb4430263bb4d426e1a36bf62690c09c8d05b7a13e78fefd6e5e0cc5ff90",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Cathy after Bob plays y1. Cathy sees Alice r2/b1/y4/g2, Bob y3/r3/g1/g2, and Donald g1/r1/r3/b2; her own cards and future draws remain unknown.",
     "source": {
       "conversation": "2026-09-29 autonomous replay audit",
@@ -66,9 +66,59 @@
       "comparison": "Both admitted. Fixture clue obtains two plays versus one for Bob. At the actual shared horizon of8 actions (through10), both forecasts have score5, clues3, demand1, committed0, secured future3 and protected BDR4, no exposed critical chops. Bob line has identified future1 (Alice r2) vs0 and blocked2 vs3. FundedProgress therefore prefers Bob; numeric base convention preference favors Donald434 vs428. The pairwise graph includes a weak-fallback cycle, but the selector preserves this forecast preference rather than allowing a weak edge to reverse it. Neither unfinished forecast proves optimality.",
       "uncertainty": "No hidden draws or card-identity assumptions are inserted. The fixture forecast cannot assume Cathy holds p1/p4, so it does not reproduce Alice purple-to-Cathy at5 from the actual continuation. It instead chooses2s to Bob; this later causes Alice rank2 ambiguity and a duplicate g2 Discharge. Compared normalized eight-action values, not the longer fixture endpoint score6 versus the shorter engine endpoint score5.",
       "question": "Should the two plays plus Order Chop Move make 1s to Donald preferable despite the forecast's later r2 clarification, or should a specific follow-up in these lines differ? The guide establishes clue meaning and OCM but does not decide this tradeoff. Existing regression asserts the fixture choice without an explanation of this comparison; do not force parity with a fixture-specific bonus.",
-      "auditScope": "Initial complete p4v0s415 rerun matches all actions except previously recorded29, with no capped calculations. After the opening inference fix, restarted p4v0s9 and matched1\u20132; this is its next unresolved position. Other replays remain pending."
+      "auditScope": "Initial complete p4v0s415 rerun matches all actions except previously recorded29, with no capped calculations. After the opening inference fix, restarted p4v0s9 and matched1\u20132; this is its next unresolved position. Other replays remain pending.",
+      "supersededBy": "t3-projected-twos-ambiguous-good-touch: the reported fixture forecast admitted an unsafe duplicate at hypothetical turn6; its comparison cannot support the proposed strategy question."
     },
     "regressions": [],
     "coverageNote": "No new strategy assertion or fixture change pending human explanation."
+  },
+  {
+    "id": "t3-projected-twos-ambiguous-good-touch",
+    "turn": 3,
+    "positionKey": "715bfb4430263bb4d426e1a36bf62690c09c8d05b7a13e78fefd6e5e0cc5ff90",
+    "status": "user-explained",
+    "perspective": "Bob at hypothetical turn6 in the fixture branch: 3 Cathy 1s to Donald, 4 Donald r1, 5 Alice 2s to Bob. This is a projection, not the recorded turn6.",
+    "source": {
+      "conversation": "2026-09-29 projected Good Touch correction",
+      "quote": "that is a bug in the projection, 2s to alice would violate good touch principle right?",
+      "documentation": "https://hanabi.github.io/beginner/good-touch-principle/"
+    },
+    "explanation": {
+      "reasoning": "Bob has an already clued 2 whose owner possibilities include y2 and g2. Cluing Alice 2s touches her r2 and g2, risking a duplicate of his gotten card. He cannot assume his own card is y2 to justify that touch.",
+      "bug": "The existing ambiguous-own-card overlap check applied only to rank1; other ranks required exact identity. Apply the same Good Touch check at every rank, retaining separately proven duplicate continuation exceptions.",
+      "limits": "This rejects unsafe overlap; it does not make the ambiguous card globally known or count a merely possible duplicate as a factual MCV duplicate. No ruling about the root optimal move is inferred.",
+      "result": "Isolated turn3 explanation completes in33.57s without exhausting the120s budget and selects the fixture 1s to Donald. Hypothetical turn6 now gives red to Alice, avoiding the unsafe g2 touch.",
+      "correctedFixtureLine": [
+        "3 Cathy 1s to Donald",
+        "4 Donald play r1 #13",
+        "5 Alice 2s to Bob",
+        "6 Bob red to Alice",
+        "7 Cathy blue to Alice",
+        "8 Donald play g1 #12",
+        "9 Alice play r2 #0",
+        "10 Bob play g2 #16",
+        "11 Cathy blue to Donald",
+        "12 Donald discard r3 #14",
+        "13 Alice play b1 #1",
+        "14 Bob discard g1 #6",
+        "Stops before15 at an unknown identity (IdentityBranch); no future draw identity assumed."
+      ],
+      "formerEngineAlternativeLine": [
+        "3 Cathy 1s to Bob",
+        "4 Donald blue to Alice",
+        "5 Alice b1 #1",
+        "6 Bob g1 #6",
+        "7 Cathy red to Alice (Bluff)",
+        "8 Donald b2 #15",
+        "9 Alice green to Bob",
+        "10 Bob g2 #16",
+        "Stops before11 Cathy unknown discard #8 (IdentityBranch)."
+      ]
+    },
+    "regressions": [
+      "h_group::tests::reviewed_projected_twos_respect_givers_ambiguous_good_touch"
+    ],
+    "coverageNote": "Checks the hypothetical branch in ordinary and masked forecast views, owner ambiguity, common Good Touch rejection, downstream admission, and a control where the old card is clarified to y2.",
+    "validation": "New regression passes. Proven-safe duplicate continuation, owner collateral ordering and integrated duplicate clue tests pass. scripts/check.sh --fast passes. Broad reviewed_ selection:72 passed,18 failed,1 ignored;16 failures occur in full baseline d959b3dc260947ee9c96e3a31996fb10 (revision82bd9a5846daa5ab0c4c742fbe72e94787430e75). The other two, every_reviewed_root_is_projected_despite_unequal_priorities and reviewed_same_priority_play_prefers_scheduled_five_refund, pass isolated reruns (36.64s and28.49s). No full suite or observed CI pass claimed."
   }
 ]

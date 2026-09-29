@@ -1114,3 +1114,44 @@ fn reviewed_hard_three_retains_only_the_shared_first_response() {
         .any(|candidate| candidate.action == replay_action_at_turn(&fixture, 0)));
     assert_eq!(select_h_group_action(&deductions, HGroupProfile::Max), Some(Action::Play(CardId::new(7))));
 }
+
+#[test]
+fn reviewed_projected_twos_respect_givers_ambiguous_good_touch() {
+    // p4v0s9 T3 fixture forecast, hypothetical T6: Alice clues Bob's g2
+    // at5. Bob knows y2/g2 and cannot safely touch Alice's r2 and g2.
+    let mut state = expert_replay_p4v0s9().state_at_turn(4).unwrap();
+    state.apply(Action::Clue { target: PlayerId::new(1), clue: Clue::Rank(Rank::Two) }).unwrap();
+    let action = Action::Clue { target: PlayerId::new(0), clue: Clue::Rank(Rank::Two) };
+    for projected in [false, true] {
+        let mut view = state.view_for(PlayerId::new(1)).unwrap();
+        if projected {
+            for (owner, hand) in view.hands.iter_mut().enumerate() {
+                for card in hand {
+                    if owner == 2 || card.id.index() > 16 { card.identity = None; }
+                }
+            }
+        }
+        let d = LogicalDeductions::new(view).unwrap();
+        let r = replay_h_group(&d, HGroupProfile::Max);
+        let notes = convention_card_inferences(&d, &r);
+        let own = notes.iter().find(|note| note.card == CardId::new(16)).unwrap();
+        assert!(own.identities.contains(Card::new(Suit::Green, Rank::Two)));
+        assert!(own.identities.contains(Card::new(Suit::Yellow, Rank::Two)));
+        let touched = [CardId::new(0), CardId::new(3)];
+        let clued = r.promptable();
+        let context = crate::h_group::admission::GoodTouchContext {
+            view: d.view(), newly_touched: &touched,
+            clue: Some((Clue::Rank(Rank::Two), &touched)),
+            explicitly_clued: &clued, fixed_cards: r.cards.facts.fixed_cards(),
+            convention_cards: &notes,
+        };
+        assert!(!crate::h_group::admission::good_touch(context));
+        let mut clarified = notes.clone();
+        clarified.iter_mut().find(|note| note.card == CardId::new(16)).unwrap().identities =
+            IdentitySet::singleton(Card::new(Suit::Yellow, Rank::Two));
+        assert!(crate::h_group::admission::good_touch(crate::h_group::admission::GoodTouchContext {
+            convention_cards: &clarified, ..context
+        }));
+        assert!(!h_group_clue_candidates(&d, HGroupProfile::Max).iter().any(|candidate| candidate.action == action));
+    }
+}

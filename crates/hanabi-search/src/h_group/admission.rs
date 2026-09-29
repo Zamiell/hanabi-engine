@@ -1,4 +1,4 @@
-use hanabi_core::{Card, CardId, Clue, PlayerView, Rank};
+use hanabi_core::{Card, CardId, Clue, PlayerView};
 
 use super::{
     CardSet, HGroupCardInference, IdentitySet, RecipientCardConsequence, RecipientCardDisposition,
@@ -108,8 +108,8 @@ pub(super) fn good_touch(context: GoodTouchContext<'_>) -> bool {
                     && context.explicitly_clued.contains(&candidate.id)
                     && !context.fixed_cards.contains(&candidate.id)
                     && (known_identity(candidate.id) == Some(identity)
-                        || (identity.rank == Rank::One
-                            && candidate.identity.is_none()
+                        // An ambiguous gotten card can duplicate this touch at any rank.
+                        || (candidate.identity.is_none()
                             && context.convention_cards.iter().any(|note| {
                                 note.card == candidate.id
                                     && note.promised_identity.map_or_else(

@@ -445,3 +445,17 @@ owner knowledge, sufficient tokens, and enough turns for the schedule; unknown
 faces or future draws cannot establish completion. The focused turn44 and turn43
 planner regressions verify the finish and preference; certificate controls
 remove card knowledge, funding, and time.
+
+## Ambiguous gotten cards can violate Good Touch at every rank
+
+At p4v0s9 turn3's hypothetical turn6, the user rejected Bob's 2s to Alice as a
+Good Touch violation. Bob's gotten 2 can be y2 or g2; Alice's newly touched
+cards include g2. An unknown own identity does not authorize promising a
+possible duplicate. Apply the overlap check to all ranks, retaining proven safe
+duplicate-continuation exceptions. This risk check does not turn a possible
+identity into exact knowledge or a factual MCV duplicate.
+
+See `t3-projected-twos-ambiguous-good-touch` in [p4v0s9](p4v0s9.json).
+Regression: `reviewed_projected_twos_respect_givers_ambiguous_good_touch` checks
+ordinary and masked forecast views, downstream admission, and clarification to a
+nonduplicating identity as a negative control.
