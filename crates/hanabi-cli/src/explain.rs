@@ -793,7 +793,6 @@ mod tests {
             preference: preference(),
             certainly_playable: false,
             certainly_useless: false,
-            unextended_plays: Vec::new(),
             newly_touched: 0,
             immediately_playable_touched: 0,
             critical_touched: 0,

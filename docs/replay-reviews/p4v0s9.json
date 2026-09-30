@@ -253,7 +253,7 @@
     "id": "t7-play-before-loading-occupied-alice",
     "turn": 7,
     "positionKey": "08c22bf99ba35e9bd4edc5ff4f7a0c4829b282be9ca26f0e0d394f9cb5bfdfa4",
-    "status": "user-explained",
+    "status": "superseded",
     "perspective": "Cathy after the recorded 2s to Alice; also Bob projecting this continuation from turn 6, with his own 3s still hidden.",
     "source": {
       "conversation": "2026-09-30 continuation",
@@ -262,14 +262,33 @@
     "explanation": {
       "reasoning": "Alice already has g2 to play. Cathy has p1. Blue accelerates b1 and then Donald’s b2, but b3 is not visible and Donald has a safe chop. The earlier b2 therefore does not extend a useful chain or protect an endangered chop. Prefer Cathy playing p1 rather than loading Alice again. General enabling of plays remains beneficial; this is not a blanket prohibition on cluing with a play.",
       "comparison": "At the shared turn-14 horizon the old direct-Cathy projections both had eight points played or committed; p1 had four clues versus three. FundedProgress incorrectly made the one earlier realized point decisive.",
-      "scope": "Unknown future draws and Bob’s hidden card faces must not be supplied to his forecast."
+      "scope": "Unknown future draws and Bob’s hidden card faces must not be supplied to his forecast.",
+      "supersededBy": "t6-majority-conditional-cathy-response: user retracts the requirement that Bob project p1 at this position; the general scheduling change in c1f22f9 is reverted."
     },
     "regressions": [
       "planner::tests::reviewed_occupied_recipient_does_not_need_unextended_play_acceleration"
     ],
-    "coverageNote": "Checks actual inference-driven lines, safe duplicate discard, final choice, and missing occupation/successor/safety/refund evidence controls. No hidden identities are supplied.",
+    "coverageNote": "Historical regression in c1f22f9, removed with the explicitly requested revert. The old implementation must not be treated as the revised user ruling.",
     "result": "Cathy now selects p1 from her actual view. Restarted p4v0s9 matches turns 1-5, but Bob at turn 6 still prefers blue to Alice. His own touched 3s have unknown suits. In that partial forecast the p1 alternative loses Donald’s r3 at12 and the blue alternative postpones it beyond the shared checkpoint, so SavePrinciple still precedes the new occupied-recipient comparison. At the root, 2s loses r3 at16 and blue keeps it through17; both lines stop before Bob’s unknown discard at18. This is distinct from treating b2 acceleration itself as progress. No fixture changes.",
     "validation": "New occupied-recipient regression, original turn18 handoff, finesse-continuation, and funded-progress controls pass. Related reviewed_convention_known_play_earns_teammate_handoff fails because its expected candidate is absent; the identical unwrap failure reproduces in an isolated worktree at starting commit975d224 (workflow c70c679a05b4440d897c55d6dba6ea14). Fast check initially failed documentation formatting and a missing field in the CLI test constructor; all affected formatting/build/Clippy/dead-code stages pass after correction, and other fast stages passed. No full suite or observed CI run.",
     "remainingQuestion": "How should Bob value the conditional r3 replacement in his own touched 3s? Cathy sees it and safely chooses p1, but Bob cannot assume its identity. Existing reviewed safe-discard and scheduling rules do not specify whether possible touched coverage should soften that forecast risk or which conditional protective continuation to use when coverage is absent."
+  },
+  {
+    "id": "t6-majority-conditional-cathy-response",
+    "turn": 6,
+    "positionKey": "7bb2b478e399002f0d69e16b92e713db7996131929dac38a4d716f5d3618ae88",
+    "status": "user-explained",
+    "perspective": "Bob forecasting Cathy after 2s to Alice. Bob cannot see the suits of his own clued 3s; Cathy can.",
+    "source": {
+      "conversation": "2026-09-30 revised probability ruling",
+      "quote": "so 30% is relatively unlikely here, so I go back on my previous statement that the projection should not clue blue. you can revert that change. but if it was >50%, then I think Bob should model cathy as playing p1"
+    },
+    "explanation": {
+      "reasoning": "The earlier conclusion used Cathy’s visible knowledge in Bob’s forecast. If Bob holds the other r3, Donald has a safe duplicate chop and Cathy should play p1; if Bob does not hold it, protecting Donald’s r3 by accelerating the blue chain justifies blue to Alice. At the current roughly30% probability Bob should project blue. If the probability exceeds50%, Bob should instead project p1. The user did not establish a tie-breaking rule for exactly50%.",
+      "probability": "Under uniform physical-card dealing, current visible counts and clues, and distinct suits for the two Good-Touched 3s: r3 in the clued pair has probability7/25=28%; r3 anywhere in Bob’s hand has probability83/275=30.1818%. Literal clues alone yield25% and27.2727%. These are combinatorial probabilities, not a likelihood model of teammate clue selection.",
+      "implementation": "Reverted the general OccupiedRecipient comparator, its visible-successor metadata, CLI test initializer and focused regression added in c1f22f9. Retained history and this corrected ruling. The existing symbolic forecast does not calculate weighted hidden-hand probabilities; automatic application of the greater-than50% rule remains unimplemented. Do not turn majority likelihood into a known identity or proof of safe discard."
+    },
+    "regressions": [],
+    "coverageNote": "No executable coverage for the majority-probability threshold yet. Current position can only validate that the reverted forecast chooses blue at below50%; it cannot validate the above50% branch."
   }
 ]

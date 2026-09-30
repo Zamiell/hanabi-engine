@@ -460,13 +460,20 @@ Regression: `reviewed_projected_twos_respect_givers_ambiguous_good_touch` checks
 ordinary and masked forecast views, downstream admission, and clarification to a
 nonduplicating identity as a negative control.
 
-## Do not load a second play merely to accelerate a dead-end chain
+## Forecast teammate choices from the observer's probability of coverage
 
-In `p4v0s9` turn 7, `t7-play-before-loading-occupied-alice`, Alice already has
-an executable g2 and Cathy has p1. Blue to Alice accelerates b1 and Donald's b2,
-but no b3 is visible and Donald has a safe chop. The user prefers Cathy playing
-p1. An earlier realized point alone does not establish superior progress when
-the alternative retains the same points plus executable commitments and gains a
-useful clue through a safe discard. Preserve exceptions for successor
-development, 5 refunds, urgent protection, and genuinely added work; do not
-infer safe chops or future draws from simulator truth.
+The earlier `p4v0s9` turn-7 unconditional loading preference was superseded by
+`t6-majority-conditional-cathy-response`. Bob cannot see his own r3. If he holds
+it, Cathy sees Donald's safe duplicate chop and should play p1; otherwise Cathy
+has reason to accelerate b1/b2 by cluing blue to Alice. The user says Bob should
+project blue at the current roughly30% probability of holding r3, and p1 if that
+probability is greater than50%. Exactly50% was not ruled on. The general
+scheduling override from c1f22f9 was explicitly reverted.
+
+This is a forecast choice under uncertainty, not permission to infer a card's
+identity or declare its discard certainly safe. Weight physical-card assignments
+using the observer's information; distinguish literal clues, Good Touch
+constraints, and any additional model of clue selection. The current symbolic
+planner does not yet implement this probability threshold. Above-threshold
+regression coverage is missing; current-position agreement alone is
+insufficient.
