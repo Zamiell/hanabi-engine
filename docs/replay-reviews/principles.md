@@ -481,3 +481,22 @@ losses, strikes, forced actions, successor development, or 5 refunds. Unknown
 identities and conservative loss annotations remain intact. See the three
 `planner::majority::tests` regressions linked in the position record for the
 current case, above-threshold and equality refinements, and negative controls.
+
+## Conditional duplicate protection must use consistent information
+
+In `p4v0s9` turn6 (`t6-delayed-red-three-can-be-protected-conditionally`), 2s to
+Alice still permits Cathy to give Donald a delayed red Play Clue before his r3
+would be discarded. Cathy sees whether Bob has a clued r3. When he does,
+Donald's copy has a secured replacement; when he does not, Cathy can protect
+Donald. A forecast must not combine the duplicate world's clue rejection with
+the nonduplicate world's unique-card loss as an unconditional consequence.
+
+A giver's visible nonduplicate takes precedence over that card owner's older
+ambiguous note when checking Good Touch reservations. This does not supply an
+unknown face to the original observer or authorize a possibly duplicating root
+clue. The localized regression
+`reviewed_delayed_red_three_uses_givers_visible_nonduplicate` checks three
+conditional non-red identities, the actual duplicate, hidden-source controls,
+Cathy's selected clue, Donald's waiting/protection, and playability after r2. It
+does not cover aggregation of these private-information policies in Bob's
+original forecast; that remains a separate planner limitation.

@@ -1205,11 +1205,18 @@ fn duplicates_good_touch_superposition(
                         .invalidated_focuses
                         .contains(&card.id)
             });
-            let settled_identity = projection
-                .replay
-                .cards
-                .facts
-                .known_identity(interpretation.focus)
+            // A giver can see another owner's card even while that owner
+            // still has an ambiguous old note. That note cannot reserve suits
+            // the giver knows the card does not have. Hidden source cards
+            // retain their uncertainty; this supplies no private face to them.
+            let settled_identity = identity_of(source, interpretation.focus)
+                .or_else(|| {
+                    projection
+                        .replay
+                        .cards
+                        .facts
+                        .known_identity(interpretation.focus)
+                })
                 .or_else(|| {
                     projection
                         .inferred

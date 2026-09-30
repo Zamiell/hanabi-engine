@@ -295,5 +295,41 @@
     ],
     "validation": "Three new majority regressions pass, including30.18%,50%,51.52%,100% and safety/budget controls. Related first-touch collateral, turn18 teammate handoff, and bounded perfect-finish follow-up tests pass. Fast checks pass; affected Rust checks and documentation formatting pass again after final boundary refinements. Full suite deferred to CI; CI not observed.",
     "coverageNote": "The reviewed source has83/275 coverage and projects blue. Hypothetical information refinements excluding blue/purple from the clued3s give17/33 and project p1; also excluding rank3 on the fresh draw gives exactly1/2 and retains blue. A further fact identifying Bob’s r3 tests100% coverage after the inferred replacement becomes visible to Cathy; p1 remains selected even though the discard has no risk annotation. These are conditional refinements, not replacement replay histories. Tests retain hidden faces and risk annotations, reject successor/strike/critical-loss exceptions, verify physical-copy weighting and guard incomplete enumeration/cancellation/unknown other hands."
+  },
+  {
+    "id": "t6-delayed-red-three-can-be-protected-conditionally",
+    "turn": 6,
+    "positionKey": "7bb2b478e399002f0d69e16b92e713db7996131929dac38a4d716f5d3618ae88",
+    "status": "user-explained",
+    "perspective": "Bob forecasting 2s to Alice; Cathy sees Bob’s cards and can give Donald a delayed red play clue when his r3 has no clued replacement.",
+    "source": {
+      "conversation": "2026-09-30 delayed r3 protection correction",
+      "quote": "a 2's clue still allows a delayed play clue to be given to donald's r3, right? so in the case where bob does not have the r3 in his hand, the r3 in donalds hand is never at risk of being discarded right?"
+    },
+    "explanation": {
+      "reasoning": "The 2s clue preserves Alice’s eventual r2 play. In the reported continuation Cathy has a funded turn15 before Donald’s turn16 discard. If Bob has no clued r3, Cathy can protect Donald’s r3 with a delayed red Play Clue. If Bob has the clued replacement, the premise that Donald’s copy is unique is false. Do not combine the duplicate branch’s rejection of a new red clue with the nonduplicate branch’s loss penalty as though they described the same world.",
+      "bug": "The prospective Good Touch superposition check ignored the giver-visible identity of another owner’s clue focus. It collected Bob’s older ambiguous rank3 note even when Cathy could see a non-red card, and rejected red to Donald as DuplicateGoodTouchPromise.",
+      "fix": "Use the giver’s visible identity before an owner’s ambiguous interpretation when checking existing reservations. Do not fill unknown source faces. The actual clued-r3 case and a source-masked hand still reject unconditionally promising a duplicate.",
+      "conditionalContinuation": [
+        "6 Bob 2s to Alice",
+        "7 Cathy blue to Alice",
+        "8 Donald play g1",
+        "9 Alice play b1",
+        "10 Bob blue to Donald",
+        "11 Cathy play p1",
+        "12 Donald play b2",
+        "13 Alice play g2",
+        "14 Bob 5s to Cathy",
+        "15 Cathy red to Donald, conditional on no clued r3 in Bob’s hand",
+        "16 Donald must wait on r3; r3 is no longer chop",
+        "17 Alice play r2; Donald’s clued r3 becomes playable"
+      ],
+      "limits": "Regression branches explicitly replace Bob’s actual r3 with each non-red suit other than his existing y3 and hide every post-root draw. These are hypothetical information cases, not a fixture edit or a claim that Bob knows his suit. It checks Cathy’s selected action, recipient waiting/protection, and later playability. It does not claim that the original Bob-masked strategic projection now combines the conditional policies or that the replay root agrees."
+    },
+    "regressions": [
+      "h_group::tests::reviewed_delayed_red_three_uses_givers_visible_nonduplicate"
+    ],
+    "coverageNote": "Covers red/blue/green/purple replacement cases, actual duplicate rejection, masked-source negative control, and downstream inference. Bob-rooted contingent-policy aggregation is not covered by this localized admission regression.",
+    "validation": "Focused conditional regression passes. Related good_touch tests:8 pass,2 fail identically with and without the production patch: fifth_replay_demonstrated_bluff_eliminates_older_good_touch_duplicates (replay.rs:2783) and second_replay_move_twenty_two_rejects_a_good_touch_duplicate (learning_rules.rs:906). Fast checks pass; all three majority regressions pass. Optimized original Bob-rooted turn6 analysis completes in11.64s without budget exhaustion and still prefers blue: it does not yet aggregate the conditional private-information policies. Full suite deferred; CI not observed."
   }
 ]

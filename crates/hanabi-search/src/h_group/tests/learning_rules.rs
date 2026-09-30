@@ -1223,3 +1223,48 @@ fn reviewed_first_touch_of_chop_moved_collateral_keeps_good_touch() {
         assert!(!inferred.playable_now.contains(&CardId::new(0)));
     }
 }
+
+#[test]
+fn reviewed_delayed_red_three_uses_givers_visible_nonduplicate() {
+    // Human-reviewed p4v0s9 T6 projection, at Cathy's T15. The alternate
+    // identities below explicitly condition on Bob not holding r3; they are
+    // not changes to the fixture or identities Bob may assume in his forecast.
+    let mut state = expert_replay_p4v0s9().state_at_turn(6).unwrap();
+    for action in [
+        Action::Clue { target: PlayerId::new(0), clue: Clue::Suit(Suit::Blue) },
+        Action::Play(CardId::new(12)),
+        Action::Play(CardId::new(1)),
+        Action::Clue { target: PlayerId::new(3), clue: Clue::Suit(Suit::Blue) },
+        Action::Play(CardId::new(10)),
+        Action::Play(CardId::new(15)),
+        Action::Play(CardId::new(3)),
+        Action::Clue { target: PlayerId::new(2), clue: Clue::Rank(Rank::Five) },
+    ] { state.apply(action).unwrap(); }
+    let red = Action::Clue { target: PlayerId::new(3), clue: Clue::Suit(Suit::Red) };
+    for suit in [Suit::Red, Suit::Blue, Suit::Green, Suit::Purple] {
+        let mut view = state.view_for(PlayerId::new(2)).unwrap();
+        view.hands[1][1].identity = Some(Card::new(suit, Rank::Three));
+        for hand in &mut view.hands { for card in hand {
+            if card.id.index() >= 18 { card.identity = None; }
+        } }
+        let d = LogicalDeductions::new(view.clone()).unwrap();
+        let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+        assert_eq!(candidates.iter().any(|c| c.action == red), suit != Suit::Red);
+        if suit == Suit::Red { continue; }
+        assert_eq!(select_h_group_action(&d, HGroupProfile::Max), Some(red));
+        let after = prospective_clue_view(&view, PlayerId::new(3), Clue::Suit(Suit::Red), &[CardId::new(14)]);
+        let (donald, replay) = projected_h_group_replay(&after, HGroupProfile::Max, PlayerId::new(3)).unwrap();
+        let inferred = infer_h_group_from_replay(&donald, replay, HGroupProfile::Max);
+        assert!(!inferred.playable_now.contains(&CardId::new(14)));
+        assert_ne!(inferred.chops[3], Some(CardId::new(14)));
+        let after = perspective::ProspectiveTransition::discard(&after, PlayerId::new(3), CardId::new(17), Card::new(Suit::Purple, Rank::Three));
+        let after = prospective_play_view(&after, PlayerId::new(0), CardId::new(0), Card::new(Suit::Red, Rank::Two));
+        let (donald, replay) = projected_h_group_replay(&after, HGroupProfile::Max, PlayerId::new(3)).unwrap();
+        let inferred = infer_h_group_from_replay(&donald, replay, HGroupProfile::Max);
+        assert!(inferred.playable_now.contains(&CardId::new(14)), "{suit:?}: {inferred:#?}");
+        // Bob's source view still lacks Cathy's visible nonduplicate evidence.
+        for held in &mut view.hands[1] { held.identity = None; }
+        let masked = LogicalDeductions::new(view).unwrap();
+        assert!(!h_group_clue_candidates(&masked,HGroupProfile::Max).iter().any(|c|c.action==red));
+    }
+}
