@@ -331,8 +331,8 @@ fn continue_plan<const REUSE_SELECTED: bool>(
                                         PerspectiveDepth::NestedRecipients,
                                     )
                                     .map(|(d, _)| {
-                                        crate::planner::choose_projected_follow_up(
-                                            &d, profile, control,
+                                        crate::planner::choose_projected_follow_up_from(
+                                            &after, &d, profile, control,
                                         )
                                     })
                                     .transpose()?
@@ -497,7 +497,12 @@ fn continue_plan<const REUSE_SELECTED: bool>(
         };
         plan.record_assumptions(&projected.assumptions);
         action = if strategic {
-            crate::planner::choose_projected_follow_up(&projected.deductions, profile, control)?
+            crate::planner::choose_projected_follow_up_from(
+                &public,
+                &projected.deductions,
+                profile,
+                control,
+            )?
         } else {
             select_h_group_action(&projected.deductions, profile)
         };

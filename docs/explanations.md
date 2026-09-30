@@ -159,3 +159,13 @@ refunds actually scheduled within that horizon. It does not credit a five merely
 because a chain could eventually reach it. This narrow preference precedes the
 ordinary lower-rank play-order tiebreak while preserving urgency, protection and
 progress.
+
+Projected decisions can report `MajorityCoverage` with an `actualBasis.stage` of
+`majorityCoverage`. This is an observer-weighted choice of a teammate's likely
+response, not an endpoint dominance proof. `coverageProbability` records the
+identity and the covered/total physical-assignment weights. A strict majority
+can favor playing over a redundant loading clue when the only projected loss has
+a likely duplicate in the source observer's hidden hand. It does not reveal that
+hand or remove the conditional loss from either projected line. The projected
+decision's `selection` explains this override. Incomplete enumeration and
+exactly50% retain the ordinary selector's choice.

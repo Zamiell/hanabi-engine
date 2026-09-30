@@ -337,6 +337,7 @@ fn comparisons(
                 "authority":format!("{:?}",comparison.authority), "actualBasis": comparison.basis.as_ref().map(|basis|json!({"stage":basis.stage,"horizon":basis.horizon,
                     "clueCostBounds": basis.clue_cost_bounds,
                     "scheduledRefunds": basis.scheduled_refunds,
+                    "coverageProbability": basis.coverage_probability.map(|(card, covered, total)| json!({"identity": format!("{card:?}"), "coveredWeight": covered, "totalWeight": total})),
                     "left":basis.left.iter().map(|c|crate::live_action::position_value_json(c.value)).collect::<Vec<_>>(),
                     "right":basis.right.iter().map(|c|crate::live_action::position_value_json(c.value)).collect::<Vec<_>>() })),
                 "note":"Shared checkpoint is context, not necessarily the comparator's decisive checkpoint; reason identifies the rule actually used."}) }
@@ -450,7 +451,9 @@ fn report(
                 "projection":crate::live_action::projection_evidence_json(0,&candidate.projection),
                 "endpoint":candidate.symbolic_line.position_value.map(crate::live_action::position_value_json),
                 "stopReason":format!("{:?}",candidate.symbolic_line.stop_reason)})).collect(),
-            selection: SELECTION,
+            selection: if d.comparisons.iter().any(|c| c.reason == hanabi_search::ComparisonReason::MajorityCoverage) {
+                "Observer-weighted majority forecast overrides the conservative clue choice; card identities and loss evidence remain uncertain."
+            } else { SELECTION },
         })
         .collect();
     planning.as_object_mut().unwrap().remove("rootActions");
@@ -546,6 +549,12 @@ fn print_comparison(c: &ComparisonReport) {
             "    Actual comparison: {} after {} actions",
             basis["stage"], basis["horizon"]
         );
+        if let Some(chance) = basis.get("coverageProbability").filter(|p| !p.is_null()) {
+            println!(
+                "    Conditional coverage of {}: {} / {} physical assignment weight (strictly above 50%); not a known identity.",
+                chance["identity"], chance["coveredWeight"], chance["totalWeight"]
+            );
+        }
         for left in basis["left"].as_array().unwrap() {
             for right in basis["right"].as_array().unwrap() {
                 let changes = left

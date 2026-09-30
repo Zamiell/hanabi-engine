@@ -1,3 +1,5 @@
+mod majority;
+
 use core::{cmp::Ordering, fmt, str::FromStr};
 use std::{borrow::Cow, collections::HashMap};
 
@@ -564,6 +566,7 @@ pub enum ComparisonReason {
     SavePressure,
     WaitingOpportunity,
     TeammateClueHandoff,
+    MajorityCoverage,
     ConventionPreference,
     PreferredAction,
     LineProgress,
@@ -663,6 +666,8 @@ pub struct ComparisonBasis {
     pub right: Vec<RotationCheckpoint>,
     pub clue_cost_bounds: Option<((u8, u8), (u8, u8))>,
     pub scheduled_refunds: Option<(u8, u8)>,
+    /// Physical assignment mass for a conditional replacement; not known identity.
+    pub coverage_probability: Option<(hanabi_core::Card, u64, u64)>,
 }
 
 fn retain_comparison_basis(
@@ -680,6 +685,7 @@ fn retain_comparison_basis(
             right: right(),
             clue_cost_bounds: None,
             scheduled_refunds: None,
+            coverage_probability: None,
         });
     }
 }
@@ -1078,7 +1084,20 @@ fn symbolic_result(
 /// One bounded strategic choice inside a forecast. Uses the same candidate
 /// admission and endpoint comparator as the root; its leaf policy does not
 /// recursively invoke this chooser.
+#[cfg(test)]
 pub(crate) fn choose_projected_follow_up(
+    deductions: &LogicalDeductions,
+    profile: crate::HGroupProfile,
+    control: &crate::AnalysisControl,
+) -> Result<Option<Action>, crate::AnalysisStopped> {
+    choose_projected_follow_up_from(deductions.view(), deductions, profile, control)
+}
+
+/// Preserve the original observer separately from the modeled actor. The
+/// optional majority response is a conditional forecast choice, not a change
+/// to admission, card knowledge, or exact-search outcomes.
+pub(crate) fn choose_projected_follow_up_from(
+    source: &PlayerView,
     deductions: &LogicalDeductions,
     profile: crate::HGroupProfile,
     control: &crate::AnalysisControl,
@@ -1127,7 +1146,21 @@ pub(crate) fn choose_projected_follow_up(
             return Ok(Some(candidate.action));
         }
     }
-    let (best, comparisons) = compare_symbolic_candidates(&evaluations, analysis.preferred_action);
+    let (mut best, mut comparisons) =
+        compare_symbolic_candidates(&evaluations, analysis.preferred_action);
+    if let Some(index) = best {
+        if let Some(majority) = majority::choose(
+            source,
+            deductions.view(),
+            profile,
+            &evaluations,
+            index,
+            &mut comparisons,
+            control,
+        )? {
+            best = Some(majority);
+        }
+    }
     let selected = best.map(|index| evaluations[index].action);
     crate::diagnostics::record(
         deductions.view(),

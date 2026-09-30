@@ -473,7 +473,11 @@ scheduling override from c1f22f9 was explicitly reverted.
 This is a forecast choice under uncertainty, not permission to infer a card's
 identity or declare its discard certainly safe. Weight physical-card assignments
 using the observer's information; distinguish literal clues, Good Touch
-constraints, and any additional model of clue selection. The current symbolic
-planner does not yet implement this probability threshold. Above-threshold
-regression coverage is missing; current-position agreement alone is
-insufficient.
+constraints, and any additional model of clue selection. The projected-choice
+implementation uses a strict majority only for this conditional duplicate
+coverage tradeoff. It preserves existing selection at exactly50% or when a
+bounded count cannot establish the probability. It does not soften critical
+losses, strikes, forced actions, successor development, or 5 refunds. Unknown
+identities and conservative loss annotations remain intact. See the three
+`planner::majority::tests` regressions linked in the position record for the
+current case, above-threshold and equality refinements, and negative controls.
