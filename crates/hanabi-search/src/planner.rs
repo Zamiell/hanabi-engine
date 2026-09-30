@@ -176,6 +176,8 @@ pub struct PlannerActionEvaluation {
     pub preference: crate::ActionPreference,
     pub certainly_playable: bool,
     pub certainly_useless: bool,
+    /// Visible non-5 cards without a visible next-rank successor.
+    pub unextended_plays: Vec<hanabi_core::CardId>,
     pub newly_touched: u8,
     pub immediately_playable_touched: u8,
     pub critical_touched: u8,
@@ -564,6 +566,7 @@ pub enum ComparisonReason {
     SavePressure,
     WaitingOpportunity,
     TeammateClueHandoff,
+    OccupiedRecipient,
     ConventionPreference,
     PreferredAction,
     LineProgress,
@@ -596,6 +599,7 @@ impl ComparisonReason {
             | Self::FundedProgress
             | Self::ClueEfficiency
             | Self::PriorityRefundTiming
+            | Self::OccupiedRecipient
             | Self::ProgressTiming
             | Self::KnownStrikes
             | Self::ConditionalStrikes
@@ -1271,6 +1275,21 @@ fn symbolic_evaluation(
         preference: convention_action.preference,
         certainly_playable: assessment.is_some_and(|value| value.certainly_playable),
         certainly_useless: assessment.is_some_and(|value| value.certainly_useless),
+        unextended_plays: view
+            .hands
+            .iter()
+            .flatten()
+            .filter_map(|held| {
+                let card = held.identity?;
+                (card.rank != Rank::Five
+                    && !view.hands.iter().flatten().any(|other| {
+                        other.identity.is_some_and(|next| {
+                            next.suit == card.suit && next.rank.number() == card.rank.number() + 1
+                        })
+                    }))
+                .then_some(held.id)
+            })
+            .collect(),
         newly_touched,
         immediately_playable_touched,
         critical_touched,
@@ -1345,6 +1364,7 @@ fn compare_symbolic_candidates(
                 EndpointComparison::PreferLeft(
                     ComparisonReason::PerfectFinish
                     | ComparisonReason::FundedProgress
+                    | ComparisonReason::OccupiedRecipient
                     | ComparisonReason::ClueEfficiency
                     | ComparisonReason::ProgressTiming
                     | ComparisonReason::BottomDeckRisk,
@@ -1354,6 +1374,7 @@ fn compare_symbolic_candidates(
                 EndpointComparison::PreferRight(
                     ComparisonReason::PerfectFinish
                     | ComparisonReason::FundedProgress
+                    | ComparisonReason::OccupiedRecipient
                     | ComparisonReason::ClueEfficiency
                     | ComparisonReason::ProgressTiming
                     | ComparisonReason::BottomDeckRisk,
@@ -1610,6 +1631,34 @@ fn compare_endpoint_evidence(
             return EndpointComparison::PreferRight(ComparisonReason::BottomDeckRisk);
         }
         Ordering::Equal => {}
+    }
+    if avoids_redundant_loading(left, right) {
+        let horizon = left
+            .projection
+            .common_horizon()
+            .min(right.projection.common_horizon());
+        retain_comparison_basis(
+            basis,
+            "occupiedRecipient",
+            usize::from(horizon),
+            || left.projection.checkpoints_at(horizon),
+            || right.projection.checkpoints_at(horizon),
+        );
+        return EndpointComparison::PreferLeft(ComparisonReason::OccupiedRecipient);
+    }
+    if avoids_redundant_loading(right, left) {
+        let horizon = left
+            .projection
+            .common_horizon()
+            .min(right.projection.common_horizon());
+        retain_comparison_basis(
+            basis,
+            "occupiedRecipient",
+            usize::from(horizon),
+            || left.projection.checkpoints_at(horizon),
+            || right.projection.checkpoints_at(horizon),
+        );
+        return EndpointComparison::PreferRight(ComparisonReason::OccupiedRecipient);
     }
     if let Some(preference) = compare_priority_refund_timing(left, right, basis) {
         return preference;
@@ -2180,6 +2229,97 @@ fn compare_save_principle_risks(
             left.projection
                 .save_violations_at(horizon)
                 .cmp(&right.projection.save_violations_at(horizon))
+        })
+}
+
+/// Loading an occupied recipient is not productive merely because it converts
+/// a terminal commitment into a point earlier while replacing a safe discard.
+/// Reviewed p4v0s9 T7: retain the point plus commitment total, the spare token,
+/// and the current player's draw when no successor or refund needs accelerating.
+fn avoids_redundant_loading(
+    play: &PlannerActionEvaluation,
+    clue: &PlannerActionEvaluation,
+) -> bool {
+    let (Action::Play(_), Action::Clue { target, .. }) = (play.action, clue.action) else {
+        return false;
+    };
+    let Some(first) = play.projection.steps.first() else {
+        return false;
+    };
+    if first.consequences.score_gain != 1
+        || !(play.certainly_playable
+            || first
+                .interpreted_identities
+                .is_some_and(|ids| ids.len() == 1))
+        || play.preference.policy_tier() != clue.preference.policy_tier()
+    {
+        return false;
+    }
+    // Establish that the recipient would already score before the giver's next
+    // turn. A touched card or an unfinished line is not enough.
+    if !play
+        .projection
+        .steps
+        .iter()
+        .skip(1)
+        .take_while(|step| step.projected.actor != first.projected.actor)
+        .any(|step| step.projected.actor == target && step.consequences.score_gain == 1)
+    {
+        return false;
+    }
+    let horizon = play
+        .projection
+        .common_horizon()
+        .min(clue.projection.common_horizon());
+    if play.projection.save_violations_at(usize::from(horizon)) != 0
+        || play
+            .projection
+            .recorded_bottom_deck_risks_at(usize::from(horizon))
+            != 0
+        || play.projection.maximum_strikes() != 0
+        || clue.projection.maximum_strikes() != 0
+    {
+        return false;
+    }
+    let accelerated: Vec<_> = clue
+        .projection
+        .steps
+        .iter()
+        .take(usize::from(horizon))
+        .filter(|step| step.consequences.score_gain == 1)
+        .filter(|step| {
+            !play
+                .projection
+                .steps
+                .iter()
+                .take(usize::from(horizon))
+                .any(|other| other.projected.action == step.projected.action)
+        })
+        .collect();
+    if accelerated.is_empty() || accelerated.iter().any(|step| {
+        !matches!(step.projected.action, Action::Play(card) if clue.unextended_plays.contains(&card))
+            || step.consequences.clues_gained > 0
+    }) { return false; }
+    let plays = play.projection.checkpoints_at(horizon);
+    let clues = clue.projection.checkpoints_at(horizon);
+    !plays.is_empty()
+        && !clues.is_empty()
+        && plays.iter().all(|a| {
+            clues.iter().all(|b| {
+                a.value.score + a.value.committed_future_plays
+                    == b.value.score + b.value.committed_future_plays
+                    && a.value.score + a.value.secured_future_plays
+                        >= b.value.score + b.value.secured_future_plays
+                    && a.value.clues > b.value.clues
+                    && a.value.clues >= a.value.clue_demand
+                    && a.value.clue_demand <= b.value.clue_demand
+                    && a.value.exposed_critical_chops <= b.value.exposed_critical_chops
+                    && a.value.save_pressure <= b.value.save_pressure
+                    && a.value.protected_bottom_deck_risks >= b.value.protected_bottom_deck_risks
+                    && b.value
+                        .exposed_chop_quality
+                        .no_worse_than(a.value.exposed_chop_quality)
+            })
         })
 }
 
@@ -3567,6 +3707,85 @@ mod tests {
             }
             .clue_efficiency_preference(b)
         );
+    }
+
+    #[test]
+    fn reviewed_occupied_recipient_does_not_need_unextended_play_acceleration() {
+        // User-reviewed p4v0s9 T7: Alice already has g2, Donald's r3 is a
+        // safe duplicate, and b3 is absent. Cathy should play p1.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s9.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(6).unwrap();
+        let analysis = crate::analyze_position(
+            &state.view_for(state.current_player()).unwrap(),
+            SupportedConvention::HGroup(crate::HGroupProfile::Max),
+            PlannerConfig {
+                objective: PlanningObjective::PerfectScore,
+                ..PlannerConfig::default()
+            },
+        )
+        .unwrap();
+        let play_action = Action::Play(hanabi_core::CardId::new(10));
+        let clue_action = Action::Clue {
+            target: hanabi_core::PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue),
+        };
+        let play = analysis
+            .planner
+            .root_actions
+            .iter()
+            .find(|a| a.action == play_action)
+            .unwrap();
+        let clue = analysis
+            .planner
+            .root_actions
+            .iter()
+            .find(|a| a.action == clue_action)
+            .unwrap();
+        assert!(avoids_redundant_loading(play, clue));
+        assert_eq!(analysis.planner.best_action, play_action);
+        assert!(
+            play.projection
+                .steps
+                .iter()
+                .any(
+                    |step| step.projected.action == Action::Discard(hanabi_core::CardId::new(14))
+                        && step.consequences.save_principle_violation.is_none()
+                        && step.consequences.bottom_deck_risk.is_none()
+                )
+        );
+        let mut connected = clue.clone();
+        connected.unextended_plays.clear();
+        assert!(!avoids_redundant_loading(play, &connected));
+        let mut refund = clue.clone();
+        refund
+            .projection
+            .steps
+            .iter_mut()
+            .find(|s| s.projected.action == Action::Play(hanabi_core::CardId::new(15)))
+            .unwrap()
+            .consequences
+            .clues_gained = 1;
+        assert!(!avoids_redundant_loading(play, &refund));
+        let mut unoccupied = play.clone();
+        unoccupied
+            .projection
+            .steps
+            .retain(|s| s.projected.actor != hanabi_core::PlayerId::new(0));
+        assert!(!avoids_redundant_loading(&unoccupied, clue));
+        let mut unsafe_discard = play.clone();
+        unsafe_discard
+            .projection
+            .steps
+            .iter_mut()
+            .find(|s| matches!(s.projected.action, Action::Discard(_)))
+            .unwrap()
+            .consequences
+            .save_principle_violation =
+            Some(crate::h_group::SavePrincipleViolation::UniquePlayable);
+        assert!(!avoids_redundant_loading(&unsafe_discard, clue));
     }
 
     fn without_handoff_evidence(

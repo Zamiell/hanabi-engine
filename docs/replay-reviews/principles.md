@@ -459,3 +459,14 @@ See `t3-projected-twos-ambiguous-good-touch` in [p4v0s9](p4v0s9.json).
 Regression: `reviewed_projected_twos_respect_givers_ambiguous_good_touch` checks
 ordinary and masked forecast views, downstream admission, and clarification to a
 nonduplicating identity as a negative control.
+
+## Do not load a second play merely to accelerate a dead-end chain
+
+In `p4v0s9` turn 7, `t7-play-before-loading-occupied-alice`, Alice already has
+an executable g2 and Cathy has p1. Blue to Alice accelerates b1 and Donald's b2,
+but no b3 is visible and Donald has a safe chop. The user prefers Cathy playing
+p1. An earlier realized point alone does not establish superior progress when
+the alternative retains the same points plus executable commitments and gains a
+useful clue through a safe discard. Preserve exceptions for successor
+development, 5 refunds, urgent protection, and genuinely added work; do not
+infer safe chops or future draws from simulator truth.
