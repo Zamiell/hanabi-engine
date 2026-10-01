@@ -498,5 +498,25 @@ clue. The localized regression
 `reviewed_delayed_red_three_uses_givers_visible_nonduplicate` checks three
 conditional non-red identities, the actual duplicate, hidden-source controls,
 Cathy's selected clue, Donald's waiting/protection, and playability after r2. It
-does not cover aggregation of these private-information policies in Bob's
-original forecast; that remains a separate planner limitation.
+does not cover aggregation by itself. The subsequent
+`t6-conditional-protection-policies-keep-their-own-losses` implementation
+retains bounded, exhaustive private-card branches and compares their common
+elapsed horizon. No branch supplies its assignments as public knowledge or
+cancels a loss in another branch. Unexpanded domains remain explicit
+uncertainty. The two `private_policy::tests` regressions cover both conditional
+policies, inference, owner masking, resource/budget controls, and integrated
+downstream evidence.
+
+A shorter unresolved sibling cannot erase a loss witnessed in another branch
+when the competing forecast reaches that loss's turn. Conversely, an unfinished
+competing forecast cannot certify avoidance. The planner regression
+`unfinished_sibling_does_not_erase_a_witnessed_conditional_loss` checks both
+comparison directions and the shorter-opponent negative control.
+
+The majority response selector must inspect covered private continuations, not
+only their shared prefix, which may end before any discard. Its original
+probability is still computed from the observer's unchanged information.
+Conditional assignments are used to validate the response, including visible
+successors, without revealing faces to that observer or erasing minority-world
+losses. The existing 30%, 50%, above-50% and certainty expectations remain in
+force; their safety assertions now traverse the branch representation.

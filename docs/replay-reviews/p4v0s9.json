@@ -331,5 +331,61 @@
     ],
     "coverageNote": "Covers red/blue/green/purple replacement cases, actual duplicate rejection, masked-source negative control, and downstream inference. Bob-rooted contingent-policy aggregation is not covered by this localized admission regression.",
     "validation": "Focused conditional regression passes. Related good_touch tests:8 pass,2 fail identically with and without the production patch: fifth_replay_demonstrated_bluff_eliminates_older_good_touch_duplicates (replay.rs:2783) and second_replay_move_twenty_two_rejects_a_good_touch_duplicate (learning_rules.rs:906). Fast checks pass; all three majority regressions pass. Optimized original Bob-rooted turn6 analysis completes in11.64s without budget exhaustion and still prefers blue: it does not yet aggregate the conditional private-information policies. Full suite deferred; CI not observed."
+  },
+  {
+    "id": "t6-conditional-protection-policies-keep-their-own-losses",
+    "turn": 6,
+    "positionKey": "7bb2b478e399002f0d69e16b92e713db7996131929dac38a4d716f5d3618ae88",
+    "status": "user-explained",
+    "perspective": "Bob forecasting teammate decisions about Donald’s r3 with his own rank3 cards hidden.",
+    "source": {
+      "conversation": "2026-10-01 conditional-policy implementation",
+      "quote": "ok, if there are clear bugs, then fix them, otherwise give me the analysis for the turn again and we can go through it",
+      "relatedRuling": "t6-delayed-red-three-can-be-protected-conditionally"
+    },
+    "explanation": {
+      "bug": "The single masked forecast required a protective clue to be valid under every possible private hand, then charged the unique-card loss from a different possible hand. A teammate can see the relevant cards and choose differently. The previous visible-identity admission fix did not supply this missing policy split.",
+      "implementation": "Before a funded teammate decision about a threatened next-player chop, enumerate bounded assignments for relevant previously clued external cards hidden from the source. Every admitted assignment keeps its own action sequence, resources and losses. Exclude physically exhausted copies and same-identity worlds forbidden by first-touch ordinary rank-clue Good Touch. Unassigned cards and future draws remain unknown, and projecting a card owner still hides that owner’s faces. Exhaustive branches use the convention leaf policy rather than recursively multiplying full strategic searches. A domain above the work bound produces an explicit interpretation frontier; no partial enumeration proves safety.",
+      "comparison": "ProjectionEvidence.private_branches participates in common-horizon checkpoints, loss bounds and token costs. JSON/text explanations retain conditions and full branch continuations. This is a conservative bounded forecast, not a weighted perfect-score calculation or a proof that the fixture is globally optimal.",
+      "observedResult": "Final turn6 analysis selects the fixture 2s to Alice in61.005s without exhausting the120s move budget. The 2s/blue comparison reports Equivalent normalized endpoints at9 actions, followed by ConventionPreference for2s (priority654 versus433). Both roots retain20 conditional assignments. Cathy projects blue at turn7 after2s, preserving the reviewed30.18% response. At15 she protects Donald with red when Bob has no clued r3; otherwise she discards r1 and Donald discards the redundant r3. No later replay positions were scanned.",
+      "valuation": "Conditional identities drive the modeled teammate policy and its actual losses, but are masked again for endpoint information valuation. Merely assuming a hidden card cannot earn information credit over another candidate.",
+      "lossComparison": "Retain a witnessed conditional loss even when an unresolved sibling stops earlier, provided the competing line is projected through the loss turn. Never treat a shorter competing forecast as proof of avoiding that loss. Preserve shared-prefix strikes as well as branch strikes.",
+      "majority": "The earlier 30.18%,50%,51.52%,100% expectations remain unchanged. The majority selector can inspect covered private continuations, including their conditional visible successors, without changing the original observer-weighted probability or deleting minority-branch losses. This avoids pretending the shared prefix contains a discard that occurs only in some branches.",
+      "lines": {
+        "fixture": ["6 Bob 2s to Alice", "7 Cathy blue to Alice"],
+        "alternative": ["6 Bob blue to Alice", "7 Cathy 2s to Alice"],
+        "sharedContinuation": [
+          "8 Donald play g1",
+          "9 Alice play b1",
+          "10 Bob blue to Donald",
+          "11 Cathy play p1",
+          "12 Donald play b2",
+          "13 Alice play g2",
+          "14 Bob 5s to Cathy"
+        ],
+        "cluedRedThreeBranch": [
+          "15 Cathy discard r1",
+          "16 Donald discard r3 (secured replacement)",
+          "17 Alice play r2",
+          "Stop before Bob18 at an unresolved identity."
+        ],
+        "noCluedRedThreeBranch": [
+          "15 Cathy red to Donald",
+          "16 Donald discard p3; some assignments retain a p3 bottom-deck risk",
+          "Stop before Alice17 at an unresolved identity."
+        ]
+      },
+      "limits": "The bounds do not enumerate unknown future draws or prove a perfect-score strategy. The two competing root lines retain identical conditional continuations, including remaining p3 risk; the fix does not label every later discard safe. Earlier intermediate probability-policy regressions are resolved without adopting a new strategy ruling."
+    },
+    "regressions": [
+      "h_group::private_policy::tests::reviewed_private_protection_keeps_conditions_and_losses_together",
+      "h_group::private_policy::tests::reviewed_root_projection_retains_private_protection_branches",
+      "planner::tests::unfinished_sibling_does_not_erase_a_witnessed_conditional_loss",
+      "hanabi-cli explain::tests::reports_preserve_cycles_branches_and_forced_exclusions",
+      "planner::majority::tests::reviewed_majority_changes_forecast_without_revealing_cards",
+      "h_group::plan::tests::shared_checkpoints_retain_conditional_tail_risk"
+    ],
+    "coverageNote": "Eight focused tests pass: private protection policies, integrated root projection, original majority probability/selection and safety controls, conditional loss comparison with shorter-opponent negative control, shared-prefix strikes and the existing Save Principle priority guard. The CLI branch-serialization regression also passes. Existing majority move expectations and probability assertions are unchanged; the loss assertion and critical-loss mutation now traverse conditional continuations, and successor/refund/strike negative controls cover the new branch path.",
+    "validation": "Eight focused tests and Clippy pass. Full scripts/check.sh completed:457 passed,51 failed; all non-Rust-test stages passed.47 failing names match the explicit completed baseline at82bd9a5846daa5ab0c4c742fbe72e94787430e75. The remaining4 also fail in an isolated clean checkout of the pre-change6a24b9437a46f6987b30b592d56b5ea07c569410: move_35_uses_the_oldest_matching_elimination_note; demonstrated_layer_pause_is_not_vetoed_by_generic_play_order; third_replay_opening_rank_two_makes_a_later_green_clue_duplicate; reviewed_two_for_one_beats_a_speculative_finesse_tiebreaker. No newly failing test names were attributable to this patch. Full-run log: target/workflow/3cfd856dd6db426b88ef2d4d3e79cb71.log; pre-change control: target/workflow/87e9a7ddea7d44a980b93be7074ce56a.log. The full suite remains failing; the failure baseline was not broadened."
   }
 ]

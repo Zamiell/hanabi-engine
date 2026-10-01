@@ -141,6 +141,7 @@ fn project_h_group_plan_with_control<const REUSE_SELECTED: bool>(
         // again would multiply historical proof work and change its model.
         !super::inverse_planning::is_active(),
         MAX_REVEAL_LEAVES,
+        32,
     )
 }
 
@@ -161,6 +162,7 @@ pub(crate) fn project_leaf_projection(
         ConditionalPlan::new(source.clue_tokens),
         false,
         MAX_REVEAL_LEAVES,
+        32,
     )?;
     Ok((plan.summarize(), plan.into_evidence()))
 }
@@ -177,6 +179,7 @@ fn continue_plan<const REUSE_SELECTED: bool>(
     mut plan: ConditionalPlan,
     strategic: bool,
     reveal_budget: usize,
+    private_budget: usize,
 ) -> Result<ConditionalPlan, crate::AnalysisStopped> {
     #[cfg(test)]
     let _profile = crate::test_profile::span("symbolic_projection");
@@ -358,6 +361,7 @@ fn continue_plan<const REUSE_SELECTED: bool>(
                                 branch,
                                 strategic,
                                 reveal_budget / domain.len(),
+                                private_budget,
                             )?;
                             plan.add_discard_branch(public.turn, card, identity, branch);
                         }
@@ -489,6 +493,61 @@ fn continue_plan<const REUSE_SELECTED: bool>(
             break;
         }
         let next = public.current_player;
+        match super::private_policy::threatened_chop(
+            source,
+            &public,
+            profile,
+            private_budget,
+            control,
+        )? {
+            super::private_policy::Split::Unneeded => {}
+            super::private_policy::Split::Unresolved => {
+                plan.stop_at(PlanFrontier::InterpretationBranch);
+                break;
+            }
+            super::private_policy::Split::Worlds(worlds) => {
+                let count = worlds.len();
+                let prefix = plan.clone();
+                for assignments in worlds {
+                    control.checkpoint()?;
+                    let mut world = public.clone();
+                    for (card, identity) in &assignments {
+                        for held in world.hands.iter_mut().flatten().filter(|c| c.id == *card) {
+                            held.identity = Some(*identity);
+                        }
+                    }
+                    let Some(projected) = PerspectiveProjector::new(&world, profile)
+                        .project_with_evidence(next, PerspectiveDepth::NestedRecipients)
+                    else {
+                        let mut unavailable = prefix;
+                        unavailable.stop_at(PlanFrontier::ProjectionUnavailable);
+                        return Ok(unavailable);
+                    };
+                    // Exhaustive private alternatives use the same bounded
+                    // convention continuation as leaf comparisons, rather than
+                    // multiplying a fresh strategic search in every world.
+                    let action = select_h_group_action(&projected.deductions, profile);
+                    let branch = continue_plan::<REUSE_SELECTED>(
+                        source,
+                        world,
+                        profile,
+                        action,
+                        root,
+                        limit,
+                        control,
+                        prefix.clone(),
+                        false,
+                        reveal_budget,
+                        private_budget / count,
+                    )?;
+                    plan.add_private_branch(public.turn, next, assignments, branch);
+                }
+                plan.record_branch_rotation(
+                    u8::try_from(source.hands.len()).expect("standard player count"),
+                );
+                return Ok(plan);
+            }
+        }
         let Some(projected) = PerspectiveProjector::new(&public, profile)
             .project_with_evidence(next, PerspectiveDepth::NestedRecipients)
         else {
@@ -1300,6 +1359,7 @@ mod tests {
             ConditionalPlan::new(public.clue_tokens),
             false,
             0,
+            32,
         )
         .unwrap();
         let evidence = plan.into_evidence();

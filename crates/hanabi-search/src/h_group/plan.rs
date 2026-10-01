@@ -181,6 +181,9 @@ pub struct ProjectionEvidence {
     /// Exhaustive alternatives for a safe discard's unknown revealed face.
     /// Each branch keeps its own history/counts and blank subsequent draws.
     pub discard_branches: Vec<DiscardRevealBranch>,
+    /// Exhaustive relevant private-card alternatives before a teammate acts.
+    /// Conditions are local worlds, never facts available to the root observer.
+    pub private_branches: Vec<PrivateHandBranch>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -204,6 +207,14 @@ pub struct ClueTouchBranch {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PrivateHandBranch {
+    pub turn: u32,
+    pub actor: PlayerId,
+    pub assignments: Vec<(CardId, Card)>,
+    pub continuation: ProjectionEvidence,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DiscardRevealBranch {
     pub turn: u32,
     pub card: CardId,
@@ -221,10 +232,17 @@ impl ProjectionEvidence {
                     .iter()
                     .map(|branch| &branch.continuation),
             )
+            .chain(
+                self.private_branches
+                    .iter()
+                    .map(|branch| &branch.continuation),
+            )
     }
 
     pub(crate) fn has_branches(&self) -> bool {
-        !self.clue_branches.is_empty() || !self.discard_branches.is_empty()
+        !self.clue_branches.is_empty()
+            || !self.discard_branches.is_empty()
+            || !self.private_branches.is_empty()
     }
     /// Unbranched risk up to an assessed discard frontier. If a forecast stops
     /// on an unresolved clue/play, absence of a recorded loss is not evidence
@@ -446,14 +464,14 @@ impl ProjectionEvidence {
     /// Worst modeled branch, not a claim that a conditional strike occurs in
     /// every world. A common-horizon comparison must never hide this tail.
     pub(crate) fn maximum_strikes(&self) -> u8 {
+        let prefix = self.steps.iter().fold(0_u8, |sum, step| {
+            sum.saturating_add(step.consequences.strikes)
+        });
         self.branches()
             .map(Self::maximum_strikes)
             .max()
-            .unwrap_or_else(|| {
-                self.steps.iter().fold(0_u8, |sum, step| {
-                    sum.saturating_add(step.consequences.strikes)
-                })
-            })
+            .unwrap_or(0)
+            .max(prefix)
     }
 }
 
@@ -556,6 +574,21 @@ impl ConditionalPlan {
             turn,
             card,
             identity,
+            continuation: plan.into_evidence(),
+        });
+    }
+
+    pub(super) fn add_private_branch(
+        &mut self,
+        turn: u32,
+        actor: PlayerId,
+        assignments: Vec<(CardId, Card)>,
+        plan: Self,
+    ) {
+        self.evidence.private_branches.push(PrivateHandBranch {
+            turn,
+            actor,
+            assignments,
             continuation: plan.into_evidence(),
         });
     }
@@ -704,6 +737,7 @@ impl ConditionalPlan {
         let mut shared = self.clone();
         shared.evidence.clue_branches.clear();
         shared.evidence.discard_branches.clear();
+        shared.evidence.private_branches.clear();
         shared.evidence.steps = self.shared_steps();
         let actions = u8::try_from(shared.len()).unwrap_or(u8::MAX);
         // Different branch states must not be advertised as one exact state.
@@ -866,6 +900,9 @@ mod tests {
         assert_eq!(evidence.clue_cost_at(1), Some((1, 1)));
         assert_eq!(evidence.clue_cost_at(2), None);
         assert_eq!(evidence.maximum_strikes(), 1);
+        let mut prefix_strike = evidence.clone();
+        prefix_strike.steps[0].consequences.strikes = 2;
+        assert_eq!(prefix_strike.maximum_strikes(), 2);
         assert_eq!(evidence.maximum_save_violations(), 1);
         assert_eq!(evidence.save_violations_at(1), 0);
         assert_eq!(evidence.save_violations_at(2), 1);

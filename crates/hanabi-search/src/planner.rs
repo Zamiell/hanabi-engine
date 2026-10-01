@@ -7,8 +7,8 @@ use hanabi_core::{Action, Clue, FullState, GameStatus, PlayerView, Rank, RuleErr
 
 use crate::{
     ConventionAction, ConventionAnalysis, ConventionPolicyTier, EnumerateWorldsError,
-    InformationSet, InformationSetError, LogicalDeductions, SupportedConvention, WorldCount,
-    assess_card,
+    InformationSet, InformationSetError, LogicalDeductions, ProjectionEvidence,
+    SupportedConvention, WorldCount, assess_card,
 };
 
 /// The result the planner should optimize during exact endgame analysis.
@@ -2194,26 +2194,33 @@ fn compare_save_principle_risks(
     left: &PlannerActionEvaluation,
     right: &PlannerActionEvaluation,
 ) -> Ordering {
-    // An unexpanded unknown discard is not proof of avoiding a loss several
-    // turns down another line. Compare equal elapsed time, retaining direct
-    // first-action Save Principle violations even at an unknown frontier.
-    let horizon = usize::from(
-        left.projection
-            .common_horizon()
-            .min(right.projection.common_horizon()),
-    )
-    .max(1);
-    // A critical-card discard makes the corresponding score unattainable.
-    // Do not equate it with risking an otherwise recoverable copy merely
-    // because each line contains one Save Principle violation.
-    left.projection
-        .critical_losses_at(horizon)
-        .cmp(&right.projection.critical_losses_at(horizon))
-        .then_with(|| {
-            left.projection
-                .save_violations_at(horizon)
-                .cmp(&right.projection.save_violations_at(horizon))
-        })
+    compare_save_histories(&left.projection, &right.projection)
+}
+
+fn compare_save_histories(left: &ProjectionEvidence, right: &ProjectionEvidence) -> Ordering {
+    let left_horizon = usize::from(left.common_horizon()).max(1);
+    let right_horizon = usize::from(right.common_horizon()).max(1);
+    let risk = |line: &ProjectionEvidence, horizon| {
+        (
+            line.critical_losses_at(horizon),
+            line.save_violations_at(horizon),
+        )
+    };
+    let shared = left_horizon.min(right_horizon);
+    let prefix = risk(left, shared).cmp(&risk(right, shared));
+    if prefix != Ordering::Equal {
+        return prefix;
+    }
+    // An unfinished sibling must not erase a witnessed conditional loss.
+    // The competing line must be complete through that loss's time: a shorter
+    // unknown forecast still cannot certify that it avoids a longer one's loss.
+    let prefer_left = risk(left, left_horizon) < risk(right, left_horizon);
+    let prefer_right = risk(right, right_horizon) < risk(left, right_horizon);
+    match (prefer_left, prefer_right) {
+        (true, false) => Ordering::Less,
+        (false, true) => Ordering::Greater,
+        _ => Ordering::Equal,
+    }
 }
 
 /// Prefer taking a certain play when the next teammate can spend their turn
@@ -4366,6 +4373,52 @@ mod tests {
             )
         ));
         assert_eq!(result.best_action, three, "{:#?}", result.comparisons);
+    }
+
+    #[test]
+    fn unfinished_sibling_does_not_erase_a_witnessed_conditional_loss() {
+        // Algorithm invariant, not a synthetic convention ruling.
+        let step = crate::PlanStep {
+            interpreted_identities: None,
+            turn: 0,
+            projected: crate::ProjectedAction {
+                actor: hanabi_core::PlayerId::new(0),
+                action: Action::Discard(hanabi_core::CardId::new(0)),
+            },
+            depends_on: None,
+            consequences: crate::ProjectedConsequences::default(),
+        };
+        let mut safe = ProjectionEvidence {
+            steps: vec![step, step],
+            checkpoints: vec![RotationCheckpoint {
+                actions: 2,
+                discards: 0,
+                value: ProjectedPositionValue::default(),
+            }],
+            ..ProjectionEvidence::default()
+        };
+        let mut short = safe.clone();
+        short.steps.truncate(1);
+        short.checkpoints[0].actions = 1;
+        let mut loss = safe.clone();
+        loss.steps[1].consequences.save_principle_violation =
+            Some(crate::SavePrincipleViolation::UniqueTwo);
+        let mut branched = short.clone();
+        for continuation in [short.clone(), loss] {
+            branched.private_branches.push(crate::PrivateHandBranch {
+                turn: 0,
+                actor: hanabi_core::PlayerId::new(0),
+                assignments: Vec::new(),
+                continuation,
+            });
+        }
+        assert_eq!(branched.common_horizon(), 1);
+        assert_eq!(compare_save_histories(&branched, &safe), Ordering::Greater);
+        assert_eq!(compare_save_histories(&safe, &branched), Ordering::Less);
+        assert_eq!(compare_save_histories(&branched, &short), Ordering::Equal);
+        safe.steps[1].consequences.save_principle_violation =
+            Some(crate::SavePrincipleViolation::UniqueTwo);
+        assert_eq!(compare_save_histories(&branched, &safe), Ordering::Equal);
     }
 
     #[test]

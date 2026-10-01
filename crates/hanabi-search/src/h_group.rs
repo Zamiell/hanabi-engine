@@ -62,6 +62,7 @@ mod plan;
 mod play_order;
 mod primary;
 mod principle_validation;
+mod private_policy;
 mod projection_requirements;
 mod prospective;
 use history_reducer::replay_h_group_inner_uncached;
@@ -143,8 +144,9 @@ use perspective::{PerspectiveProjector, ProspectiveTransition};
 use plan::ConditionalPlan;
 pub use plan::{
     ClueTouchBranch, ConditionalAlternative, DiscardRevealBranch, HiddenCardCondition,
-    PerspectiveAssumption, PlanFrontier, PlanStep, ProjectedAction, ProjectedConsequences,
-    ProjectionEvidence, ResourceSchedule, SavePrincipleViolation, TokenTransition,
+    PerspectiveAssumption, PlanFrontier, PlanStep, PrivateHandBranch, ProjectedAction,
+    ProjectedConsequences, ProjectionEvidence, ResourceSchedule, SavePrincipleViolation,
+    TokenTransition,
 };
 use play_order::ordered_playable_cards;
 use primary::{ClueInterpretationPlan, PrimaryClueInputs};

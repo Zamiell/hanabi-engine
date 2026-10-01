@@ -169,3 +169,33 @@ a likely duplicate in the source observer's hidden hand. It does not reveal that
 hand or remove the conditional loss from either projected line. The projected
 decision's `selection` explains this override. Incomplete enumeration and
 exactly50% retain the ordinary selector's choice.
+
+### Conditional private-information policies
+
+`projection.privateBranches` retains bounded, mutually exclusive assignments for
+cards a projected teammate can see but the original observer cannot. A branch
+records its decision turn, modeled actor, relevant card assignments, and
+complete continuation. These assignments are hypotheses, not revealed cards.
+Future draws stay blank, and an owner's decision view still hides their own
+assigned cards.
+
+When a threatened chop could instead have a clued replacement in an unknown
+external hand, the forecast can split before the teammate's protection decision.
+Each branch evaluates the action and its consequences together. It must not
+combine a duplicate world's rejected clue with a nonduplicate world's loss.
+Branches use bounded convention continuations, not a claim of optimal play.
+Comparisons use the common elapsed horizon and retain worst-branch losses;
+mutually exclusive card values are never added together. If the relevant domain
+exceeds the branch budget, the projection reports an interpretation frontier
+instead of treating an unexpanded possibility as a certain discard.
+
+Private assignments can condition actions and their losses, but are masked again
+when valuing the original observer’s information. They cannot earn endpoint
+credit as if the observer had learned those hidden faces.
+
+A witnessed loss in a longer conditional branch remains comparable when the
+other candidate is fully projected through that loss's turn. An unfinished
+sibling is not evidence that the witnessed loss disappeared. This does not
+permit a shorter competing forecast to claim avoidance. Majority-response
+selection can inspect the covered continuations without altering the original
+observer's probability or the minority branches' recorded losses.

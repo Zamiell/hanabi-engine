@@ -420,6 +420,13 @@ pub(crate) fn projection_evidence_json(
             "identity": identity_json(branch.identity),
             "projection": projection_evidence_json(table_id, &branch.continuation),
         })).collect::<Vec<_>>(),
+        "privateBranches": evidence.private_branches.iter().map(|branch| json!({
+            "turn": branch.turn + 1, "actor": branch.actor.index(),
+            "assignments": branch.assignments.iter().map(|(card, identity)| json!({
+                "card": card.index(), "identity": identity_json(*identity),
+            })).collect::<Vec<_>>(),
+            "projection": projection_evidence_json(table_id, &branch.continuation),
+        })).collect::<Vec<_>>(),
         "assumptions": evidence.assumptions.iter().map(|assumption| json!({
             "turn": assumption.turn + 1,
             "sourceObserver": assumption.source_observer.index(),

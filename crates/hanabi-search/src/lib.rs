@@ -33,9 +33,10 @@ pub use h_group::{
     HGroupClueInterpretation, HGroupClueKind, HGroupConnection, HGroupConnectionKind,
     HGroupConnectionPromise, HGroupIdentityStatus, HGroupInferences, HGroupLevelDescriptor,
     HGroupMoveKind, HGroupPhase, HGroupPlayObligation, HGroupSaveKind, HGroupSignal,
-    HiddenCardCondition, PerspectiveAssumption, PlanFrontier, PlanStep, ProjectedAction,
-    ProjectedConsequences, ProjectionEvidence, ProjectionRequirement, ProjectionRequirementKind,
-    ResourceSchedule, SavePrincipleViolation, TokenTransition, TurnCommitment, infer_h_group,
+    HiddenCardCondition, PerspectiveAssumption, PlanFrontier, PlanStep, PrivateHandBranch,
+    ProjectedAction, ProjectedConsequences, ProjectionEvidence, ProjectionRequirement,
+    ProjectionRequirementKind, ResourceSchedule, SavePrincipleViolation, TokenTransition,
+    TurnCommitment, infer_h_group,
 };
 pub use information_set::{
     BeliefConstraints, EnumerateWorldsError, IdentitySet, InformationSet, InformationSetError,

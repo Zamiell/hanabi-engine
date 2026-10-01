@@ -65,8 +65,45 @@ fn can_play_soon(view: &PlayerView, domain: IdentitySet, secured: IdentitySet) -
         })
 }
 
-#[allow(clippy::too_many_lines)]
 pub(super) fn evaluate(
+    source: &PlayerView,
+    frontier: &PlayerView,
+    profile: HGroupProfile,
+    root: Action,
+) -> Option<ProjectedPositionValue> {
+    // Private-world hypotheses can change a teammate's action and the
+    // resulting losses. They are not new knowledge earned by the original
+    // observer: compare resources from that same observation scope on both
+    // sides, letting public clues/actions supply any genuine new inference.
+    let hidden = |id| {
+        source
+            .hands
+            .iter()
+            .flatten()
+            .any(|old| old.id == id && old.identity.is_none())
+    };
+    let mut masked;
+    let frontier = if frontier
+        .hands
+        .iter()
+        .flatten()
+        .any(|held| held.identity.is_some() && hidden(held.id))
+    {
+        masked = frontier.clone();
+        for held in masked.hands.iter_mut().flatten() {
+            if hidden(held.id) {
+                held.identity = None;
+            }
+        }
+        &masked
+    } else {
+        frontier
+    };
+    evaluate_observed(source, frontier, profile, root)
+}
+
+#[allow(clippy::too_many_lines)]
+fn evaluate_observed(
     source: &PlayerView,
     frontier: &PlayerView,
     profile: HGroupProfile,

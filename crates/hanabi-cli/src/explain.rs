@@ -762,6 +762,15 @@ fn print_projection(
         );
         print_projection(&branch.continuation, players, &format!("{indent}  "));
     }
+    for branch in &projection.private_branches {
+        println!(
+            "{indent}Conditional private cards {:?}, seen by P{} at T{}:",
+            branch.assignments,
+            branch.actor.index(),
+            branch.turn + 1
+        );
+        print_projection(&branch.continuation, players, &format!("{indent}  "));
+    }
     if !projection.assumptions.is_empty() {
         println!("{indent}Assumptions: {:?}", projection.assumptions);
     }
@@ -861,6 +870,17 @@ mod tests {
                 outcome: SymbolicLineOutcome::default(),
                 continuation: ProjectionEvidence::default(),
             });
+        a.projection
+            .private_branches
+            .push(hanabi_search::PrivateHandBranch {
+                turn: 2,
+                actor: PlayerId::new(2),
+                assignments: vec![(
+                    CardId::new(5),
+                    hanabi_core::Card::new(hanabi_core::Suit::Red, hanabi_core::Rank::Three),
+                )],
+                continuation: ProjectionEvidence::default(),
+            });
         let b = evaluation(actions[1]);
         let rows = candidates(
             &view,
@@ -893,6 +913,13 @@ mod tests {
         let evidence = crate::live_action::projection_evidence_json(0, &a.projection);
         assert_eq!(evidence["clueBranches"][0]["turn"], 2);
         assert_eq!(evidence["clueBranches"][0]["touched"][0], 4);
+        assert_eq!(evidence["privateBranches"][0]["turn"], 3);
+        assert_eq!(evidence["privateBranches"][0]["actor"], 2);
+        assert_eq!(evidence["privateBranches"][0]["assignments"][0]["card"], 5);
+        assert_eq!(
+            evidence["privateBranches"][0]["assignments"][0]["identity"]["rank"],
+            3
+        );
         assert!(evidence["steps"].as_array().unwrap().is_empty());
     }
 }

@@ -138,10 +138,18 @@ pub(super) fn choose(
     let Action::Clue { target, .. } = clue.action else {
         return Ok(None);
     };
-    if !evaluations
+    let cases: Vec<_> = evaluations
         .iter()
-        .any(|play| eligible(source, play, clue, target))
-    {
+        .enumerate()
+        .filter_map(|(index, play)| {
+            if eligible(source, play, clue, target) {
+                Some((index, play.clone()))
+            } else {
+                covered_policy_case(source, play, clue, target).map(|case| (index, case))
+            }
+        })
+        .collect();
+    if cases.is_empty() {
         return Ok(None);
     }
     let Ok(deductions) = LogicalDeductions::new(source.clone()) else {
@@ -177,10 +185,7 @@ pub(super) fn choose(
             pairs
         })
         .collect();
-    for (index, play) in evaluations.iter().enumerate() {
-        if !eligible(source, play, clue, target) {
-            continue;
-        }
+    for (index, play) in cases {
         let losses: Vec<_> = play
             .projection
             .steps
@@ -190,7 +195,7 @@ pub(super) fn choose(
                     || s.consequences.bottom_deck_risk.is_some()
             })
             .collect();
-        let Some((identity, loss_turn)) = replacement_at(source, play, &losses) else {
+        let Some((identity, loss_turn)) = replacement_at(source, &play, &losses) else {
             continue;
         };
         // A single probabilistic duplicate cannot excuse unrelated losses or
@@ -224,10 +229,69 @@ pub(super) fn choose(
         if !chance.majority() {
             continue;
         }
-        record_choice(comparisons, play, clue, identity, chance);
+        record_choice(comparisons, &play, clue, identity, chance);
         return Ok(Some(index));
     }
     Ok(None)
+}
+
+/// A covered private world can choose the play even when another world must
+/// spend a clue to protect the chop. Keep that response separate from the
+/// aggregate's common prefix; it may contain no discard at all.
+fn covered_policy_case(
+    source: &PlayerView,
+    play: &PlannerActionEvaluation,
+    clue: &PlannerActionEvaluation,
+    target: hanabi_core::PlayerId,
+) -> Option<PlannerActionEvaluation> {
+    if !matches!(play.action, Action::Play(_))
+        || play.projection.maximum_strikes() != 0
+        || play.projection.critical_losses_at(usize::MAX) != 0
+    {
+        return None;
+    }
+    let owns = |id| {
+        source.hands[source.observer.index()]
+            .iter()
+            .any(|c| c.id == id)
+    };
+    for branch in &play.projection.private_branches {
+        let mut case = play.clone();
+        case.projection = branch.continuation.clone();
+        let Some((identity, _)) = replacement_at(source, &case, &[]) else {
+            continue;
+        };
+        let covered = |b: &&crate::PrivateHandBranch| {
+            b.assignments
+                .iter()
+                .any(|(id, card)| owns(*id) && *card == identity)
+        };
+        if !covered(&branch) {
+            continue;
+        }
+        let all_covered = play
+            .projection
+            .private_branches
+            .iter()
+            .filter(covered)
+            .all(|b| {
+                let mut conditional = play.clone();
+                conditional.projection = b.continuation.clone();
+                let mut visible = source.clone();
+                for (id, identity) in &b.assignments {
+                    for held in visible.hands.iter_mut().flatten().filter(|c| c.id == *id) {
+                        held.identity = Some(*identity);
+                    }
+                }
+                conditional.projection.maximum_save_violations() == 0
+                    && conditional.projection.maximum_bottom_deck_risks() == 0
+                    && eligible(&visible, &conditional, clue, target)
+            });
+        if all_covered {
+            return Some(case);
+        }
+    }
+    None
 }
 
 fn replacement_at(
@@ -593,6 +657,22 @@ mod tests {
             }
         }
     }
+    fn mark_critical(evidence: &mut crate::ProjectionEvidence) -> bool {
+        if let Some(step) = evidence
+            .steps
+            .iter_mut()
+            .find(|s| s.consequences.save_principle_violation.is_some())
+        {
+            step.consequences.save_principle_violation =
+                Some(crate::SavePrincipleViolation::CriticalCard);
+            return true;
+        }
+        evidence
+            .private_branches
+            .iter_mut()
+            .any(|b| mark_critical(&mut b.continuation))
+    }
+
     fn assert_safety_controls(
         source: &PlayerView,
         d: &LogicalDeductions,
@@ -604,17 +684,15 @@ mod tests {
             .find(|c| c.action == Action::Play(CardId::new(10)))
             .unwrap();
         // The majority choice must not relabel a conditional discard safe.
-        assert!(
-            play.projection
-                .steps
-                .iter()
-                .any(|s| s.consequences.save_principle_violation.is_some())
-        );
+        // The same loss assertion now traverses conditional continuations:
+        // their losses must not be fabricated in the shared public prefix.
+        assert!(play.projection.maximum_save_violations() > 0);
         let clue_index = decision.candidates.iter().position(|c| matches!(c.action, Action::Clue { target, clue: Clue::Suit(Suit::Blue) } if target == PlayerId::new(0))).unwrap();
         let clue = &decision.candidates[clue_index];
         let mut connected = source.clone();
         connected.hands[2][1].identity = Some(Card::new(Suit::Blue, Rank::Three));
         assert!(!eligible(&connected, play, clue, PlayerId::new(0)));
+        assert!(covered_policy_case(&connected, play, clue, PlayerId::new(0)).is_none());
         let mut refund = source.clone();
         refund.hands[3]
             .iter_mut()
@@ -622,22 +700,17 @@ mod tests {
             .unwrap()
             .identity = Some(Card::new(Suit::Blue, Rank::Five));
         assert!(!eligible(&refund, play, clue, PlayerId::new(0)));
+        assert!(covered_policy_case(&refund, play, clue, PlayerId::new(0)).is_none());
         let mut unsafe_play = play.clone();
         unsafe_play.projection.steps[0].consequences.strikes = 1;
         assert!(!eligible(source, &unsafe_play, clue, PlayerId::new(0)));
+        assert!(covered_policy_case(source, &unsafe_play, clue, PlayerId::new(0)).is_none());
         let mut critical = decision.candidates.clone();
         let modified = critical
             .iter_mut()
             .find(|c| c.action == play.action)
             .unwrap();
-        modified
-            .projection
-            .steps
-            .iter_mut()
-            .find(|s| s.consequences.save_principle_violation.is_some())
-            .unwrap()
-            .consequences
-            .save_principle_violation = Some(crate::SavePrincipleViolation::CriticalCard);
+        assert!(mark_critical(&mut modified.projection));
         assert!(
             choose(
                 source,
