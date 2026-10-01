@@ -458,5 +458,54 @@
       "h_group::tests::replay::reviewed_hidden_fix_survives_nested_perspectives",
       "h_group::tests::replay::reviewed_yellow_out_of_order_fix_uses_bobs_connector"
     ]
+  },
+  {
+    "id": "t20-yellow-chain-versus-blue-play-and-fours-bluff",
+    "turn": 20,
+    "positionKey": "f21d2366aabf9409e733324dfd1bc7e93447f7b1ef664aeb62bb88b8aa07e9cf",
+    "status": "unresolved",
+    "perspective": "Donald knows b2 from Bob’s blue clue; his other faces and all future draws remain unknown.",
+    "source": {
+      "conversation": "2026-10-01 autonomous replay audit after 567399a",
+      "quote": "Otherwise, ask me about the correct strategy or convention."
+    },
+    "explanation": {
+      "scope": "Restarted p4v0s9 agrees turns1–19 and first differs at20 after the two fixes in5787c63 and567399a. No other replay was advanced in this work session. Fixture unchanged.",
+      "fixture": "Yellow to Alice obtains y2 through Cathy and identifies Alice’s y4; Bob’s y3 was already touched.",
+      "preferred": "Play b2, then Bob clues4s to Alice as a Bluff on Cathy’s y2 while touching both y4 and g4. Both4s were chop-moved already, so they are not urgent exposed chops.",
+      "fixtureLine": [
+        "20 Donald yellow to Alice",
+        "21 Alice discard p1",
+        "22 Bob discard g2",
+        "23 Cathy play y2",
+        "24 Donald play b2",
+        "25 Alice discard g1",
+        "26 Bob play r3",
+        "27 Cathy discard r1",
+        "28 Donald discard unknown #14 under safe reveal branches",
+        "29 Alice5s to Cathy",
+        "30 Bob play y3",
+        "31 Cathy discard p1",
+        "32 Donald discard unknown #21; stop at SafeDiscardReveal before its face is assigned."
+      ],
+      "preferredLine": [
+        "20 Donald play b2",
+        "21 Alice discard p1",
+        "22 Bob4s to Alice",
+        "23 Cathy play y2",
+        "Stop before Donald24: projected discard #14 has unresolved identity and bottom-deck risk; it is a selected forecast action, not forced."
+      ],
+      "branches": "The fixture has eight #14 safe-reveal branches at28: r2,r3,y2,y3,g4,p2,p3,p4. All have the same subsequent action sequence through32. No actual hidden identity is assumed. The compact symbolic summary stops sooner than these explicit branches; inspect ProjectionEvidence.discardBranches for the full line.",
+      "conditionalAlternatives": [
+        "If Donald’s #23 is b3, Alice can clue blue after his b2 play:21 in the preferred line or25 in the fixture line. Only this follow-up window is recorded, not a full conditional policy.",
+        "If Donald’s #14 is r4, Cathy can clue red at27 in the fixture line. This is an alternative protection window, not a claim that r4 is safely discarded."
+      ],
+      "comparison": "ActualBasis=fundedProgress, common horizon4 actions through23. Fixture: score11,clues2,committed future1,secured future3,clue demand1. Preferred: score12,clues1,committed future2,secured future4,clue demand1. Both have zero recorded losses at that cutoff and no exposed critical chop. The earlier b2 makes all remaining live3s playable after y2, freeing both of Bob’s touched3s; the4s clue also secures an additional future4. The extra clue in the fixture does not outweigh these funded progress terms. Numeric convention preference actually favors yellow551 over b2’s525; it is not the decisive comparator.",
+      "limits": "b2’s unresolved turn24 discard is not certified safe. Neither forecast proves a perfect finish; the comparison uses the same established four-action horizon rather than comparing the fixture’s longer endpoint against it. Hidden b3/r4 opportunities do not supply actual identities.",
+      "question": "Should Donald play b2 and delegate the4s Bluff to Bob here, or is there a convention/strategic reason to prefer yellow immediately? The existing play-and-delegate principle supports b2, but there is no reviewed ruling resolving this exact yellow-chain/4s-Bluff tradeoff or changing the fixture. The recorded projections expose the remaining decision for human review.",
+      "artifacts": "target/replay-audit/audit-t20-after-fix-clean.json; target/replay-audit/audit-p4v0s9-after-live-fix.txt"
+    },
+    "regressions": [],
+    "coverageNote": "No optimal-move regression added for the unresolved choice. Existing full parity test intentionally fails at20. Both fixes have focused coverage; final fast checks pass. Full Rust suite and CI not run/observed this session."
   }
 ]
