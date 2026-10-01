@@ -387,5 +387,50 @@
     ],
     "coverageNote": "Eight focused tests pass: private protection policies, integrated root projection, original majority probability/selection and safety controls, conditional loss comparison with shorter-opponent negative control, shared-prefix strikes and the existing Save Principle priority guard. The CLI branch-serialization regression also passes. Existing majority move expectations and probability assertions are unchanged; the loss assertion and critical-loss mutation now traverse conditional continuations, and successor/refund/strike negative controls cover the new branch path.",
     "validation": "Eight focused tests and Clippy pass. Full scripts/check.sh completed:457 passed,51 failed; all non-Rust-test stages passed.47 failing names match the explicit completed baseline at82bd9a5846daa5ab0c4c742fbe72e94787430e75. The remaining4 also fail in an isolated clean checkout of the pre-change6a24b9437a46f6987b30b592d56b5ea07c569410: move_35_uses_the_oldest_matching_elimination_note; demonstrated_layer_pause_is_not_vetoed_by_generic_play_order; third_replay_opening_rank_two_makes_a_later_green_clue_duplicate; reviewed_two_for_one_beats_a_speculative_finesse_tiebreaker. No newly failing test names were attributable to this patch. Full-run log: target/workflow/3cfd856dd6db426b88ef2d4d3e79cb71.log; pre-change control: target/workflow/87e9a7ddea7d44a980b93be7074ce56a.log. The full suite remains failing; the failure baseline was not broadened."
+  },
+  {
+    "id": "t7-visible-coverage-uses-the-reviewed-response",
+    "turn": 7,
+    "positionKey": "08c22bf99ba35e9bd4edc5ff4f7a0c4829b282be9ca26f0e0d394f9cb5bfdfa4",
+    "status": "user-explained",
+    "perspective": "Cathy sees Bob’s touched r3; Bob forecasting Cathy does not see that identity.",
+    "source": {
+      "conversation": "2026-10-01 replay audit implementing the earlier conditional response ruling",
+      "quote": "cluing blue to alice WOULD be optimal in the projection, but only if bob does not hold the r3.",
+      "relatedRuling": "t6-majority-conditional-cathy-response"
+    },
+    "explanation": {
+      "bug": "The conditional scheduling selector only ran for a future teammate under a different source observer. Cathy’s own root still chose blue using FundedProgress even though her p1 line correctly marked Donald’s r3 discard safe. The two eight-action endpoints have equal played-plus-committed work and equal played-plus-secured work; p1 retains four clues versus three. Blue only accelerates b2, with no visible b3 or five refund.",
+      "implementation": "Apply the same scheduling eligibility checks in root, forecast, and completed-candidate deadline comparisons when the source can see a retained, positively clued replacement for the discarded useful card and the play line has no recorded losses. Preserve the strict-majority uncertainty rule separately; no hidden replacement is supplied to the source. The certain counterpart cannot override safety, urgent policy, perfect-finish or convention-play-order decisions.",
+      "scope": "This is the covered case of the revised user ruling, not reinstatement of the retracted blanket occupied-recipient preference. Missing replacement evidence, a visible successor, a five refund, loss evidence or missing checkpoints prevent the override.",
+      "fixtureLine": [
+        "7 Cathy play p1",
+        "8 Donald play g1",
+        "9 Alice play g2",
+        "10 Bob blue to Alice",
+        "11 Cathy blue to Donald",
+        "12 Donald discard r3 (Bob’s touched copy covers it)",
+        "13 Alice play b1",
+        "14 Bob discard g1",
+        "Stop before Cathy15 at unresolved identity."
+      ],
+      "alternativeLine": [
+        "7 Cathy blue to Alice",
+        "8 Donald play g1",
+        "9 Alice play b1",
+        "10 Bob blue to Donald",
+        "11 Cathy play p1",
+        "12 Donald play b2",
+        "13 Alice play g2",
+        "14 Bob discard g1",
+        "Stop before Cathy15 at unresolved identity."
+      ]
+    },
+    "regressions": [
+      "planner::majority::tests::reviewed_visible_coverage_applies_to_root_and_forecast",
+      "planner::majority::tests::reviewed_majority_changes_forecast_without_revealing_cards"
+    ],
+    "coverageNote": "Root and same-observer forecast selection, both comparison directions, shared-horizon evidence, safe-discard consequences, missing/untouched replacement, successor/refund, strike/BDR and missing-checkpoint controls. Existing physical-probability tests preserve 30%,50%,above50%,certainty behavior.",
+    "validation": "Seven focused tests pass, including the retained majority probabilities, turn18 handoff and finesse-continuation controls; final root/forecast regression passes again after safety guards. All fast-check stages pass after correcting and rechecking the review-note formatting. Full Rust suite not rerun for this localized fix; the previously recorded baseline failures remain unverified here."
   }
 ]

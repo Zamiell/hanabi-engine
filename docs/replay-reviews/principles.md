@@ -520,3 +520,14 @@ Conditional assignments are used to validate the response, including visible
 successors, without revealing faces to that observer or erasing minority-world
 losses. The existing 30%, 50%, above-50% and certainty expectations remain in
 force; their safety assertions now traverse the branch representation.
+
+The certain covered case must also apply when Cathy chooses her own move, not
+only when Bob forecasts her. In `p4v0s9` turn7
+(`t7-visible-coverage-uses-the-reviewed-response`), Cathy sees Bob’s touched r3.
+With the same committed/secured progress, no visible b3 or five refund, and a
+safe Donald discard, she plays p1 and retains the extra clue. Root, forecast and
+completed-candidate deadline comparisons share the same scheduling eligibility.
+This is not the retracted unconditional loading preference: unknown or untouched
+replacements and useful successor/refund progress do not satisfy this proof. The
+root/forecast regression includes those negative controls, while the existing
+majority regressions preserve Bob’s information and probability rules.

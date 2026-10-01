@@ -199,3 +199,10 @@ sibling is not evidence that the witnessed loss disappeared. This does not
 permit a shorter competing forecast to claim avoidance. Majority-response
 selection can inspect the covered continuations without altering the original
 observer's probability or the minority branches' recorded losses.
+
+`knownCoverageScheduling` is the certain counterpart: a visible, touched
+replacement makes the projected discard safe, so the same scheduling conditions
+can favor the ready play at the root as well as in a teammate forecast. Its
+basis records both endpoints at the common horizon; it supplies no private-card
+probability or hidden identity. The uncertain `majorityCoverage` rule remains
+separate.

@@ -122,6 +122,67 @@ pub(super) fn probability(
     )
 }
 
+/// The certain counterpart of the reviewed conditional response. Use the
+/// same scheduling tests at the root and in forecasts, without inventing an
+/// unknown replacement or turning a majority into guaranteed protection.
+pub(super) fn known_coverage(
+    source: &PlayerView,
+    left: &PlannerActionEvaluation,
+    right: &PlannerActionEvaluation,
+    basis: &mut Option<ComparisonBasis>,
+) -> Option<EndpointComparison> {
+    if super::has_unconditional_perfect_finish(left)
+        || super::has_unconditional_perfect_finish(right)
+        || left.preference.advances_terminal_plan() != right.preference.advances_terminal_plan()
+        || left.preference.compare_play_order(right.preference) != core::cmp::Ordering::Equal
+    {
+        return None;
+    }
+    let prefers = |play: &PlannerActionEvaluation, clue: &PlannerActionEvaluation| {
+        let Action::Clue { target, .. } = clue.action else {
+            return false;
+        };
+        if play.projection.maximum_save_violations() != 0
+            || play.projection.maximum_bottom_deck_risks() != 0
+            || play.projection.critical_losses_at(usize::MAX) != 0
+            || !eligible(source, play, clue, target)
+        {
+            return false;
+        }
+        let Some((identity, loss_turn)) = replacement_at(source, play, &[]) else {
+            return false;
+        };
+        source.hands.iter().flatten().any(|card| {
+            card.identity == Some(identity)
+                && (card.clues.has_positive_clue(hanabi_core::Clue::Suit(identity.suit))
+                    || card.clues.has_positive_clue(hanabi_core::Clue::Rank(identity.rank)))
+                && !play.projection.steps.iter().any(|step| {
+                    step.turn <= loss_turn
+                        && matches!(step.projected.action, Action::Play(id) | Action::Discard(id) if id == card.id)
+                })
+        })
+    };
+    let result = if prefers(left, right) {
+        EndpointComparison::PreferLeft(ComparisonReason::KnownCoverageScheduling)
+    } else if prefers(right, left) {
+        EndpointComparison::PreferRight(ComparisonReason::KnownCoverageScheduling)
+    } else {
+        return None;
+    };
+    let horizon = left
+        .projection
+        .common_horizon()
+        .min(right.projection.common_horizon());
+    super::retain_comparison_basis(
+        basis,
+        "knownCoverageScheduling",
+        usize::from(horizon),
+        || left.projection.checkpoints_at(horizon),
+        || right.projection.checkpoints_at(horizon),
+    );
+    Some(result)
+}
+
 pub(super) fn choose(
     source: &PlayerView,
     actor: &PlayerView,
@@ -544,6 +605,120 @@ mod tests {
             .unwrap(),
             None
         );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn reviewed_visible_coverage_applies_to_root_and_forecast() {
+        // p4v0s9 turn7: Cathy sees Bob's touched r3. The reviewed conditional
+        // policy says to play p1 in this covered world, as well as when Bob's
+        // forecast gives that world a strict majority.
+        let fixture = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s9.json"
+        ))
+        .unwrap();
+        let source = fixture
+            .state_at_turn(6)
+            .unwrap()
+            .view_for(PlayerId::new(2))
+            .unwrap();
+        let result = crate::analyze_position(
+            &source,
+            crate::SupportedConvention::HGroup(HGroupProfile::Max),
+            crate::PlannerConfig {
+                objective: crate::PlanningObjective::PerfectScore,
+                ..crate::PlannerConfig::default()
+            },
+        )
+        .unwrap();
+        let play_action = Action::Play(CardId::new(10));
+        assert_eq!(result.planner.best_action, play_action);
+        let play = result
+            .planner
+            .root_actions
+            .iter()
+            .find(|c| c.action == play_action)
+            .unwrap();
+        let clue = result
+            .planner
+            .root_actions
+            .iter()
+            .find(|c| {
+                c.action
+                    == Action::Clue {
+                        target: PlayerId::new(0),
+                        clue: Clue::Suit(Suit::Blue),
+                    }
+            })
+            .unwrap();
+        assert!(
+            result
+                .planner
+                .comparisons
+                .iter()
+                .any(|c| c.reason == ComparisonReason::KnownCoverageScheduling
+                    && c.preferred == play_action)
+        );
+        assert_eq!(play.projection.maximum_save_violations(), 0);
+        assert_eq!(play.projection.maximum_bottom_deck_risks(), 0);
+        let mut basis = None;
+        let (known, _) =
+            crate::capture_decisions(|| known_coverage(&source, play, clue, &mut basis));
+        assert_eq!(
+            known,
+            Some(EndpointComparison::PreferLeft(
+                ComparisonReason::KnownCoverageScheduling
+            ))
+        );
+        assert_eq!(basis.unwrap().horizon, 8);
+        assert_eq!(
+            known_coverage(&source, clue, play, &mut None),
+            Some(EndpointComparison::PreferRight(
+                ComparisonReason::KnownCoverageScheduling
+            ))
+        );
+        let d = LogicalDeductions::new(source.clone()).unwrap();
+        assert_eq!(
+            super::super::choose_projected_follow_up_from(
+                &source,
+                &d,
+                HGroupProfile::Max,
+                &AnalysisControl::default()
+            )
+            .unwrap(),
+            Some(play_action)
+        );
+        for control in 0..4 {
+            let mut masked = source.clone();
+            match control {
+                0 => masked.hands[1][1].identity = None,
+                1 => masked.hands[1][1].clues = hanabi_core::ClueFacts::default(),
+                2 => masked.hands[2][0].identity = Some(Card::new(Suit::Blue, Rank::Three)),
+                _ => {
+                    masked.hands[3]
+                        .iter_mut()
+                        .find(|c| c.id == CardId::new(15))
+                        .unwrap()
+                        .identity = Some(Card::new(Suit::Blue, Rank::Five));
+                }
+            }
+            assert_eq!(
+                known_coverage(&masked, play, clue, &mut None),
+                None,
+                "control {control}"
+            );
+        }
+        let mut unsafe_play = play.clone();
+        unsafe_play.projection.steps[5]
+            .consequences
+            .bottom_deck_risk = Some(Card::new(Suit::Red, Rank::Three));
+        assert_eq!(known_coverage(&source, &unsafe_play, clue, &mut None), None);
+        unsafe_play = play.clone();
+        unsafe_play.projection.steps[0].consequences.strikes = 1;
+        assert_eq!(known_coverage(&source, &unsafe_play, clue, &mut None), None);
+        unsafe_play = play.clone();
+        unsafe_play.projection.checkpoints.clear();
+        assert_eq!(known_coverage(&source, &unsafe_play, clue, &mut None), None);
     }
 
     fn refined_source(restricted: bool, exclude_draw: bool, known: bool) -> PlayerView {

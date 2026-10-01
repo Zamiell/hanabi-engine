@@ -567,6 +567,7 @@ pub enum ComparisonReason {
     WaitingOpportunity,
     TeammateClueHandoff,
     MajorityCoverage,
+    KnownCoverageScheduling,
     ConventionPreference,
     PreferredAction,
     LineProgress,
@@ -772,7 +773,9 @@ pub(crate) fn plan_move_with_control(
         )
     }) {
         Ok(result) => result,
-        Err(crate::budget::Stop::MoveDeadline) => progress.fallback(analysis.preferred_action),
+        Err(crate::budget::Stop::MoveDeadline) => {
+            progress.fallback(analysis.preferred_action, Some(information_set.view()))
+        }
         Err(stop) => Err(PlannerError::Stopped(stop.reason())),
     }
 }
@@ -784,7 +787,11 @@ struct PlanningProgress {
     exact_status: ExactSearchStatus,
 }
 impl PlanningProgress {
-    fn fallback(mut self, preferred: Option<Action>) -> Result<PlannerResult, PlannerError> {
+    fn fallback(
+        mut self,
+        preferred: Option<Action>,
+        source: Option<&PlayerView>,
+    ) -> Result<PlannerResult, PlannerError> {
         // A contradictory belief must never become an admitted fallback merely
         // because its enumeration timed out before finding any world.
         let count = self
@@ -796,7 +803,8 @@ impl PlanningProgress {
             .filter(|candidate| candidate.projection_evaluated)
             .cloned()
             .collect::<Vec<_>>();
-        let (best, comparisons) = compare_symbolic_candidates(&completed, preferred);
+        let (best, comparisons) =
+            compare_symbolic_candidates_in_view(&completed, preferred, source);
         let best_action = best
             .map(|index| completed[index].action)
             .or_else(|| {
@@ -948,6 +956,7 @@ fn plan_move_inner(
         control,
     )?;
     symbolic_result(
+        deductions.view(),
         std::mem::take(&mut progress.evaluations),
         preferred,
         count,
@@ -1061,13 +1070,15 @@ fn try_terminal_perfect_proof(
 }
 
 fn symbolic_result(
+    source: &PlayerView,
     evaluations: Vec<PlannerActionEvaluation>,
     preferred: Option<Action>,
     world_count: WorldCount,
     exact_nodes: u64,
     exact_status: ExactSearchStatus,
 ) -> Result<PlannerResult, PlannerError> {
-    let (best_index, comparisons) = compare_symbolic_candidates(&evaluations, preferred);
+    let (best_index, comparisons) =
+        compare_symbolic_candidates_in_view(&evaluations, preferred, Some(source));
     let best_index = best_index.ok_or(PlannerError::NoCandidateActions)?;
     Ok(PlannerResult {
         budget_exhausted: false,
@@ -1147,7 +1158,7 @@ pub(crate) fn choose_projected_follow_up_from(
         }
     }
     let (mut best, mut comparisons) =
-        compare_symbolic_candidates(&evaluations, analysis.preferred_action);
+        compare_symbolic_candidates_in_view(&evaluations, analysis.preferred_action, Some(source));
     if let Some(index) = best {
         if let Some(majority) = majority::choose(
             source,
@@ -1359,9 +1370,18 @@ fn best_symbolic_index(
     compare_symbolic_candidates(evaluations, preferred).0
 }
 
+#[cfg(test)]
 fn compare_symbolic_candidates(
     evaluations: &[PlannerActionEvaluation],
     preferred: Option<Action>,
+) -> (Option<usize>, Vec<CandidateComparison>) {
+    compare_symbolic_candidates_in_view(evaluations, preferred, None)
+}
+
+fn compare_symbolic_candidates_in_view(
+    evaluations: &[PlannerActionEvaluation],
+    preferred: Option<Action>,
+    source: Option<&PlayerView>,
 ) -> (Option<usize>, Vec<CandidateComparison>) {
     let count = evaluations.len();
     let mut reaches = vec![vec![false; count]; count];
@@ -1373,7 +1393,20 @@ fn compare_symbolic_candidates(
         for right in left + 1..count {
             let a = &evaluations[left];
             let b = &evaluations[right];
-            let (endpoint, basis) = compare_endpoints_with_basis(a, b);
+            let (mut endpoint, mut basis) = compare_endpoints_with_basis(a, b);
+            if matches!(
+                endpoint,
+                EndpointComparison::Equivalent
+                    | EndpointComparison::Incomparable
+                    | EndpointComparison::PreferLeft(ComparisonReason::FundedProgress)
+                    | EndpointComparison::PreferRight(ComparisonReason::FundedProgress)
+            ) {
+                if let Some(source) = source {
+                    if let Some(preference) = majority::known_coverage(source, a, b, &mut basis) {
+                        endpoint = preference;
+                    }
+                }
+            }
             match endpoint {
                 EndpointComparison::PreferLeft(
                     ComparisonReason::PerfectFinish
@@ -3302,7 +3335,7 @@ mod tests {
             exact_nodes: 7,
             exact_status: ExactSearchStatus::TimeLimit,
         }
-        .fallback(Some(unsearched))
+        .fallback(Some(unsearched), None)
         .unwrap();
         assert_eq!(fallback.best_action, completed);
         assert_eq!(fallback.exact_nodes, 7);
@@ -3314,7 +3347,7 @@ mod tests {
                 exact_nodes: 0,
                 exact_status: ExactSearchStatus::TimeLimit,
             }
-            .fallback(Some(unsearched)),
+            .fallback(Some(unsearched), None),
             Err(PlannerError::Stopped(crate::AnalysisStopped::Deadline))
         );
         // Expired private scopes must not contaminate the next request.
