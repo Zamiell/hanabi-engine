@@ -547,5 +547,51 @@
       "failureEvidence": "Both failures are recorded in target/workflow/failure-baseline.json and the previous completed full run 3cfd856dd6db426b88ef2d4d3e79cb71; not accepted as new baseline changes.",
       "scope": "No full Rust suite or further replay scan this session; CI unobserved."
     }
+  },
+  {
+    "id": "t32-finesse-versus-ejection-clarification-cost",
+    "turn": 32,
+    "positionKey": "c548ce1db8649dae9848fe2ceca50ca70103d368720476a7403611c1a0caf98f",
+    "status": "unresolved",
+    "perspective": "Donald; his own cards and future draws remain unknown. Card14 can safely reveal r2,r3,y2,g3,g4 in the retained forecast branches.",
+    "source": {
+      "conversation": "2026-10-01 autonomous replay continuation after 1210572",
+      "quote": "continue to autonomously go through all replays and find disagreements. Do a deep analysis for each disagreement.",
+      "documentation": "https://hanabi.github.io/level-16/#the-5-color-ejection-5ce"
+    },
+    "explanation": {
+      "scope": "Restarted p4v0s9 from turn1: matches1–31; first difference32. Other replays not rescanned after this checkpoint. No fixture or engine edits.",
+      "fixture": "Donald clues4s to Alice, starts the g3 finesse through Bob’s b3 layer and clarifies Alice’s y4/g4.",
+      "preferred": "Donald discards unknown chop14. Alice can protect/identify Cathy’s b5 with blue as a5 Color Ejection, getting Bob’s g3 from second finesse position. Cathy later clues4s and Donald separately clues Bob’s b3.",
+      "fixtureLine": [
+        "32 Donald4s to Alice",
+        "33 Alice5s to Cathy",
+        "34 Bob plays b3 (#34)",
+        "35 Cathy discards p1 (#18)",
+        "36 Donald discards unknown #14",
+        "37 Alice plays y4 (#2)",
+        "38 Bob plays g3 (#30)",
+        "39 Cathy discards r4 (#31)",
+        "40 Donald discards unknown #21; SafeDiscardReveal frontier before identifying this card"
+      ],
+      "preferredLine": [
+        "32 Donald discards unknown #14",
+        "33 Alice blue to Cathy (5 Color Ejection)",
+        "34 Bob plays g3 (#30)",
+        "35 Cathy4s to Alice",
+        "36 Donald blue to Bob",
+        "37 Alice plays g4 (#20)",
+        "38 Bob plays b3 (#34)",
+        "39 Cathy discards p1 (#18)",
+        "40 Donald discards unknown #21; SafeDiscardReveal frontier before identifying this card"
+      ],
+      "branches": "Both lines retain five separate card14 reveal branches (r2,r3,y2,g3,g4). Their action sequences agree through the listed frontier. Unknown draws are never filled from the fixture. The shared representation ends at38; branch suffixes supply39–40. These are forecasts, not forced entire lines or solved finishes.",
+      "comparison": "FundedProgress actualBasis at horizon8 (through39), identical values across the five branches: both score19,secured future2,committed future1,clue demand0,no exposed critical chops. Fixture has3 clues and1 identified future card; discard has1 clue and2 identified future cards. Fixture leaves known g4 plus ambiguous saved5; discard leaves known y4 plus exact b5. No b4 is established and no five refund is projected.",
+      "cause": "ProjectedPositionValue::productive_preference treats additional identified future cards as progress once both sides fund recorded clue demand and preserve scoring/commitment/protection. It does not charge the two-token difference at this stage. Raw convention priority favors4s472 versus discard400; it is not the decisive term.",
+      "question": "Is exact identification of Cathy’s b5 worth ending with two fewer clues when score,secured work and committed plays tie, or should4s win here? Prior positive-clarification ruling p4v0s415T28 and negative5/earlier-Save ruling p4v0s1T29 do not specify this token-cost boundary; no new rule has been inferred from the assistant’s preference.",
+      "limitation": "Release explanation reached120.013s and marked budgetExhausted. Both competing projections and their comparison are retained, but best-move selection is provisional, not exhaustive. Unoptimized explanation also hit120s before useful projection completion and was discarded as comparison evidence."
+    },
+    "regressions": [],
+    "coverageNote": "Existing full p4v0s9 action-parity test fails first at32, after matching1–31. No optimal-move assertion added for an unresolved strategic choice. Release build succeeded; no full suite or engine fix this session. Structured evidence is retained in ignored target/replay-audit/p4v0s9-t32-release.json."
   }
 ]
