@@ -36,6 +36,10 @@ pub(super) fn validate(
     let mcv = minimum_value(deductions, profile, replay, proposal, outcome);
     let touch = good_touch(deductions, profile, replay, proposal, outcome);
     let mut response = response_safety(deductions, profile, proposal, outcome);
+    if unsupported_rank_bluff_touches(deductions, profile, replay, proposal) {
+        response.verdict = PrincipleVerdict::Fail;
+        response.evidence = "A newly clued rank-Bluff card needs an intermediate identity the giver has not established.";
+    }
     if source_creates_false_anxiety(deductions, profile, replay, proposal) {
         response.verdict = PrincipleVerdict::Fail;
         response.evidence =
@@ -54,6 +58,48 @@ pub(super) fn validate(
         checks: [mcv, touch, response],
         rejection,
     }
+}
+
+/// A rank Bluff can touch different suits at different stack heights. The
+/// focus being one-away does not justify an unsupported farther-away peer.
+/// Use pre-clue giver knowledge, including exact own notes, for every newly
+/// promised card. Chop protection alone is not an earlier play promise.
+fn unsupported_rank_bluff_touches(
+    deductions: &LogicalDeductions,
+    profile: HGroupProfile,
+    replay: &HGroupState,
+    proposal: &ClueProposal,
+) -> bool {
+    let Action::Clue {
+        target,
+        clue: super::Clue::Rank(rank),
+    } = proposal.action
+    else {
+        return false;
+    };
+    if proposal.move_kind() != Some(HGroupMoveKind::Bluff) {
+        return false;
+    }
+    // The documented Hard3 exception permits a rank3 Bluff from empty stacks.
+    if rank == Rank::Three && super::rule_enabled(profile, super::HGroupRuleId::IntermediateBluffs)
+    {
+        return false;
+    }
+    let source = deductions.view();
+    let promptable = replay.promptable();
+    let gotten = replay.gotten_from(&promptable);
+    let notes = super::convention_card_inferences(deductions, replay);
+    source.hands[target.index()].iter().any(|card| {
+        !promptable.contains(&card.id)
+            && card.identity.is_some_and(|identity| {
+                identity.rank == rank
+                    && super::is_eventually_useful(source, identity)
+                    && !is_playable_now(source, identity)
+                    && !super::interpretation::bluff_focus_is_one_away(
+                        source, identity, &gotten, &notes,
+                    )
+            })
+    })
 }
 
 fn source_creates_false_anxiety(

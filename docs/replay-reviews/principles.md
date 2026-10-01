@@ -543,3 +543,15 @@ existing reviewed b2-persistence test and the new giver/recipient table verify
 inference and downstream playability; genuine Fix controls remain. This follows
 promise lifecycle consistency and documented Fix meaning, not a new strategic
 exception.
+
+## Every new rank-Bluff touch needs supported intermediates
+
+In `p4v0s9` turn20’s hypothetical turn22
+(`t20-rank-bluff-collateral-needs-giver-known-intermediate`), Bob’s4s to Alice
+would bluff Cathy’s y2 and touch g4/y4. Checking only the one-away g4 misses the
+two-away y4. Bob’s unidentified3s cannot establish the already-clued y3 required
+by that promise. Use pre-clue giver knowledge for newly promised collateral as
+well as focus; earlier chop protection is not a prior play promise. A known
+visible intermediate or exact own note can support the clue. Preserve the
+documented Hard3 exception and established promises. The regression includes
+masked forecasts, Bob’s own view, downstream selection, and a known-y3 control.

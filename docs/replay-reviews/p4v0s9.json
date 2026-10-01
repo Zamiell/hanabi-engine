@@ -66,7 +66,7 @@
       "comparison": "Both admitted. Fixture clue obtains two plays versus one for Bob. At the actual shared horizon of8 actions (through10), both forecasts have score5, clues3, demand1, committed0, secured future3 and protected BDR4, no exposed critical chops. Bob line has identified future1 (Alice r2) vs0 and blocked2 vs3. FundedProgress therefore prefers Bob; numeric base convention preference favors Donald434 vs428. The pairwise graph includes a weak-fallback cycle, but the selector preserves this forecast preference rather than allowing a weak edge to reverse it. Neither unfinished forecast proves optimality.",
       "uncertainty": "No hidden draws or card-identity assumptions are inserted. The fixture forecast cannot assume Cathy holds p1/p4, so it does not reproduce Alice purple-to-Cathy at5 from the actual continuation. It instead chooses2s to Bob; this later causes Alice rank2 ambiguity and a duplicate g2 Discharge. Compared normalized eight-action values, not the longer fixture endpoint score6 versus the shorter engine endpoint score5.",
       "question": "Should the two plays plus Order Chop Move make 1s to Donald preferable despite the forecast's later r2 clarification, or should a specific follow-up in these lines differ? The guide establishes clue meaning and OCM but does not decide this tradeoff. Existing regression asserts the fixture choice without an explanation of this comparison; do not force parity with a fixture-specific bonus.",
-      "auditScope": "Initial complete p4v0s415 rerun matches all actions except previously recorded29, with no capped calculations. After the opening inference fix, restarted p4v0s9 and matched1\u20132; this is its next unresolved position. Other replays remain pending.",
+      "auditScope": "Initial complete p4v0s415 rerun matches all actions except previously recorded29, with no capped calculations. After the opening inference fix, restarted p4v0s9 and matched1–2; this is its next unresolved position. Other replays remain pending.",
       "supersededBy": "t3-projected-twos-ambiguous-good-touch: the reported fixture forecast admitted an unsafe duplicate at hypothetical turn6; its comparison cannot support the proposed strategy question."
     },
     "regressions": [],
@@ -172,7 +172,7 @@
     "turn": 6,
     "positionKey": "7bb2b478e399002f0d69e16b92e713db7996131929dac38a4d716f5d3618ae88",
     "status": "unresolved",
-    "perspective": "Alice interpreting Bob\u2019s recorded 2s clue after her r2 #0 was protected by Donald\u2019s Order Chop Move.",
+    "perspective": "Alice interpreting Bob’s recorded 2s clue after her r2 #0 was protected by Donald’s Order Chop Move.",
     "source": {
       "conversation": "2026-09-30 autonomous replay audit",
       "quote": "If there are obvious bugs, then fix them autonomously.",
@@ -180,23 +180,23 @@
       "authority": "Documentation establishes first actual clue on a chop-moved card as a normal Play Clue; no new human strategy ruling."
     },
     "explanation": {
-      "bug": "Collateral Good Touch creation excluded all gotten cards, including chop-moved but never clued r2 #0. In the rank2 forecast, after Alice plays g2 #3, #0 still permits g2 and is not considered playable; Alice discards y4 instead. The rival blue line was preferred by SavePrinciple because the flawed continuation also discarded Donald\u2019s r3.",
+      "bug": "Collateral Good Touch creation excluded all gotten cards, including chop-moved but never clued r2 #0. In the rank2 forecast, after Alice plays g2 #3, #0 still permits g2 and is not considered playable; Alice discards y4 instead. The rival blue line was preferred by SavePrinciple because the flawed continuation also discarded Donald’s r3.",
       "fix": "Distinguish prior actual/invisible play promises from mere chop protection when recording first-touch collateral. Preserve ongoing Good Touch narrowing after the focus plays.",
-      "assumptions": "Regression branches from recorded turn6 through the reported blue-Alice/green1/blue1/blue-Donald/purple1/blue2/green2 sequence; it verifies both ordinary owner view and original-Bob-masked forecast view. No hidden faces or draws establish Alice\u2019s inference.",
-      "relatedHistoricalBug": "The focused g2 #3 lost its actual g2 possibility after the queued g1 played before Alice\u2019s first response turn. The compiler detected the demonstrated delayed identity but, because direct r2/y2 alternatives remained, subsequently narrowed back to direct-at-clue identities. Keep demonstrated alternatives when the pending connector completes; do not invent new identities outside the original clue domain.",
+      "assumptions": "Regression branches from recorded turn6 through the reported blue-Alice/green1/blue1/blue-Donald/purple1/blue2/green2 sequence; it verifies both ordinary owner view and original-Bob-masked forecast view. No hidden faces or draws establish Alice’s inference.",
+      "relatedHistoricalBug": "The focused g2 #3 lost its actual g2 possibility after the queued g1 played before Alice’s first response turn. The compiler detected the demonstrated delayed identity but, because direct r2/y2 alternatives remained, subsequently narrowed back to direct-at-clue identities. Keep demonstrated alternatives when the pending connector completes; do not invent new identities outside the original clue domain.",
       "result": "After both inference corrections, Alice now plays her remaining r2 at17. Restarted replay still agrees1-5 and differs6, with SavePrinciple preferring blue to Alice over2s."
     },
     "regressions": [
       "h_group::tests::reviewed_first_touch_of_chop_moved_collateral_keeps_good_touch"
     ],
-    "coverageNote": "Checks first-touch collateral provenance, removal of played g2, retention of r2, downstream playable status, and a pre-clue chop-move-only negative control. Also checks that the focused g2 remains possible after g1 is demonstrated before the recipient\u2019s first response."
+    "coverageNote": "Checks first-touch collateral provenance, removal of played g2, retention of r2, downstream playable status, and a pre-clue chop-move-only negative control. Also checks that the focused g2 remains possible after g1 is demonstrated before the recipient’s first response."
   },
   {
     "id": "t6-two-for-one-versus-uncertain-red-three-coverage",
     "turn": 6,
     "positionKey": "7bb2b478e399002f0d69e16b92e713db7996131929dac38a4d716f5d3618ae88",
     "status": "unresolved",
-    "perspective": "Bob knows his two touched cards have rank3 but does not know their suits. Donald\u2019s r3 is visible; the actual other r3 in Bob\u2019s hand is not available as exact knowledge to his forecast.",
+    "perspective": "Bob knows his two touched cards have rank3 but does not know their suits. Donald’s r3 is visible; the actual other r3 in Bob’s hand is not available as exact knowledge to his forecast.",
     "source": {
       "conversation": "2026-09-30 autonomous replay audit",
       "quote": "Otherwise, ask me about the correct strategy or convention.",
@@ -236,8 +236,8 @@
         "17 Alice play g2",
         "Stops before18 Bob unknown discard #6."
       ],
-      "comparison": "SavePrinciple compares the equal12-action horizon. Fixture line discards Donald\u2019s r3 at16 while clued r2 is about to play; source Bob has no known replacement, so this is tagged UniqueDelayedPlayable with BDR. Blue line keeps r3. Both reach score8, two secured future cards, no strikes, before the same unknown Bob discard. Fixture retains3 clues versus1 and no remaining clue demand versus1. Those resource benefits lose to the earlier SavePrinciple comparison. ActualBasis is not recorded for this policy-stage comparator; code confirms equal-horizon critical loss then Save violation counts. Neither forecast proves optimality.",
-      "followUpInspection": "Cathy\u2019s projected choice at7 also compares p1 against blue to Alice using SavePrinciple. Later red/3s to Donald are not admitted; Bob\u2019s own clued3s remain ambiguous, and a possible duplicate is not a new safe ordinary touch. The engine does not know that Donald\u2019s r3 is actually redundant. The fixed r2 collateral and delayed g2 identities no longer account for the difference.",
+      "comparison": "SavePrinciple compares the equal12-action horizon. Fixture line discards Donald’s r3 at16 while clued r2 is about to play; source Bob has no known replacement, so this is tagged UniqueDelayedPlayable with BDR. Blue line keeps r3. Both reach score8, two secured future cards, no strikes, before the same unknown Bob discard. Fixture retains3 clues versus1 and no remaining clue demand versus1. Those resource benefits lose to the earlier SavePrinciple comparison. ActualBasis is not recorded for this policy-stage comparator; code confirms equal-horizon critical loss then Save violation counts. Neither forecast proves optimality.",
+      "followUpInspection": "Cathy’s projected choice at7 also compares p1 against blue to Alice using SavePrinciple. Later red/3s to Donald are not admitted; Bob’s own clued3s remain ambiguous, and a possible duplicate is not a new safe ordinary touch. The engine does not know that Donald’s r3 is actually redundant. The fixed r2 collateral and delayed g2 identities no longer account for the difference.",
       "question": "Should the efficient2s clue outrank this conservative future r3-discard penalty when Bob may already hold its clued replacement, or does a specific projected follow-up need a different convention interpretation? Existing rules cover known replacements and prioritizing plays with preserved safety, not how strongly this uncertain replacement should affect this comparative forecast.",
       "scope": "Initial scan covered p4v0s415 with retained turn29 difference. Capped matching positions31/32/34/35 all complete on isolated recheck after fixes, in37.0/38.4/4.9/67.3 seconds respectively, and match. Other p4v0s415 positions were checked before these fixes. Restarted p4v0s9 agrees1-5 and stops6. p4v0s2/p4v0s3/p4v0s1 not advanced this turn.",
       "assumptions": "No future draws or hidden Bob identities assumed. Projected discards are policy choices, not forced game actions."
@@ -463,7 +463,8 @@
     "id": "t20-yellow-chain-versus-blue-play-and-fours-bluff",
     "turn": 20,
     "positionKey": "f21d2366aabf9409e733324dfd1bc7e93447f7b1ef664aeb62bb88b8aa07e9cf",
-    "status": "unresolved",
+    "status": "superseded",
+    "supersededBy": "t20-rank-bluff-collateral-needs-giver-known-intermediate",
     "perspective": "Donald knows b2 from Bob’s blue clue; his other faces and all future draws remain unknown.",
     "source": {
       "conversation": "2026-10-01 autonomous replay audit after 567399a",
@@ -507,5 +508,44 @@
     },
     "regressions": [],
     "coverageNote": "No optimal-move regression added for the unresolved choice. Existing full parity test intentionally fails at20. Both fixes have focused coverage; final fast checks pass. Full Rust suite and CI not run/observed this session."
+  },
+  {
+    "id": "t20-rank-bluff-collateral-needs-giver-known-intermediate",
+    "turn": 20,
+    "positionKey": "f21d2366aabf9409e733324dfd1bc7e93447f7b1ef664aeb62bb88b8aa07e9cf",
+    "status": "user-explained",
+    "perspective": "Bob at hypothetical turn22 after Donald plays b2 and Alice discards p1; Bob’s two clued3s remain unidentified. Root observer Donald cannot substitute his view of Bob’s y3.",
+    "source": {
+      "conversation": "2026-10-01 projected4s follow-up",
+      "quote": "cluing 4s to alice would imply that a y3 exists, which bob cannot know (I think).",
+      "documentation": "https://hanabi.github.io/level-11/#bluffs-through-already-clued-cards"
+    },
+    "explanation": {
+      "reasoning": "The user identifies the missing intermediate knowledge. The guide requires an already-clued intermediate for a Bluff through a two-away card. At clue time g4 is one-away but y4 is two-away: yellow is still at1. Bob cannot establish y3 from his ambiguous3s, and there is no other visible known clued y3. Chop-moving Alice’s4s earlier did not already promise their identities.",
+      "bug": "The Bluff generator checked only the focus g4. Common response safety verified Cathy’s immediate y2 but never checked whether the additional newly-clued rank4 card had a supported intermediate. This was a missed collateral prerequisite, not a direct read of Bob’s hidden face.",
+      "fix": "Common response validation checks all newly-promised useful delayed cards of a rank Bluff against pre-clue giver knowledge. Known visible intermediate cards or exact own convention notes can support it; merely possible own identities cannot. Existing playable/previously promised cards do not acquire this new condition. Preserve the documented Hard3 exception.",
+      "result": "Turn20 now selects fixture yellow to Alice. The b2 alternative projects Bob yellow to Cathy at22 and Donald yellow to Alice at24, instead of Bob4s to Alice. Root analysis completed in13.041s without exhausting the move budget. No fixture edit or further replay scan.",
+      "comparison": "FundedProgress at common horizon12: both reach score14 and two secured future cards; fixture retains5 clues,one committed future play and0 clue demand, versus3 clues,0 committed future plays and1 clue demand for b2. The earlier assistant recommendation of b2 depended on the invalid4s continuation and is superseded."
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_fours_bluff_requires_known_yellow_three_for_collateral"
+    ],
+    "coverageNote": "Reproduces the pre-fix admission failure with blank future draws, checks hidden/ambiguous Bob3s, giver/forecast admission and downstream choice, and permits the hypothetical refinement where Bob knows y3 without revealing its face. Related legitimate turn19/21 Bluffs and Hard3 coverage retained.",
+    "validation": {
+      "passed": [
+        "reviewed_fours_bluff_requires_known_yellow_three_for_collateral (including pre-fix reproduction)",
+        "current_turn_twenty_one_purple_bluffs_bobs_green_two",
+        "current_turn_nineteen_bluff_requires_the_reactors_response",
+        "reviewed_green_bluff_requires_minimum_clue_value",
+        "scripts/check.sh --fast",
+        "Turn20 CLI comparison: fixture yellow to Alice selected"
+      ],
+      "existingFailures": [
+        "fifth_replay_bluffs_through_the_givers_known_green_four",
+        "level_thirteen_admits_the_opening_hard_three_self_bluff"
+      ],
+      "failureEvidence": "Both failures are recorded in target/workflow/failure-baseline.json and the previous completed full run 3cfd856dd6db426b88ef2d4d3e79cb71; not accepted as new baseline changes.",
+      "scope": "No full Rust suite or further replay scan this session; CI unobserved."
+    }
   }
 ]

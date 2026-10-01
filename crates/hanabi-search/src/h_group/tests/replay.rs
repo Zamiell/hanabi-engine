@@ -7100,3 +7100,109 @@ fn reviewed_duplicate_collateral_uses_leftmost_play_before_trash() {
             .contains(&CardId::new(6))
     );
 }
+
+#[test]
+fn reviewed_fours_bluff_requires_known_yellow_three_for_collateral() {
+    // p4v0s9 turn20 hypothetical: Donald b2, Alice p1 discard, Bob 4s.
+    // User review: Bob's unknown 3s cannot establish the y3 needed by y4.
+    let state = expert_replay_p4v0s9().state_at_turn(19).unwrap();
+    let root = state.view_for(PlayerId::new(3)).unwrap();
+    let played = ProspectiveTransition::successful_play(
+        &root,
+        PlayerId::new(3),
+        CardId::new(15),
+        Card::new(Suit::Blue, Rank::Two),
+    );
+    let discarded = ProspectiveTransition::discard(
+        &played,
+        PlayerId::new(0),
+        CardId::new(22),
+        Card::new(Suit::Purple, Rank::One),
+    );
+    let (d, _) = PerspectiveProjector::new(&discarded, HGroupProfile::Max)
+        .project(PlayerId::new(1), PerspectiveDepth::NestedRecipients)
+        .unwrap();
+    let action = Action::Clue {
+        target: PlayerId::new(0),
+        clue: Clue::Rank(Rank::Four),
+    };
+    let inferred = infer_h_group(&d, HGroupProfile::Max);
+    for id in [CardId::new(4), CardId::new(5)] {
+        assert!(identity_of(d.view(), id).is_none());
+        assert!(
+            inferred
+                .cards
+                .iter()
+                .find(|c| c.card == id)
+                .unwrap()
+                .identities
+                .len()
+                > 1
+        );
+    }
+    assert!(
+        !h_group_clue_candidates(&d, HGroupProfile::Max)
+            .iter()
+            .any(|c| c.action == action),
+        "unsupported yellow4 collateral cannot borrow the giver's hidden y3"
+    );
+    let mut known = d.view().clone();
+    known.hands[1]
+        .iter_mut()
+        .find(|c| c.id == CardId::new(4))
+        .unwrap()
+        .clues
+        .add_positive_clue(Clue::Suit(Suit::Yellow));
+    let known = LogicalDeductions::new(known).unwrap();
+    assert!(identity_of(known.view(), CardId::new(4)).is_none());
+    assert!(
+        h_group_clue_candidates(&known, HGroupProfile::Max)
+            .iter()
+            .any(|c| c.action == action),
+        "a genuinely known y3 supports the intermediate"
+    );
+    let r = replay_h_group(&d, HGroupProfile::Max);
+    let admitted = h_group_clue_candidates(&d, HGroupProfile::Max)
+        .iter()
+        .map(|c| c.action)
+        .collect::<Vec<_>>();
+    let rejected = h_group_rejected_clues_from_replay(&d, HGroupProfile::Max, &r, &admitted);
+    assert!(rejected.iter().any(|c| c.action == action));
+    assert_ne!(select_h_group_action(&d, HGroupProfile::Max), Some(action));
+    assert_ne!(
+        crate::planner::choose_projected_follow_up_from(
+            &root,
+            &d,
+            HGroupProfile::Max,
+            &crate::AnalysisControl::default()
+        )
+        .unwrap(),
+        Some(action)
+    );
+    // Seeing Donald's current cards does not reveal Bob's own 3s either.
+    let mut actual = state;
+    actual.apply(Action::Play(CardId::new(15))).unwrap();
+    actual.apply(Action::Discard(CardId::new(22))).unwrap();
+    let mut bob = actual.view_for(PlayerId::new(1)).unwrap();
+    for held in bob
+        .hands
+        .iter_mut()
+        .flatten()
+        .filter(|c| c.id.index() >= 27)
+    {
+        held.identity = None;
+    }
+    for entry in &mut bob.history {
+        if let ObservedEvent::Drew { card, identity, .. } = &mut entry.event {
+            if card.index() >= 27 {
+                *identity = None;
+            }
+        }
+    }
+    let bob = LogicalDeductions::new(bob).unwrap();
+    assert!(
+        !h_group_clue_candidates(&bob, HGroupProfile::Max)
+            .iter()
+            .any(|c| c.action == action)
+    );
+}
