@@ -531,3 +531,15 @@ This is not the retracted unconditional loading preference: unknown or untouched
 replacements and useful successor/refund progress do not satisfy this proof. The
 root/forecast regression includes those negative controls, while the existing
 majority regressions preserve Bob’s information and probability rules.
+
+## Cancelled claims cannot borrow a later promise’s authority
+
+In `p4v0s9` turn14 (`t14-cancelled-layer-cannot-revive-a-fix`), an old cancelled
+y2 claim and membership in a new p3 layer referred to the same physical b2. That
+combination must not turn a fresh blue Play Clue into a Fix. Historical claims
+need matching live identity/response evidence or their own surviving effect
+provenance. A conditional suffix is not the actionable connection head. The
+existing reviewed b2-persistence test and the new giver/recipient table verify
+inference and downstream playability; genuine Fix controls remain. This follows
+promise lifecycle consistency and documented Fix meaning, not a new strategic
+exception.

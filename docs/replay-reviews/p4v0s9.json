@@ -432,5 +432,31 @@
     ],
     "coverageNote": "Root and same-observer forecast selection, both comparison directions, shared-horizon evidence, safe-discard consequences, missing/untouched replacement, successor/refund, strike/BDR and missing-checkpoint controls. Existing physical-probability tests preserve 30%,50%,above50%,certainty behavior.",
     "validation": "Seven focused tests pass, including the retained majority probabilities, turn18 handoff and finesse-continuation controls; final root/forecast regression passes again after safety guards. All fast-check stages pass after correcting and rechecking the review-note formatting. Full Rust suite not rerun for this localized fix; the previously recorded baseline failures remain unverified here."
+  },
+  {
+    "id": "t14-cancelled-layer-cannot-revive-a-fix",
+    "turn": 14,
+    "positionKey": "a17b3124ff77e50fb0a41c19c1fbd35da81fae3e374a6fbb9eecdb39c290c610",
+    "status": "unresolved",
+    "perspective": "Donald interpreting Bob’s direct blue clue, with his own cards hidden; discovered while auditing turn20 forecasts.",
+    "source": {
+      "conversation": "2026-10-01 autonomous replay audit",
+      "quote": "If there are obvious bugs, then fix them autonomously.",
+      "documentation": "https://hanabi.github.io/level-3/#the-fix-clue",
+      "authority": "Existing reviewed regression second_replay_direct_blue_two_play_clue_persists_until_played establishes the b2 promise; no new user strategy ruling."
+    },
+    "explanation": {
+      "bug": "The opening y2 layer was cancelled after Bob demonstrated y1. Its historical identity claim still named Donald’s #15. At turn14, #15 was a conditional suffix of an unrelated live p3 layer behind #17. signaled_card_fix combined the old y2 claim with the new invisible-card membership, falsely classified blue as Fix, and lost b2 knowledge through turn20.",
+      "fix": "A contradictory historical signal requires the same expected identity on a currently actionable matching connection head, or a surviving non-promise effect sourced at the claim’s own turn. Membership in an unrelated layer does not revive the cancelled identity. Historical explanation signals remain available.",
+      "coverage": "The original reviewed b2 assertion now passes through turn28 unchanged. A table of blue/red clues from the reviewed turn14 position and giver/recipient perspectives verifies that cancelled y2 does not manufacture a Fix or cancel the active p3 response. Turn20 still knows b2 with Donald’s actual faces hidden. Genuine promised-card, nested hidden and out-of-order Fix controls pass.",
+      "reviewBoundary": "This is an implementation correction; no new optimal turn20 action is asserted by this record."
+    },
+    "regressions": [
+      "h_group::tests::second_replay_direct_blue_two_play_clue_persists_until_played",
+      "h_group::tests::reviewed_cancelled_identity_cannot_turn_a_fresh_clue_into_a_fix",
+      "h_group::tests::replay::first_replay_move_seven_is_a_fix_of_the_promised_red_one",
+      "h_group::tests::replay::reviewed_hidden_fix_survives_nested_perspectives",
+      "h_group::tests::replay::reviewed_yellow_out_of_order_fix_uses_bobs_connector"
+    ]
   }
 ]

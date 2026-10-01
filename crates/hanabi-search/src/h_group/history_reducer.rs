@@ -759,13 +759,7 @@ impl ReplayReducer {
                     .is_some_and(|card| touched.contains(card))
         });
         let signaled_card_fix = touched.iter().any(|card| {
-            let has_active_promise = self.invisibly_clued.contains(card)
-                || self
-                    .pending_connections
-                    .iter()
-                    .any(|connection| connection.cards.first() == Some(card));
-            has_active_promise
-                && !self.signals.facts().fixed_cards().contains(card)
+            !self.signals.facts().fixed_cards().contains(card)
                 && self
                     .signals
                     .facts()
@@ -773,7 +767,19 @@ impl ReplayReducer {
                     .iter()
                     .rev()
                     .any(|claim| {
-                        claim.turn < entry.turn
+                        // Historical claims are explanations, not live promises.
+                        // An unrelated new layer can include the same physical
+                        // card without reviving a cancelled older identity.
+                        let live = self.pending_connections.active().any(|connection| {
+                            connection.actor == *target
+                                && connection.cards.first() == Some(card)
+                                && connection.expected == claim.identity
+                        }) || self.invisibly_clued.sources(*card).iter().any(|source| {
+                            matches!(source,
+                            EffectSource::Event(turn) | EffectSource::Rule { turn, .. }
+                                if *turn == claim.turn)
+                        });
+                        live && claim.turn < entry.turn
                             && claim.target == Some(*target)
                             && claim.cards.first() == Some(card)
                             && !clue.matches(claim.identity)

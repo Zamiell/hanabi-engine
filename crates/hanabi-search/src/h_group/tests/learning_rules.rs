@@ -277,6 +277,35 @@ fn second_replay_direct_blue_two_play_clue_persists_until_played() {
 }
 
 #[test]
+fn reviewed_cancelled_identity_cannot_turn_a_fresh_clue_into_a_fix() {
+    // p4v0s9: the opening y2 layer was cancelled after the y1 Bluff.
+    // Later, the p3 layer includes the same older cards as conditional
+    // suffixes. Neither membership nor the old y2 claim revives a Fix.
+    let fixture = expert_replay_p4v0s9();
+    for (clue, card) in [(Clue::Suit(Suit::Blue), CardId::new(15)),
+                         (Clue::Suit(Suit::Red), CardId::new(14))] {
+        let mut state = fixture.state_at_turn(13).unwrap();
+        state.apply(Action::Clue { target: PlayerId::new(3), clue }).unwrap();
+        for observer in [PlayerId::new(1), PlayerId::new(3)] {
+            let d = LogicalDeductions::new(state.view_for(observer).unwrap()).unwrap();
+            let replay = replay_h_group(&d, HGroupProfile::Max);
+            assert!(!replay.signals.has_at_turn(13, HGroupMoveKind::FixClue), "{clue:?}, {observer:?}");
+            assert!(replay.pending_connections.iter().any(|c| c.expected == Card::new(Suit::Purple, Rank::Three) && c.cards.first() == Some(&CardId::new(17))));
+            assert!(!active_invisibly_clued(&replay.cards.invisibly_clued, &replay.pending_connections).contains(&card));
+        }
+    }
+    // The original blue promise remains a playable singleton at the audited
+    // turn20; the owner's hidden face cannot supply that knowledge.
+    let state = fixture.state_at_turn(19).unwrap();
+    let d = LogicalDeductions::new(state.view_for(PlayerId::new(3)).unwrap()).unwrap();
+    assert!(d.view().hands[3].iter().all(|c| c.identity.is_none()));
+    let inferred = infer_h_group(&d, HGroupProfile::Max);
+    assert!(inferred.playable_now.contains(&CardId::new(15)));
+    assert_eq!(inferred.cards.iter().find(|c| c.card == CardId::new(15)).unwrap().identities,
+               IdentitySet::singleton(Card::new(Suit::Blue, Rank::Two)));
+}
+
+#[test]
 fn second_replay_move_thirty_one_can_defer_to_a_more_efficient_clue() {
     let fixture = expert_replay_p4v0s9();
     let state = fixture
