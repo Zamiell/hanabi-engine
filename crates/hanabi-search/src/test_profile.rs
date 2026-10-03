@@ -25,6 +25,8 @@ struct Profile {
     untracked_misses: u64,
     peak_entries: usize,
     flushes: u64,
+    rotations: u64,
+    evicted_entries: usize,
 }
 
 pub(crate) fn replay_lookup(key: &crate::h_group::ReplayMemoKey, hit: bool) {
@@ -57,6 +59,15 @@ pub(crate) fn replay_flush() {
     PROFILE.with_borrow_mut(|profile| {
         if let Some(profile) = profile {
             profile.flushes += 1;
+        }
+    });
+}
+
+pub(crate) fn replay_rotation(evicted: usize) {
+    PROFILE.with_borrow_mut(|profile| {
+        if let Some(profile) = profile {
+            profile.rotations += 1;
+            profile.evicted_entries += evicted;
         }
     });
 }
@@ -108,13 +119,15 @@ pub(crate) fn finish(seed: &str, turn: u32, elapsed: Duration) {
         .expect("active profiling session");
     assert!(profile.children.is_empty());
     eprintln!(
-        "REPLAY_MEMO\t{seed}\t{turn}\thits={}\tmisses={}\trepeated_misses={}\tuntracked_misses={}\tpeak_entries={}\tflushes={}",
+        "REPLAY_MEMO\t{seed}\t{turn}\thits={}\tmisses={}\trepeated_misses={}\tuntracked_misses={}\tpeak_entries={}\tflushes={}\trotations={}\tevicted_entries={}",
         profile.hits,
         profile.misses,
         profile.repeated_misses,
         profile.untracked_misses,
         profile.peak_entries,
-        profile.flushes
+        profile.flushes,
+        profile.rotations,
+        profile.evicted_entries
     );
     eprintln!(
         "REPLAY_PROFILE\t{seed}\t{turn}\ttotal\t1\t{:.6}\t{:.6}",

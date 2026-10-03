@@ -108,6 +108,16 @@ exact-key misses, untracked misses, peak entries, and capacity flushes. The
 diagnostic exact-key tracker retains at most 8,192 keys per turn; nonzero
 untracked counts mean repeated-miss counts are lower bounds, not exhaustive.
 
+For cache eviction comparisons, the ignored
+`h_group::tests::replay_memo::benchmark_reviewed_replay_cache` test runs the
+clear-all and two-generation policies sequentially in the same precompiled
+binary. It compares complete fixed-work outputs and alternates timing order. See
+the [eviction benchmark](replay-cache-2026-10-03.md) for commands, controls, and
+measurements. Profiling also reports generation rotations and evicted entries;
+these are distinct from complete capacity flushes. `HANABI_REPLAY_MEMO=clear`
+selects the original clear-all policy in test binaries for reproducing failures
+without the eviction change; production ignores it.
+
 When changing replay memoization, also run the full-output differential check:
 
 ```bash

@@ -878,11 +878,55 @@ thread_local! {
 #[cfg(test)]
 thread_local! {
     static BYPASS_REQUEST_REPLAY_MEMO: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static LEGACY_REPLAY_MEMO: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 struct ReplayMemo {
     entries: HashMap<ReplayMemoKey, HGroupState>,
+    previous: HashMap<ReplayMemoKey, HGroupState>,
     limit: usize,
+    #[cfg(test)]
+    legacy: bool,
+}
+
+impl ReplayMemo {
+    fn get(&mut self, key: &ReplayMemoKey) -> Option<HGroupState> {
+        if let Some(value) = self.entries.get(key) {
+            return Some(value.clone());
+        }
+        let (key, value) = self.previous.remove_entry(key)?;
+        let result = value.clone();
+        self.insert(key, value);
+        Some(result)
+    }
+
+    fn insert(&mut self, key: ReplayMemoKey, value: HGroupState) {
+        #[cfg(test)]
+        if self.legacy {
+            if self.entries.len() >= self.limit {
+                self.entries.clear();
+                crate::test_profile::replay_flush();
+            }
+            self.entries.insert(key, value);
+            return;
+        }
+        // Promote hits from the previous generation. At capacity, retire only
+        // that older generation, retaining the current working set. Both maps
+        // together remain within the request's original entry bound.
+        self.previous.remove(&key);
+        let generation_limit = (self.limit / 2).max(1);
+        if self.entries.len() >= generation_limit && !self.entries.contains_key(&key) {
+            #[cfg(test)]
+            crate::test_profile::replay_rotation(self.previous.len());
+            self.previous.clear();
+            if self.limit > 1 {
+                std::mem::swap(&mut self.entries, &mut self.previous);
+            } else {
+                self.entries.clear();
+            }
+        }
+        self.entries.insert(key, value);
+    }
 }
 
 /// Entry bound, not a search budget: reaching it drops cached values only.
@@ -908,7 +952,11 @@ fn begin_replay_memo(limit: usize) -> ReplayMemoGuard {
         }
         *memo = Some(ReplayMemo {
             entries: HashMap::new(),
+            previous: HashMap::new(),
             limit,
+            #[cfg(test)]
+            legacy: LEGACY_REPLAY_MEMO.get()
+                || std::env::var_os("HANABI_REPLAY_MEMO").is_some_and(|mode| mode == "clear"),
         });
         true
     });
@@ -955,11 +1003,8 @@ fn replay_h_group_inner(
             allow_blind_reverse_empathy,
             counterfactual: inverse_planning::is_active(),
         };
-        let cached = H_GROUP_REPLAY_MEMO.with(|memo| {
-            memo.borrow()
-                .as_ref()
-                .and_then(|memo| memo.entries.get(&key).cloned())
-        });
+        let cached = H_GROUP_REPLAY_MEMO
+            .with(|memo| memo.borrow_mut().as_mut().and_then(|memo| memo.get(&key)));
         #[cfg(test)]
         crate::test_profile::replay_lookup(&key, cached.is_some());
         if let Some(replay) = cached {
@@ -977,14 +1022,9 @@ fn replay_h_group_inner(
         H_GROUP_REPLAY_MEMO.with(|memo| {
             let mut borrow = memo.borrow_mut();
             let memo = borrow.as_mut().expect("replay memo scope is active");
-            if memo.entries.len() >= memo.limit {
-                memo.entries.clear();
-                #[cfg(test)]
-                crate::test_profile::replay_flush();
-            }
-            memo.entries.insert(key, replay.clone());
+            memo.insert(key, replay.clone());
             #[cfg(test)]
-            crate::test_profile::replay_peak(memo.entries.len());
+            crate::test_profile::replay_peak(memo.entries.len() + memo.previous.len());
         });
         replay
     })

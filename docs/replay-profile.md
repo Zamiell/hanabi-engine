@@ -94,6 +94,10 @@ clears cached entries and recomputes as necessary. It does not truncate search,
 world enumeration, or projections. Recursive-only standalone reductions retain
 their existing behavior when outside an analysis request.
 
+The October 3 [eviction experiment](replay-cache-2026-10-03.md) replaces this
+clear-all policy with two bounded generations, preserving the 1,024-entry bound.
+The measurements in this September report describe the original policy.
+
 There is a tradeoff: turn 37 increased from 58.320 to 67.680 seconds because the
 bounded cache evicts results the old inverse-planning reduction retained. The
 other 46 turns together fell from approximately 179.43 to 34.94 seconds. The
