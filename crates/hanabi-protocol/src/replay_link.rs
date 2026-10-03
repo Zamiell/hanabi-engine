@@ -6,7 +6,7 @@ use crate::HanabiLiveReplay;
 
 const BASE62: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
-/// Generates a validated standard-game replay URL at a one-based Hanab Live turn.
+/// Generates a validated solo standard-game replay URL at a one-based Hanab Live turn.
 ///
 /// # Errors
 /// Returns an explanation if the replay is invalid, the turn is out of range,
@@ -23,9 +23,7 @@ pub fn replay_link(replay: &HanabiLiveReplay, turn: usize) -> Result<String, Str
     if !payload_matches_replay(&payload, replay) {
         return Err("replay-link encoding failed its round-trip verification".to_owned());
     }
-    Ok(format!(
-        "https://hanab.live/shared-replay-json/{payload}#{turn}"
-    ))
+    Ok(format!("https://hanab.live/replay-json/{payload}#{turn}"))
 }
 
 /// Independently decode the fields represented by Hanab Live's codec. Names,

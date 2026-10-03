@@ -205,6 +205,10 @@ Always include a generated clickable Hanab Live replay link, the seed, the
 one-based turn, and the competing actions or concrete issue. This applies even
 when reporting status rather than explicitly asking a question.
 
+Use a normal solo replay (`/replay-json/`), not a shared replay
+(`/shared-replay-json/`), unless the user explicitly requests a shared replay.
+The common generator must produce solo links for fixture reviews.
+
 The expert replay comparison prints a link on disagreement. For a ready-to-paste
 Markdown link, generate it with:
 

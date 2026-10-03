@@ -4,6 +4,11 @@ use hanabi_protocol::{HanabiLiveReplay, replay_link};
 fn replay_link_preserves_seed_hyphens_and_empty_seed_field() {
     let mut replay = HanabiLiveReplay::from_json(r#"{"seed":"p4v0s3","actions":[]}"#).unwrap();
     assert_eq!(replay.seed.as_deref(), Some("p4v0s3"));
+    assert!(
+        replay_link(&replay, 1)
+            .unwrap()
+            .starts_with("https://hanab.live/replay-json/")
+    );
     // Codec-only metadata checks; a named custom seed is not regenerated here.
     for seed in [
         "legacy-1-p4v0s3",
