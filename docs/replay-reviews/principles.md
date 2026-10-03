@@ -534,6 +534,18 @@ majority regressions preserve Bob’s information and probability rules.
 
 ## Cancelled claims cannot borrow a later promise’s authority
 
+Implementation invariant, also covering the turn-12 regression in `p4v0s415`
+(`t12-incidental-connector-must-not-reopen-direct-play`): a later play of the
+right identity does not demonstrate a hypothetical connection that expected a
+different card or actor. Check the clue-time path. A predecessor needing no new
+connection step may instead have already been gotten before the clue. This
+preserves the reviewed `p4v0s9` turn-6 g1/g2 continuation while preventing
+Cathy's old r2 response from reopening Donald's settled b3 Play clue. This is
+causal bookkeeping, not a new strategy preference. The table-driven
+`reviewed_connector_demonstration_uses_clue_time_evidence` checks both
+positions, downstream playability, hidden replacement draws, and evidence
+removal.
+
 In `p4v0s9` turn14 (`t14-cancelled-layer-cannot-revive-a-fix`), an old cancelled
 y2 claim and membership in a new p3 layer referred to the same physical b2. That
 combination must not turn a fresh blue Play Clue into a Fix. Historical claims

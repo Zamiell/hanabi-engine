@@ -911,10 +911,28 @@ fn compile_convention_card_inferences(
                         && matches!(
                             entry.event,
                             ObservedEvent::Played {
-                                identity,
+                                card,
+                                identity: played,
+                                player,
                                 successful: true,
                                 ..
-                            } if identity == connector
+                            } if played == connector && clue.hypotheses.iter().any(|hypothesis| {
+                                if hypothesis.focus_identity != identity {
+                                    return false;
+                                }
+                                // A coincidental play of the same identity is
+                                // not a demonstration of a different card's
+                                // hypothesized Prompt/Finesse. Already-gotten
+                                // predecessors need no new connection step,
+                                // but must have been gotten before this clue.
+                                let mut steps = hypothesis.connection_steps.iter()
+                                    .filter(|step| step.expected == connector).peekable();
+                                if steps.peek().is_some() {
+                                    steps.any(|step| step.actor == player && step.cards.contains(&card))
+                                } else {
+                                    clue.previously_gotten.contains(&card)
+                                }
+                            })
                         )
                 })
             })

@@ -2950,6 +2950,110 @@ fn fifth_replay_double_bluff_keeps_observer_relative_focus_domains() {
 }
 
 #[test]
+fn reviewed_connector_demonstration_uses_clue_time_evidence() {
+    let first = HanabiLiveReplay::from_json(include_str!(
+        "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+    ))
+    .unwrap()
+    .state_at_turn(11)
+    .unwrap();
+    let mut second = expert_replay_p4v0s9().state_at_turn(6).unwrap();
+    // The reviewed T6 projection: g1 plays before Alice's first response;
+    // after the team's intervening plays she can play her retained g2 note.
+    for action in [
+        Action::Clue {
+            target: PlayerId::new(0),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(12)),
+        Action::Play(CardId::new(1)),
+        Action::Clue {
+            target: PlayerId::new(3),
+            clue: Clue::Suit(Suit::Blue),
+        },
+        Action::Play(CardId::new(10)),
+        Action::Play(CardId::new(15)),
+    ] {
+        second.apply(action).unwrap();
+    }
+    for (state, owner, focus, clue_turn, cutoff, identity, retains_without_evidence) in [
+        (
+            first,
+            3,
+            18,
+            9,
+            20,
+            Card::new(Suit::Blue, Rank::Three),
+            true,
+        ),
+        (
+            second,
+            0,
+            3,
+            5,
+            18,
+            Card::new(Suit::Green, Rank::Two),
+            false,
+        ),
+    ] {
+        for mask_draws in [false, true] {
+            let mut view = state.view_for(PlayerId::new(owner)).unwrap();
+            if mask_draws {
+                for card in view
+                    .hands
+                    .iter_mut()
+                    .flatten()
+                    .filter(|c| c.id.index() >= cutoff)
+                {
+                    card.identity = None;
+                }
+                for entry in &mut view.history {
+                    if let ObservedEvent::Drew { card, identity, .. } = &mut entry.event {
+                        if card.index() >= cutoff {
+                            *identity = None;
+                        }
+                    }
+                }
+            }
+            let d = LogicalDeductions::new(view).unwrap();
+            let mut r = replay_h_group(&d, HGroupProfile::Max);
+            let inferred = infer_h_group_from_replay(&d, r.clone(), HGroupProfile::Max);
+            let focus = CardId::new(focus);
+            assert!(
+                inferred
+                    .cards
+                    .iter()
+                    .find(|c| c.card == focus)
+                    .unwrap()
+                    .identities
+                    .contains(identity)
+            );
+            assert!(
+                inferred.playable_now.contains(&focus),
+                "owner={owner} masked={mask_draws}: {inferred:#?}"
+            );
+            // Removing clue-time support may erase a delayed interpretation,
+            // but cannot undo an independently established direct Play clue.
+            let clue = r.clues.iter_mut().find(|c| c.turn == clue_turn).unwrap();
+            clue.hypotheses.clear();
+            clue.previously_gotten.clear();
+            r.knowledge = build_convention_knowledge(&d, &r);
+            let inferred = infer_h_group_from_replay(&d, r, HGroupProfile::Max);
+            assert_eq!(
+                inferred
+                    .cards
+                    .iter()
+                    .find(|c| c.card == focus)
+                    .unwrap()
+                    .identities
+                    .contains(identity),
+                retains_without_evidence
+            );
+        }
+    }
+}
+
+#[test]
 fn demonstrated_layer_pause_is_not_vetoed_by_generic_play_order() {
     // Reviewed p4v0s415 T10 3s to Donald; at T12 the new b3 play may
     // interrupt the already-demonstrated yellow layer. This tests the
@@ -2958,6 +3062,21 @@ fn demonstrated_layer_pause_is_not_vetoed_by_generic_play_order() {
         "../../../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
     ))
     .unwrap();
+    for completed in [10, 11] {
+        let state = fixture.state_at_turn(completed).unwrap();
+        let d = LogicalDeductions::new(state.view_for(PlayerId::new(3)).unwrap()).unwrap();
+        let r = replay_h_group(&d, HGroupProfile::Max);
+        let notes = convention_card_inferences(&d, &r);
+        let note = notes
+            .iter()
+            .find(|note| note.card == CardId::new(18))
+            .unwrap();
+        assert_eq!(
+            note.identities,
+            IdentitySet::singleton(Card::new(Suit::Blue, Rank::Three)),
+            "Cathy's old r2 response cannot reopen Donald's settled b3 note: after {completed}"
+        );
+    }
     let state = fixture.state_at_turn(11).unwrap();
     let view = state.view_for(state.current_player()).unwrap();
     let deductions = LogicalDeductions::new(view.clone()).unwrap();

@@ -559,7 +559,28 @@
     "regressions": [
       "h_group::tests::replay::first_expert_replay_reviewed_prefix_matches_engine"
     ],
-    "coverageNote": "Recorded parity test retained but not rerun for this fixture-only edit. Complete rules replay and affected card/slot mapping validated; no new optimal-strategy assertion."
+    "coverageNote": "Recorded parity test retained but not rerun for this fixture-only edit. Complete rules replay and affected card/slot mapping validated; no new optimal-strategy assertion.",
+    "recheck": {
+      "date": "2026-10-03",
+      "scope": "After fixing the incidental-connector regression, restarted p4v0s415 from turn1: agreement through28; first disagreement29. Other replays have not been advanced in this audit.",
+      "fixtureProjection": [
+        "29 Alice discard g4 #3",
+        "30 Bob play y3 #28",
+        "31 Cathy play g4 #32",
+        "32 Donald discard chop #12 (visible to Alice as b2)",
+        "Stops before33 Alice: UnknownIdentity / IdentityBranch."
+      ],
+      "engineProjection": [
+        "29 Alice play g4 #3",
+        "30 Bob play y3 #28",
+        "31 Cathy discard chop #20 (visible to Alice as b3)",
+        "32 Donald discard chop #12 (visible to Alice as b2)",
+        "Stops before33 Alice: UnknownIdentity / IdentityBranch."
+      ],
+      "comparison": "Built-in explanation actualBasis: ProgressTiming, horizon4, equal score17, clues2, committed2, secured3, identified3, clueDemand1, and zero exposed critical chops / Save pressure. Play scores g4 at29 instead of31. Discard earns its token at29 instead of31; Bob plays y3 and does not spend it. Both draw in the same seats. The transfer leaves Cathy b3 instead of a now-dead g4.",
+      "uncertainty": "Alice convention-knows p5 #24 and y4 #31; those identities are exported to teammate views. Her ambiguous five and future draws remain unknown. Discard faces are visible to Alice, not claimed known to their owners. No claim of a perfect finish follows from these four-action forecasts. The symbolic comparison did not exhaust the time budget; exact analysis exceeded the world limit.",
+      "question": "The recorded discard choice stands. What compensating benefit should favor it over the earlier play: immediate clue availability despite no scheduled expenditure before31, preserving Cathy's older trash, or another consideration? Earlier user messages select this move but do not explain that comparative benefit; the convention guide allows the transfer with compensating side effects and does not resolve this tradeoff."
+    }
   },
   {
     "id": "t32-purple-clue-touches-two-unidentified-purple-twos",
@@ -794,6 +815,30 @@
       "planner::tests::reviewed_secured_finish_prefers_fill_in_burn",
       "planner::tests::reviewed_equivalent_winning_play_clues_prefer_color",
       "h_group::decision::secured_finish_tests::reviewed_burn_certificate_requires_public_cards_funding_and_time"
+    ]
+  },
+  {
+    "id": "t12-incidental-connector-must-not-reopen-direct-play",
+    "turn": 12,
+    "positionKey": "c2a36e818cf66c93ea1f75b5f85f6346adf3c45b5753041719154daa4365c586",
+    "status": "unresolved",
+    "perspective": "Donald interpreting his rank-3 clue before and after Cathy plays her earlier r2 obligation. Implementation regression against the existing reviewed pause/handoff, not a new user strategy ruling.",
+    "source": {
+      "conversation": "2026-10-03 autonomous replay audit",
+      "quote": "continue to find disagreements etc",
+      "authority": "Ordinary inference invariant and the existing t10 demonstrated-layer pause / t12 convention-known handoff reviews."
+    },
+    "explanation": {
+      "bug": "Donald has a settled b3 note immediately after the rank-3 clue. Cathy subsequently plays r2 #11 for an older obligation. The completed-connector retention guard then reopens Donald\u2019s note to r3/g3/b3/p3, removing b3 from admitted plays. The delayed r3 hypothesis actually expected a Prompt of Donald\u2019s #17, not Cathy\u2019s #11. Matching only the played identity treated an incidental play as evidence for the wrong hypothetical path.",
+      "fix": "A first-connector play must match the card and actor in the clue-time connection hypothesis. If that predecessor required no new connection step, the played card must already have been gotten before the clue. This retains the reviewed p4v0s9 turn-6 delayed g2 possibility after Donald\u2019s already-gotten g1 plays, without reopening the unrelated b3 Play clue.",
+      "uncertainty": "No own hidden face or future draw supplies the proof. The table-driven regression masks replacement draws in both hands and draw history, then removes clue-time support as a negative control. Neither fixture is changed.",
+      "result": "Focused pause, convention-known handoff, and delayed g2/collateral tests pass; the turn-12 planner again selects b3. Restarting the active replay from turn1 agrees through28, then reproduces the known turn29 g4 play/discard disagreement. No fixture change or replay-wide agreement is claimed."
+    },
+    "regressions": [
+      "h_group::tests::replay::reviewed_connector_demonstration_uses_clue_time_evidence",
+      "h_group::tests::replay::demonstrated_layer_pause_is_not_vetoed_by_generic_play_order",
+      "h_group::tests::reviewed_first_touch_of_chop_moved_collateral_keeps_good_touch",
+      "planner::tests::reviewed_convention_known_play_earns_teammate_handoff"
     ]
   }
 ]
