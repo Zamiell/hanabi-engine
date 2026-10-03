@@ -552,7 +552,7 @@
     "id": "t32-finesse-versus-ejection-clarification-cost",
     "turn": 32,
     "positionKey": "c548ce1db8649dae9848fe2ceca50ca70103d368720476a7403611c1a0caf98f",
-    "status": "unresolved",
+    "status": "superseded",
     "perspective": "Donald; his own cards and future draws remain unknown. Card14 can safely reveal r2,r3,y2,g3,g4 in the retained forecast branches.",
     "source": {
       "conversation": "2026-10-01 autonomous replay continuation after 1210572",
@@ -592,6 +592,36 @@
       "limitation": "Release explanation reached120.013s and marked budgetExhausted. Both competing projections and their comparison are retained, but best-move selection is provisional, not exhaustive. Unoptimized explanation also hit120s before useful projection completion and was discarded as comparison evidence."
     },
     "regressions": [],
-    "coverageNote": "Existing full p4v0s9 action-parity test fails first at32, after matching1–31. No optimal-move assertion added for an unresolved strategic choice. Release build succeeded; no full suite or engine fix this session. Structured evidence is retained in ignored target/replay-audit/p4v0s9-t32-release.json."
+    "coverageNote": "Existing full p4v0s9 action-parity test fails first at32, after matching1–31. No optimal-move assertion added for an unresolved strategic choice. Release build succeeded; no full suite or engine fix this session. Structured evidence is retained in ignored target/replay-audit/p4v0s9-t32-release.json.",
+    "supersededBy": "t32-clandestine-finesse-over-fragile-clarification"
+  },
+  {
+    "id": "t32-clandestine-finesse-over-fragile-clarification",
+    "turn": 32,
+    "positionKey": "c548ce1db8649dae9848fe2ceca50ca70103d368720476a7403611c1a0caf98f",
+    "status": "user-explained",
+    "perspective": "Donald at turn32, own identities and replacement draw unknown. The b3 draw is a possible counterfactual, not a predicted identity.",
+    "source": {
+      "conversation": "2026-10-03 turn32 clarification and draw-risk ruling",
+      "quote": "the only thing that makes the ejection line win is that blue 5 is exactly identified for later, which is a very tiny benefit that shouldn't matter in this game that is already getting a maximum score. importantly, note that it is possible that discarding messes up the 5 color ejection if donald draws b3. thus, for that reason, the engine should prefer the clandestine finesse line (the fixutre)."
+    },
+    "explanation": {
+      "reasoning": "The user prefers the fixture clandestine Finesse: the extra exact b5 identity is a minor benefit, with no additional scored or committed work in the compared lines. The user considers the game on course for maximum score. Drawing before the proposed Ejection introduces an avoidable failure condition: a b3 in Donald’s new card changes Bob’s interpretation of Alice’s blue clue. Do not convert this possibility into a certain b3 draw or assume a guaranteed perfect finish from the bounded forecast.",
+      "implementation": "When a root action draws before future clues, pure identity clarification no longer establishes FundedProgress dominance over an immediate clue if it leaves less available clue funding (tokens plus actually scheduled five refunds, minus recorded demand). Real scored/committed progress and equal-resource useful clarification retain their existing comparisons. Immediate clue-versus-clue comparisons retain the previously reviewed delayed-five clarification preference. The action records whether a replacement draw actually occurs; an empty deck does not trigger the guard. This removes the false unconditional advantage without assigning unknown draws or globally prohibiting Ejections.",
+      "drawEvidence": "At the reviewed hypothetical post-discard position, blank and irrelevant r1 draws admit blue to Cathy as an Ejection. Supplying the hypothetical visible b3 draw to the future giver’s perspective removes that Ejection. This conditional risk is regression evidence supporting the ruling; no new draw-probability penalty or exhaustive draw search is claimed."
+    },
+    "regressions": [
+      "planner::tests::reviewed_ejection_clarification_does_not_spend_extra_tokens",
+      "planner::tests::reviewed_clandestine_finesse_precedes_ejection_clarification",
+      "h_group::tests::replay::reviewed_ejection_can_be_disrupted_by_donalds_draw"
+    ],
+    "coverageNote": "Comparator regression includes equal-resources, extra-score and extra-commitment controls. Draw regression preserves the actual replay prefix and checks admission and Bob’s ordinary response for blank/b3/irrelevant draws. Full-position and related clarification checks recorded after completion; no fixture changes or scan-ahead authorized by this localized correction.",
+    "validation": {
+      "focused": "All five final focused/related tests pass: full turn32 root and both evaluated candidates, pure-clarification arithmetic controls, Ejection draw admission/ordinary response controls, earlier delayed-five clarification and earlier critical-Save timing ruling.",
+      "result": "Turn32 selects fixture4s to Alice; fixture and discard projections are both evaluated. The root check reaches the120-second budget, so this is bounded selection, not an exhaustive solve.",
+      "iteration": "An initial blanket resource guard broke the prior delayed-five ruling. It was replaced by the narrower draw-before-future-clue versus immediate-clue guard; all original assertions remain intact and pass.",
+      "scope": "No fixture edits, replay-wide rescan or full Rust suite. Fast validation recorded after completion. No push attempted while the user is on an airplane.",
+      "fast": "scripts/check.sh --fast passes, including build, Clippy, documentation, Python and dead-code checks. Ordinary full Rust suite not run."
+    }
   }
 ]

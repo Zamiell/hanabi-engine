@@ -555,3 +555,21 @@ well as focus; earlier chop protection is not a prior play promise. A known
 visible intermediate or exact own note can support the clue. Preserve the
 documented Hard3 exception and established promises. The regression includes
 masked forecasts, Bob’s own view, downstream selection, and a known-y3 control.
+
+## Small clarification does not justify a costlier, draw-sensitive continuation
+
+In `p4v0s9` turn32 (`t32-clandestine-finesse-over-fragile-clarification`),
+Donald should give the fixture clandestine Finesse. The alternative discard
+allows a later 5 Color Ejection that identifies Cathy's b5 exactly, but this
+minor information gain adds no scored or committed work and leaves two fewer
+clues at the compared horizon. The user regards the game as on course for a
+perfect score. Moreover, Donald might draw b3, disrupting that Ejection.
+
+Do not assume the draw or certify a perfect finish from an unfinished forecast.
+When an action draws before future clues, pure identity clarification alone must
+not dominate an immediate productive clue by consuming more available clue
+funding. Include actual scheduled five refunds. Actual progress and useful
+clarification at equal resources retain their benefits; this is not a blanket
+token restriction on the earlier immediate-clue versus immediate-clue ruling.
+The regressions cover the comparison, root choice and the conditional b3
+disruption, with irrelevant-draw and useful-progress controls.

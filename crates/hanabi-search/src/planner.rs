@@ -178,6 +178,8 @@ pub struct PlannerActionEvaluation {
     pub preference: crate::ActionPreference,
     pub certainly_playable: bool,
     pub certainly_useless: bool,
+    /// This action introduces an unknown replacement before later clues.
+    pub draws_card: bool,
     pub newly_touched: u8,
     pub immediately_playable_touched: u8,
     pub critical_touched: u8,
@@ -268,6 +270,17 @@ impl ProjectedPositionValue {
                     > other.score.saturating_add(other.identified_future_plays)
                     && self.exposed_critical_chops <= other.exposed_critical_chops
                     && self.foregone_touch_opportunities <= other.foregone_touch_opportunities))
+    }
+
+    /// Apply after scheduled five refunds when an action draws before a later
+    /// clue. A possible replacement can disrupt that clue (p4v0s9 T32), so
+    /// clarification alone cannot dominate current work at greater clue cost.
+    /// This does not penalize two immediate clues or assume a particular draw.
+    fn preserves_clarification_funding(self, other: Self) -> bool {
+        self.score > other.score
+            || self.committed_future_plays > other.committed_future_plays
+            || self.clues.saturating_sub(self.clue_demand)
+                >= other.clues.saturating_sub(other.clue_demand)
     }
 
     fn preserves_funded_progress(self, other: Self) -> bool {
@@ -1315,6 +1328,7 @@ fn symbolic_evaluation(
         preference: convention_action.preference,
         certainly_playable: assessment.is_some_and(|value| value.certainly_playable),
         certainly_useless: assessment.is_some_and(|value| value.certainly_useless),
+        draws_card: view.deck_size > 0 && matches!(action, Action::Play(_) | Action::Discard(_)),
         newly_touched,
         immediately_playable_touched,
         critical_touched,
@@ -1712,18 +1726,34 @@ fn compare_endpoint_evidence(
             }
             value
         };
-        let wins = |a: &[RotationCheckpoint], b: &[RotationCheckpoint], refunds: (u8, u8)| {
+        let wins = |a: &[RotationCheckpoint],
+                    b: &[RotationCheckpoint],
+                    refunds: (u8, u8),
+                    draws_before_clue: bool| {
             a.iter().all(|a| {
                 b.iter().all(|b| {
-                    funded(a.value, refunds.0).productive_preference(funded(b.value, refunds.1))
+                    let a = funded(a.value, refunds.0);
+                    let b = funded(b.value, refunds.1);
+                    a.productive_preference(b)
+                        && (!draws_before_clue || a.preserves_clarification_funding(b))
                 })
             })
         };
-        let reason = if wins(&left_values, &right_values, refunds) {
+        let reason = if wins(
+            &left_values,
+            &right_values,
+            refunds,
+            left.draws_card && matches!(right.action, Action::Clue { .. }),
+        ) {
             Some(EndpointComparison::PreferLeft(
                 ComparisonReason::FundedProgress,
             ))
-        } else if wins(&right_values, &left_values, (refunds.1, refunds.0)) {
+        } else if wins(
+            &right_values,
+            &left_values,
+            (refunds.1, refunds.0),
+            right.draws_card && matches!(left.action, Action::Clue { .. }),
+        ) {
             Some(EndpointComparison::PreferRight(
                 ComparisonReason::FundedProgress,
             ))
@@ -3959,6 +3989,90 @@ mod tests {
             committed_future_plays: 1,
             ..saved
         }));
+    }
+
+    #[test]
+    fn reviewed_clandestine_finesse_precedes_ejection_clarification() {
+        // User-reviewed p4v0s9 T32: retain the efficient finesse instead of
+        // paying to identify b5 and drawing before a fragile Ejection.
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s9.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(31).unwrap();
+        let analysis = crate::analyze_position(
+            &state.view_for(state.current_player()).unwrap(),
+            SupportedConvention::HGroup(crate::HGroupProfile::Max),
+            PlannerConfig {
+                objective: PlanningObjective::PerfectScore,
+                ..PlannerConfig::default()
+            },
+        )
+        .unwrap();
+        let finesse = Action::Clue {
+            target: hanabi_core::PlayerId::new(0),
+            clue: Clue::Rank(Rank::Four),
+        };
+        assert_eq!(analysis.planner.best_action, finesse);
+        let a = analysis
+            .planner
+            .root_actions
+            .iter()
+            .find(|c| c.action == finesse)
+            .unwrap();
+        let b = analysis
+            .planner
+            .root_actions
+            .iter()
+            .find(|c| c.action == Action::Discard(hanabi_core::CardId::new(14)))
+            .unwrap();
+        assert!(a.projection_evaluated && b.projection_evaluated);
+        assert!(!a.draws_card && b.draws_card);
+        assert!(!matches!(
+            compare_endpoint_evidence(a, b, &mut None),
+            EndpointComparison::PreferRight(_)
+        ));
+    }
+
+    #[test]
+    fn reviewed_ejection_clarification_does_not_spend_extra_tokens() {
+        // p4v0s9 T32, reviewed 2026-10-03: the two lines through T39
+        // have equal score and commitments. Exactly identifying the saved b5
+        // does not justify losing two clues or risking the intervening draw.
+        let finesse = ProjectedPositionValue {
+            score: 19,
+            clues: 3,
+            secured_future_plays: 2,
+            committed_future_plays: 1,
+            identified_future_plays: 1,
+            ..ProjectedPositionValue::default()
+        };
+        let ejection = ProjectedPositionValue {
+            clues: 1,
+            identified_future_plays: 2,
+            ..finesse
+        };
+        assert!(ejection.productive_preference(finesse));
+        assert!(!ejection.preserves_clarification_funding(finesse));
+        // Clarification remains useful at equal resources; actual extra work
+        // retains precedence when it is funded.
+        for control in [
+            ProjectedPositionValue {
+                clues: 3,
+                ..ejection
+            },
+            ProjectedPositionValue {
+                score: 20,
+                ..ejection
+            },
+            ProjectedPositionValue {
+                committed_future_plays: 2,
+                ..ejection
+            },
+        ] {
+            assert!(control.productive_preference(finesse));
+            assert!(control.preserves_clarification_funding(finesse));
+        }
     }
 
     #[test]

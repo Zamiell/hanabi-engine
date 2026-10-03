@@ -7206,3 +7206,68 @@ fn reviewed_fours_bluff_requires_known_yellow_three_for_collateral() {
             .any(|c| c.action == action)
     );
 }
+
+#[test]
+fn reviewed_ejection_can_be_disrupted_by_donalds_draw() {
+    // p4v0s9 T32, user-reviewed 2026-10-03. A possible b3 draw changes
+    // Bob's reading of Alice's later blue clue; a blank draw is not proof
+    // that the Ejection is robust. Branch from the reviewed position only.
+    let state = expert_replay_p4v0s9().state_at_turn(31).unwrap();
+    let root = state.view_for(PlayerId::new(3)).unwrap();
+    let after = ProspectiveTransition::discard(
+        &root,
+        PlayerId::new(3),
+        CardId::new(14),
+        Card::new(Suit::Red, Rank::Three),
+    );
+    let draw = after.hands[3].last().unwrap().id;
+    let action = Action::Clue {
+        target: PlayerId::new(2),
+        clue: Clue::Suit(Suit::Blue),
+    };
+    for (identity, ejection) in [
+        (None, true),
+        (Some(Card::new(Suit::Blue, Rank::Three)), false),
+        (Some(Card::new(Suit::Red, Rank::One)), true),
+    ] {
+        let mut branch = after.clone();
+        branch.hands[3].last_mut().unwrap().identity = identity;
+        for entry in &mut branch.history {
+            if let ObservedEvent::Drew {
+                card,
+                identity: face,
+                ..
+            } = &mut entry.event
+            {
+                if *card == draw {
+                    *face = identity;
+                }
+            }
+        }
+        let (d, _) = PerspectiveProjector::new(&branch, HGroupProfile::Max)
+            .project(PlayerId::new(0), PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        let candidates = h_group_clue_candidates(&d, HGroupProfile::Max);
+        assert_eq!(
+            candidates
+                .iter()
+                .any(|c| c.action == action && c.move_kind() == Some(HGroupMoveKind::Ejection)),
+            ejection,
+            "draw {identity:?}: {candidates:?}"
+        );
+        let clued = ProspectiveTransition::clue(
+            d.view(),
+            PlayerId::new(2),
+            Clue::Suit(Suit::Blue),
+            &[CardId::new(11)],
+        );
+        let (bob, _) = PerspectiveProjector::new(&clued, HGroupProfile::Max)
+            .project(PlayerId::new(1), PerspectiveDepth::NestedRecipients)
+            .unwrap();
+        assert_eq!(
+            select_h_group_action(&bob, HGroupProfile::Max) == Some(Action::Play(CardId::new(30))),
+            ejection,
+            "Bob's ordinary response with draw {identity:?}"
+        );
+    }
+}
