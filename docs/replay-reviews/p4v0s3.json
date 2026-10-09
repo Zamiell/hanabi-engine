@@ -1,0 +1,33 @@
+[
+  {
+    "id": "t9-known-trash-discard-versus-immediate-green-finesse",
+    "turn": 9,
+    "positionKey": "5f14027d613c69a576830f552ade7f4dce1a7991646b992bd75a0e2c40f580bd",
+    "status": "unresolved",
+    "perspective": "Alice with 4 clues. Her yellow-clued #2 is known trash (yellow stack at 4, the only y5 visible in Cathy's hand). Cathy holds unclued g2 #11 and r2 #9 on chop; Donald holds g1 #19 in finesse position. Alice's future draws remain unknown.",
+    "source": {
+      "conversation": "2026-10-09 autonomous all-replay audit",
+      "quote": "If there are obvious bugs, then fix them autonomously. Otherwise, ask me about the correct strategy or convention.",
+      "existingAuthority": "The reviewed fixture records Alice discarding #2 at turn9. This record adds no new user strategy ruling."
+    },
+    "explanation": {
+      "fixtureProjection": [
+        "9 Alice discards known-trash #2",
+        "10 Bob green to Cathy (g2 via Donald's g1 finesse)",
+        "11 Cathy plays y5",
+        "Stops before12 Donald: his finesse response is modeled as depending on Alice's newly drawn unknown card."
+      ],
+      "engineProjection": [
+        "9 Alice green to Cathy",
+        "10 Bob 2 to Cathy (r2 Save)",
+        "11 Cathy plays y5; 12 Donald plays g1; 13 Alice discards #2",
+        "14 Bob 2 to Donald; 15 Cathy plays g2; 16 Donald discards #14 (p3, BDR)",
+        "Stops before17 on an unknown identity."
+      ],
+      "comparison": "FundedProgress at the shared three-action checkpoint: green line has 2 committed plays, clue demand 0, 3 clues; discard line has 1 committed play, clue demand 1 (r2 Save), 5 clues.",
+      "question": "With 4 clues, should Alice discard her known trash and leave the green finesse to Bob, or give the green finesse herself? The convention guide does not decide this tempo choice; the discard line is also cut short because Donald's response is modeled as depending on Alice's unseen draw."
+    },
+    "regressions": [],
+    "coverageNote": "No coverage; awaiting a strategy ruling."
+  }
+]
