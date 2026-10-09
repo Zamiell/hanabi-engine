@@ -439,6 +439,22 @@ fn continue_plan<const REUSE_SELECTED: bool>(
             plan.stop_at(frontier);
             break;
         };
+        if consequences.strikes > 0
+            && misplay_depends_on_hidden_visible_card(
+                &public,
+                &actor_deductions,
+                &actor_inferences,
+                actor,
+                current,
+            )
+        {
+            // The modeled actor cannot see a card hidden from the forecaster,
+            // but the real actor can. If that card could be the identity the
+            // actor plays for, the misplay is an artifact of the forecaster's
+            // uncertainty, not an established strike.
+            plan.stop_at(PlanFrontier::InterpretationBranch);
+            break;
+        }
         if let Action::Discard(card) = current {
             (
                 consequences.save_principle_violation,
@@ -701,6 +717,35 @@ fn has_unresolved_requirement(
         .any(|requirement| {
             super::projection_requirements::assess(source, requirement).status
                 != super::DependencyStatus::Supported
+        })
+}
+
+fn misplay_depends_on_hidden_visible_card(
+    public: &PlayerView,
+    actor_deductions: &LogicalDeductions,
+    actor_inferences: &super::HGroupInferences,
+    actor: PlayerId,
+    action: Action,
+) -> bool {
+    let Action::Play(card) = action else {
+        return false;
+    };
+    let Some(believed) = symbolic_identity(public, actor_deductions, actor_inferences, card) else {
+        return false;
+    };
+    let deductions = LogicalDeductions::new(public.clone()).ok();
+    public
+        .hands
+        .iter()
+        .enumerate()
+        .filter(|(owner, _)| *owner != actor.index())
+        .flat_map(|(_, hand)| hand)
+        .filter(|other| other.identity.is_none())
+        .any(|other| {
+            deductions
+                .as_ref()
+                .and_then(|deductions| deductions.possible_identities(other.id))
+                .is_none_or(|identities| identities.contains(believed))
         })
 }
 
@@ -1560,5 +1605,45 @@ mod tests {
 
         assert_eq!(outcome.actions, 0);
         assert_eq!(outcome.stop_reason, SymbolicStopReason::Limit);
+    }
+
+    #[test]
+    fn hidden_forecaster_card_does_not_manufacture_teammate_misplay() {
+        // p4v0s2, Hanab Live turn 8: Donald forecasts Alice's reply to his
+        // purple clue. Cathy's red r4 waits on the r3 finesse in Donald's
+        // finesse position. Donald cannot see that card, but Cathy can; a
+        // modeled Cathy who plays her red card as r3 is not an established
+        // strike. https://hanabi.github.io/beginner/finesse/
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../../hanabi-protocol/tests/fixtures/game-p4v0s2.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(8).unwrap();
+        let alice_play = Action::Play(CardId::new(0));
+        let red_four = Action::Play(CardId::new(8));
+        let control = crate::AnalysisControl::default();
+        let forecast_from = |source: &PlayerView| {
+            let (alice, _) = PerspectiveProjector::new(source, HGroupProfile::Max)
+                .project(PlayerId::new(0), PerspectiveDepth::NestedRecipients)
+                .unwrap();
+            project_leaf_projection(alice.view(), HGroupProfile::Max, alice_play, &control)
+                .unwrap()
+                .1
+        };
+
+        let hidden = forecast_from(&state.view_for(PlayerId::new(3)).unwrap());
+        assert!(
+            !hidden
+                .steps
+                .iter()
+                .any(|step| step.projected.action == red_four),
+            "{hidden:#?}"
+        );
+        assert_eq!(hidden.maximum_strikes(), 0, "{hidden:#?}");
+
+        // Control: when the r3 is visible to the forecaster, the modeled
+        // Cathy also waits, so no hidden-card guard is needed for safety.
+        let visible = forecast_from(&state.view_for(PlayerId::new(1)).unwrap());
+        assert_eq!(visible.maximum_strikes(), 0, "{visible:#?}");
     }
 }

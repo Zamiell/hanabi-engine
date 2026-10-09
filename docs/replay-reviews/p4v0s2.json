@@ -1,0 +1,57 @@
+[
+  {
+    "id": "t6-five-color-ejection-funded-discards-are-postponed-not-avoided",
+    "turn": 6,
+    "positionKey": "5041d3d29fbdf00c13a8080f5a345f9d2156f73070b9b8fded6d127f67134d9f",
+    "status": "unresolved",
+    "perspective": "Bob with 5 clues. Donald's untouched b5 is on chop; Cathy's unclued slot 3 is p2. Bob's own hand and future draws remain unknown.",
+    "source": {
+      "conversation": "2026-10-09 autonomous all-replay audit",
+      "quote": "If there are obvious bugs, then fix them autonomously. Otherwise, ask me about the correct strategy or convention.",
+      "existingAuthority": "The reviewed fixture records blue to Donald, followed by Cathy playing p2 from her second finesse position. This record adds no new user strategy ruling.",
+      "documentation": "https://hanabi.github.io/level-16/#the-5-color-ejection-5ce"
+    },
+    "explanation": {
+      "fixtureProjection": [
+        "6 Bob blue to Donald (5 Color Ejection)",
+        "7 Cathy plays p2 #9",
+        "8-16 plays and clues; 17 Alice discards her chop y4 #2",
+        "Stops before18 Bob: unknown discard #4. Score9, clues2, one discard, Save pressure0."
+      ],
+      "engineProjection": [
+        "6 Bob 5 to Donald",
+        "7-17 plays and clues; no discard",
+        "Stops before18 Bob: unknown discard #4. Score9, clues0, no discard, Save pressure1."
+      ],
+      "bug": "BottomDeckRisk preferred the 5 Save because Alice's y4 chop discard fell inside the shared horizon. The 5 Save line reached the same elapsed turn and score only by spending the two clues that discard line still held; it postponed discards rather than avoiding them. This is the existing like-for-like principle in compare_bottom_deck_risks (postponing a forecast is not evidence of avoidance), which omitted discards funded by retained clues.",
+      "fix": "When the riskier non-discard root's extra bottom-deck risk is matched by extra discards, at equal elapsed actions, no lower score, no more strikes, and at least that many surplus clues, treat the risk counts as not comparable and fall through to resource comparison.",
+      "result": "Engine chooses blue to Donald via SavePressure (clues 2 vs 0, Save pressure 0 vs 1)."
+    },
+    "regressions": [
+      "planner::tests::reviewed_five_color_ejection_is_not_penalized_for_funded_discards"
+    ],
+    "coverageNote": "Checks the discard and risk counts, the funded-postponement predicate in both directions, the neutral risk comparison, and the planner choice."
+  },
+  {
+    "id": "t8-hidden-forecaster-card-cannot-manufacture-cathy-misplay",
+    "turn": 8,
+    "positionKey": "a61a8ba3e968d48a185a72a81be60b57d60fd905e12d84b112ec0679f55bebd1",
+    "status": "unresolved",
+    "perspective": "Donald forecasting replies to purple/blue/1 clues. Donald's finessed #17 is r3 in simulator truth; Donald's convention domain is r3/y1/p3 (layered possibilities). Cathy can see #17; Donald cannot.",
+    "source": {
+      "conversation": "2026-10-09 autonomous all-replay audit",
+      "quote": "If there are obvious bugs, then fix them autonomously. Otherwise, ask me about the correct strategy or convention.",
+      "existingAuthority": "The reviewed fixture records purple to Alice, with Cathy holding her red r4 until Donald plays r3 at turn16. This record adds no new user strategy ruling.",
+      "documentation": "https://hanabi.github.io/beginner/finesse/"
+    },
+    "explanation": {
+      "bug": "Inside Donald's forecast, Alice's modeled replies projected Cathy playing her red r4 #8 as r3 at turn15, a strike. The modeled Cathy could not see Donald's #17 because it is hidden from Donald, so she inferred the r3 directly. The real Cathy sees the r3 finesse in Donald's hand and waits. The spurious strike flipped Alice's modeled choice away from playing p3 and decided the root comparison.",
+      "fix": "A projected misplay is not executed when the actor believes the card is an identity that a card hidden from the forecaster, but visible to the actor, could be. The forecast stops at InterpretationBranch instead of crediting a strike. Forecasts from observers who see the card are unaffected.",
+      "remainingDisagreement": "After the fix the engine prefers blue to Alice (b1) over the fixture's purple to Alice (p3) by FundedProgress at six actions; this has not been reviewed."
+    },
+    "regressions": [
+      "h_group::symbolic_line::tests::hidden_forecaster_card_does_not_manufacture_teammate_misplay"
+    ],
+    "coverageNote": "Reproduces Donald's nested Alice forecast; control uses Bob's view where the r3 is visible. Turn8 root move parity remains open."
+  }
+]

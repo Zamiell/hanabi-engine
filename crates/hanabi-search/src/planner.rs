@@ -2234,23 +2234,58 @@ fn compare_bottom_deck_risks(
         matches!(candidate.action, Action::Discard(_))
             && candidate.projection.bottom_deck_risks_at(1) > 0
     });
-    let complete = left
-        .projection
-        .maximum_bottom_deck_risks()
-        .max(assessed_tail(&left.projection, immediate_discard_risk))
-        .max(left_prefix)
-        .cmp(
-            &right
-                .projection
-                .maximum_bottom_deck_risks()
-                .max(assessed_tail(&right.projection, immediate_discard_risk))
-                .max(right_prefix),
-        );
-    if prefix == complete {
-        prefix
-    } else {
-        Ordering::Equal
+    let complete_risk = |candidate: &PlannerActionEvaluation, prefix: usize| {
+        candidate
+            .projection
+            .maximum_bottom_deck_risks()
+            .max(assessed_tail(&candidate.projection, immediate_discard_risk))
+            .max(prefix)
+    };
+    let left_complete = complete_risk(left, left_prefix);
+    let right_complete = complete_risk(right, right_prefix);
+    let complete = left_complete.cmp(&right_complete);
+    if prefix != complete {
+        return Ordering::Equal;
     }
+    // Spending clues instead of discarding postpones discards; it does not
+    // avoid them. When the riskier line's extra risk comes only from extra
+    // discards whose tokens it still holds at the same elapsed time, the
+    // other line owes those discards and the counts are not like-for-like.
+    let (riskier, safer, extra_risk) = match complete {
+        Ordering::Greater => (left, right, left_complete - right_complete),
+        Ordering::Less => (right, left, right_complete - left_complete),
+        Ordering::Equal => return prefix,
+    };
+    if !matches!(riskier.action, Action::Discard(_))
+        && postpones_funded_discards(riskier, safer, extra_risk)
+    {
+        return Ordering::Equal;
+    }
+    prefix
+}
+
+fn postpones_funded_discards(
+    riskier: &PlannerActionEvaluation,
+    safer: &PlannerActionEvaluation,
+    extra_risk: usize,
+) -> bool {
+    let (Some(riskier_value), Some(safer_value)) = (
+        riskier.symbolic_line.position_value,
+        safer.symbolic_line.position_value,
+    ) else {
+        return false;
+    };
+    let extra_discards = usize::from(
+        riskier
+            .symbolic_line
+            .discards
+            .saturating_sub(safer.symbolic_line.discards),
+    );
+    riskier.symbolic_line.actions == safer.symbolic_line.actions
+        && extra_discards >= extra_risk
+        && usize::from(riskier_value.clues) >= usize::from(safer_value.clues) + extra_discards
+        && riskier_value.score >= safer_value.score
+        && riskier.symbolic_line.strikes <= safer.symbolic_line.strikes
 }
 
 fn compare_save_principle_risks(
@@ -4465,6 +4500,57 @@ mod tests {
             Ordering::Less,
             "preserve risk at an unresolved discard inside the shared prefix"
         );
+    }
+
+    #[test]
+    fn reviewed_five_color_ejection_is_not_penalized_for_funded_discards() {
+        // p4v0s2, Hanab Live turn 6: the reviewed blue clue to Donald is a
+        // 5 Color Ejection (b5 saved, Cathy's p2 ejected). The 5 Save line
+        // reaches the same elapsed turn with two fewer clues and no discard;
+        // it has postponed discards, not avoided their bottom-deck risk.
+        // https://hanabi.github.io/level-16/#the-5-color-ejection-5ce
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s2.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(5).unwrap();
+        let information =
+            InformationSet::new(&state.view_for(state.current_player()).unwrap()).unwrap();
+        let result = plan_move(
+            &information,
+            SupportedConvention::HGroup(crate::HGroupProfile::Max),
+            PlannerConfig::default(),
+        )
+        .unwrap();
+        let blue = Action::Clue {
+            target: PlayerId::new(3),
+            clue: Clue::Suit(hanabi_core::Suit::Blue),
+        };
+        let five = Action::Clue {
+            target: PlayerId::new(3),
+            clue: Clue::Rank(hanabi_core::Rank::Five),
+        };
+        let find = |action| {
+            result
+                .root_actions
+                .iter()
+                .find(|root| root.action == action)
+                .unwrap()
+        };
+        let (blue_line, five_line) = (find(blue), find(five));
+        assert!(blue_line.symbolic_line.discards > five_line.symbolic_line.discards);
+        assert!(
+            blue_line.projection.maximum_bottom_deck_risks()
+                > five_line.projection.maximum_bottom_deck_risks()
+        );
+        assert!(postpones_funded_discards(blue_line, five_line, 1));
+        // Control: the 5 Save line holds no surplus clues to fund a discard.
+        assert!(!postpones_funded_discards(five_line, blue_line, 1));
+        assert_eq!(
+            compare_bottom_deck_risks(blue_line, five_line),
+            Ordering::Equal
+        );
+        assert_eq!(result.best_action, blue, "{:#?}", result.comparisons);
     }
 
     #[test]
