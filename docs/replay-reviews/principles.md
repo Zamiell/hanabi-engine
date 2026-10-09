@@ -585,3 +585,16 @@ clarification at equal resources retain their benefits; this is not a blanket
 token restriction on the earlier immediate-clue versus immediate-clue ruling.
 The regressions cover the comparison, root choice and the conditional b3
 disruption, with irrelevant-draw and useful-progress controls.
+
+## A clue for the team beats earlier points at 0 clues
+
+Current `p4v0s415`, turn 29, record
+`t29-zero-clue-gentlemans-discard-keeps-a-clue-available`: the user prefers
+Alice's g4 Gentleman's Discard over playing g4 at 0 clues. Playing forces Cathy
+to discard; the discard lets Cathy either discard or give an optimal or urgent
+clue.
+
+At equal realized score and clue count, prefer the line in which fewer later
+players must discard at 0 clues. Do not use this to trade away points or clues.
+
+Regression: `reviewed_zero_clue_gentlemans_discard_keeps_a_clue_available`.

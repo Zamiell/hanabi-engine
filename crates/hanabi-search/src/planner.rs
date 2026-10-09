@@ -565,6 +565,7 @@ pub enum ComparisonReason {
     FundedProgress,
     ClueEfficiency,
     ProgressTiming,
+    ClueAvailability,
     ProtectedDevelopment,
     PolicyTier,
     TerminalProgress,
@@ -614,6 +615,7 @@ impl ComparisonReason {
             | Self::ClueEfficiency
             | Self::PriorityRefundTiming
             | Self::ProgressTiming
+            | Self::ClueAvailability
             | Self::KnownStrikes
             | Self::ConditionalStrikes
             | Self::EndpointResources
@@ -622,6 +624,21 @@ impl ComparisonReason {
             | Self::PerfectFinish => ComparisonAuthority::Forecast,
             _ => ComparisonAuthority::Heuristic,
         }
+    }
+}
+
+impl ComparisonReason {
+    /// Endpoint evidence strong enough to anchor the preference graph.
+    const fn establishes_evidence_edge(self) -> bool {
+        matches!(
+            self,
+            Self::PerfectFinish
+                | Self::FundedProgress
+                | Self::ClueEfficiency
+                | Self::ProgressTiming
+                | Self::ClueAvailability
+                | Self::BottomDeckRisk
+        )
     }
 }
 
@@ -1422,22 +1439,10 @@ fn compare_symbolic_candidates_in_view(
                 }
             }
             match endpoint {
-                EndpointComparison::PreferLeft(
-                    ComparisonReason::PerfectFinish
-                    | ComparisonReason::FundedProgress
-                    | ComparisonReason::ClueEfficiency
-                    | ComparisonReason::ProgressTiming
-                    | ComparisonReason::BottomDeckRisk,
-                ) => {
+                EndpointComparison::PreferLeft(reason) if reason.establishes_evidence_edge() => {
                     evidence_reaches[left][right] = true;
                 }
-                EndpointComparison::PreferRight(
-                    ComparisonReason::PerfectFinish
-                    | ComparisonReason::FundedProgress
-                    | ComparisonReason::ClueEfficiency
-                    | ComparisonReason::ProgressTiming
-                    | ComparisonReason::BottomDeckRisk,
-                ) => {
+                EndpointComparison::PreferRight(reason) if reason.establishes_evidence_edge() => {
                     evidence_reaches[right][left] = true;
                 }
                 _ => {}
@@ -1535,13 +1540,15 @@ fn compare_endpoints_with_basis(
             ComparisonReason::EndpointResources
             | ComparisonReason::FundedProgress
             | ComparisonReason::ClueEfficiency
-            | ComparisonReason::ProgressTiming,
+            | ComparisonReason::ProgressTiming
+            | ComparisonReason::ClueAvailability,
         ) if risk == Ordering::Greater => EndpointComparison::Incomparable,
         EndpointComparison::PreferRight(
             ComparisonReason::EndpointResources
             | ComparisonReason::FundedProgress
             | ComparisonReason::ClueEfficiency
-            | ComparisonReason::ProgressTiming,
+            | ComparisonReason::ProgressTiming
+            | ComparisonReason::ClueAvailability,
         ) if risk == Ordering::Less => EndpointComparison::Incomparable,
         _ => comparison,
     };
@@ -1772,6 +1779,42 @@ fn compare_endpoint_evidence(
                 basis.scheduled_refunds = Some(refunds);
             }
             return reason;
+        }
+        // User-reviewed p4v0s415 turn 29: at equal score and clues, a line
+        // that leaves a teammate at 0 clues forces them to discard, while a
+        // line that keeps a clue available lets them discard or give an
+        // urgent clue. Prefer the flexibility over merely earlier points.
+        let equal_resources = left_values.iter().all(|a| {
+            right_values
+                .iter()
+                .all(|b| a.value.score == b.value.score && a.value.clues == b.value.clues)
+        });
+        if equal_resources {
+            if let Some((a, b)) = left
+                .projection
+                .zero_clue_teammate_discards(horizon)
+                .zip(right.projection.zero_clue_teammate_discards(horizon))
+            {
+                let preference = match a.cmp(&b) {
+                    Ordering::Less => Some(EndpointComparison::PreferLeft(
+                        ComparisonReason::ClueAvailability,
+                    )),
+                    Ordering::Greater => Some(EndpointComparison::PreferRight(
+                        ComparisonReason::ClueAvailability,
+                    )),
+                    Ordering::Equal => None,
+                };
+                if let Some(preference) = preference {
+                    retain_comparison_basis(
+                        basis,
+                        "clueAvailability",
+                        usize::from(horizon),
+                        || left_values,
+                        || right_values,
+                    );
+                    return preference;
+                }
+            }
         }
         if let Some((a_cost, b_cost)) = left
             .projection
@@ -4500,6 +4543,76 @@ mod tests {
             Ordering::Less,
             "preserve risk at an unresolved discard inside the shared prefix"
         );
+    }
+
+    #[test]
+    fn reviewed_zero_clue_gentlemans_discard_keeps_a_clue_available() {
+        // User-reviewed p4v0s415 turn 29: at 0 clues, Alice's g4 Gentleman's
+        // Discard beats playing g4. Playing leaves Cathy at 0 clues, forcing
+        // her to discard; the discard lets her discard or give an urgent clue.
+        // https://hanabi.github.io/level-10/#the-gentlemans-discard-gd
+        let replay = hanabi_protocol::HanabiLiveReplay::from_json(include_str!(
+            "../../hanabi-protocol/tests/fixtures/game-p4v0s415.json"
+        ))
+        .unwrap();
+        let state = replay.state_at_turn(28).unwrap();
+        assert_eq!(
+            state.view_for(state.current_player()).unwrap().clue_tokens,
+            0
+        );
+        let information =
+            InformationSet::new(&state.view_for(state.current_player()).unwrap()).unwrap();
+        let result = plan_move(
+            &information,
+            SupportedConvention::HGroup(crate::HGroupProfile::Max),
+            PlannerConfig::default(),
+        )
+        .unwrap();
+        let (play, discard) = (
+            Action::Play(hanabi_core::CardId::new(3)),
+            Action::Discard(hanabi_core::CardId::new(3)),
+        );
+        let find = |action| {
+            result
+                .root_actions
+                .iter()
+                .find(|root| root.action == action)
+                .unwrap()
+        };
+        let horizon = find(play)
+            .projection
+            .common_horizon()
+            .min(find(discard).projection.common_horizon());
+        assert_eq!(
+            find(play).projection.zero_clue_teammate_discards(horizon),
+            Some(1)
+        );
+        assert_eq!(
+            find(discard)
+                .projection
+                .zero_clue_teammate_discards(horizon),
+            Some(0)
+        );
+        // Control: before Cathy's turn neither line has forced anyone yet,
+        // and Alice's own root discard is not a teammate's forced discard.
+        assert_eq!(
+            find(play).projection.zero_clue_teammate_discards(2),
+            Some(0)
+        );
+        assert_eq!(
+            find(discard).projection.zero_clue_teammate_discards(2),
+            Some(0)
+        );
+        let comparison = result
+            .comparisons
+            .iter()
+            .find(|comparison| {
+                [comparison.left, comparison.right].contains(&play)
+                    && [comparison.left, comparison.right].contains(&discard)
+            })
+            .unwrap();
+        assert_eq!(comparison.reason, ComparisonReason::ClueAvailability);
+        assert_eq!(result.best_action, discard);
     }
 
     #[test]

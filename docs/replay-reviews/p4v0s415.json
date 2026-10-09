@@ -840,5 +840,28 @@
       "h_group::tests::reviewed_first_touch_of_chop_moved_collateral_keeps_good_touch",
       "planner::tests::reviewed_convention_known_play_earns_teammate_handoff"
     ]
+  },
+  {
+    "id": "t29-zero-clue-gentlemans-discard-keeps-a-clue-available",
+    "turn": 29,
+    "positionKey": "3885eaad7d4cb8977da19779ecac1482260183ac9fb38373c1cd3305d3288929",
+    "status": "user-explained",
+    "perspective": "Alice at 0 clues knows her g4; Cathy holds the other g4 in finesse position. Bob has a known y3 to play. Alice's ambiguous five and future draws remain unknown.",
+    "source": {
+      "conversation": "2026-10-09 all-replay audit, answer to the turn29 comparative-benefit question",
+      "quote": "the discard is better because it provides a clue for the team. right now, the clue count is at 0, which forces cathy to discard. but if alice does a GD, then cathy can EITHER discard or give a clue if there is some optimal/urgent clue to give.",
+      "related": "t29-user-retains-gentlemans-discard-and-revises-continuation",
+      "documentation": "https://hanabi.github.io/level-10/#the-gentlemans-discard-gd"
+    },
+    "explanation": {
+      "ruling": "Answers the open question in t29-user-retains-gentlemans-discard-and-revises-continuation. Playing g4 leaves the team at 0 clues, so Cathy, who has no play, is forced to discard. The Gentleman's Discard generates a clue, so Cathy may either discard or give an optimal or urgent clue. That flexibility outweighs scoring g4 two turns earlier.",
+      "implementation": "At the latest shared checkpoint, when both lines have equal score and clues, prefer the line with fewer discards by later players taken at 0 clue tokens (ComparisonReason::ClueAvailability). This precedes ProgressTiming and clue-efficiency comparisons but follows Save Principle, strikes, bottom-deck risk, and FundedProgress.",
+      "boundary": "Applies only when realized score and clue count are equal at the compared checkpoint; it does not trade points or clues for flexibility. Branching projections are not counted."
+    },
+    "regressions": [
+      "planner::tests::reviewed_zero_clue_gentlemans_discard_keeps_a_clue_available",
+      "h_group::tests::replay::first_expert_replay_reviewed_prefix_matches_engine"
+    ],
+    "coverageNote": "Checks forced-discard counts in both lines, a pre-Cathy horizon control, the comparison reason, and the planner choice."
   }
 ]

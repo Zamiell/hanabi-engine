@@ -279,6 +279,27 @@ impl ProjectionEvidence {
         }
     }
 
+    /// Discards by players after the root actor taken with no clue token
+    /// available, within the first `horizon` actions. Such a player had no
+    /// choice but to discard. `None` when branches make the count ambiguous.
+    pub(crate) fn zero_clue_teammate_discards(&self, horizon: u8) -> Option<usize> {
+        if self.has_branches() {
+            return None;
+        }
+        let mut tokens = self.resources.initial_tokens;
+        let mut count = 0;
+        for (index, step) in self.steps.iter().take(usize::from(horizon)).enumerate() {
+            if index > 0 && tokens == 0 && matches!(step.projected.action, Action::Discard(_)) {
+                count += 1;
+            }
+            tokens = tokens
+                .saturating_sub(step.consequences.clues_spent)
+                .saturating_add(step.consequences.clues_gained)
+                .min(MAX_CLUE_TOKENS);
+        }
+        Some(count)
+    }
+
     pub(crate) fn maximum_bottom_deck_risks(&self) -> usize {
         self.recorded_bottom_deck_risks_at(usize::MAX)
     }
